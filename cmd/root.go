@@ -14,9 +14,6 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// popupGuard marks the picker's own popup, so it doesn't open another one.
-const popupGuard = "SIDEBAR_SELECT_IN_POPUP"
-
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:               "dev [project]",
@@ -32,7 +29,7 @@ func newRootCmd() *cobra.Command {
 		}
 		return runProject(cmd, args[0])
 	}
-	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd())
+	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd())
 	return root
 }
 
@@ -45,7 +42,7 @@ func Execute() {
 	if !errors.Is(err, open.ErrShown) {
 		fmt.Fprintln(os.Stderr, "❌ "+err.Error())
 		// The popup closes as soon as dev exits, taking the message with it.
-		if os.Getenv(popupGuard) != "" {
+		if os.Getenv(picker.PopupGuard) != "" {
 			open.Pause(os.Stderr, "Press enter to close…")
 		}
 	}
@@ -53,8 +50,8 @@ func Execute() {
 }
 
 func runPicker(cmd *cobra.Command) error {
-	if os.Getenv("TMUX") != "" && os.Getenv(popupGuard) == "" {
-		code, err := tmux.New().ReexecInPopup(popupGuard, "80%", "60%")
+	if os.Getenv("TMUX") != "" && os.Getenv(picker.PopupGuard) == "" {
+		code, err := tmux.New().ReexecInPopup(picker.PopupGuard, "80%", "60%")
 		if err != nil {
 			return err
 		}

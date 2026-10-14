@@ -15,9 +15,12 @@ import (
 // devBin is the dev binary built once for the whole suite.
 var devBin string
 
-// TestMain builds dev, kills servers left by an earlier run that died without cleanup (go test -timeout
-// panics skip t.Cleanup) and kills this run's servers on SIGINT/SIGTERM.
+// TestMain pins a UTF-8 locale, builds dev, kills servers left by an earlier run that died without
+// cleanup (go test -timeout panics skip t.Cleanup) and kills this run's servers on SIGINT/SIGTERM.
 func TestMain(m *testing.M) {
+	// Every server, client and script inherits it: tmux draws UTF-8 only in a UTF-8 locale, and bash's
+	// ${#x} counts bytes otherwise, so "·" and "●" lines would pad differently from dev's.
+	os.Setenv("LC_ALL", "en_US.UTF-8")
 	killServers(func(pid int) bool { return !alive(pid) })
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)

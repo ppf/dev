@@ -36,3 +36,15 @@ func TestReexecInPopupRefusedUnderTest(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoSocket", err)
 	}
 }
+
+func TestShellJoin(t *testing.T) {
+	words := []string{"/go/bin/dev", "sidebar", "", "it's"}
+	got := ShellJoin(words...)
+	if want := `'/go/bin/dev' 'sidebar' '' 'it'"'"'s'`; got != want {
+		t.Errorf("ShellJoin = %s, want %s", got, want)
+	}
+	out, err := exec.Command("sh", "-c", `printf '%s|' `+got).Output()
+	if err != nil || string(out) != "/go/bin/dev|sidebar||it's|" {
+		t.Errorf("sh round trip = %q, %v", out, err)
+	}
+}

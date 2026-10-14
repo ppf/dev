@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/worktree"
 )
@@ -28,13 +29,12 @@ type Options struct {
 	ForceNew bool   // picker path: suffix -2, -3, ... instead of attaching to an existing session
 }
 
-// SidebarCommand is the shell command the layout's sidebar pane runs.
-var SidebarCommand = "exec $HOME/.tmux/sessions/sidebar.sh"
-
-// EnsureSidebar makes sure an existing session shows its sidebar before it is attached.
-var EnsureSidebar = func(_ *tmux.Client, session string) {
-	// Best effort, like bash: a missing or failing sidebar never blocks opening the session.
-	_ = exec.Command(os.Getenv("HOME")+"/.tmux/sessions/toggle-sidebar.sh", session).Run()
+// ensureSidebar makes sure an existing session shows its sidebar before it is attached.
+func ensureSidebar(c *tmux.Client, session string) {
+	// Best effort, like bash's `>/dev/null 2>&1 || true`: a missing origin only skips the focus
+	// give-back, and a failing sidebar never blocks opening the session.
+	from, _ := sidebar.ResolveOrigin(c, "")
+	_ = sidebar.Ensure(c, session, from)
 }
 
 var (
@@ -91,7 +91,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 		return err
 	}
 	if found {
-		EnsureSidebar(c, session)
+		ensureSidebar(c, session)
 	} else if err := createLayout(c, session, opts.Name, path, width, height); err != nil {
 		return err
 	}
@@ -225,7 +225,10 @@ func uniqueName(base string, exists func(string) (bool, error)) (string, error) 
 // left) and Files (nvim | two terminals), finishing on the claude pane.
 func createLayout(c *tmux.Client, session, project, path string, width, height int) error {
 	target := tmux.SessionTarget(session)
-	var err error
+	sidebarCmd, err := sidebar.PaneCommand()
+	if err != nil {
+		return err
+	}
 	run := func(args ...string) string {
 		if err != nil {
 			return ""
@@ -252,8 +255,8 @@ func createLayout(c *tmux.Client, session, project, path string, width, height i
 	run("select-pane", "-t", nvim)
 
 	run("select-window", "-t", target+"1")
-	sidebar := run("split-window", "-t", claude, "-hb", "-l", "40", "-PF", "#{pane_id}", SidebarCommand)
-	run("set-option", "-t", target, "@sidebar_pane", sidebar)
+	sidebarPane := run("split-window", "-t", claude, "-hb", "-l", "40", "-PF", "#{pane_id}", sidebarCmd)
+	run("set-option", "-t", target, "@sidebar_pane", sidebarPane)
 	run("select-pane", "-t", claude)
 	return err
 }

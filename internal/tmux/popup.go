@@ -14,11 +14,7 @@ func (c *Client) ReexecInPopup(guardEnv, width, height string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	words := []string{shellQuote(self)}
-	for _, arg := range os.Args[1:] {
-		words = append(words, shellQuote(arg))
-	}
-	err = c.Interactive(popupArgs(guardEnv, width, height, strings.Join(words, " "))...)
+	err = c.Interactive(popupArgs(guardEnv, width, height, ShellJoin(append([]string{self}, os.Args[1:]...)...))...)
 	// tmux exits with the popup command's status, so a non-zero exit is the child's, not a failure.
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exitErr.ExitCode(), nil
@@ -28,6 +24,15 @@ func (c *Client) ReexecInPopup(guardEnv, width, height string) (int, error) {
 
 func popupArgs(guardEnv, width, height, command string) []string {
 	return []string{"display-popup", "-E", "-w", width, "-h", height, "-b", "rounded", "-e", guardEnv + "=1", "--", command}
+}
+
+// ShellJoin quotes each word for the shell tmux runs popup and pane commands with, joined by spaces.
+func ShellJoin(words ...string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = shellQuote(w)
+	}
+	return strings.Join(quoted, " ")
 }
 
 // shellQuote single-quotes s for the shell tmux runs the popup command with.
