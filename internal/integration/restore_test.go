@@ -14,15 +14,15 @@ import (
 )
 
 // Port of ppf/terminal tmux/tests/restore-test.sh: dev session save/restore (dev-resurrect.sh + resurrect
-// hooks) on the exported ~/.tmux scripts. Starts a real `claude` pane; the restore relaunches it as
-// `sleep`, so no real conversation is resumed.
+// hooks) on the bash scripts. The agent pane runs a stand-in claude binary; the restore
+// relaunches it as `sleep`.
 func TestRestore(t *testing.T) {
-	home := tmuxHome(t)
+	home := tmuxHome()
 	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
 	project := filepath.Join(home, "sessions/project.sh")
 	toggle := filepath.Join(home, "sessions/toggle-sidebar.sh")
-	requireFiles(t, restore, save, project, toggle)
+	requireFiles(t, restore, save)
 	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestRestore(t *testing.T) {
 	s := newServer(t, `source-file ~/.tmux.conf
 set -g @resurrect-dir '`+tmp+`/resurrect'
 set -g @resurrect-processes '"~^([^ ]*/)?claude( |$)->sleep 600"'
-`, "XDG_STATE_HOME="+stateHome)
+`, "XDG_STATE_HOME="+stateHome, "PATH="+filepath.Dir(sleeper(t, "claude"))+":"+os.Getenv("PATH"))
 	display := func(target, format string) string {
 		out, _ := s.Try("display", "-t", target, "-p", format)
 		return out

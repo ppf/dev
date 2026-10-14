@@ -9,16 +9,10 @@ import (
 )
 
 // Port of ppf/terminal tmux/tests/compact-test.sh: compact mode (compact.sh + client-* hooks). The inner
-// server runs the real ~/.tmux.conf with continuum autosave off; its client is attached inside an outer
+// server runs the bash ~/.tmux.conf with continuum autosave off; its client is attached inside an outer
 // server's pane, which the test resizes to act as a narrow (iPad) or wide client.
 func TestCompact(t *testing.T) {
-	home := tmuxHome(t)
-	toggleScript := filepath.Join(home, "sessions/toggle-sidebar.sh")
-	requireFiles(t, filepath.Join(home, "sessions/compact.sh"), toggleScript)
-	requireExported(t, map[string]string{
-		"tmux/sessions/compact.sh": ".tmux/sessions/compact.sh",
-		"tmux/.tmux.conf":          ".tmux.conf",
-	})
+	toggleScript := filepath.Join(tmuxHome(), "sessions/toggle-sidebar.sh")
 	tmp := t.TempDir()
 	env := "XDG_STATE_HOME=" + filepath.Join(tmp, "state")
 	in := newServer(t, `source-file ~/.tmux.conf

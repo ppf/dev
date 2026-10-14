@@ -17,16 +17,8 @@ import (
 const popupGuard = "SIDEBAR_SELECT_IN_POPUP=1"
 
 // projectScript is the bash reference for opening a session.
-func projectScript(t *testing.T) string {
-	t.Helper()
-	p := filepath.Join(tmuxHome(t), "sessions/project.sh")
-	requireFiles(t, p, filepath.Join(tmuxHome(t), "sessions/sidebar.sh"), filepath.Join(tmuxHome(t), "sessions/toggle-sidebar.sh"))
-	requireExported(t, map[string]string{
-		"tmux/sessions/project.sh":        ".tmux/sessions/project.sh",
-		"tmux/sessions/sidebar.sh":        ".tmux/sessions/sidebar.sh",
-		"tmux/sessions/toggle-sidebar.sh": ".tmux/sessions/toggle-sidebar.sh",
-	})
-	return p
+func projectScript() string {
+	return filepath.Join(tmuxHome(), "sessions/project.sh")
 }
 
 func tempDir(t *testing.T) string {
@@ -55,7 +47,7 @@ func devSidebarStart(start string) string {
 // `dev <name>` against `project.sh <path> <name>` on identical servers: the new-session layout, then the
 // existing-session path (attach, no duplicate).
 func TestOpenParity(t *testing.T) {
-	project := projectScript(t)
+	project := projectScript()
 	dir := tempDir(t)
 	cfg := writeProjects(t, [2]string{"app", dir})
 	impls := map[string]func(d *devServer) (string, error){
@@ -95,7 +87,7 @@ func TestOpenParity(t *testing.T) {
 	check(t, "dev: no duplicate session", dev.sessions, "app\nboot")
 	check(t, "dev: client switched", dev.clients, "app")
 	// The deliberate difference: the same pane runs dev's sidebar instead of sidebar.sh
-	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(t), "sessions/sidebar.sh"))), "true")
+	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(), "sessions/sidebar.sh"))), "true")
 	check(t, "dev: sidebar runs dev sidebar", devSidebarStart(dev.sidebar), "true")
 	for _, want := range []string{
 		"session app @project=app clients=app\n",
@@ -113,8 +105,8 @@ func TestOpenParity(t *testing.T) {
 // The first dev of a server restores saved sessions before the has-session check, so `dev app` attaches to
 // a restored app; it sets @dev_restored and prints then unsets the restore warnings. Later runs skip it.
 func TestOpenFirstRunRestore(t *testing.T) {
-	project := projectScript(t)
-	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/restore.sh"))
+	project := projectScript()
+	requireFiles(t, filepath.Join(tmuxHome(), "plugins/tmux-resurrect/scripts/restore.sh"))
 	dir := tempDir(t)
 	cfg := writeProjects(t, [2]string{"app", dir}, [2]string{"two", dir})
 	impls := map[string]func(d *devServer, name string) (string, error){
@@ -150,7 +142,7 @@ func TestOpenFirstRunRestore(t *testing.T) {
 // The picker path: Enter on a project that has a session opens name-2, name-3 (force-new); a typed worktree
 // name opens <name>-<worktree with / as -> in that worktree. Bash runs project.sh exactly as select.sh does.
 func TestOpenPicker(t *testing.T) {
-	project := projectScript(t)
+	project := projectScript()
 	plain := tempDir(t)
 	type run struct{ sessions, forced, wt, statuses, sidebars string }
 	got := map[string]run{}

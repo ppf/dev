@@ -42,8 +42,8 @@ type server struct {
 	socket string
 }
 
-// newServer prepares a server with config conf and extra env (also passed to scripts via scriptEnv).
-// The server itself starts with the first command that needs it.
+// newServer prepares a server with config conf, HOME=bashHome and extra env (also passed to scripts via
+// scriptEnv). The server itself starts with the first command that needs it.
 func newServer(t *testing.T, conf string, env ...string) *server {
 	t.Helper()
 	confPath := filepath.Join(t.TempDir(), "test.conf")
@@ -51,7 +51,7 @@ func newServer(t *testing.T, conf string, env ...string) *server {
 		t.Fatal(err)
 	}
 	socket := fmt.Sprintf("dev-it-%d-%d", os.Getpid(), socketSeq.Add(1))
-	s := &server{t: t, tmux: tmux.NewIsolated(socket, confPath, env...), socket: socket}
+	s := &server{t: t, tmux: tmux.NewIsolated(socket, confPath, append([]string{"HOME=" + bashHome}, env...)...), socket: socket}
 	t.Cleanup(s.kill)
 	return s
 }
@@ -191,6 +191,20 @@ func runScript(env []string, name string, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// sleeper builds a stand-in binary called name that sleeps: rules match the pane's process name, which
+// macOS takes from the executable, so a script or symlink would show as sh or sleep.
+func sleeper(t *testing.T, name string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "main.go"), "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(time.Hour) }\n")
+	build := exec.Command("go", "build", "-o", name, "main.go")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build %s stub: %v\n%s", name, err, out)
+	}
+	return filepath.Join(dir, name)
+}
+
 // check reports a mismatch and lets the test go on, like the bash tests' check().
 func check(t *testing.T, name, got, want string) {
 	t.Helper()
@@ -213,45 +227,17 @@ func waitFor(t *testing.T, desc string, cond func() bool) {
 	t.Fatalf("❌ timeout waiting for: %s", desc)
 }
 
-func tmuxHome(t *testing.T) string {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(home, ".tmux")
+// tmuxHome is bashHome's ~/.tmux, which the bash scripts run from.
+func tmuxHome() string {
+	return filepath.Join(bashHome, ".tmux")
 }
 
-// requireFiles fails the test when a prerequisite (exported script, plugin) is missing.
+// requireFiles fails the test when a prerequisite (a tmux plugin) is missing.
 func requireFiles(t *testing.T, paths ...string) {
 	t.Helper()
 	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("prerequisite missing (run ./export.sh in ppf/terminal): %v", err)
-		}
-	}
-}
-
-// requireExported fails when an exported file differs from the ppf/terminal repo; skipped without DEV_TERMINAL_REPO.
-func requireExported(t *testing.T, pairs map[string]string) {
-	t.Helper()
-	repo := os.Getenv("DEV_TERMINAL_REPO")
-	if repo == "" {
-		t.Log("DEV_TERMINAL_REPO unset: not checking exports against the repo")
-		return
-	}
-	home := filepath.Dir(tmuxHome(t))
-	for src, dst := range pairs {
-		a, err := os.ReadFile(filepath.Join(repo, src))
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := os.ReadFile(filepath.Join(home, dst))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(a, b) {
-			t.Fatalf("❌ ~/%s differs from the repo: run ./export.sh first", dst)
+			t.Fatalf("prerequisite missing: %v", err)
 		}
 	}
 }

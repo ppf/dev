@@ -30,7 +30,7 @@ func ensNewSide(t *testing.T, bash bool) *ensSide {
 		d.T("new-session", "-d", "-s", s, "-x", "200", "-y", "50")
 		d.T("split-window", "-h", "-t", tmux.SessionTarget(s))
 	}
-	home := tmuxHome(t)
+	home := tmuxHome()
 	return &ensSide{d: d, bash: bash, toggle: filepath.Join(home, "sessions/toggle-sidebar.sh"),
 		action: filepath.Join(home, "sessions/sidebar-action.sh"), boot: d.T("display", "-t", "=boot:1.1", "-p", "#{pane_id}")}
 }
@@ -85,9 +85,7 @@ func ensState(d *devServer) string {
 // bash's sidebar-action.sh reads the @sidebar_session_order a dev sidebar wrote: j moves to the next
 // session in dev's grouped order (zeta joins alpha's group), not list-sessions' alphabetical one.
 func TestSessionOrderReadByBash(t *testing.T) {
-	action := filepath.Join(tmuxHome(t), "sessions/sidebar-action.sh")
-	requireFiles(t, action)
-	requireExported(t, map[string]string{"tmux/sessions/sidebar-action.sh": ".tmux/sessions/sidebar-action.sh"})
+	action := filepath.Join(tmuxHome(), "sessions/sidebar-action.sh")
 	d := actServer(t, "alpha", "beta", "zeta")
 	d.T("set-option", "-t", "=zeta:", "@project", "alpha")
 	sidebar := actEnsure(d, "alpha")
@@ -106,14 +104,6 @@ func TestSessionOrderReadByBash(t *testing.T) {
 // compared after every step: create in another session, create and focus in the same one, hand focus
 // back from the sidebar, focus it again, hide, ensure while hidden, show, goto, and compact's zoom.
 func TestEnsureParity(t *testing.T) {
-	home := tmuxHome(t)
-	requireFiles(t, filepath.Join(home, "sessions/toggle-sidebar.sh"), filepath.Join(home, "sessions/sidebar-action.sh"),
-		filepath.Join(home, "sessions/sidebar.sh"))
-	requireExported(t, map[string]string{
-		"tmux/sessions/toggle-sidebar.sh": ".tmux/sessions/toggle-sidebar.sh",
-		"tmux/sessions/sidebar-action.sh": ".tmux/sessions/sidebar-action.sh",
-		"tmux/sessions/sidebar.sh":        ".tmux/sessions/sidebar.sh",
-	})
 	sides := []*ensSide{ensNewSide(t, true), ensNewSide(t, false)}
 
 	// from picks the pane a step runs from on each side

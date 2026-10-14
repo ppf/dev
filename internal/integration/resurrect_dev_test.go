@@ -16,7 +16,7 @@ import (
 // and hiding sidebars goes through `dev sidebar toggle`. Panes run stubs, so resurrect restores the agent
 // pane as a bare shell.
 func TestResurrectDev(t *testing.T) {
-	home := tmuxHome(t)
+	home := tmuxHome()
 	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
 	requireFiles(t, restore, save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))
