@@ -175,6 +175,8 @@ func TestSidebarViewParity(t *testing.T) {
 				"Codex · Port the parser to Go on m…", "epsilon-with-a-long-session-na…")
 		case 30:
 			markers = append(markers, "Codex · Port the parser …", "epsilon-with-a-long-…")
+		case 11:
+			markers = append(markers, "no ag…", "Claud…")
 		}
 		unfocused := viewSame(d, name("unfocused"), bashPane, devPane, markers...)
 		if i == 0 {
