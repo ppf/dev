@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,11 @@ func New() *Client {
 // env entries are added on top.
 func NewIsolated(socket, config string, env ...string) *Client {
 	return &Client{socket: socket, config: config, env: append(environWithoutTmux(), env...), run: execTmux}
+}
+
+// Env returns the environment of an isolated client's child processes (nil for New: they inherit).
+func (c *Client) Env() []string {
+	return slices.Clone(c.env)
 }
 
 // Run executes one tmux command (or a ";"-chained list) and returns its stdout.

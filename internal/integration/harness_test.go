@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -22,12 +23,38 @@ import (
 
 var socketSeq atomic.Int32
 
+// TestMain kills servers left by an earlier run that died without cleanup (go test -timeout panics skip
+// t.Cleanup) and kills this run's servers on SIGINT/SIGTERM.
+func TestMain(m *testing.M) {
+	killServers(func(pid int) bool { return !alive(pid) })
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		killServers(func(pid int) bool { return pid == os.Getpid() })
+		os.Exit(1)
+	}()
+	os.Exit(m.Run())
+}
+
+// killServers kills the test servers (dev-it-<pid>-<n>) whose owning pid matches and removes their sockets.
+func killServers(owned func(pid int) bool) {
+	sockets, _ := filepath.Glob(filepath.Join(socketDir(), "dev-it-*-*"))
+	for _, sock := range sockets {
+		var pid, n int
+		if _, err := fmt.Sscanf(filepath.Base(sock), "dev-it-%d-%d", &pid, &n); err != nil || !owned(pid) {
+			continue
+		}
+		tmux.NewIsolated(filepath.Base(sock), "").Run("kill-server")
+		os.Remove(sock)
+	}
+}
+
 // server is an isolated tmux server (-L) owned by one test; it is killed and its socket removed on cleanup.
 type server struct {
 	t      *testing.T
 	tmux   *tmux.Client
 	socket string
-	env    []string
 }
 
 // newServer prepares a server with config conf and extra env (also passed to scripts via scriptEnv).
@@ -39,9 +66,16 @@ func newServer(t *testing.T, conf string, env ...string) *server {
 		t.Fatal(err)
 	}
 	socket := fmt.Sprintf("dev-it-%d-%d", os.Getpid(), socketSeq.Add(1))
-	s := &server{t: t, tmux: tmux.NewIsolated(socket, confPath, env...), socket: socket, env: env}
+	s := &server{t: t, tmux: tmux.NewIsolated(socket, confPath, env...), socket: socket}
 	t.Cleanup(s.kill)
 	return s
+}
+
+// with returns a view of s that reports failures to t, for use inside subtests.
+func (s *server) with(t *testing.T) *server {
+	c := *s
+	c.t = t
+	return &c
 }
 
 // T runs a tmux command and returns its output without the trailing newline; failure is fatal.
@@ -78,38 +112,43 @@ func (s *server) socketPath() string {
 }
 
 func (s *server) expectedSocketPath() string {
+	return filepath.Join(socketDir(), s.socket)
+}
+
+func socketDir() string {
 	dir := os.Getenv("TMUX_TMPDIR")
 	if dir == "" {
 		dir = "/tmp"
 	}
-	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), s.socket)
+	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()))
 }
 
 // scriptEnv is the environment for a bash script under test: its plain `tmux` calls reach this server
 // through TMUX, and nothing points at the user's server.
 func (s *server) scriptEnv(extra ...string) []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "TMUX=") && !strings.HasPrefix(kv, "TMUX_PANE=") {
-			env = append(env, kv)
-		}
-	}
-	env = append(env, s.env...)
-	env = append(env, "TMUX="+s.socketPath()+","+s.T("display", "-p", "#{pid}")+",0")
+	env := append(s.tmux.Env(), "TMUX="+s.socketPath()+","+s.T("display", "-p", "#{pid}")+",0")
 	return append(env, extra...)
 }
 
-// kill stops the server and waits for its pane processes and their descendants, so none outlives the
-// test and writes into its temp dirs (nvim saves shada on SIGHUP).
+// kill stops the server and waits for it, its pane processes and their descendants, so none outlives
+// the test and writes into its temp dirs (nvim saves shada on SIGHUP). Survivors get SIGKILL after 10s.
+// The server can be started again afterwards.
 func (s *server) kill() {
-	panePIDs, _ := s.Try("list-panes", "-a", "-F", "#{pane_pid}")
-	pids := s.descendants(strings.Fields(panePIDs))
+	roots, _ := s.Try("list-panes", "-a", "-F", "#{pane_pid}")
+	if pid, err := s.Try("display", "-p", "#{pid}"); err == nil {
+		roots += " " + pid
+	}
+	pids := s.descendants(strings.Fields(roots))
 	if _, err := s.tmux.Run("kill-server"); err != nil && !isNoServer(err) {
 		s.t.Errorf("kill-server: %v", err)
 	}
 	for i := 0; slices.ContainsFunc(pids, alive); i++ {
 		if i == 100 {
-			s.t.Errorf("pane processes still running 10s after kill-server: %v", slices.DeleteFunc(pids, func(p int) bool { return !alive(p) }))
+			survivors := slices.DeleteFunc(pids, func(p int) bool { return !alive(p) })
+			s.t.Errorf("processes still running 10s after kill-server, sending SIGKILL: %v", survivors)
+			for _, p := range survivors {
+				syscall.Kill(p, syscall.SIGKILL)
+			}
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -218,9 +257,15 @@ func requireExported(t *testing.T, pairs map[string]string) {
 	}
 	home := filepath.Dir(tmuxHome(t))
 	for src, dst := range pairs {
-		a, errA := os.ReadFile(filepath.Join(repo, src))
-		b, errB := os.ReadFile(filepath.Join(home, dst))
-		if errA != nil || errB != nil || !bytes.Equal(a, b) {
+		a, err := os.ReadFile(filepath.Join(repo, src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(home, dst))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(a, b) {
 			t.Fatalf("❌ ~/%s differs from the repo: run ./export.sh first", dst)
 		}
 	}

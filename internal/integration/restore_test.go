@@ -63,8 +63,7 @@ set -g @resurrect-processes '"~^([^ ]*/)?claude( |$)->sleep 600"'
 	check(t, "no save warnings", s.T("show", "-gqv", "@dev_resurrect_warnings"), "")
 
 	// Cold start: same command project.sh runs on the first `dev` of a server
-	s.T("kill-server")
-	time.Sleep(time.Second)
+	s.kill()
 	s.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)
 	waitFor(t, "claude pane relaunched", func() bool { return display("devt:1.2", "#{pane_current_command}") == "sleep" })
 	sessions := strings.Split(s.T("ls", "-F", "#{session_name}"), "\n")

@@ -94,14 +94,14 @@ type pane struct {
 
 func TestQueryBuildsFormatAndParses(t *testing.T) {
 	c := NewIsolated("sock", "")
-	run, calls := fake("%1\x1fclaude\x1f80\x1f1\n%2\x1f\x1f40\x1f0\n", "", nil)
+	run, calls := fake("%1\x1fclaude\x1f80\x1f1\x1f\n%2\x1f\x1f40\x1f0\x1f\n", "", nil)
 	c.run = run
 
 	panes, err := Query[pane](c, "list-panes", "-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgs := []string{"-L", "sock", "list-panes", "-a", "-F", "#{pane_id}\x1f#{pane_title}\x1f#{pane_width}\x1f#{pane_active}"}
+	wantArgs := []string{"-L", "sock", "list-panes", "-a", "-F", "#{pane_id}\x1f#{pane_title}\x1f#{pane_width}\x1f#{pane_active}\x1f"}
 	if !slices.Equal((*calls)[0].args, wantArgs) {
 		t.Errorf("args = %q, want %q", (*calls)[0].args, wantArgs)
 	}
@@ -123,12 +123,15 @@ func TestParse(t *testing.T) {
 		wantErr   bool
 	}{
 		{name: "empty output", out: "", want: nil},
-		{name: "empty middle field", out: "x\x1f\x1fz\n", want: []row{{A: "x", C: "z"}}},
-		{name: "all fields empty", out: "\x1f\x1f\n", want: []row{{}}},
-		{name: "spaces kept", out: " x \x1fy\x1f z \n", want: []row{{A: " x ", B: "y", C: " z "}}},
-		{name: "two rows", out: "1\x1f2\x1f3\n4\x1f5\x1f6\n", want: []row{{"1", "2", "3"}, {"4", "5", "6"}}},
-		{name: "too few fields", out: "x\x1fy\n", wantErr: true},
-		{name: "too many fields", out: "x\x1fy\x1fz\x1fw\n", wantErr: true},
+		{name: "empty middle field", out: "x\x1f\x1fz\x1f\n", want: []row{{A: "x", C: "z"}}},
+		{name: "all fields empty", out: "\x1f\x1f\x1f\n", want: []row{{}}},
+		{name: "spaces kept", out: " x \x1fy\x1f z \x1f\n", want: []row{{A: " x ", B: "y", C: " z "}}},
+		{name: "two rows", out: "1\x1f2\x1f3\x1f\n4\x1f5\x1f6\x1f\n", want: []row{{"1", "2", "3"}, {"4", "5", "6"}}},
+		{name: "newline in value", out: "a\nb\x1fx\n\x1fz\n\x1f\n", want: []row{{A: "a\nb", B: "x\n", C: "z\n"}}},
+		{name: "too few fields", out: "x\x1fy\x1f\n", wantErr: true},
+		{name: "too many fields", out: "x\x1fy\x1fz\x1fw\x1f\n", wantErr: true},
+		{name: "Sep in value", out: "x\x1fy\x1fz\x1fw\x1f\n", wantErr: true},
+		{name: "unterminated", out: "x\x1fy\x1fz\n", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -143,11 +146,21 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParseSingleEmptyField(t *testing.T) {
+	type row struct {
+		Project string `tmux:"@project"`
+	}
+	got, err := Parse[row]("\x1f\n")
+	if err != nil || len(got) != 1 || got[0] != (row{}) {
+		t.Errorf("Parse = %+v, %v; want one empty row", got, err)
+	}
+}
+
 func TestParseBadInt(t *testing.T) {
 	type row struct {
 		N int `tmux:"pane_width"`
 	}
-	if _, err := Parse[row]("wide\n"); err == nil || !strings.Contains(err.Error(), "pane_width") {
+	if _, err := Parse[row]("wide\x1f\n"); err == nil || !strings.Contains(err.Error(), "pane_width") {
 		t.Errorf("err = %v, want pane_width parse error", err)
 	}
 }

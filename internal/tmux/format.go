@@ -7,8 +7,11 @@ import (
 	"strings"
 )
 
-// Sep separates fields in -F output; tmux passes it through unescaped and no field value contains it.
+// Sep separates fields in -F output and, followed by a newline, ends each row. tmux prints values raw,
+// so a value may contain newlines (except at its start); a value containing Sep makes Parse fail.
 const Sep = "\x1f"
+
+const rowEnd = Sep + "\n"
 
 // Query runs a list command (list-panes, list-sessions, ...) with a -F format built from T's
 // `tmux:"<format variable>"` tags and parses one T per output line.
@@ -18,24 +21,28 @@ func Query[T any](c *Client, args ...string) ([]T, error) {
 	for i, name := range names {
 		vars[i] = "#{" + name + "}"
 	}
-	out, err := c.Run(append(args, "-F", strings.Join(vars, Sep))...)
+	out, err := c.Run(append(args, "-F", strings.Join(vars, Sep)+Sep)...)
 	if err != nil {
 		return nil, err
 	}
 	return Parse[T](out)
 }
 
-// Parse decodes Sep-joined lines into T, one field per `tmux` tag in declaration order.
+// Parse decodes rows of Sep-joined values, each ending in Sep and a newline, into T, one field per
+// `tmux` tag in declaration order.
 // Supported field kinds: string, int, bool ("1" is true).
 func Parse[T any](out string) ([]T, error) {
 	typ := reflect.TypeFor[T]()
 	idx := taggedFields(typ)
-	out = strings.TrimSuffix(out, "\n")
 	if out == "" {
 		return nil, nil
 	}
+	body, ok := strings.CutSuffix(out, rowEnd)
+	if !ok {
+		return nil, fmt.Errorf("tmux: unterminated row: %q", out)
+	}
 	var rows []T
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(body, rowEnd) {
 		values := strings.Split(line, Sep)
 		if len(values) != len(idx) {
 			return nil, fmt.Errorf("tmux: %d fields, want %d: %q", len(values), len(idx), line)

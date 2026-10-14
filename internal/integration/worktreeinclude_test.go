@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // gitEnv keeps the user's git config (hooks, signing) out of the temp repos.
@@ -81,6 +83,7 @@ set -g @resurrect-dir '`+tmp+`/resurrect'
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			s := s.with(t)
 			root := newRepo(t, tt.gitignore, tt.include)
 			for _, f := range tt.files {
 				writeFile(t, filepath.Join(root, f), f)
@@ -107,6 +110,8 @@ set -g @resurrect-dir '`+tmp+`/resurrect'
 				if err == nil || !strings.Contains(out, "worktree removed") {
 					t.Fatalf("want failure with cleanup message, got err=%v\n%s", err, out)
 				}
+				_, err := s.Try("has-session", "-t", tmux.SessionTarget(name+"-feat"))
+				check(t, "no session created", boolStr(err != nil), "1")
 				check(t, "worktree dir removed", exists(worktree), "absent")
 				check(t, "worktree unregistered", boolStr(strings.Contains(git(t, root, "worktree", "list", "--porcelain"), worktree)), "0")
 				wantBranch := "absent"
