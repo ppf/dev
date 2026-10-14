@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -192,5 +193,19 @@ func TestState(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", errOut, tt.wantStderr)
 			}
 		})
+	}
+}
+
+func TestCloseWorktreeDashNames(t *testing.T) {
+	args := []string{"sidebar", "close-worktree", "--client", "", "--", "-a", "-b", "/r", "/r/.claude/worktrees/x"}
+	cmd, rest, err := newRootCmd().Find(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.ParseFlags(rest); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cmd.Flags().Args(), []string{"-a", "-b", "/r", "/r/.claude/worktrees/x"}; !slices.Equal(got, want) {
+		t.Errorf("args = %q, want %q", got, want)
 	}
 }

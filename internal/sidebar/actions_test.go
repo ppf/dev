@@ -224,7 +224,7 @@ func TestActionKill(t *testing.T) {
 			"list-sessions -F …",
 			"list-panes -t =b: -F …", "display-message -t %2 -p #{pane_current_path}", "list-panes -a -F …",
 			"display-popup -c /dev/tty1 -E -w 70 -h 8 -b rounded -- " +
-				tmux.ShellJoin(exe, "sidebar", "close-worktree", "--client", "/dev/tty1", "a", "b", root, wt),
+				tmux.ShellJoin(exe, "sidebar", "close-worktree", "--client", "/dev/tty1", "--", "a", "b", root, wt),
 		}},
 		{"shared worktree", []string{"a", "b", "c"}, "b", wt, wt + "/sub", append(append(plainKill[:3:3], "list-panes -a -F …"), plainKill[3:]...)},
 	} {

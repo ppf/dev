@@ -75,6 +75,7 @@ type tickMsg struct{}
 type refreshMsg struct {
 	snap     snapshot
 	selected string // after the selection sync
+	read     string // @sidebar_selected_session as the refresh read it
 	order    string // @sidebar_session_order after the refresh
 	gen      int    // Model.gen when the refresh started
 	err      error
@@ -127,7 +128,7 @@ func tick() tea.Cmd {
 }
 
 // refresh queries tmux once (list-panes -a, list-clients), builds the snapshot, writes
-// @sidebar_session_order when it changed and applies the selection sync (refresh_sessions).
+// @sidebar_session_order when it changed and computes the selection sync (refresh_sessions); apply writes it.
 func (m Model) refresh() tea.Cmd {
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg { return refreshMsg{gen: m.gen, err: err} }
@@ -151,17 +152,12 @@ func (m Model) refresh() tea.Cmd {
 		}
 		// A global option: every row carries the same value, and buildSnapshot found at least one row
 		read := rows[0].Selected
-		selected := syncSelection(read, snap)
-		if selected != read {
-			if err := setSelected(m.c, selected); err != nil {
-				return fail(err)
-			}
-		}
-		return refreshMsg{snap: snap, selected: selected, order: order, gen: m.gen}
+		return refreshMsg{snap: snap, selected: syncSelection(read, snap), read: read, order: order, gen: m.gen}
 	}
 }
 
-// apply takes a refresh's result, keeping a local selection made after the refresh started.
+// apply takes a refresh's result, keeping a local selection made after the refresh started: a stale
+// selection sync is neither applied nor written, so it can't overwrite a newer key press on the server.
 func (m Model) apply(msg refreshMsg) Model {
 	if msg.err != nil {
 		// Keep the last snapshot; the view shows the error until a refresh succeeds
@@ -169,8 +165,14 @@ func (m Model) apply(msg refreshMsg) Model {
 		return m
 	}
 	m.snap, m.order, m.err = msg.snap, msg.order, nil
-	if msg.gen == m.gen {
-		m.selected = msg.selected
+	if msg.gen != m.gen {
+		return m
+	}
+	m.selected = msg.selected
+	if msg.selected != msg.read {
+		if err := setSelected(m.c, msg.selected); err != nil {
+			m.err = err
+		}
 	}
 	return m
 }
