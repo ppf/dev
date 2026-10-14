@@ -107,3 +107,18 @@ func environWithoutTmux() []string {
 	}
 	return env
 }
+
+// Interactive runs a tmux command attached to this process's terminal (attach-session, popups).
+func (c *Client) Interactive(args ...string) error {
+	if c.socket == "" && testing.Testing() {
+		return ErrNoSocket
+	}
+	argv := c.argv(args)
+	cmd := exec.Command("tmux", argv...)
+	cmd.Env = c.env
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return &Error{Args: argv, Err: err}
+	}
+	return nil
+}
