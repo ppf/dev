@@ -23,21 +23,14 @@ type parSide struct {
 }
 
 // parSides starts the bash and the dev side, each with sessions besides boot and the client on the
-// first. Bash's picker popup runs select.sh, which lists the user's ~/.tmux/sessions/projects.conf (read
-// only; the tests close it with Esc).
+// first. Bash's picker popup runs select.sh, which lists no projects (the bash home has no
+// projects.conf; the tests close it with Esc).
 func parSides(t *testing.T, sessions ...string) []*parSide {
 	t.Helper()
-	home := tmuxHome(t)
+	home := tmuxHome()
 	keys := filepath.Join(home, "sessions/install-sidebar-keys.sh")
 	action := filepath.Join(home, "sessions/sidebar-action.sh")
 	toggle := filepath.Join(home, "sessions/toggle-sidebar.sh")
-	requireFiles(t, keys, action, toggle, filepath.Join(home, "sessions/sidebar.sh"), filepath.Join(home, "sessions/select.sh"))
-	requireExported(t, map[string]string{
-		"tmux/sessions/install-sidebar-keys.sh": ".tmux/sessions/install-sidebar-keys.sh",
-		"tmux/sessions/sidebar-action.sh":       ".tmux/sessions/sidebar-action.sh",
-		"tmux/sessions/toggle-sidebar.sh":       ".tmux/sessions/toggle-sidebar.sh",
-		"tmux/sessions/sidebar.sh":              ".tmux/sessions/sidebar.sh",
-	})
 	var sides []*parSide
 	for _, bash := range []bool{true, false} {
 		s := &parSide{name: "dev", d: actServer(t, sessions...), bash: bash, action: action, toggle: toggle}

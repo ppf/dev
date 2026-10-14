@@ -18,12 +18,8 @@ import (
 )
 
 // viewScript is the bash reference for the sidebar's screen.
-func viewScript(t *testing.T) string {
-	t.Helper()
-	p := filepath.Join(tmuxHome(t), "sessions/sidebar.sh")
-	requireFiles(t, p)
-	requireExported(t, map[string]string{"tmux/sessions/sidebar.sh": ".tmux/sessions/sidebar.sh"})
-	return p
+func viewScript() string {
+	return filepath.Join(tmuxHome(), "sessions/sidebar.sh")
 }
 
 // viewGitRepo returns a temp repository with one commit on branch.
@@ -111,30 +107,16 @@ func viewFocused(d *devServer, pane string) string {
 	return screen
 }
 
-// viewCodex builds a stand-in codex binary: the agent rule matches the pane's process name, which
-// macOS takes from the executable, so a script or symlink would show as sh or sleep.
-func viewCodex(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "main.go"), "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(time.Hour) }\n")
-	build := exec.Command("go", "build", "-o", "codex", "main.go")
-	build.Dir = dir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build codex stub: %v\n%s", err, out)
-	}
-	return filepath.Join(dir, "codex")
-}
-
 // sidebar.sh and `dev sidebar` side by side in one window, equal size, against the same sessions (one
 // server, so both read identical state): at widths 40, 30 and 11, unfocused and each focused, then after
 // a selection change.
 func TestSidebarViewParity(t *testing.T) {
-	script := viewScript(t)
+	script := viewScript()
 	d := newDevServer(t, "")
 	repo := viewGitRepo(t, "feature/login")
 	longRepo := viewGitRepo(t, "feature/a-branch-name-long-enough-to-cut")
 	plain := tempDir(t)
-	codex := viewCodex(t)
+	codex := sleeper(t, "codex")
 
 	// Agent panes run sleep, hook-registered via @agent_cmd: bash calls any non-shell window-1 pane
 	// Claude, the Go sidebar only a registered one. The Codex pane has no hook state and a "dir | task"
@@ -174,13 +156,17 @@ func TestSidebarViewParity(t *testing.T) {
 
 	for i, w := range []int{40, 30, 11} {
 		name := func(s string) string { return fmt.Sprintf("W=%d %s", w, s) }
+		// Unfocus before resizing: a hint still drawn when the pane narrows wraps and scrolls bash's screen
+		d.T("select-pane", "-t", other)
+		waitFor(t, name("no hint before resize"), func() bool {
+			return !strings.Contains(viewCapture(d, bashPane), "j/k") && !strings.Contains(viewCapture(d, devPane), "j/k")
+		})
 		d.T("resize-window", "-t", bashPane, "-x", strconv.Itoa(3*w+2), "-y", "30")
 		d.T("select-layout", "-t", bashPane, "even-horizontal")
 		want := fmt.Sprintf("%dx30", w)
 		if size(bashPane) != want || size(devPane) != want {
 			t.Fatalf("sidebar sizes %s and %s, want %s", size(bashPane), size(devPane), want)
 		}
-		d.T("select-pane", "-t", other)
 
 		markers := []string{"SESSIONS"}
 		switch w {
