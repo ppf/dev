@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/ppf/dev/internal/tmux"
 )
 
 // gitEnv keeps the user's git config (hooks, signing) out of the temp repos.
@@ -19,27 +17,13 @@ var gitEnv = []string{
 	"GIT_COMMITTER_NAME=dev-test", "GIT_COMMITTER_EMAIL=dev-test@example.com",
 }
 
-// The .worktreeinclude cases from ppf/terminal#8, run through project.sh's DEV_WORKTREE mode: gitignored
-// files matching .worktreeinclude are copied into a fresh worktree; a failed copy removes the worktree and
-// deletes the branch only if it was just created.
+// The .worktreeinclude cases from ppf/terminal#8, each run through project.sh's DEV_WORKTREE mode and through
+// the dev picker: gitignored files matching .worktreeinclude are copied into a fresh worktree; a failed copy
+// removes the worktree and deletes the branch only if it was just created.
 func TestWorktreeInclude(t *testing.T) {
-	project := filepath.Join(tmuxHome(t), "sessions/project.sh")
-	requireFiles(t, project)
-	tmp := t.TempDir()
-	// claude, lazygit and nvim are stubbed so the layout doesn't start real apps in temp repos
-	stubs := writeStubs(t, filepath.Join(tmp, "stubs"), "exec sleep 600", "claude", "lazygit", "nvim")
-	failingRsync := writeStubs(t, filepath.Join(tmp, "failing"), "exit 1", "rsync")
-	path := stubs + ":" + os.Getenv("PATH")
-	// @dev_restored skips project.sh's first-run restore. Panes run a non-login /bin/sh: a login shell
-	// reads /etc/profile and ~/.profile, which put the real binaries ahead of the stubs.
-	s := newServer(t, `set -g base-index 1
-setw -g pane-base-index 1
-set -g default-shell /bin/sh
-set -g default-command /bin/sh
-set -g @dev_restored 1
-set -g @resurrect-dir '`+tmp+`/resurrect'
-`, "PATH="+path, "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
-	s.T("new-session", "-d", "-s", "boot")
+	project := projectScript(t)
+	d := newDevServer(t, "set -g @dev_restored 1\n")
+	failingRsync := writeStubs(t, filepath.Join(d.tmp, "failing"), "exit 1", "rsync")
 
 	tests := []struct {
 		name, gitignore, include string
@@ -82,68 +66,85 @@ set -g @resurrect-dir '`+tmp+`/resurrect'
 		},
 	}
 	for i, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := s.with(t)
-			root := newRepo(t, tt.gitignore, tt.include)
-			for _, f := range tt.files {
-				writeFile(t, filepath.Join(root, f), f)
-			}
-			if tt.nested != "" {
-				nested := filepath.Join(root, tt.nested)
-				writeFile(t, filepath.Join(nested, "f.txt"), "nested")
-				git(t, nested, "init", "-q")
-				git(t, nested, "add", "f.txt")
-				git(t, nested, "commit", "-qm", "nested")
-			}
-			if tt.existingBranch {
-				git(t, root, "branch", "feat")
-			}
-			env := append(s.scriptEnv(gitEnv...), "DEV_WORKTREE=feat")
-			if tt.failCopy {
-				env = append(env, "PATH="+failingRsync+":"+path)
-			}
-			name := "wt" + string(rune('a'+i))
-			out, err := runScript(env, project, root, name)
-			worktree := filepath.Join(root, ".claude/worktrees/feat")
-
-			if tt.failCopy {
-				if err == nil || !strings.Contains(out, "worktree removed") {
-					t.Fatalf("want failure with cleanup message, got err=%v\n%s", err, out)
+		for _, impl := range []string{"bash", "dev"} {
+			t.Run(impl+"/"+tt.name, func(t *testing.T) {
+				d := d.with(t)
+				root := newRepo(t, tt.gitignore, tt.include)
+				for _, f := range tt.files {
+					writeFile(t, filepath.Join(root, f), f)
 				}
-				_, err := s.Try("has-session", "-t", tmux.SessionTarget(name+"-feat"))
-				check(t, "no session created", boolStr(err != nil), "1")
-				check(t, "worktree dir removed", exists(worktree), "absent")
-				check(t, "worktree unregistered", boolStr(strings.Contains(git(t, root, "worktree", "list", "--porcelain"), worktree)), "0")
-				wantBranch := "absent"
+				if tt.nested != "" {
+					nested := filepath.Join(root, tt.nested)
+					writeFile(t, filepath.Join(nested, "f.txt"), "nested")
+					git(t, nested, "init", "-q")
+					git(t, nested, "add", "f.txt")
+					git(t, nested, "commit", "-qm", "nested")
+				}
 				if tt.existingBranch {
-					wantBranch = "present"
+					git(t, root, "branch", "feat")
 				}
-				branch := "absent"
-				if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/feat"); err == nil {
-					branch = "present"
+				path := d.path
+				if tt.failCopy {
+					path = failingRsync + ":" + d.path
 				}
-				check(t, "branch feat", branch, wantBranch)
-				return
-			}
+				name := impl + string(rune('a'+i))
+				var out, status string
+				if impl == "bash" {
+					var err error
+					out, err = runScript(append(d.scriptEnv(gitEnv...), "DEV_WORKTREE=feat", "PATH="+path), project, root, name)
+					status = errStatus(err)
+				} else {
+					steps := []step{
+						{wait: "Select project", keys: []string{"Enter"}},
+						{wait: "Session mode", keys: []string{"feat", "Enter"}},
+					}
+					if tt.failCopy {
+						steps = append(steps, step{wait: "Press enter to close", keys: []string{"Enter"}})
+					}
+					env := append([]string{writeProjects(t, [2]string{name, root}), popupGuard, "PATH=" + path}, gitEnv...)
+					out, status = d.runInPane(env, []string{devBin}, steps...)
+				}
+				worktree := filepath.Join(root, ".claude/worktrees/feat")
 
-			session := name + "-feat"
-			if _, err := s.Try("has-session", "-t", "="+session+":"); err != nil {
-				t.Fatalf("session %s not created: %v\n%s", session, err, out)
-			}
-			for _, pane := range []string{":1.2", ":1.3", ":2.1"} { // claude, lazygit, nvim
-				waitFor(t, "stub in "+session+pane, func() bool {
-					cmd, _ := s.Try("display", "-t", "="+session+pane, "-p", "#{pane_current_command}")
-					return cmd == "sleep"
-				})
-			}
-			s.T("kill-session", "-t", "="+session+":")
-			for _, f := range tt.copied {
-				check(t, "copied "+f, exists(filepath.Join(worktree, f)), "present")
-			}
-			for _, f := range tt.notCopied {
-				check(t, "not copied "+f, exists(filepath.Join(worktree, f)), "absent")
-			}
-		})
+				if tt.failCopy {
+					want := "Copying .worktreeinclude files into " + worktree + " failed — worktree removed"
+					if status != "1" || !strings.Contains(out, "❌ "+want) {
+						t.Fatalf("want exit 1 with %q, got exit %s\n%s", want, status, out)
+					}
+					_, err := d.Try("has-session", "-t", "="+name+"-feat:")
+					check(t, "no session created", boolStr(err != nil), "1")
+					check(t, "worktree dir removed", exists(worktree), "absent")
+					check(t, "worktree unregistered", boolStr(strings.Contains(git(t, root, "worktree", "list", "--porcelain"), worktree)), "0")
+					wantBranch := "absent"
+					if tt.existingBranch {
+						wantBranch = "present"
+					}
+					branch := "absent"
+					if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/feat"); err == nil {
+						branch = "present"
+					}
+					check(t, "branch feat", branch, wantBranch)
+					return
+				}
+
+				session := name + "-feat"
+				if status != "0" {
+					t.Fatalf("exit %s\n%s", status, out)
+				}
+				if _, err := d.Try("has-session", "-t", "="+session+":"); err != nil {
+					t.Fatalf("session %s not created: %v\n%s", session, err, out)
+				}
+				d.waitForStubs(session)
+				// Back to boot first: the attached client would detach with its session (detach-on-destroy)
+				d.T("switch-client", "-t", "=boot:", ";", "kill-session", "-t", "="+session+":")
+				for _, f := range tt.copied {
+					check(t, "copied "+f, exists(filepath.Join(worktree, f)), "present")
+				}
+				for _, f := range tt.notCopied {
+					check(t, "not copied "+f, exists(filepath.Join(worktree, f)), "absent")
+				}
+			})
+		}
 	}
 }
 
