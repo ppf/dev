@@ -33,16 +33,19 @@ func Save(c *tmux.Client, snapshot string) error {
 		return fail(c, "list-sessions failed, dev state not saved", err)
 	}
 	panes, err := tmux.Query[struct {
-		ID     string `tmux:"pane_id"`
-		Window string `tmux:"window_index"`
-		Index  string `tmux:"pane_index"`
+		Session string `tmux:"session_name"`
+		ID      string `tmux:"pane_id"`
+		Window  string `tmux:"window_index"`
+		Index   string `tmux:"pane_index"`
 	}](c, "list-panes", "-a")
 	if err != nil {
 		return fail(c, "list-panes failed, dev state not saved", err)
 	}
-	pos := map[string]string{}
+	// Keyed by session too: a window linked into another session lists its panes there at another index
+	type sessionPane struct{ session, id string }
+	pos := map[sessionPane]string{}
 	for _, p := range panes {
-		pos[p.ID] = p.Window + "." + p.Index
+		pos[sessionPane{p.Session, p.ID}] = p.Window + "." + p.Index
 	}
 	var b strings.Builder
 	for _, s := range sessions {
@@ -50,7 +53,7 @@ func Save(c *tmux.Client, snapshot string) error {
 			continue
 		}
 		// A stale id means the sidebar is gone, which is the same as hidden
-		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[s.Sidebar])
+		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[sessionPane{s.Name, s.Sidebar}])
 	}
 	dev := snapshot + ".dev"
 	err = os.WriteFile(dev+".tmp", []byte(b.String()), 0o644)

@@ -57,6 +57,8 @@ func TestZoomTarget(t *testing.T) {
 	}
 }
 
+const clientsFormat = "#{client_name}\x1f#{client_width}\x1f#{client_session}\x1f"
+
 const windowsFormat = "#{window_index}\x1f#{window_name}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{pane_id}\x1f#{@dev_compact_zoomed}\x1f"
 
 var errFake = errors.New("exit status 1")
@@ -70,7 +72,8 @@ func fakeTmux(respond func(args []string) (string, error)) (*tmux.Client, *[][]s
 	}), &calls
 }
 
-// devc answers the queries of a run for client /dev/ttys1 viewing devc at width, with windows rows.
+// devc answers the queries of a run for client /dev/ttys1 viewing devc at width (and a wide /dev/ttys0
+// viewing other), with windows rows.
 func devc(width string, windows string, override func(args []string) (string, bool, error)) func([]string) (string, error) {
 	return func(args []string) (string, error) {
 		if override != nil {
@@ -79,8 +82,8 @@ func devc(width string, windows string, override func(args []string) (string, bo
 			}
 		}
 		switch strings.Join(args, " ") {
-		case "display-message -c /dev/ttys1 -p #{client_width}\x1f#{client_session}":
-			return width + "\x1fdevc\n", nil
+		case "list-clients -F " + clientsFormat:
+			return tmux.FormatRow("/dev/ttys0", "200", "other") + tmux.FormatRow("/dev/ttys1", width, "devc"), nil
 		case "show-option -qv -t =devc: @project":
 			return "devc\n", nil
 		case "show-option -qv -t =devc: @sidebar_pane":
@@ -97,7 +100,7 @@ func devc(width string, windows string, override func(args []string) (string, bo
 }
 
 var (
-	callInfo     = []string{"display-message", "-c", "/dev/ttys1", "-p", "#{client_width}\x1f#{client_session}"}
+	callInfo     = []string{"list-clients", "-F", clientsFormat}
 	callProject  = []string{"show-option", "-qv", "-t", "=devc:", "@project"}
 	callSidebar  = []string{"show-option", "-qv", "-t", "=devc:", "@sidebar_pane"}
 	callWindows  = []string{"list-windows", "-t", "=devc:", "-F", windowsFormat}
@@ -205,27 +208,18 @@ func TestRunStops(t *testing.T) {
 			},
 		},
 		{
-			name: "client detached", client: "/dev/ttys1", width: "100",
-			override: func(args []string) (string, bool, error) { return "", args[0] == "display-message", errFake },
-			want:     [][]string{callInfo},
+			name: "client detached", client: "/dev/ttys2", width: "100",
+			want: [][]string{callInfo},
 		},
 		{
-			name: "bad width", client: "/dev/ttys1", width: "-5", wantErr: "bad client info '-5\x1fdevc' for '/dev/ttys1'",
-			want: [][]string{
-				callInfo,
-				{"display-message", "-c", "/dev/ttys1", "⚠ dev compact: bad client info '-5\x1fdevc' for '/dev/ttys1'"},
-				callWarnings("bad client info '-5\x1fdevc' for '/dev/ttys1'"),
-			},
-		},
-		{
-			name: "no session", client: "/dev/ttys1", wantErr: "bad client info '100' for '/dev/ttys1'",
+			name: "list-clients fails", client: "/dev/ttys1", width: "100", wantErr: "list-clients failed: no server",
 			override: func(args []string) (string, bool, error) {
-				return "100\n", args[0] == "display-message" && args[1] == "-c" && args[3] == "-p", nil
+				return "", args[0] == "list-clients", &tmux.Error{Stderr: "no server", Err: errFake}
 			},
 			want: [][]string{
 				callInfo,
-				{"display-message", "-c", "/dev/ttys1", "⚠ dev compact: bad client info '100' for '/dev/ttys1'"},
-				callWarnings("bad client info '100' for '/dev/ttys1'"),
+				{"display-message", "-c", "/dev/ttys1", "⚠ dev compact: list-clients failed: no server"},
+				callWarnings("list-clients failed: no server"),
 			},
 		},
 		{

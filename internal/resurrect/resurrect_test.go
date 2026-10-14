@@ -74,7 +74,9 @@ func writeFile(t *testing.T, path, content string) {
 func TestSave(t *testing.T) {
 	sessions := tmux.FormatRow("devt", "devt", "%1") + tmux.FormatRow("plain", "", "") +
 		tmux.FormatRow("hidden", "proj", "") + tmux.FormatRow("stale", "p", "%99")
-	panes := tmux.FormatRow("%1", "1", "1") + tmux.FormatRow("%2", "1", "2")
+	// devt's window 1 is also linked into linked as window 5, listed after devt
+	panes := tmux.FormatRow("devt", "%1", "1", "1") + tmux.FormatRow("devt", "%2", "1", "2") +
+		tmux.FormatRow("linked", "%1", "5", "1")
 	tests := []struct {
 		name      string
 		replies   map[string]any

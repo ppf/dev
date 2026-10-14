@@ -231,6 +231,11 @@ Resurrect and compact:
   for an unknown state dir, last snapshot or default-shell, and for unreadable or unwritable state files; a
   failing `last_resurrect_file` warns and fails where bash exited 0.
 - `save` writes a temp file and renames it, so a failed write keeps the old `.dev`; a failed rename leaves
-  `<snapshot>.dev.tmp`, which prune doesn't remove. Positions come from one `list-panes -a`.
+  `<snapshot>.dev.tmp`, which prune doesn't remove. Positions come from one `list-panes -a`, taken in the
+  session's own context: a sidebar window linked into another session keeps its index in its session
+  (bash's `display-message -t %pane` could report the other session's index).
+- `dev compact` finds the hook client's width and session in `list-clients`; bash's `display-message -c`
+  formats for the best client of the current session on tmux 3.8, so a narrow client could read a wide one's
+  width. A failing `list-clients` warns; an unknown client is a detached one and does nothing.
 - `#{@project}` in `list-sessions -F` falls back to a global `@project` (`show-option -qv -t` did not);
   nothing sets one.

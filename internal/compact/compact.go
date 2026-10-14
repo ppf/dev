@@ -6,7 +6,7 @@ package compact
 import (
 	"errors"
 	"fmt"
-	"strconv"
+	"slices"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -14,6 +14,13 @@ import (
 
 // threshold is the client width below which dev windows are zoomed.
 const threshold = 140
+
+// hookClient is one list-clients row; hook_client is a client_name.
+type hookClient struct {
+	Name    string `tmux:"client_name"`
+	Width   int    `tmux:"client_width"`
+	Session string `tmux:"client_session"`
+}
 
 // window is one list-windows row of the client's session.
 type window struct {
@@ -40,17 +47,17 @@ func Run(c *tmux.Client, client string) error {
 	if client == "" {
 		return fail(c, client, "no hook client passed")
 	}
-	// The hook's own client: client_* formats in a hook can resolve to another client of the session
-	out, err := c.Run("display-message", "-c", client, "-p", "#{client_width}"+tmux.Sep+"#{client_session}")
+	// list-clients, not display-message -c: on tmux 3.8 `display-message -c TTY -p` formats for the best
+	// client of the current session, and client_* formats in a hook can resolve to another client too
+	clients, err := tmux.Query[hookClient](c, "list-clients")
 	if err != nil {
+		return fail(c, client, "list-clients failed: "+stderr(err))
+	}
+	i := slices.IndexFunc(clients, func(cl hookClient) bool { return cl.Name == client })
+	if i < 0 {
 		return nil // the client detached since the hook fired
 	}
-	info := strings.TrimRight(out, "\n")
-	w, session, _ := strings.Cut(info, tmux.Sep)
-	width, err := strconv.Atoi(w)
-	if err != nil || strings.TrimLeft(w, "0123456789") != "" || session == "" {
-		return fail(c, client, fmt.Sprintf("bad client info '%s' for '%s'", info, client))
-	}
+	width, session := clients[i].Width, clients[i].Session
 	target := tmux.SessionTarget(session)
 	// A session that vanished since the hook fired has no options; nothing to do
 	if project, err := c.Run("show-option", "-qv", "-t", target, "@project"); err != nil || strings.TrimRight(project, "\n") == "" {
