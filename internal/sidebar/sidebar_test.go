@@ -93,7 +93,7 @@ func TestModelCloseCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := tmux.ShellJoin(exe, "sidebar", "close-worktree", "--client", "", "app", "app-x", "/r", "/r/.claude/worktrees/x")
+	want := tmux.ShellJoin(exe, "sidebar", "close-worktree", "--client", "", "--", "app", "app-x", "/r", "/r/.claude/worktrees/x")
 	if got != want || !strings.HasPrefix(got, "'"+exe+"' ") {
 		t.Errorf("command = %s, want %s", got, want)
 	}

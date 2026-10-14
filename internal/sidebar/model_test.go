@@ -162,17 +162,22 @@ func TestModelRefresh(t *testing.T) {
 			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
-		{"set-option", "-gq", "@sidebar_selected_session", "app"},
 	}
 	if !slices.EqualFunc(f.calls, want, slices.Equal) {
 		t.Errorf("first refresh calls =\n%q\nwant\n%q", f.calls, want)
 	}
-	if msg.selected != "app" || msg.order != "app\nweb\n" || msg.snap.current != "app" || len(msg.snap.sessions) != 2 {
+	if msg.selected != "app" || msg.read != "" || msg.order != "app\nweb\n" || msg.snap.current != "app" || len(msg.snap.sessions) != 2 {
 		t.Errorf("msg = %+v", msg)
 	}
 
-	// Nothing changed: only the two queries
+	// apply writes the synced selection
+	f.calls = nil
 	m = m.apply(msg)
+	if want := []string{"set-option", "-gq", "@sidebar_selected_session", "app"}; len(f.calls) != 1 || !slices.Equal(f.calls[0], want) {
+		t.Errorf("apply calls = %q", f.calls)
+	}
+
+	// Nothing changed: only the two queries
 	f.selected, f.calls = "app", nil
 	if msg := m.refresh()().(refreshMsg); msg.err != nil || len(f.calls) != 2 {
 		t.Errorf("unchanged refresh: err %v, calls %q", msg.err, f.calls)
@@ -185,7 +190,7 @@ func TestModelRefresh(t *testing.T) {
 	}
 	f.focused, f.calls = false, nil
 	msg = m.refresh()().(refreshMsg)
-	if want := []string{"set-option", "-gq", "@sidebar_selected_session", "app"}; msg.selected != "app" || len(f.calls) != 3 || !slices.Equal(f.calls[2], want) {
+	if msg.selected != "app" || msg.read != "web" || len(f.calls) != 2 {
 		t.Errorf("unfocused: selected %q, calls %q", msg.selected, f.calls)
 	}
 
@@ -197,21 +202,22 @@ func TestModelRefresh(t *testing.T) {
 
 func TestModelApply(t *testing.T) {
 	old := snapshot{current: "app", sessions: []Session{{Name: "app"}}}
-	c, _ := recorder(nil)
+	c, calls := recorder(nil)
 	m := Model{c: c, snap: old, selected: "app", order: "app\n"}
 	if err := m.setSelection("web"); err != nil {
 		t.Fatal(err)
 	}
+	*calls = nil
 
-	// A refresh started before the key: its snapshot lands, its selection doesn't
+	// A refresh started before the key: its snapshot lands, its selection sync is neither applied nor written
 	next := snapshot{current: "app", sessions: []Session{{Name: "app"}, {Name: "web"}}}
-	got := m.apply(refreshMsg{snap: next, selected: "app", order: "app\nweb\n", gen: 0})
-	if got.selected != "web" || len(got.snap.sessions) != 2 || got.order != "app\nweb\n" {
-		t.Errorf("stale gen: %+v", got)
+	got := m.apply(refreshMsg{snap: next, selected: "app", read: "other", order: "app\nweb\n", gen: 0})
+	if got.selected != "web" || len(got.snap.sessions) != 2 || got.order != "app\nweb\n" || len(*calls) != 0 {
+		t.Errorf("stale gen: %+v, calls %q", got, *calls)
 	}
-	got = got.apply(refreshMsg{snap: next, selected: "app", order: "app\nweb\n", gen: m.gen})
-	if got.selected != "app" {
-		t.Errorf("current gen: selected %q, want app", got.selected)
+	got = got.apply(refreshMsg{snap: next, selected: "app", read: "other", order: "app\nweb\n", gen: m.gen})
+	if want := []string{"set-option", "-gq", "@sidebar_selected_session", "app"}; got.selected != "app" || len(*calls) != 1 || !slices.Equal((*calls)[0], want) {
+		t.Errorf("current gen: selected %q, calls %q", got.selected, *calls)
 	}
 
 	boom := errors.New("boom")

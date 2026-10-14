@@ -127,7 +127,9 @@ instead, so they read the same state.
 - [x] `dev <name>` layouts run `dev sidebar`, and an existing session gets one through ensure:
   `TestOpenParity`, `TestOpenPicker`, `TestResurrectDev`.
 - [ ] Cutover (3e): `toggle-sidebar.sh`, `install-sidebar-keys.sh` and the `.tmux.conf` bindings live in
-  ppf/terminal. Not done here.
+  ppf/terminal. Not done here. Install a dev with this phase only together with 3e: while
+  install-sidebar-keys.sh's root bindings are active they take the Go sidebar's keys and clicks and resolve
+  them through `@sidebar_row_map`, which dev never writes.
 
 ## Resurrect (Phase 4)
 

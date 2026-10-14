@@ -21,9 +21,9 @@ type CloseArgs struct {
 	Worktree string // <MainRoot>/.claude/worktrees/<name>
 }
 
-// command is the popup's command line: `dev sidebar close-worktree --client C current target main worktree`.
+// command is the popup's command line: `dev sidebar close-worktree --client C -- current target main worktree`.
 func (a CloseArgs) command() (string, error) {
-	return selfCommand("sidebar", "close-worktree", "--client", a.Client, a.Current, a.Target, a.MainRoot, a.Worktree)
+	return selfCommand("sidebar", "close-worktree", "--client", a.Client, "--", a.Current, a.Target, a.MainRoot, a.Worktree)
 }
 
 // CloseWorktree runs in the 70×8 popup (close_worktree_popup): it prints the prompt, reads one key,
