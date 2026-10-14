@@ -102,6 +102,13 @@ Every item is verified side by side with bash before its phase ships.
   - Preserves the active window and focus.
   - Warns via display-message and appends to `@dev_resurrect_warnings`.
 
+**Compact mode (`compact.sh`, ppf/terminal tmux/tests/compact-test.sh)**
+- Synchronous client hooks (attached/resized/active/session-changed) pass `#{hook_client}`; width and session are looked up from that client.
+- Below 140 cols: zoom the claude pane in `Agent` and the nvim pane in `Files` of that session only; marks `@dev_compact_zoomed` with the pane id. Zooms once per narrow period (a manual unzoom stays); skips single-pane windows.
+- Wide: unzoom only if still zoomed on the marked pane; always clear the mark.
+- Sidebar ensure doesn't focus a sidebar hidden by zoom; hiding sidebars re-zooms a window the kill unzoomed; restore unzooms restored dev windows.
+- Problems via display-message to the hook client + `@dev_compact_warnings`.
+
 **Hook (`tmux-agent-state.sh`)**
 - Gated on `TMUX_PANE`; no-op without it.
 - Hook stdin parsed as JSON (deliberate fix vs bash substring match): skip working/tool-failed when the top-level `agent_id` field is present; `is_interrupt: true` → idle. Malformed JSON → no-op with stderr message (Claude shows it, non-blocking).
@@ -149,8 +156,8 @@ Phase 2 comes before the sidebar, so the Go sidebar can open the Go picker.
 **Rollback:** revert those two scripts and `.tmux.conf`, then rerun the original `install-sidebar-keys.sh`.
 
 ### Phase 4: Resurrect + removal (1 day)
-- **4a** `dev resurrect …`; switch the `.tmux.conf` hooks to the absolute binary path; run the full restore suite (cold start, hidden sidebars, prune, focus).
-- **4b** Delete the 7 session scripts plus `tmux-agent-state.sh` and `tmux/tests/restore-test.sh`, their manifest entries, the stale `tmux/sessions/README.md`; replace `projects.conf.example` with `projects.toml.example` (`projects.toml` itself stays local, untracked); `./export.sh`; drift-check.
+- **4a** `dev resurrect …` and `dev compact`; switch the `.tmux.conf` hooks to the absolute binary path; run the full restore suite (cold start, hidden sidebars, prune, focus).
+- **4b** Delete the 8 session scripts plus `tmux-agent-state.sh` and both `tmux/tests/*-test.sh`, their manifest entries, the stale `tmux/sessions/README.md`; replace `projects.conf.example` with `projects.toml.example` (`projects.toml` itself stays local, untracked); `./export.sh`; drift-check.
 
 **Done when:** an export into a temp `$HOME` installs everything and `dev` works end to end.
 
