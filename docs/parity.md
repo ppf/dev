@@ -123,8 +123,10 @@ Not started; `dev <name>` still spawns bash `sidebar.sh`.
   dev gives `app`. A dotted name (`app-v1.2`) was parsed as a pane target and never found; dev finds it.
 - Layout creation stops at the first failed tmux step and exits 1, leaving the half-built session
   detached; project.sh ran every step and still attached.
-- The picker's search has no fzf extended operators (`'exact`, `^prefix`, `suffix$`, `!not`, `a | b`);
-  they are matched as plain characters. A sanitized worktree name can't contain them.
+- The picker's search supports fzf's extended operators (`'exact`, `^prefix`, `suffix$`, `!not`, `a | b`)
+  and picks the same rows, but ranks them by a simpler score: tightest, earliest match, then the shorter
+  row. fzf's word-boundary bonuses aren't ported, so when several rows match the order can differ
+  (`api` lists `rapid tool` before `a-p-i`; fzf the reverse).
 - `dev import-projects` refuses a `projects.conf` with duplicate names or names clashing with a
   subcommand, naming the line, since `dev` would then reject the whole file; bash accepted both (first
   duplicate wins).

@@ -82,11 +82,26 @@ func TestFilterSmartCaseAndRanked(t *testing.T) {
 		{"tool rap", []string{"rapid tool"}},
 		{"gate A", []string{"API gateway"}},
 		{"  api  zzz", nil},
+		// fzf extended-search operators
+		{"'api", []string{"API gateway", "rapid tool"}},
+		{"^a", []string{"a-p-i", "API gateway"}},
+		{"way$", []string{"API gateway"}},
+		{"^a-p-i$", []string{"a-p-i"}},
+		{"api !gate", []string{"rapid tool", "a-p-i"}},
+		{"zzz | tool", []string{"rapid tool"}},
+		{"'", nil},
 	} {
 		f, _ := feed(t, newFinder("h", rows, false, nil), typed(tc.query)...)
 		if got := rowsOf(f); !slices.Equal(got, tc.want) {
 			t.Errorf("%q: matches = %q, want %q", tc.query, got, tc.want)
 		}
+	}
+}
+
+func TestFilterTieGoesToShorterRow(t *testing.T) {
+	f, _ := feed(t, newFinder("h", []string{"app-api", "app"}, false, nil), typed("app")...)
+	if got := rowsOf(f); !slices.Equal(got, []string{"app", "app-api"}) {
+		t.Errorf("matches = %q, want app first", got)
 	}
 }
 
@@ -200,6 +215,7 @@ func TestWorktreeStep(t *testing.T) {
 		{name: "uppercase query skips main repo", msgs: append(typed("Main"), key(tea.KeyEnter)), chosen: true, worktree: "Main"},
 		{name: "uppercase query skips lowercase worktree", msgs: append(typed("PROJ-12"), key(tea.KeyEnter)), chosen: true, worktree: "PROJ-12"},
 		{name: "terms match in any order", msgs: append(typed("fix wt"), key(tea.KeyEnter)), chosen: true, worktree: "proj-12-fix"},
+		{name: "extended-search operator opens a row", msgs: append(typed("^main"), key(tea.KeyEnter)), chosen: true, main: true},
 		{name: "esc", msgs: []tea.Msg{key(tea.KeyEsc)}},
 		{name: "ctrl-c", msgs: append(typed("x"), key(tea.KeyCtrlC))},
 		{name: "+ new with empty query prompts", msgs: []tea.Msg{key(tea.KeyDown), key(tea.KeyEnter)}, wantPrompt: true},
