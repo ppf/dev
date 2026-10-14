@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -22,20 +21,6 @@ import (
 )
 
 var socketSeq atomic.Int32
-
-// TestMain kills servers left by an earlier run that died without cleanup (go test -timeout panics skip
-// t.Cleanup) and kills this run's servers on SIGINT/SIGTERM.
-func TestMain(m *testing.M) {
-	killServers(func(pid int) bool { return !alive(pid) })
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sig
-		killServers(func(pid int) bool { return pid == os.Getpid() })
-		os.Exit(1)
-	}()
-	os.Exit(m.Run())
-}
 
 // killServers kills the test servers (dev-it-<pid>-<n>) whose owning pid matches and removes their sockets.
 func killServers(owned func(pid int) bool) {
