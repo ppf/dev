@@ -29,7 +29,8 @@ func newRootCmd() *cobra.Command {
 		}
 		return runProject(cmd, args[0])
 	}
-	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd())
+	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
+		newResurrectCmd(), newCompactCmd())
 	return root
 }
 
