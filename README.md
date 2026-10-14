@@ -10,6 +10,13 @@ Status: not built yet. It replaces the bash `dev` scripts in [ppf/terminal](http
 go install github.com/ppf/dev@latest
 ```
 
+## Development
+
+```bash
+go test ./...                                              # unit tests, never start tmux
+go test -tags integration -count=1 ./internal/integration/ # isolated tmux servers; local only, needs tmux 3.8 + exported ~/.tmux
+```
+
 ## License
 
 Apache-2.0
