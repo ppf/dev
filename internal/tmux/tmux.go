@@ -40,6 +40,7 @@ type Client struct {
 	config string
 	env    []string
 	run    runner
+	fake   bool // run is a test double: no tmux process starts, so no socket is needed
 }
 
 // New returns a client for the server tmux itself picks (TMUX env, else default socket).
@@ -54,6 +55,19 @@ func NewIsolated(socket, config string, env ...string) *Client {
 	return &Client{socket: socket, config: config, env: append(environWithoutTmux(), env...), run: execTmux}
 }
 
+// NewFake returns a client whose commands go to run instead of tmux, for unit tests in other packages.
+// run gets the command's arguments and returns its stdout or an error; an *Error it returns stands for
+// tmux printing its Stderr and failing with its Err. Interactive is refused under test.
+func NewFake(run func(args []string) (string, error)) *Client {
+	return &Client{fake: true, run: func(args, _ []string) ([]byte, []byte, error) {
+		out, err := run(args)
+		if e, ok := errors.AsType[*Error](err); ok {
+			return []byte(out), []byte(e.Stderr), e.Err
+		}
+		return []byte(out), nil, err
+	}}
+}
+
 // Env returns the environment of an isolated client's child processes (nil for New: they inherit).
 func (c *Client) Env() []string {
 	return slices.Clone(c.env)
@@ -61,7 +75,7 @@ func (c *Client) Env() []string {
 
 // Run executes one tmux command (or a ";"-chained list) and returns its stdout.
 func (c *Client) Run(args ...string) (string, error) {
-	if c.socket == "" && testing.Testing() {
+	if c.socket == "" && !c.fake && testing.Testing() {
 		return "", ErrNoSocket
 	}
 	argv := c.argv(args)

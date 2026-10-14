@@ -100,8 +100,8 @@ type snapPane struct {
 }
 
 // snapshot describes a session as the parity tests compare it: name, options, viewing clients, windows
-// and every pane's geometry, command, start command, path and the stub command line it ran. Each
-// replace pair is applied to paths (e.g. a per-run repo dir).
+// and every pane's geometry, command, start command (but the sidebar's), path and the stub command line
+// it ran. Each replace pair is applied to paths (e.g. a per-run repo dir).
 func (d *devServer) snapshot(session string, replace ...string) string {
 	d.t.Helper()
 	target := tmux.SessionTarget(session)
@@ -126,11 +126,10 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 	}
 	for _, p := range panes {
 		cmd := p.Command
-		// project.sh expands $HOME when it builds the sidebar command, dev leaves it to the pane's shell
-		// (tmux shows it escaped)
-		p.Start = strings.ReplaceAll(p.Start, `\$HOME`, os.Getenv("HOME"))
 		if p.ID == sidebar {
-			cmd = "<sidebar>" // the sidebar script's current command changes as it polls tmux
+			// The bash sidebar's current command changes as it polls tmux, and its start command runs
+			// sidebar.sh where dev's runs `dev sidebar` (see sidebarStart)
+			cmd, p.Start = "<sidebar>", "<sidebar>"
 		}
 		fmt.Fprintf(&b, "pane %d.%d active=%t %dx%d+%d+%d cmd=%s start=%q path=%s stub=%q\n",
 			p.Window, p.Index, p.Active, p.Width, p.Height, p.Left, p.Top, cmd, p.Start, r.Replace(p.Path), stubs[p.ID])
@@ -194,4 +193,11 @@ func waitScreen(t *testing.T, s *server, pane, text string) string {
 	}
 	t.Fatalf("❌ timeout waiting for %q on screen:%s", text, capture())
 	return ""
+}
+
+// sidebarStart is the start command of session's sidebar pane.
+func (d *devServer) sidebarStart(session string) string {
+	d.t.Helper()
+	pane := d.T("show-option", "-qv", "-t", tmux.SessionTarget(session), "@sidebar_pane")
+	return d.T("display", "-t", pane, "-p", "#{pane_start_command}")
 }

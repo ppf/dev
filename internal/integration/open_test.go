@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 const popupGuard = "SIDEBAR_SELECT_IN_POPUP=1"
@@ -42,6 +44,12 @@ type opened struct {
 	first, second     string // snapshots after the new-session and the existing-session run
 	out2, status2     string
 	sessions, clients string
+	sidebar           string // the sidebar pane's start command
+}
+
+// devSidebarStart reports whether a sidebar start command runs the dev binary's sidebar.
+func devSidebarStart(start string) string {
+	return strconv.FormatBool(strings.Contains(start, "exec "+tmux.ShellJoin(devBin, "sidebar")))
 }
 
 // `dev <name>` against `project.sh <path> <name>` on identical servers: the new-session layout, then the
@@ -67,6 +75,7 @@ func TestOpenParity(t *testing.T) {
 		r.second = d.snapshot("app")
 		r.sessions = d.T("list-sessions", "-F", "#{session_name}")
 		r.clients = d.T("list-clients", "-F", "#{client_session}")
+		r.sidebar = d.sidebarStart("app")
 		got[name] = r
 		t.Logf("%s snapshot:\n%s", name, r.first)
 	}
@@ -85,10 +94,13 @@ func TestOpenParity(t *testing.T) {
 	check(t, "dev: status", dev.status+"/"+dev.status2, "0/0")
 	check(t, "dev: no duplicate session", dev.sessions, "app\nboot")
 	check(t, "dev: client switched", dev.clients, "app")
+	// The deliberate difference: the same pane runs dev's sidebar instead of sidebar.sh
+	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(t), "sessions/sidebar.sh"))), "true")
+	check(t, "dev: sidebar runs dev sidebar", devSidebarStart(dev.sidebar), "true")
 	for _, want := range []string{
 		"session app @project=app clients=app\n",
 		"window 1 Agent active=1 panes=4\nwindow 2 Files active=0 panes=3\n",
-		`cmd=<sidebar> start="\"exec ` + filepath.Dir(tmuxHome(t)) + `/.tmux/sessions/sidebar.sh\""`,
+		`cmd=<sidebar> start="<sidebar>"`,
 		`pane 1.2 active=true 58x49+41+0 cmd=sleep start="/bin/sh" path=` + dir + ` stub="claude "`,
 		`stub="lazygit status --screen-mode=half"`, `stub="nvim ."`,
 	} {
@@ -140,7 +152,7 @@ func TestOpenFirstRunRestore(t *testing.T) {
 func TestOpenPicker(t *testing.T) {
 	project := projectScript(t)
 	plain := tempDir(t)
-	type run struct{ sessions, forced, wt, statuses string }
+	type run struct{ sessions, forced, wt, statuses, sidebars string }
 	got := map[string]run{}
 	for _, impl := range []string{"bash", "dev"} {
 		d := newDevServer(t, "set -g @dev_restored 1\n")
@@ -175,6 +187,7 @@ func TestOpenPicker(t *testing.T) {
 		r.sessions = d.T("list-sessions", "-F", "#{session_name}")
 		r.forced = d.snapshot("app-2")
 		r.wt = d.snapshot("repo-feature-x", repo, "<repo>")
+		r.sidebars = d.sidebarStart("app-2") + "\n" + d.sidebarStart("repo-feature-x")
 		got[impl] = r
 	}
 	dev, bash := got["dev"], got["bash"]
@@ -183,6 +196,9 @@ func TestOpenPicker(t *testing.T) {
 	check(t, "worktree session (dev = bash)", dev.wt, bash.wt)
 	check(t, "dev: statuses", dev.statuses, "0000")
 	check(t, "dev: sessions", dev.sessions, "app\napp-2\napp-3\nboot\nrepo-feature-x")
+	for _, start := range strings.Split(dev.sidebars, "\n") {
+		check(t, "dev: sidebar runs dev sidebar", devSidebarStart(start), "true")
+	}
 	if want := "path=<repo>/.claude/worktrees/feature/x"; !strings.Contains(dev.wt, want) {
 		t.Errorf("❌ dev worktree session lacks %q:\n%s", want, dev.wt)
 	}

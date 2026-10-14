@@ -164,3 +164,39 @@ func TestParseBadInt(t *testing.T) {
 		t.Errorf("err = %v, want pane_width parse error", err)
 	}
 }
+
+func TestNewFake(t *testing.T) {
+	var got []string
+	c := NewFake(func(args []string) (string, error) {
+		got = args
+		return FormatRow("%1", "claude") + FormatRow("%2", ""), nil
+	})
+	panes, err := Query[struct {
+		ID    string `tmux:"pane_id"`
+		Title string `tmux:"pane_title"`
+	}](c, "list-panes", "-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"list-panes", "-a", "-F", "#{pane_id}\x1f#{pane_title}\x1f"}; !slices.Equal(got, want) {
+		t.Errorf("args = %q, want %q (no -L/-f)", got, want)
+	}
+	if len(panes) != 2 || panes[0].Title != "claude" || panes[1].ID != "%2" {
+		t.Errorf("panes = %+v", panes)
+	}
+
+	exitErr := &exec.ExitError{}
+	c = NewFake(func([]string) (string, error) { return "", exitErr })
+	if _, err := c.Run("has-session"); !errors.Is(err, exitErr) {
+		t.Errorf("err = %v, want the fake's error wrapped", err)
+	}
+	c = NewFake(func([]string) (string, error) { return "", &Error{Stderr: "can't find pane: %9", Err: exitErr} })
+	_, err = c.Run("kill-pane", "-t", "%9")
+	if e, ok := errors.AsType[*Error](err); !ok || e.Stderr != "can't find pane: %9" || !errors.Is(err, exitErr) ||
+		!slices.Equal(e.Args, []string{"kill-pane", "-t", "%9"}) {
+		t.Errorf("err = %#v, want the fake's stderr and exit error under the real argv", err)
+	}
+	if err := c.Interactive("attach-session"); !errors.Is(err, ErrNoSocket) {
+		t.Errorf("Interactive err = %v, want ErrNoSocket", err)
+	}
+}

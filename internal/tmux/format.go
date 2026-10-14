@@ -28,6 +28,11 @@ func Query[T any](c *Client, args ...string) ([]T, error) {
 	return Parse[T](out)
 }
 
+// FormatRow encodes values as one row of Query output, for fake tmux output in tests.
+func FormatRow(values ...string) string {
+	return strings.Join(values, Sep) + rowEnd
+}
+
 // Parse decodes rows of Sep-joined values, each ending in Sep and a newline, into T, one field per
 // `tmux` tag in declaration order.
 // Supported field kinds: string, int, bool ("1" is true).

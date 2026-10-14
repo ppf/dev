@@ -72,20 +72,62 @@ Unticked items need a person, or belong to a later phase.
 
 ## Sidebar (Phase 3)
 
-Not started; `dev <name>` still spawns bash `sidebar.sh`.
+The side-by-side tests run bash (`install-sidebar-keys.sh`'s bindings, `sidebar.sh` started by
+`toggle-sidebar.sh`) on one server and `dev sidebar` (no bindings) on its twin, and compare the state after
+every step. Keys and clicks are typed into the attached client: `send-keys` to a pane bypasses the key
+tables the bash bindings live in. `TestSidebarViewParity` puts both sidebars side by side on one server
+instead, so they read the same state.
 
-- [ ] Agent pane: hook-registered Claude, else `codex*`, else "no agent" (`agent.TestDetect` covers the
-  rule; the sidebar doesn't use it yet).
-- [ ] State trusted only when `@agent_cmd == pane_current_command`.
-- [ ] Labels and title cleanup.
-- [ ] Grouping by `@project`.
-- [ ] View.
-- [ ] Selection sync.
-- [ ] Keys.
-- [ ] Mouse.
-- [ ] Kill.
-- [ ] Ensure / toggle.
-- [ ] `prefix+1..9` goto N, `prefix+0` new.
+- [x] Agent pane: hook-registered Claude, else `codex*`, else "no agent"; lazygit and nvim are no longer
+  Claude (deliberate fix): `agent.TestDetect`, `sidebar.TestModelBuildSnapshot`; on screen in
+  `TestSidebarViewParity` (registered panes, a `codex` binary, sessions without an agent). The branch is read
+  only for an agent pane: `sidebar.TestModelBuildSnapshot`, `TestModelBranchCache`.
+- [x] State trusted only when `@agent_cmd == pane_current_command`: `agent.TestDetect`,
+  `sidebar.TestModelBuildSnapshot` (state left after claude exited).
+- [x] Labels and title cleanup: `sidebar.TestModelCleanTitle` (goldens from sidebar.sh's perl and bash
+  regex), `TestModelIsGenericTitle`, `TestModelAgentTitle`; `TestSidebarViewParity` ("Claude Code" blanked,
+  Codex `a | b` shown as `b on a`).
+- [x] Grouping by `@project`, else `${name%-[0-9]*}`, with a rule line per group and a blank line between:
+  `sidebar.TestModelGroup`, `TestModelOrder`, `TestSidebarViewParity`.
+- [x] `@sidebar_session_order` in the same order and format (each name newline-terminated):
+  `sidebar.TestModelRefresh`; equal to sidebar.sh's after every step of `TestEnsureParity`; bash's
+  `move_selection` reads the order a dev sidebar wrote (grouped, unlike `list-sessions`):
+  `TestSessionOrderReadByBash`.
+- [x] View: `capture-pane -e` byte-equal to sidebar.sh unfocused at widths 40, 30 and 11 (no buttons) and
+  focused at 40 (at 30 and 11 the rows above the hint are equal and dev clips the hint, see below), with the
+  selection background and red ×, the bold current session, the red waiting line, the faint "no agent" line,
+  `…` truncation and the hint only while focused: `TestSidebarViewParity`;
+  `sidebar.TestViewRenderGolden` (goldens rendered by sidebar.sh's own functions, also "No sessions" and a
+  pane shorter than the list), `sidebar.TestViewWideRunes`.
+- [ ] Colours and feel in a real terminal. Needs a person.
+- [x] Selection sync: `sidebar.TestModelSyncSelection` (also an empty option taking the own session);
+  `TestSidebarViewParity` (both follow `@sidebar_selected_session`), `TestSidebarKeysParity` (after `q`
+  the unfocused sidebar of the viewed session adopts it, as bash does).
+- [x] Keys: `j/k/↑/↓` wrap; `⏎` switches (creating the target's sidebar) or, on the current session, focuses
+  its content; `q`; `x` on another session, on the current one (switches to the first other session in order
+  first, as `kill_session_now`) and on the last one (refused, same message); `r` through the client's
+  `command-prompt`; `d` opens the picker popup: `TestSidebarKeysParity`. Dev only: a name with a quote,
+  ctrl+c: `TestActionKeys`, `sidebar.TestActionRename`, `sidebar.TestInputCtrlC`.
+- [x] Mouse, real SGR clicks through the client: a row switches, a click below a name row selects that row's
+  session, a click on the current session focuses its content, × kills, + on row 0 opens the picker:
+  `TestSidebarMouseParity`, `TestActionMouse`, `sidebar.TestInputMouse`.
+- [x] Kill of a worktree session no other session uses: the 70×8 popup, Esc cancels, `n` keeps the worktree,
+  `y` removes it, also from the session's own sidebar (which dies while the popup carries on):
+  `TestSidebarKillWorktreeParity`, `TestActionKillWorktree`. A shared worktree is closed plainly:
+  `sidebar.TestActionKill`, `TestActionWorktreeShared`.
+- [x] Ensure / toggle: `@sidebar_hidden`, ensure does nothing while hidden, focus given back, an existing
+  sidebar focused, a compact zoom kept by ensure and by hiding: `TestEnsureParity` (13 steps against
+  toggle-sidebar.sh), `sidebar.TestEnsure`, `TestToggleHide`, `TestToggleShow`.
+- [x] A running bash sidebar is replaced: `TestEnsureReplacesBashSidebar`, with a stand-in pane whose start
+  command contains `sidebar.sh` (a real one comes with toggle-sidebar.sh, which installs bash's root
+  bindings on the server).
+- [x] `prefix+1..9` goto N: `TestEnsureParity` (2, 3 and out of range against `sidebar-action.sh goto`),
+  `sidebar.TestGoto`. `prefix+0` new: `TestSidebarMouseParity` (`dev new` and `sidebar-action.sh new` open
+  the picker popup).
+- [x] `dev <name>` layouts run `dev sidebar`, and an existing session gets one through ensure:
+  `TestOpenParity`, `TestOpenPicker`.
+- [ ] Cutover (3e): `toggle-sidebar.sh`, `install-sidebar-keys.sh` and the `.tmux.conf` bindings live in
+  ppf/terminal. Not done here.
 
 ## Resurrect (Phase 4)
 
@@ -112,9 +154,8 @@ Not started; `dev <name>` still spawns bash `sidebar.sh`.
 
 ## Known differences from bash
 
-- The sidebar pane's start command is `exec $HOME/.tmux/sessions/sidebar.sh` with `$HOME` left for the
-  pane's shell; project.sh expands it first. Same program runs; `TestOpenParity` compares the two after
-  expanding `$HOME`.
+- The sidebar pane runs `exec '<dev binary>' 'sidebar'` instead of `exec $HOME/.tmux/sessions/sidebar.sh`;
+  the parity snapshots leave the sidebar's start command out and check each separately.
 - `dev <name>` returns 1 when the final `switch-client`/`attach-session` fails on an existing session;
   project.sh exits 0 there.
 - `dev state` rejects an unknown state (exit 1); the bash hook recorded any word.
@@ -132,3 +173,37 @@ Not started; `dev <name>` still spawns bash `sidebar.sh`.
   duplicate wins).
 - In the picker popup, an error waits for Enter before the popup closes. Bash had no such early exit
   (fzf listed nothing on a missing config, project.sh never stopped on a tmux failure).
+
+Sidebar:
+
+- Sessions are matched exactly (`=name:`) here too. Bash's bare `-t name` also resolved a window name in the
+  current session: a session `b` beside windows named `bash` read the current session's `@sidebar_pane`, so a
+  click on `b` switched without creating its sidebar.
+- Keys are read by the sidebar instead of root-table bindings and a `sidebar` key table. A click focuses the
+  sidebar first (tmux's default `MouseDown1Pane`), so after × or + focus is on the sidebar; bash's binding
+  acted without focusing it. Ctrl+C quits the dev sidebar.
+- Selection sync and every action use the most recently active client viewing the sidebar's session; bash
+  took the first client listed.
+- `@sidebar_session_order` and the selection are written only when they change (bash: every second);
+  `@sidebar_row_map` is never written. The order is Go byte order (bash's `sort` followed the locale), and
+  `dev goto` computes it fresh (bash read the option, stale while sidebars were hidden).
+- The generic-title check compares with the host name (`os.Hostname`), not the literal `mac.home`; a
+  leading symbol is anything but a Unicode letter or digit.
+- The branch is cached per path and re-read when `<git-dir>/HEAD` changes; bash ran git per session every
+  second.
+- A failed refresh keeps the last screen with the error in red on the bottom row, on one line; before the
+  first successful refresh the error shows alone on that row (`TestActionErrorBeforeFirstRefresh`,
+  `sidebar.TestViewErrorBeforeFirstRefresh`). A pane working directory or `@project` containing `\x1f`
+  fails every refresh while it exists (tmux refuses or strips it in titles and session names); bash drew
+  the list with shifted fields.
+- Text is printed as is (bash used `printf %b`, so a `\n` in a title was a newline); widths are display
+  widths. A hint wider than the pane is clipped; bash wrapped it, scrolling the screen (`TestSidebarViewParity`
+  checks dev's clipped hint at widths 30 and 11).
+- tmux failures bash ignored are shown as `❌ …` on the client: a failed query while looking up a worktree
+  (bash killed plainly), select-pane in focus-content, the close-worktree popup failing, tmux failing to open
+  the picker popup (e.g. a client gone since the last refresh; `dev new --client` then fails). The picker's
+  own exit status is no error: it showed its error in the popup (`sidebar.TestActionOpenPicker`).
+- `dev sidebar ensure` with a client reads `list-clients` (on tmux 3.8 `display-message -c` ignores the
+  client for formats).
+- Replacing a bash sidebar re-zooms its window, which the split creating dev's sidebar undoes at once, as
+  toggle-sidebar.sh's create path did.

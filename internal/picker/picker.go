@@ -10,6 +10,9 @@ import (
 	"github.com/ppf/dev/internal/worktree"
 )
 
+// PopupGuard is set (=1) in the picker's own popup, so dev there runs the picker instead of another popup.
+const PopupGuard = "SIDEBAR_SELECT_IN_POPUP"
+
 // Result is the user's choice; Chosen=false means Esc (exit 0, nothing opened).
 type Result struct {
 	Chosen   bool
