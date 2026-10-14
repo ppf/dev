@@ -117,7 +117,7 @@ instead, so they read the same state.
   `sidebar.TestActionKill`, `TestActionWorktreeShared`.
 - [x] Ensure / toggle: `@sidebar_hidden`, ensure does nothing while hidden, focus given back, an existing
   sidebar focused, a compact zoom kept by ensure and by hiding: `TestEnsureParity` (13 steps against
-  toggle-sidebar.sh), `sidebar.TestEnsure`, `TestToggleHide`, `TestToggleShow`.
+  toggle-sidebar.sh), `TestCompactDev`, `sidebar.TestEnsure`, `TestToggleHide`, `TestToggleShow`.
 - [x] A running bash sidebar is replaced: `TestEnsureReplacesBashSidebar`, with a stand-in pane whose start
   command contains `sidebar.sh` (a real one comes with toggle-sidebar.sh, which installs bash's root
   bindings on the server).
@@ -125,7 +125,7 @@ instead, so they read the same state.
   `sidebar.TestGoto`. `prefix+0` new: `TestSidebarMouseParity` (`dev new` and `sidebar-action.sh new` open
   the picker popup).
 - [x] `dev <name>` layouts run `dev sidebar`, and an existing session gets one through ensure:
-  `TestOpenParity`, `TestOpenPicker`.
+  `TestOpenParity`, `TestOpenPicker`, `TestResurrectDev`.
 - [ ] Cutover (3e): `toggle-sidebar.sh`, `install-sidebar-keys.sh` and the `.tmux.conf` bindings live in
   ppf/terminal. Not done here. Install a dev with this phase only together with 3e: while
   install-sidebar-keys.sh's root bindings are active they take the Go sidebar's keys and clicks and resolve
@@ -133,13 +133,24 @@ instead, so they read the same state.
 
 ## Resurrect (Phase 4)
 
-- [ ] `save` / `prune`.
-- [ ] `pre-restore`.
-- [ ] `restore`.
+- [x] `save` / `prune`: `TestResurrectHooksParity` (same `.dev` file, exit status and warning as
+  dev-resurrect.sh; a missing snapshot fails and keeps the old file; prune deletes only orphans),
+  `TestResurrectDev` (save during a real resurrect save), `resurrect.TestSave`, `TestPrune`.
+- [x] `pre-restore`: `TestResurrectHooksParity`, `resurrect.TestPreRestore`.
+- [x] `restore`: `TestResurrectDev` (`TestRestore` with the hooks running dev: a cold start rebuilds a Go
+  sidebar, `@project`, undoes the zoom, keeps focus, no warnings, removes the live list; a manual restore with
+  hidden sidebars leaves live panes alone), `resurrect.TestRestore` (skipped live sessions, the slot check,
+  warnings, focus and active window).
+- [ ] The `.tmux.conf` hooks call the binary. Cutover in ppf/terminal (4a).
 
 ## Compact mode (Phase 4)
 
-- [ ] Client hooks, zoom below 140 cols, unzoom when wide, sidebar and restore interplay, warnings.
+- [x] Client hooks, zoom below 140 columns, unzoom when wide, sidebar interplay: `TestCompactDev`
+  (`TestCompact` with the client-* hooks running `dev compact`), `compact.TestDecide`, `TestZoomTarget`,
+  `TestRunZoomsNarrow`, `TestRunWide`. Restore interplay: `TestResurrectDev`.
+- [x] Warnings to the hook client and `@dev_compact_warnings`, with tmux's stderr as bash's `2>&1`:
+  `compact.TestRunWarnsPerWindow`, `TestRunUnmarkWarns`, `TestRunStops`; none in `TestCompactDev`.
+- [ ] The `.tmux.conf` hooks call the binary. Cutover in ppf/terminal (4a).
 
 ## Hook (Phase 1)
 
@@ -209,3 +220,22 @@ Sidebar:
   client for formats).
 - Replacing a bash sidebar re-zooms its window, which the split creating dev's sidebar undoes at once, as
   toggle-sidebar.sh's create path did.
+
+Resurrect and compact:
+
+- Their messages start `⚠ dev resurrect:` and `⚠ dev compact:` (bash: `⚠ dev-resurrect:`, `⚠ compact.sh:`);
+  the text kept in `@dev_resurrect_warnings` and `@dev_compact_warnings` is the same.
+- tmux commands bash didn't check (list-windows, zoom, kill-pane, select-window, select-pane, compact's
+  unmark) are warned (restore: `<session>: <step> failed: <tmux stderr>`, `resurrect.TestRestore`,
+  `TestRestoreUncheckedFailure`); restore goes on with the next session and fails at the end. New warnings
+  for an unknown state dir, last snapshot or default-shell, and for unreadable or unwritable state files; a
+  failing `last_resurrect_file` warns and fails where bash exited 0.
+- `save` writes a temp file and renames it, so a failed write keeps the old `.dev`; a failed rename leaves
+  `<snapshot>.dev.tmp`, which prune doesn't remove. Positions come from one `list-panes -a`, taken in the
+  session's own context: a sidebar window linked into another session keeps its index in its session
+  (bash's `display-message -t %pane` could report the other session's index).
+- `dev compact` finds the hook client's width and session in `list-clients`; bash's `display-message -c`
+  formats for the best client of the current session on tmux 3.8, so a narrow client could read a wide one's
+  width. A failing `list-clients` warns; an unknown client is a detached one and does nothing.
+- `#{@project}` in `list-sessions -F` falls back to a global `@project` (`show-option -qv -t` did not);
+  nothing sets one.
