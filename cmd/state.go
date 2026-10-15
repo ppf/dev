@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -42,7 +43,14 @@ func newStateCmd() *cobra.Command {
 			if !ok {
 				return nil
 			}
-			return agent.Record(tmux.New(), pane, state)
+			c := tmux.New()
+			if err := agent.Record(c, pane, state); err != nil {
+				return err
+			}
+			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+			}
+			return nil
 		},
 	}
 }
