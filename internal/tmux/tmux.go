@@ -103,7 +103,8 @@ func SessionTarget(name string) string {
 }
 
 func execTmux(args, env []string) ([]byte, []byte, error) {
-	cmd := exec.Command("tmux", args...)
+	// -u: in a non-UTF-8 locale outside tmux the client prints control characters (Query's \x1f) as "_"
+	cmd := exec.Command("tmux", append([]string{"-u"}, args...)...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
