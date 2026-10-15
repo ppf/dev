@@ -58,6 +58,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "bash home:", err)
 		os.Exit(1)
 	}
+	// Sessions created without -c start in this cwd; a checkout under .claude/worktrees would make the
+	// sidebar treat every such session as a worktree and ask before killing it.
+	if err := os.Chdir(dir); err != nil {
+		os.RemoveAll(dir)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
