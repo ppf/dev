@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -115,8 +117,18 @@ func (m Model) render() frame {
 		if s.State == agent.Waiting {
 			colour = red
 		}
-		body = truncate(body, maxMeta)
-		f.lines = append(f.lines, cardLine("    "+colour+body+reset, 4+ansi.StringWidth(body), w, selected))
+		meta, vis := "", 4
+		if s.PR.Number != 0 {
+			// First, so the end-cut takes the title before the tag
+			tag := truncate(fmt.Sprintf("#%d %s", s.PR.Number, s.PR.State), maxMeta)
+			tw := ansi.StringWidth(tag)
+			f.links = append(f.links, link{line: len(f.lines), from: vis, to: vis + tw, url: s.PR.URL})
+			meta, vis = prColour(s.PR.State)+tag+reset, vis+tw
+			body = " · " + body
+		}
+		body = truncate(body, maxMeta-(vis-4))
+		meta += colour + body + reset
+		f.lines = append(f.lines, cardLine("    "+meta, vis+ansi.StringWidth(body), w, selected))
 	}
 
 	// Exactly h lines: content reaching the bottom row gives way to it, as bash drew that row last
@@ -127,6 +139,8 @@ func (m Model) render() frame {
 	if h > 0 {
 		f.lines[h-1] = m.bottomRow()
 	}
+	// A tag cut off or under the bottom row isn't on screen to click
+	f.links = slices.DeleteFunc(f.links, func(l link) bool { return l.line >= h-1 })
 	return f
 }
 
@@ -166,6 +180,19 @@ func cardLine(content string, visible, width int, selected bool) string {
 	// Each reset would end the background mid-row, e.g. after the bold current name
 	with := strings.ReplaceAll(content, reset, reset+selectedBG)
 	return selectedBG + with + strings.Repeat(" ", max(0, width-visible)) + reset
+}
+
+// prColour is a PR tag's colour by state.
+func prColour(state string) string {
+	switch state {
+	case "open":
+		return green
+	case "merged":
+		return gold
+	case "closed":
+		return muted
+	}
+	return faint
 }
 
 // statusDot is the coloured dot for an agent label and state (status_dot).

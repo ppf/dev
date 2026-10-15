@@ -44,13 +44,19 @@ func TestModelBuildSnapshot(t *testing.T) {
 		branched = append(branched, path)
 		return "br" + path
 	}
+	pr := func(path, branch string) PR {
+		if path != "/app" || branch != "br/app" {
+			return PR{}
+		}
+		return PR{Number: 7, State: "open", URL: "u"}
+	}
 	clients := []Client{{TTY: "/dev/a", Session: "app"}}
-	s, err := buildSnapshot(modelRows(), clients, "%0", "host", branch)
+	s, err := buildSnapshot(modelRows(), clients, "%0", "host", branch, pr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Session{
-		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login"},
+		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}},
 		{Name: "app-2", Group: "app"},
 		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle"},
 		{Name: "side", Group: "side"},
@@ -68,7 +74,14 @@ func TestModelBuildSnapshot(t *testing.T) {
 		t.Errorf("own pane: %+v", s)
 	}
 
-	if _, err := buildSnapshot(modelRows(), nil, "%99", "host", branch); err == nil {
+	// No client views app: no PR lookups, as another session's sidebar is out of sight
+	s, err = buildSnapshot(modelRows(), []Client{{TTY: "/dev/a", Session: "web"}}, "%0", "host", branch,
+		func(string, string) PR { t.Error("PR looked up for an unviewed sidebar"); return PR{} })
+	if err != nil || s.sessions[0].PR != (PR{}) {
+		t.Errorf("unviewed: %v, %+v", err, s.sessions[0])
+	}
+
+	if _, err := buildSnapshot(modelRows(), nil, "%99", "host", branch, pr); err == nil {
 		t.Error("missing own pane: want an error")
 	}
 }
@@ -146,7 +159,8 @@ func modelPaneLine(session, id, active, sidebar, selected string) string {
 
 func modelTestModel(c *tmux.Client) Model {
 	return Model{c: c, pane: "%0", host: "host",
-		branches: &branchCache{git: (&modelFakeGit{}).run, now: time.Now, entries: map[string]branchEntry{}}}
+		branches: &branchCache{git: (&modelFakeGit{}).run, now: time.Now, entries: map[string]branchEntry{}},
+		prs:      &prCache{gh: (&prFakeGH{}).run, branch: prOnBranch(""), now: time.Now, sem: make(chan struct{}, prLookups), entries: map[prKey]prEntry{}}}
 }
 
 func TestModelRefresh(t *testing.T) {
