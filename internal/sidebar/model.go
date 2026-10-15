@@ -59,6 +59,7 @@ type Model struct {
 	pane     string // this sidebar's pane id (TMUX_PANE)
 	host     string // hostname: tmux's default pane title, so a generic title
 	branches *branchCache
+	prs      *prCache
 	snap     snapshot
 	selected string // local copy of @sidebar_selected_session
 	gen      int    // bumped by each local selection change, so a refresh already running can't undo it
@@ -96,7 +97,7 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache()}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache()}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
@@ -140,7 +141,7 @@ func (m Model) refresh() tea.Cmd {
 		if err != nil {
 			return fail(err)
 		}
-		snap, err := buildSnapshot(rows, clients, m.pane, m.host, m.branches.get)
+		snap, err := buildSnapshot(rows, clients, m.pane, m.host, m.branches.get, m.prs.get)
 		if err != nil {
 			return fail(err)
 		}
@@ -178,8 +179,9 @@ func (m Model) apply(msg refreshMsg) Model {
 }
 
 // buildSnapshot turns the query rows into sessions in display order, own pane geometry and focus.
-// branch returns a path's branch (the cache in production).
-func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch func(path string) string) (snapshot, error) {
+// branch returns a path's branch and pr a branch's PR (the caches in production); pr is only asked
+// while a client views this sidebar's session, as every session's sidebar would query every PR.
+func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch func(path string) string, pr func(path, branch string) PR) (snapshot, error) {
 	s := snapshot{clients: clients}
 	own := false
 	var names []string
@@ -196,6 +198,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 	if !own {
 		return snapshot{}, fmt.Errorf("sidebar: pane %s not listed", pane)
 	}
+	_, viewed := activeClient(clients, s.current)
 	sessions := make([]Session, 0, len(names))
 	for _, name := range names {
 		rs := panes[name]
@@ -212,6 +215,9 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			}
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, agentTitle(a.Label, title)
 			sess.Branch = branch(a.Pane.Path)
+			if viewed {
+				sess.PR = pr(a.Pane.Path, sess.Branch)
+			}
 		}
 		sessions = append(sessions, sess)
 	}

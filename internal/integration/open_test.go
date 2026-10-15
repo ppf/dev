@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -193,6 +194,71 @@ func TestOpenPicker(t *testing.T) {
 	}
 	if want := "path=<repo>/.claude/worktrees/feature/x"; !strings.Contains(dev.wt, want) {
 		t.Errorf("❌ dev worktree session lacks %q:\n%s", want, dev.wt)
+	}
+}
+
+var headSHA = regexp.MustCompile(`HEAD is now at [0-9a-f]+`)
+
+// `dev <name> <worktree>` against project.sh with DEV_WORKTREE and no force-new: the first run creates the
+// worktree and session <name>-<worktree with / as ->, the second attaches to it. A rerun after the session
+// is gone reuses the worktree; a name sanitizing would change is rejected.
+func TestOpenWorktreeArg(t *testing.T) {
+	project := projectScript()
+	type run struct{ out, out2, statuses, sessions, first, second string }
+	got := map[string]run{}
+	for _, impl := range []string{"bash", "dev"} {
+		d := newDevServer(t, "set -g @dev_restored 1\n")
+		repo := newRepo(t, "", "")
+		open := func() (string, error) {
+			if impl == "bash" {
+				return runScript(d.scriptEnv(append(gitEnv, "DEV_WORKTREE=feature/x")...), project, repo, "repo")
+			}
+			return runScript(d.scriptEnv(append(gitEnv, writeProjects(t, [2]string{"repo", repo}))...), devBin, "repo", "feature/x")
+		}
+		var r run
+		out, err := open()
+		// Each run's repo has its own commit hash.
+		r.out, r.statuses = headSHA.ReplaceAllString(out, "HEAD is now at <sha>"), errStatus(err)
+		d.waitForStubs("repo-feature-x")
+		r.first = d.snapshot("repo-feature-x", repo, "<repo>")
+		out, err = open()
+		r.out2, r.statuses = out, r.statuses+errStatus(err)
+		r.second = d.snapshot("repo-feature-x", repo, "<repo>")
+		r.sessions = d.T("list-sessions", "-F", "#{session_name}")
+		got[impl] = r
+		t.Logf("%s first run:\n%s", impl, r.out)
+
+		if impl == "dev" {
+			// Back on boot first: killing the viewed session would detach the only client.
+			actSwitch(d, "boot")
+			d.T("kill-session", "-t", "=repo-feature-x")
+			out, err = open()
+			check(t, "dev: rerun status", errStatus(err), "0")
+			check(t, "dev: rerun reuses the worktree", strconv.FormatBool(strings.Contains(out, "Preparing worktree")), "false")
+			d.waitForStubs("repo-feature-x")
+			check(t, "dev: rerun session in the worktree", strconv.FormatBool(strings.Contains(
+				d.snapshot("repo-feature-x", repo, "<repo>"), "path=<repo>/.claude/worktrees/feature/x")), "true")
+			before := git(t, repo, "worktree", "list", "--porcelain")
+			out, err = runScript(d.scriptEnv(writeProjects(t, [2]string{"repo", repo})), devBin, "repo", "bad name")
+			check(t, "dev: bad name status", errStatus(err), "1")
+			check(t, "dev: bad name output", out, "❌ invalid worktree name \"bad name\": only A-Za-z0-9._/- allowed\n")
+			check(t, "dev: bad name creates nothing", git(t, repo, "worktree", "list", "--porcelain"), before)
+		}
+	}
+	dev, bash := got["dev"], got["bash"]
+	check(t, "first run output (dev = bash)", dev.out, bash.out)
+	check(t, "second run output (dev = bash)", dev.out2, bash.out2)
+	check(t, "layout after first run (dev = bash)", dev.first, bash.first)
+	check(t, "layout after second run (dev = bash)", dev.second, bash.second)
+	check(t, "sessions (dev = bash)", dev.sessions, bash.sessions)
+	check(t, "dev: statuses", dev.statuses, "00")
+	check(t, "dev: attached, no duplicate", dev.sessions, "boot\nrepo-feature-x")
+	check(t, "dev: second run output", dev.out2, "\033]2;repo-feature-x\007")
+	if want := "session repo-feature-x @project=repo clients=repo-feature-x\n"; !strings.HasPrefix(dev.first, want) {
+		t.Errorf("❌ dev snapshot doesn't start with %q:\n%s", want, dev.first)
+	}
+	if want := "path=<repo>/.claude/worktrees/feature/x"; !strings.Contains(dev.first, want) {
+		t.Errorf("❌ dev snapshot lacks %q:\n%s", want, dev.first)
 	}
 }
 

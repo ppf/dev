@@ -292,3 +292,46 @@ func TestViewHeight(t *testing.T) {
 		}
 	}
 }
+
+// A PR tag leads the meta line in its state's colour and is cut last; its columns are a link.
+func TestViewPRTag(t *testing.T) {
+	pr := PR{Number: 12, State: "open", URL: "https://x/pull/12"}
+	m := Model{selected: "b", snap: snapshot{width: 40, height: 10, current: "a", sessions: []Session{
+		{Name: "a", Group: "g", Branch: "feat", Agent: "Claude", State: "idle", Title: "a long title that gets cut at the end", PR: pr},
+		{Name: "b", Group: "g", Branch: "fix", Agent: "Claude", PR: PR{Number: 3, State: "draft", URL: "u3"}},
+		{Name: "c", Group: "g", Branch: "main", Agent: "Claude", State: "waiting", PR: PR{Number: 9, State: "merged", URL: "u9"}},
+	}}}
+	f := m.render()
+	for i, want := range map[int]string{
+		4: "    \x1b[38;2;152;187;108m#12 open\x1b[0m\x1b[38;2;114;113;105m · Claude · idle · a long …\x1b[0m",
+		6: "\x1b[48;2;42;42;55m    \x1b[38;2;84;84;109m#3 draft\x1b[0m\x1b[48;2;42;42;55m\x1b[38;2;114;113;105m · Claude\x1b[0m\x1b[48;2;42;42;55m                   \x1b[0m",
+		8: "    \x1b[38;2;192;163;110m#9 merged\x1b[0m\x1b[38;2;228;104;118m · Claude · waiting\x1b[0m",
+	} {
+		if f.lines[i] != want {
+			t.Errorf("line %d:\n got %q\nwant %q", i, f.lines[i], want)
+		}
+	}
+	if w := ansi.StringWidth(f.lines[4]); w != 39 {
+		t.Errorf("meta line width %d, want 4+maxMeta = 39", w)
+	}
+	want := []link{{4, 4, 12, "https://x/pull/12"}, {6, 4, 12, "u3"}, {8, 4, 13, "u9"}}
+	if !slices.Equal(f.links, want) {
+		t.Errorf("links = %v, want %v", f.links, want)
+	}
+
+	// 11 columns: the tag itself is cut, nothing follows it
+	m.snap.width = 11
+	f = m.render()
+	if got, want := f.lines[4], "    \x1b[38;2;152;187;108m#12 o…\x1b[0m\x1b[38;2;114;113;105m\x1b[0m"; got != want {
+		t.Errorf("narrow:\n got %q\nwant %q", got, want)
+	}
+	if f.links[0] != (link{4, 4, 10, "https://x/pull/12"}) {
+		t.Errorf("narrow link = %v", f.links[0])
+	}
+
+	// 7 rows: b's meta line is the bottom row, c's is cut off
+	m.snap.height = 7
+	if got := m.render().links; !slices.Equal(got, []link{{4, 4, 10, "https://x/pull/12"}}) {
+		t.Errorf("short pane: links %v, want a's only", got)
+	}
+}

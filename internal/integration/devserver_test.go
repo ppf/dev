@@ -15,8 +15,9 @@ import (
 
 // devServer is an isolated server set up for project.sh and dev side by side: base-index 1, panes in a
 // non-login /bin/sh (a login shell reads /etc/profile and ~/.profile, which put the real binaries ahead of
-// the stubs), stubbed claude/lazygit/nvim that log their command line, temp resurrect and state dirs, and
-// a client attached to session boot so switch-client works as it does for a person.
+// the stubs), stubbed claude/lazygit/nvim that log their command line, a gh that finds no PR, temp
+// resurrect and state dirs, and a client attached to session boot so switch-client works as it does for
+// a person.
 type devServer struct {
 	*server
 	tmp     string
@@ -36,6 +37,8 @@ func newDevServer(t *testing.T, extraConf string) *devServer {
 	stubs := writeStubs(t, filepath.Join(tmp, "stubs"),
 		`printf '%s %s\n' "$TMUX_PANE" "$(basename "$0") $*" >> "$DEV_STUB_LOG"; exec sleep 600`,
 		"claude", "lazygit", "nvim")
+	// No PRs: the sidebar must never reach the user's real gh
+	writeStubs(t, stubs, "exit 1", "gh")
 	path := stubs + ":" + os.Getenv("PATH")
 	s := newServer(t, `set -g base-index 1
 setw -g pane-base-index 1
