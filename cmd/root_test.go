@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -60,7 +61,7 @@ func TestRootPrintsHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "tmux workspace launcher") || strings.Contains(out, "completion") {
+	if !strings.Contains(out, "tmux workspace launcher") || !strings.Contains(out, "completion") {
 		t.Errorf("help output:\n%s", out)
 	}
 }
@@ -96,8 +97,140 @@ func TestKnownProjectOpens(t *testing.T) {
 	}
 }
 
+// newGitRepo creates a git repo with one commit and no origin, isolated from the user's git config,
+// and returns its resolved path.
+func newGitRepo(t *testing.T) string {
+	t.Helper()
+	for k, v := range map[string]string{
+		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_AUTHOR_NAME": "dev-test", "GIT_AUTHOR_EMAIL": "dev-test@example.com",
+		"GIT_COMMITTER_NAME": "dev-test", "GIT_COMMITTER_EMAIL": "dev-test@example.com",
+	} {
+		t.Setenv(k, v)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+func TestProjectWorktreeCreated(t *testing.T) {
+	repo := newGitRepo(t)
+	withConfig(t, "[[project]]\nname = \"repo\"\npath = \""+repo+"\"\n")
+	// Reaching tmux proves the worktree was handed to open.Run, which creates it first.
+	out, _, err := execute(t, "", "repo", "feature/x")
+	if !errors.Is(err, tmux.ErrNoSocket) {
+		t.Errorf("err = %v, want ErrNoSocket", err)
+	}
+	if !strings.Contains(out, "⚠  No origin/HEAD — branching from current HEAD") {
+		t.Errorf("stdout lacks the base warning:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude/worktrees/feature/x")); err != nil {
+		t.Errorf("worktree not created: %v", err)
+	}
+}
+
+func TestProjectWorktreeInvalidName(t *testing.T) {
+	repo := newGitRepo(t)
+	withConfig(t, "[[project]]\nname = \"repo\"\npath = \""+repo+"\"\n")
+	_, _, err := execute(t, "", "repo", "bad name")
+	if err == nil || !strings.Contains(err.Error(), `invalid worktree name "bad name"`) {
+		t.Errorf("err = %v, want invalid worktree name", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("worktree dir touched despite the bad name: %v", err)
+	}
+}
+
+func TestProjectWorktreeEmptyName(t *testing.T) {
+	withConfig(t, projectsTOML)
+	if _, _, err := execute(t, "", "app", ""); err == nil || err.Error() != "empty worktree name" {
+		t.Errorf("err = %v, want empty worktree name", err)
+	}
+}
+
+func TestTooManyArgs(t *testing.T) {
+	withConfig(t, projectsTOML)
+	if _, _, err := execute(t, "", "app", "wt", "extra"); err == nil || !strings.Contains(err.Error(), "accepts at most 2 arg(s)") {
+		t.Errorf("err = %v, want an argument error", err)
+	}
+}
+
+func TestCompletion(t *testing.T) {
+	repo := newGitRepo(t)
+	for _, name := range []string{"one", "feature/two"} {
+		wt := filepath.Join(repo, ".claude/worktrees", name)
+		if out, err := exec.Command("git", "-C", repo, "worktree", "add", "-q", "-b", name, wt).CombinedOutput(); err != nil {
+			t.Fatalf("worktree add: %v\n%s", err, out)
+		}
+	}
+	withConfig(t, projectsTOML+"\n[[project]]\nname = \"repo\"\npath = \""+repo+"\"\n")
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"projects", []string{""}, "app\tMain app\nnotes\nrepo\n:4\n"},
+		{"worktrees", []string{"repo", ""}, "feature/two\none\n:4\n"},
+		{"not a git repo", []string{"notes", ""}, ":4\n"},
+		{"unknown project", []string{"nope", ""}, ":4\n"},
+		{"no third argument", []string{"repo", "one", ""}, ":4\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _, err := execute(t, "", append([]string{"__complete"}, tt.args...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Subcommands are completed too; only the project/worktree lines are under test.
+			reserved := reservedNames(newRootCmd())
+			var got []string
+			for _, line := range strings.SplitAfter(out, "\n") {
+				name, _, _ := strings.Cut(strings.TrimSuffix(line, "\n"), "\t")
+				if line == "" || strings.HasPrefix(line, "Completion ended") || slices.Contains(reserved, name) || name == "completion" {
+					continue
+				}
+				got = append(got, line)
+			}
+			if strings.Join(got, "") != tt.want {
+				t.Errorf("__complete %q = %q, want %q", tt.args, strings.Join(got, ""), tt.want)
+			}
+		})
+	}
+}
+
+func TestCompletionConfigError(t *testing.T) {
+	withConfig(t, "")
+	out, _, err := execute(t, "", "__complete", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "\n:1\n") {
+		t.Errorf("want ShellCompDirectiveError (:1), got %q", out)
+	}
+}
+
+func TestCompletionScript(t *testing.T) {
+	out, _, err := execute(t, "", "completion", "zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "#compdef dev") {
+		t.Errorf("zsh script lacks #compdef dev:\n%.200s", out)
+	}
+}
+
 func TestReservedNames(t *testing.T) {
-	for _, name := range []string{"list", "import-projects", "state", "sidebar", "goto", "new", "resurrect", "compact", "help"} {
+	for _, name := range []string{"list", "import-projects", "state", "sidebar", "goto", "new", "resurrect", "compact", "completion", "help"} {
 		withConfig(t, "[[project]]\nname = \""+name+"\"\npath = \"/x\"\n")
 		_, _, err := execute(t, "", "list")
 		if err == nil || !strings.Contains(err.Error(), "clashes with a subcommand") {

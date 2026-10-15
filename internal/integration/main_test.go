@@ -20,6 +20,8 @@ const bashRef = "ac2cc87fda9ee3e14b08dd574badfca8fc5838e2"
 var (
 	// devBin is the dev binary built once for the whole suite.
 	devBin string
+	// checkout is this repo's root, resolved before TestMain leaves the package dir.
+	checkout string
 	// bashHome is every test server's HOME: the bash reference at bashRef with .tmux/plugins linked to
 	// the real plugins.
 	bashHome string
@@ -56,6 +58,18 @@ func TestMain(m *testing.M) {
 	if err := newBashHome(bashHome); err != nil {
 		os.RemoveAll(dir)
 		fmt.Fprintln(os.Stderr, "bash home:", err)
+		os.Exit(1)
+	}
+	if checkout, err = filepath.Abs("../.."); err != nil {
+		os.RemoveAll(dir)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	// Sessions created without -c start in this cwd; a checkout under .claude/worktrees would make the
+	// sidebar treat every such session as a worktree and ask before killing it.
+	if err := os.Chdir(dir); err != nil {
+		os.RemoveAll(dir)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	code := m.Run()
