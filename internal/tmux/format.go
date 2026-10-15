@@ -16,16 +16,20 @@ const rowEnd = Sep + "\n"
 // Query runs a list command (list-panes, list-sessions, ...) with a -F format built from T's
 // `tmux:"<format variable>"` tags and parses one T per output line.
 func Query[T any](c *Client, args ...string) ([]T, error) {
-	names := fieldNames(reflect.TypeFor[T]())
-	vars := make([]string, len(names))
-	for i, name := range names {
-		vars[i] = "#{" + name + "}"
-	}
-	out, err := c.Run(append(args, "-F", strings.Join(vars, Sep)+Sep)...)
+	out, err := c.Run(append(args, "-F", Format[T]())...)
 	if err != nil {
 		return nil, err
 	}
 	return Parse[T](out)
+}
+
+// Format is T's -F row format, for commands Query can't run (display -p, chained lists).
+func Format[T any]() string {
+	var b strings.Builder
+	for _, name := range fieldNames(reflect.TypeFor[T]()) {
+		b.WriteString("#{" + name + "}" + Sep)
+	}
+	return b.String()
 }
 
 // FormatRow encodes values as one row of Query output, for fake tmux output in tests.
