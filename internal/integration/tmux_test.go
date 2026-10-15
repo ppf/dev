@@ -73,3 +73,23 @@ func envValue(env []string, key string) string {
 	}
 	return v
 }
+
+// tmux prints control characters as "_" for a client in a non-UTF-8 locale outside tmux (a shell
+// with no LANG, e.g. some SSH logins), which would turn Query's \x1f separator into "_".
+func TestQueryInNonUTF8Locale(t *testing.T) {
+	s := newServer(t, "")
+	s.T("new-session", "-d", "-s", "loc", "-x", "80", "-y", "24")
+
+	type session struct {
+		Name    string `tmux:"session_name"`
+		Windows int    `tmux:"session_windows"`
+	}
+	c := tmux.NewIsolated(s.socket, "", "LC_ALL=C", "LC_CTYPE=C", "LANG=C")
+	got, err := tmux.Query[session](c, "list-sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != (session{Name: "loc", Windows: 1}) {
+		t.Errorf("Query = %+v", got)
+	}
+}
