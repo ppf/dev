@@ -17,6 +17,12 @@ go test ./...                                              # unit tests, never s
 go test -tags integration -count=1 ./internal/integration/ # isolated tmux servers; local only, needs tmux 3.8 + exported ~/.tmux
 ```
 
+## Sidebar PR links
+
+When the [GitHub CLI](https://cli.github.com) (`gh`) is installed and signed in, the sidebar looks up each agent session's PR (`gh pr view` in the agent pane's directory, so fork PRs count; in the background, only while the sidebar's session is on screen, cached for a minute per directory and branch) and leads the session's second line with it, e.g. `#12 open`. State is one of `open`, `draft`, `merged`, `closed`. No `gh`, no remote, or no PR shows nothing.
+
+`o` on the selected session (else the current one), or a click on its tag, opens the PR in the browser (`gh pr view --web`); when the lookup failed, `o` shows why.
+
 ## License
 
 Apache-2.0

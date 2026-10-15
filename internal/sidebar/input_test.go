@@ -262,3 +262,65 @@ func TestInputMouse(t *testing.T) {
 		})
 	}
 }
+
+// o opens the selected session's PR through gh, or says there is none; a click on a PR tag opens that PR.
+func TestInputOpenPR(t *testing.T) {
+	setup := func(selected string) (Model, *actWorld, *prFakeGH) {
+		m, w := inputModel(selected)
+		g := &prFakeGH{}
+		m.prs = &prCache{gh: g.run}
+		m.snap.sessions[1].PR = PR{Number: 5, State: "open", URL: "https://x/pull/5"}
+		return m, w, g
+	}
+	want := []string{": pr view https://x/pull/5 --web"}
+
+	m, w, g := setup("b")
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	inputRun(cmd)
+	if got := g.log(); !slices.Equal(got, want) {
+		t.Errorf("o on b: gh calls %q, want %q", got, want)
+	}
+	// The fake gh fails, so the error is flashed
+	if got := w.log(); len(got) != 1 || !strings.HasPrefix(got[0], "display-message -c /dev/tty1 ❌ gh pr view: no pull requests found") {
+		t.Errorf("o on b: tmux calls %q, want the gh error flashed", got)
+	}
+
+	m, w, g = setup("c")
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	if cmd != nil || len(g.log()) != 0 {
+		t.Errorf("o on c: command %v, gh calls %q; want neither", cmd, g.log())
+	}
+	if got, want := w.log(), []string{"display-message -c /dev/tty1 No pull request for c"}; !slices.Equal(got, want) {
+		t.Errorf("o on c: tmux calls %q, want %q", got, want)
+	}
+
+	// A failed lookup says why
+	m, w, _ = setup("c")
+	m.snap.sessions[2].PR = PR{Err: "gh pr view: offline"}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	if got, want := w.log(), []string{"display-message -c /dev/tty1 ❌ gh pr view: offline"}; !slices.Equal(got, want) {
+		t.Errorf("o on c, lookup failed: tmux calls %q, want %q", got, want)
+	}
+
+	m, _, g = setup("")
+	l := m.render().links
+	if len(l) != 1 {
+		t.Fatalf("links %v, want b's", l)
+	}
+	next, cmd := m.handleMouse(tea.MouseMsg{X: l[0].to - 1, Y: l[0].line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	inputRun(cmd)
+	if got := g.log(); !slices.Equal(got, want) {
+		t.Errorf("click on b's tag: gh calls %q, want %q", got, want)
+	}
+	if got := next.(Model).selected; got != "" {
+		t.Errorf("click on b's tag: selected %q, want unchanged", got)
+	}
+
+	// Past the tag, the line selects and switches
+	m, w, g = setup("")
+	_, cmd = m.handleMouse(tea.MouseMsg{X: l[0].to, Y: l[0].line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	inputRun(cmd)
+	if len(g.log()) != 0 || !slices.Contains(w.log(), "switch-client -c /dev/tty1 -t =b:") {
+		t.Errorf("click past the tag: gh %q, tmux %q; want a switch to b", g.log(), w.log())
+	}
+}
