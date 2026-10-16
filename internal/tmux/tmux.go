@@ -32,6 +32,13 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
+// IsNoServer reports a failed tmux call to a server that isn't running (no socket, or nothing listening).
+func IsNoServer(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	return ok && (strings.Contains(e.Stderr, "no server running") ||
+		strings.Contains(e.Stderr, "error connecting") && strings.Contains(e.Stderr, "No such file or directory"))
+}
+
 type runner func(args, env []string) (stdout, stderr []byte, err error)
 
 // Client runs tmux commands against one server.

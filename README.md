@@ -42,6 +42,24 @@ tmux set -g @dev_notify_activate com.mitchellh.ghostty     # app a click raises
 
 Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.claude/settings.json`) to avoid duplicate notifications. Hook errors go to stderr, which Claude Code hides for a successful hook; run `claude --debug` to see them.
 
+## Codex state
+
+Codex CLI hooks give Codex panes the same sidebar state and notifications (needs approval, done). In `~/.codex/hooks.json`, call `dev state --codex <state>`:
+
+| Event | State |
+|---|---|
+| `SessionStart` (matcher `startup\|resume\|clear`) | `idle` |
+| `UserPromptSubmit`, `PostToolUse` | `working` |
+| `PermissionRequest` | `waiting` |
+| `Stop`, `Interrupt` | `idle` |
+| `SessionEnd` | `clear` |
+
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "$HOME/go/bin/dev state --codex idle"}]}]}}
+```
+
+Codex runs hooks in its shared app-server daemon, whose `TMUX_PANE` is the pane that started it, so `--codex` picks the only pane running `codex` (or `codex-*`) whose directory is the hook's `cwd`. Nothing is recorded when no pane matches (Codex's background memory agent, a session started with `codex -C <other dir>`) or two or more Codex panes share a directory. A Codex session outside tmux (the desktop app) in a directory with a Codex pane counts as that pane's. Codex asks you to trust new hooks once (`/hooks`). With `approvals_reviewer = "guardian_subagent"` a reviewer, not you, answers approvals, so leave out `PermissionRequest`. Turn off Codex's own notifications (`[tui] notifications = false`) to avoid duplicates.
+
 ## Development
 
 ```bash

@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -29,6 +30,13 @@ func TestDecide(t *testing.T) {
 		{"stop strips a leading bullet", event{Name: "Stop", Last: "- Fixed X\n- Fixed Y"}, note{"Done", "Fixed X - Fixed Y", false}, true},
 		{"stop strips a leading minus", event{Name: "Stop", Last: "-1 tests failed"}, note{"Done", "1 tests failed", false}, true},
 		{"stop only delimiters", event{Name: "Stop", Last: "[[( -"}, note{"Done", "Finished", false}, true},
+		{"codex approval", event{Name: "PermissionRequest", Tool: "Bash", ToolInput: json.RawMessage(`{"description":"May I run touch?"}`)},
+			note{"Needs approval", "May I run touch?", true}, true},
+		{"codex approval of a patch", event{Name: "PermissionRequest", Tool: "apply_patch", ToolInput: json.RawMessage(`"*** Begin Patch"`)},
+			note{"Needs approval", "apply_patch", true}, true},
+		{"codex approval without description", event{Name: "PermissionRequest", Tool: "Bash"}, note{"Needs approval", "Bash", true}, true},
+		{"codex approval without tool", event{Name: "PermissionRequest"}, note{"Needs approval", "Needs approval", true}, true},
+		{"codex interrupt", event{Name: "Interrupt"}, note{}, false},
 		{"failure", event{Name: "StopFailure", Error: "rate_limit"}, note{"Failed", "rate_limit", false}, true},
 		{"failure without error", event{Name: "StopFailure"}, note{"Failed", "Stopped on an error", false}, true},
 		{"session start", event{Name: "SessionStart"}, note{}, false},
