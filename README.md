@@ -2,7 +2,7 @@
 
 tmux workspace launcher for Claude Code agents: project picker, git worktrees, agent-state sidebar, session restore. Single Go binary on top of tmux.
 
-Status: in daily use. It replaced the bash `dev` scripts with strict parity (see [docs/plan.md](docs/plan.md)), then added notifications, Codex agent state, Claude resume after restore and the `dev agent` control CLI.
+Status: in daily use. It replaced the bash `dev` scripts with strict parity, then added notifications, Codex agent state, Claude resume after restore, session cost and the `dev agent` control CLI.
 
 ## Install
 
