@@ -28,6 +28,7 @@ type Session struct {
 	State  string // trusted hook state (working, waiting, idle) or ""
 	Title  string // the agent pane's cleaned title, "" when generic
 	PR     PR     // Branch's pull request; none without a branch or while no client views this sidebar
+	Cost   string // the agent's estimated session cost, e.g. "$1.24"; "" when unknown
 }
 
 // Client is an attached client as list-clients reports it.

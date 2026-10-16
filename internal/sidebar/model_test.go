@@ -11,9 +11,9 @@ import (
 )
 
 func TestModelAgentPane(t *testing.T) {
-	r := paneRow{Session: "app", Window: 1, ID: "%1", Path: "/r", Title: "t", Command: "claude", State: "idle", StateCmd: "claude",
+	r := paneRow{Session: "app", Window: 1, ID: "%1", Path: "/r", Title: "t", Command: "claude", State: "idle", StateCmd: "claude", Cost: "0.5",
 		Active: true, Width: 40, Height: 20, Project: "p", Sidebar: "%0", Selected: "app"}
-	want := agent.Pane{Session: "app", Window: 1, ID: "%1", Path: "/r", Title: "t", Command: "claude", State: "idle", StateCmd: "claude"}
+	want := agent.Pane{Session: "app", Window: 1, ID: "%1", Path: "/r", Title: "t", Command: "claude", State: "idle", StateCmd: "claude", Cost: "0.5"}
 	if got := r.agentPane(); got != want {
 		t.Errorf("agentPane = %+v, want %+v", got, want)
 	}
@@ -25,13 +25,13 @@ func TestModelAgentPane(t *testing.T) {
 func modelRows() []paneRow {
 	return []paneRow{
 		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
-		{Session: "app", Window: 1, ID: "%1", Path: "/app", Title: "✳ Fix login", Command: "claude", State: "working", StateCmd: "claude", Sidebar: "%0"},
+		{Session: "app", Window: 1, ID: "%1", Path: "/app", Title: "✳ Fix login", Command: "claude", State: "working", StateCmd: "claude", Cost: "1.5", Sidebar: "%0"},
 		{Session: "app", Window: 1, ID: "%2", Path: "/app", Command: "lazygit", Sidebar: "%0"},
 		{Session: "app", Window: 2, ID: "%3", Path: "/app", Command: "nvim", Sidebar: "%0"},
 		{Session: "app-2", Window: 1, ID: "%4", Path: "/app2", Command: "lazygit"},
 		{Session: "app-2", Window: 1, ID: "%5", Path: "/app2", Command: "nvim"},
-		{Session: "web", Window: 1, ID: "%6", Path: "/web", Title: "repo | task", Command: "codex", State: "idle", StateCmd: "claude", Project: "zz"},
-		{Session: "stale", Window: 1, ID: "%7", Path: "/stale", Title: "✳ Old", Command: "zsh", State: "waiting", StateCmd: "claude"},
+		{Session: "web", Window: 1, ID: "%6", Path: "/web", Title: "repo | task", Command: "codex", State: "idle", StateCmd: "claude", Cost: "4", Project: "zz"},
+		{Session: "stale", Window: 1, ID: "%7", Path: "/stale", Title: "✳ Old", Command: "zsh", State: "waiting", StateCmd: "claude", Cost: "3"},
 		{Session: "gen", Window: 1, ID: "%8", Path: "/gen", Title: "✳ gen", Command: "claude", State: "idle", StateCmd: "claude"},
 		{Session: "side", Window: 1, ID: "%9", Path: "/side", Command: "claude", StateCmd: "claude", Sidebar: "%9"},
 		{Session: "w2", Window: 2, ID: "%10", Path: "/w2", Command: "claude", StateCmd: "claude"},
@@ -56,7 +56,7 @@ func TestModelBuildSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Session{
-		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}},
+		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50"},
 		{Name: "app-2", Group: "app"},
 		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle"},
 		{Name: "side", Group: "side"},
@@ -154,7 +154,7 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", active, "40", "30", "", sidebar, selected)
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected)
 }
 
 func modelTestModel(c *tmux.Client) Model {
@@ -172,7 +172,7 @@ func TestModelRefresh(t *testing.T) {
 	}
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
-			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
+			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
 			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},

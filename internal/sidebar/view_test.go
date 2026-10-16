@@ -335,3 +335,35 @@ func TestViewPRTag(t *testing.T) {
 		t.Errorf("short pane: links %v, want a's only", got)
 	}
 }
+
+func TestViewCost(t *testing.T) {
+	session := Session{Name: "app", Group: "app", Agent: "Claude", State: "idle", Title: "Fix login", Cost: "$1.24"}
+	line := func(width int, s Session) string {
+		m := Model{snap: snapshot{width: width, height: 8, current: "x", sessions: []Session{s}}}
+		return ansi.Strip(m.render().lines[4])
+	}
+	if got, want := line(40, session), "    Claude · idle · $1.24 · Fix login"; got != want {
+		t.Errorf("cost line = %q, want %q", got, want)
+	}
+	if got, want := line(31, session), "    Claude · idle · $1.24 · F…"; got != want {
+		t.Errorf("title cut after the cost = %q, want %q", got, want)
+	}
+	if got, want := line(30, session), "    Claude · idle · $1.24"; got != want {
+		t.Errorf("no room for the title = %q, want %q", got, want)
+	}
+	// A cost that doesn't fit whole is left out, not cut
+	if got, want := line(24, session), "    Claude · idle · Fi…"; got != want {
+		t.Errorf("no room for the cost = %q, want %q", got, want)
+	}
+	if got := line(40, Session{Name: "app", Group: "app", Agent: "Claude", State: "idle"}); strings.Contains(got, "$") {
+		t.Errorf("no cost: %q", got)
+	}
+}
+
+func TestFormatCost(t *testing.T) {
+	for usd, want := range map[float64]string{0: "$0.00", 0.004: "$0.00", 1.236: "$1.24", 189.21: "$189.21"} {
+		if got := FormatCost(usd); got != want {
+			t.Errorf("FormatCost(%v) = %q, want %q", usd, got, want)
+		}
+	}
+}

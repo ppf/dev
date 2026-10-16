@@ -78,7 +78,7 @@ Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (an
 `dev agent` lets one Claude session (a coordinator) drive the agents in other sessions. Targets are session names or pane ids (`%12`), never sidebar positions.
 
 ```bash
-dev agent list [--json]                        # session, pane, agent, state, branch, path
+dev agent list [--json]                        # session, pane, agent, state, branch, path, cost
 dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
 dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
 dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
@@ -88,6 +88,16 @@ dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 ```
 
 Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hooks, so `wait` and `prompt --wait` refuse a Codex pane without them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
+
+## Session cost
+
+The sidebar shows each Claude session's estimated cost (`Claude · idle · $1.24 · title`), and `dev agent list --json` reports it as `cost_usd`. The number is Claude Code's own `cost.total_cost_usd`, the list-price estimate `/cost` shows. It covers every API call of the conversation, and resets on `/clear`. It isn't your bill on a subscription plan. `dev statusline` records it from the status line input, so run your status line through it:
+
+```json
+"statusLine": { "type": "command", "command": "$HOME/go/bin/dev statusline -- $HOME/.claude/statusline.sh" }
+```
+
+Without a command, `dev statusline` prints the cost as the status line. Codex panes show no cost.
 
 ## Development
 

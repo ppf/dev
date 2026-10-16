@@ -105,14 +105,13 @@ func (m Model) render() frame {
 		f.lines = append(f.lines, cardLine(line, vis, w, selected))
 
 		body, colour := "no agent", faint
+		cost, title := "", ""
 		if s.Agent != "" {
 			body, colour = s.Agent, muted
 			if s.State != "" {
 				body += " · " + s.State
 			}
-			if s.Title != "" {
-				body += " · " + s.Title
-			}
+			cost, title = s.Cost, s.Title
 		}
 		if s.State == agent.Waiting {
 			colour = red
@@ -126,7 +125,18 @@ func (m Model) render() frame {
 			meta, vis = prColour(s.PR.State)+tag+reset, vis+tw
 			body = " · " + body
 		}
-		body = truncate(body, maxMeta-(vis-4))
+		avail := maxMeta - (vis - 4)
+		// The cost only whole, before the title: a cut "$18…" would read as another amount
+		if cost != "" && ansi.StringWidth(body+" · "+cost) <= avail {
+			body += " · " + cost
+			// " · ", then at least one character of the title before its "…"
+			if rest := avail - ansi.StringWidth(body); title != "" && rest > 4 {
+				body += " · " + truncate(title, rest-3)
+			}
+		} else if title != "" {
+			body += " · " + title
+		}
+		body = truncate(body, avail)
 		meta += colour + body + reset
 		f.lines = append(f.lines, cardLine("    "+meta, vis+ansi.StringWidth(body), w, selected))
 	}
@@ -209,4 +219,9 @@ func statusDot(label, state string) string {
 		return muted + "●" + reset
 	}
 	return faint + "○" + reset
+}
+
+// FormatCost renders a session cost in USD for the sidebar and dev agent.
+func FormatCost(usd float64) string {
+	return fmt.Sprintf("$%.2f", usd)
 }

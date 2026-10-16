@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -95,10 +97,14 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd")}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost")}
 	} else {
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
 		cmds = [][]string{set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
+		if h.Event == "SessionStart" {
+			// A crashed session's cost would show until the new one's first status line
+			cmds = append(cmds, unset("@agent_cost"))
+		}
 		if h.Event == "UserPromptSubmit" {
 			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
 			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
@@ -208,6 +214,7 @@ type Pane struct {
 	Command  string `tmux:"pane_current_command"`
 	State    string `tmux:"@agent_state"`
 	StateCmd string `tmux:"@agent_cmd"`
+	Cost     string `tmux:"@agent_cost"`
 }
 
 // Agent is a session's detected agent pane.
@@ -215,6 +222,9 @@ type Agent struct {
 	Pane  Pane
 	Label string // "Claude" or "Codex"
 	State string // hook state, only when @agent_cmd matches the pane's command; else ""
+	// Cost is @agent_cost in USD, only for a hook-registered Claude pane (@agent_cmd ties it to the process)
+	Cost   float64
+	CostOK bool
 }
 
 // Detect finds the agent among one session's panes: in window 1, excluding sidebarPane, the pane whose
@@ -233,7 +243,9 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 			continue
 		}
 		if p.StateCmd != "" && p.Command == p.StateCmd {
-			return Agent{Pane: *p, Label: "Claude", State: p.State}, true
+			a := Agent{Pane: *p, Label: "Claude", State: p.State}
+			a.Cost, a.CostOK = ParseCost(p.Cost)
+			return a, true
 		}
 	}
 	if codex == nil {
@@ -244,4 +256,39 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 
 func isCodex(command string) bool {
 	return command == "codex" || strings.HasPrefix(command, "codex-")
+}
+
+// StatusCost reads cost.total_cost_usd from a Claude status line's stdin; ok=false when it's missing,
+// malformed or negative.
+func StatusCost(input []byte) (usd float64, ok bool) {
+	var v struct {
+		Cost struct {
+			USD *float64 `json:"total_cost_usd"`
+		} `json:"cost"`
+	}
+	if json.Unmarshal(input, &v) != nil || v.Cost.USD == nil || *v.Cost.USD < 0 {
+		return 0, false
+	}
+	return *v.Cost.USD, true
+}
+
+// RecordCost writes usd to the pane's @agent_cost.
+func RecordCost(c *tmux.Client, pane string, usd float64) error {
+	_, err := c.Run("set-option", "-p", "-t", pane, "@agent_cost", strconv.FormatFloat(usd, 'f', -1, 64))
+	return err
+}
+
+// ClearCost unsets the pane's @agent_cost.
+func ClearCost(c *tmux.Client, pane string) error {
+	_, err := c.Run("set-option", "-pu", "-t", pane, "@agent_cost")
+	return err
+}
+
+// ParseCost reads an @agent_cost value; ok=false when unset, malformed, negative or not finite.
+func ParseCost(v string) (float64, bool) {
+	usd, err := strconv.ParseFloat(v, 64)
+	if err != nil || usd < 0 || math.IsInf(usd, 0) || math.IsNaN(usd) {
+		return 0, false
+	}
+	return usd, true
 }

@@ -18,7 +18,7 @@ You are a coordinator. Other Claude Code agents run in their own tmux sessions, 
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, project, branch, path}]
+dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?}]
 dev agent get <target> --json
 ```
 
