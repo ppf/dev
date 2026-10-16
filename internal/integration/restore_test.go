@@ -23,10 +23,7 @@ func TestRestore(t *testing.T) {
 	project := filepath.Join(home, "sessions/project.sh")
 	toggle := filepath.Join(home, "sessions/toggle-sidebar.sh")
 	requireFiles(t, restore, save)
-	repo, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo := checkout
 
 	tmp := t.TempDir()
 	for _, d := range []string{"resurrect", "state"} {

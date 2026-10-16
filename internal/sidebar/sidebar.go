@@ -27,6 +27,7 @@ type Session struct {
 	Agent  string // "Claude", "Codex", or "" for no agent
 	State  string // trusted hook state (working, waiting, idle) or ""
 	Title  string // the agent pane's cleaned title, "" when generic
+	PR     PR     // Branch's pull request; none without a branch or while no client views this sidebar
 }
 
 // Client is an attached client as list-clients reports it.
@@ -42,10 +43,17 @@ type Origin struct {
 	Pane    string
 }
 
-// frame is one rendered screen: at most height lines, and where each session row starts.
+// frame is one rendered screen: at most height lines, where each session row starts and where its PR tag is.
 type frame struct {
 	lines []string
 	rows  []rowStart // display order
+	links []link
+}
+
+// link is a clickable PR tag: columns [from, to) of line.
+type link struct {
+	line, from, to int
+	url            string
 }
 
 // rowStart is the line a session's name row is drawn on (bash's @sidebar_row_map entry).

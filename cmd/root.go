@@ -12,22 +12,29 @@ import (
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/picker"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/worktree"
 )
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:               "dev [project]",
+		Use:               "dev [project [worktree]]",
 		Short:             "tmux workspace launcher for Claude Code agents",
-		Args:              cobra.ArbitraryArgs,
+		Args:              cobra.MaximumNArgs(2),
 		SilenceUsage:      true,
 		SilenceErrors:     true,
-		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		ValidArgsFunction: completeArgs,
 	}
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return runPicker(cmd)
 		}
-		return runProject(cmd, args[0])
+		wt := ""
+		if len(args) == 2 {
+			if wt = args[1]; wt == "" {
+				return errors.New("empty worktree name")
+			}
+		}
+		return runProject(cmd, args[0], wt)
 	}
 	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
 		newResurrectCmd(), newCompactCmd())
@@ -78,7 +85,12 @@ func runPicker(cmd *cobra.Command) error {
 	}, cmd.OutOrStdout())
 }
 
-func runProject(cmd *cobra.Command, name string) error {
+// runProject opens project name, or its worktree wt (created when missing) when wt is set.
+func runProject(cmd *cobra.Command, name, wt string) error {
+	// Rejected rather than stripped like picker input: a typo must not become a different branch.
+	if wt != "" && worktree.Sanitize(wt) != wt {
+		return fmt.Errorf("invalid worktree name %q: only A-Za-z0-9._/- allowed", wt)
+	}
 	projects, path, err := loadProjects(cmd)
 	if err != nil {
 		return err
@@ -96,7 +108,45 @@ func runProject(cmd *cobra.Command, name string) error {
 	if err != nil {
 		return err
 	}
-	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name}, cmd.OutOrStdout())
+	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt}, cmd.OutOrStdout())
+}
+
+// completeArgs completes project names (with descriptions), then that project's worktree names.
+func completeArgs(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 1 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	projects, _, err := loadProjects(cmd)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	if len(args) == 0 {
+		names := make([]string, len(projects))
+		for i, p := range projects {
+			names[i] = p.Name
+			if p.Description != "" {
+				names[i] = cobra.CompletionWithDesc(p.Name, p.Description)
+			}
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
+	p, ok := config.Find(projects, args[0])
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	dir, err := p.Dir()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	root, ok := worktree.Root(dir)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names, err := worktree.List(root)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
 // loadProjects reads projects.toml with every subcommand name reserved; also returns its path.

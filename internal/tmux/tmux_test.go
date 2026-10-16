@@ -111,6 +111,12 @@ func TestQueryBuildsFormatAndParses(t *testing.T) {
 	}
 }
 
+func TestFormat(t *testing.T) {
+	if got, want := Format[pane](), "#{pane_id}\x1f#{pane_title}\x1f#{pane_width}\x1f#{pane_active}\x1f"; got != want {
+		t.Errorf("Format = %q, want %q", got, want)
+	}
+}
+
 func TestParse(t *testing.T) {
 	type row struct {
 		A string `tmux:"a"`
