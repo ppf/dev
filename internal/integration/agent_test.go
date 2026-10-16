@@ -150,6 +150,32 @@ func TestAgentControl(t *testing.T) {
 	})
 }
 
+// A Codex pane with the dev state --codex hooks has a state: wait works and an approval request refuses prompts.
+func TestAgentCodexHooks(t *testing.T) {
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n")
+	s.T("new-session", "-d", "-s", "cx", sleeper(t, "codex"))
+	env := s.scriptEnv()
+	cwd := s.T("display", "-t", "=cx:", "-p", "#{pane_current_path}")
+	hook := func(state, event string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", "--codex", state)
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(`{"hook_event_name":"` + event + `","cwd":"` + cwd + `"}`)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("dev state --codex %s: %v %s", state, err, out)
+		}
+	}
+	hook("idle", "SessionStart")
+	out, _, _ := devAgent(env, "", "get", "cx")
+	check(t, "codex state", strings.Join(strings.Split(out, "\t")[:4], " "), "cx "+s.T("display", "-t", "=cx:", "-p", "#{pane_id}")+" Codex idle")
+	hook("waiting", "PermissionRequest")
+	out, _, status := devAgent(env, "", "wait", "cx", "--until", "waiting", "--timeout", "5s")
+	check(t, "codex wait", status+" "+out, "0 waiting\n")
+	_, errOut, status := devAgent(env, "", "prompt", "cx", "yes")
+	check(t, "codex approval refuses prompts", status+" "+errOut,
+		"1 ❌ agent is waiting for a decision (PermissionRequest): read it and answer with send-keys\n")
+}
+
 // dev agent start opens a project detached, returns once the agent registered, and reuses the session.
 // It skips the first-run restore, whose switch-client would move the user's client.
 func TestAgentStart(t *testing.T) {

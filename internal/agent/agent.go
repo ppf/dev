@@ -1,12 +1,16 @@
-// Package agent records Claude and Codex hook state on tmux panes and detects a session's agent pane.
+// Package agent records Claude and Codex hook state on tmux panes, detects a session's agent pane and
+// gives the command that reopens a saved Claude conversation.
 package agent
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -48,7 +52,7 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
 const IdlePrompt = "idle_prompt"
 
-// Hook is the part of a hook's input Record needs.
+// Hook is the part of a hook's input Record needs besides the Session.
 type Hook struct {
 	Event            string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type"`
@@ -61,25 +65,60 @@ func ParseHook(input []byte) Hook {
 	return h
 }
 
-// Record writes state to @agent_state and the pane's current command to @agent_cmd in one chained
-// tmux call, bumping @agent_prompts on UserPromptSubmit and setting @agent_waiting_for to a waiting
-// state's notification type; Clear unsets state and command.
-func Record(c *tmux.Client, pane, state string, h Hook) error {
+// Session is the conversation a hook event belongs to.
+type Session struct {
+	ID         string `json:"session_id"`
+	Transcript string `json:"transcript_path"`
+}
+
+// safeID is a session id that can be typed into a shell as one argument (Claude's are UUIDs).
+var safeID = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z_-]*$`)
+
+// HookSession reads the session from hook stdin that Resolve accepted; an id unsafe to type into a shell,
+// or a transcript path that would break the tab-separated resurrect state, gives no session.
+func HookSession(input []byte) Session {
+	var s Session
+	if json.Unmarshal(input, &s) != nil || !safeID.MatchString(s.ID) || strings.ContainsAny(s.Transcript, "\t\n") {
+		return Session{}
+	}
+	return s
+}
+
+// Record writes state to @agent_state, the pane's current command to @agent_cmd and s to @agent_session
+// and @agent_transcript in one chained tmux call, bumping @agent_prompts on UserPromptSubmit and setting
+// @agent_waiting_for to why a waiting state waits (Claude's notification type, else the event: Codex's
+// PermissionRequest); Clear (or no session) unsets the session options.
+func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
+	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
+	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
+	var cmds [][]string
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
-		_, err := c.Run("set-option", "-pu", "-t", pane, "@agent_state", ";", "set-option", "-pu", "-t", pane, "@agent_cmd")
-		return err
+		s = Session{}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd")}
+	} else {
+		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
+		cmds = [][]string{set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
+		if h.Event == "UserPromptSubmit" {
+			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
+			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
+		}
+		if state == Waiting {
+			// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
+			cmds = append(cmds, set("@agent_waiting_for", cmp.Or(h.NotificationType, h.Event)))
+		}
 	}
-	// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
-	args := []string{"set-option", "-p", "-t", pane, "@agent_state", state, ";",
-		"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}
-	if h.Event == "UserPromptSubmit" {
-		// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
-		args = append(args, ";", "set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}")
+	if s.ID == "" {
+		cmds = append(cmds, unset("@agent_session"), unset("@agent_transcript"))
+	} else {
+		cmds = append(cmds, set("@agent_session", s.ID), set("@agent_transcript", s.Transcript))
 	}
-	if state == Waiting {
-		// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
-		args = append(args, ";", "set-option", "-p", "-t", pane, "@agent_waiting_for", h.NotificationType)
+	var args []string
+	for i, cmd := range cmds {
+		if i > 0 {
+			args = append(args, ";")
+		}
+		args = append(args, cmd...)
 	}
 	_, err := c.Run(args...)
 	return err
@@ -91,6 +130,24 @@ func Trusted(state, stateCmd, command string) string {
 		return ""
 	}
 	return state
+}
+
+// Claude is the agent kind whose sessions `dev state` records.
+const Claude = "claude"
+
+// ResumeCommand is the shell command that restarts an agent of kind: resumed, its conversation id when
+// the id is safe to type and the conversation's transcript still exists, else a fresh agent. ok=false for
+// an unknown kind.
+func ResumeCommand(kind, id, transcript string) (cmd string, resumed, ok bool) {
+	if kind != Claude {
+		return "", false, false
+	}
+	if safeID.MatchString(id) {
+		if _, err := os.Stat(transcript); err == nil {
+			return "claude --resume " + id, true, true
+		}
+	}
+	return "claude", false, true
 }
 
 type codexPane struct {

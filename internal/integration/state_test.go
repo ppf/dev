@@ -106,8 +106,9 @@ func TestCodexState(t *testing.T) {
 		}
 	}
 
-	hook("working", "PostToolUse", cwdA, "")
+	hook("working", "PostToolUse", cwdA, `,"session_id":"c1","transcript_path":"/t/c1.jsonl"`)
 	check(t, "state on the cwd's codex pane", state(a), "working/codex")
+	check(t, "no Claude session for restore to resume", s.T("show-option", "-pqv", "-t", a, "@agent_session"), "")
 	check(t, "TMUX_PANE's pane untouched", state(daemon), "/")
 
 	hook("waiting", "PermissionRequest", cwdA, `,"tool_name":"Bash","tool_input":{"command":"touch x","description":"May I run touch x?"}`)

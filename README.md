@@ -60,6 +60,19 @@ Codex CLI hooks give Codex panes the same sidebar state and notifications (needs
 
 Codex runs hooks in its shared app-server daemon, whose `TMUX_PANE` is the pane that started it, so `--codex` picks the only pane running `codex` (or `codex-*`) whose directory is the hook's `cwd`. Nothing is recorded when no pane matches (Codex's background memory agent, a session started with `codex -C <other dir>`) or two or more Codex panes share a directory. A Codex session outside tmux (the desktop app) in a directory with a Codex pane counts as that pane's. Codex asks you to trust new hooks once (`/hooks`). With `approvals_reviewer = "guardian_subagent"` a reviewer, not you, answers approvals, so leave out `PermissionRequest`. Turn off Codex's own notifications (`[tui] notifications = false`) to avoid duplicates.
 
+## Session restore
+
+The `dev resurrect` [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) hooks bring back each session's `@project` and sidebar, and each agent's own Claude conversation: `dev state` records the hook's `session_id` and transcript on the pane, the save keeps them next to the snapshot, and the restore types `claude --resume <id>` into each agent pane it brought back as a bare shell (100 ms apart; sessions that were still running are left alone). A pane restored into another directory, or whose transcript is gone, gets a fresh `claude` and a warning. Codex panes aren't resumed.
+
+```tmux
+set -g @resurrect-hook-post-save-layout '$HOME/go/bin/dev resurrect save'
+set -g @resurrect-hook-post-save-all '$HOME/go/bin/dev resurrect prune'
+set -g @resurrect-hook-pre-restore-all '$HOME/go/bin/dev resurrect pre-restore'
+set -g @resurrect-hook-post-restore-all '$HOME/go/bin/dev resurrect restore'
+```
+
+Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (and off `:all:`): resurrect would start its own claude in the same pane, so dev warns and resumes nothing.
+
 ## Driving agents from an agent
 
 `dev agent` lets one Claude session (a coordinator) drive the agents in other sessions. Targets are session names or pane ids (`%12`), never sidebar positions.
