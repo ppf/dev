@@ -73,6 +73,22 @@ set -g @resurrect-hook-post-restore-all '$HOME/go/bin/dev resurrect restore'
 
 Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (and off `:all:`): resurrect would start its own claude in the same pane, so dev warns and resumes nothing.
 
+## Driving agents from an agent
+
+`dev agent` lets one Claude session (a coordinator) drive the agents in other sessions. Targets are session names or pane ids (`%12`), never sidebar positions.
+
+```bash
+dev agent list [--json]                        # session, pane, agent, state, branch, path
+dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
+dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
+dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
+dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)
+dev agent send-keys <target> esc|enter|ctrl+c|1|…
+dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
+```
+
+Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hooks, so `wait` and `prompt --wait` refuse a Codex pane without them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
+
 ## Development
 
 ```bash

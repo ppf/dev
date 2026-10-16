@@ -57,7 +57,7 @@ func newStateCmd() *cobra.Command {
 				// Restore resumes Claude conversations only; a Codex id would make it type `claude --resume`
 				session = agent.Session{}
 			}
-			if err := agent.Record(c, pane, state, session); err != nil {
+			if err := agent.Record(c, pane, state, session, agent.ParseHook(input)); err != nil {
 				return err
 			}
 			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {

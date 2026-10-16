@@ -98,7 +98,7 @@ func TestRecord(t *testing.T) {
 				calls = append(calls, strings.Join(args, " "))
 				return "", nil
 			})
-			if err := Record(c, "%1", tt.state, tt.session); err != nil {
+			if err := Record(c, "%1", tt.state, tt.session, Hook{}); err != nil {
 				t.Fatal(err)
 			}
 			if len(calls) != 1 || calls[0] != tt.want {
@@ -164,6 +164,49 @@ func TestDetect(t *testing.T) {
 			got, ok := Detect(tt.panes, tt.sidebar)
 			if ok != (tt.wantID != "") || got.Pane.ID != tt.wantID || got.Label != tt.label || got.State != tt.state {
 				t.Errorf("Detect = %+v, %v; want ID %q, Label %q, State %q", got, ok, tt.wantID, tt.label, tt.state)
+			}
+		})
+	}
+}
+
+func TestParseHook(t *testing.T) {
+	for input, want := range map[string]Hook{
+		`{"hook_event_name":"UserPromptSubmit"}`:                               {Event: "UserPromptSubmit"},
+		`{"hook_event_name":"Notification","notification_type":"idle_prompt"}`: {Event: "Notification", NotificationType: IdlePrompt},
+		`{}`: {},
+		`{`:  {},
+	} {
+		if got := ParseHook([]byte(input)); got != want {
+			t.Errorf("ParseHook(%s) = %+v, want %+v", input, got, want)
+		}
+	}
+}
+
+func TestRecordHook(t *testing.T) {
+	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
+	tests := []struct {
+		name, state string
+		hook        Hook
+		want        string
+	}{
+		{"state", Working, Hook{Event: "PostToolUse"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
+		{"prompt counted", Working, Hook{Event: "UserPromptSubmit"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command} ; " +
+			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1}"},
+		{"waiting records why", Waiting, Hook{Event: "Notification", NotificationType: "permission_prompt"}, "set-option -p -t %1 @agent_state waiting ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt"},
+		{"codex approval records the event", Waiting, Hook{Event: "PermissionRequest"}, "set-option -p -t %1 @agent_state waiting ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for PermissionRequest"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			c := tmux.NewFake(func(args []string) (string, error) {
+				got = strings.Join(args, " ")
+				return "", nil
+			})
+			if err := Record(c, "%1", tt.state, Session{}, tt.hook); err != nil || got != tt.want+noSession {
+				t.Errorf("Record ran %q, %v; want %q", got, err, tt.want)
 			}
 		})
 	}

@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +49,22 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 	return state, true, nil
 }
 
+// IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
+const IdlePrompt = "idle_prompt"
+
+// Hook is the part of a hook's input Record needs besides the Session.
+type Hook struct {
+	Event            string `json:"hook_event_name"`
+	NotificationType string `json:"notification_type"`
+}
+
+// ParseHook reads a hook's input; malformed input gives the zero Hook (Resolve reports it).
+func ParseHook(input []byte) Hook {
+	var h Hook
+	_ = json.Unmarshal(input, &h)
+	return h
+}
+
 // Session is the conversation a hook event belongs to.
 type Session struct {
 	ID         string `json:"session_id"`
@@ -68,17 +85,28 @@ func HookSession(input []byte) Session {
 }
 
 // Record writes state to @agent_state, the pane's current command to @agent_cmd and s to @agent_session
-// and @agent_transcript in one chained tmux call; Clear (or no session) unsets the session options.
-func Record(c *tmux.Client, pane, state string, s Session) error {
+// and @agent_transcript in one chained tmux call, bumping @agent_prompts on UserPromptSubmit and setting
+// @agent_waiting_for to why a waiting state waits (Claude's notification type, else the event: Codex's
+// PermissionRequest); Clear (or no session) unsets the session options.
+func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
 	var cmds [][]string
 	if state == Clear {
+		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
 		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd")}
 	} else {
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
 		cmds = [][]string{set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
+		if h.Event == "UserPromptSubmit" {
+			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
+			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
+		}
+		if state == Waiting {
+			// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
+			cmds = append(cmds, set("@agent_waiting_for", cmp.Or(h.NotificationType, h.Event)))
+		}
 	}
 	if s.ID == "" {
 		cmds = append(cmds, unset("@agent_session"), unset("@agent_transcript"))
@@ -94,6 +122,14 @@ func Record(c *tmux.Client, pane, state string, s Session) error {
 	}
 	_, err := c.Run(args...)
 	return err
+}
+
+// Trusted is state when the process that recorded it (stateCmd) still runs in the pane, else "".
+func Trusted(state, stateCmd, command string) string {
+	if stateCmd == "" || stateCmd != command {
+		return ""
+	}
+	return state
 }
 
 // Claude is the agent kind whose sessions `dev state` records.
@@ -203,11 +239,7 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 	if codex == nil {
 		return Agent{}, false
 	}
-	a := Agent{Pane: *codex, Label: "Codex"}
-	if codex.StateCmd == codex.Command {
-		a.State = codex.State
-	}
-	return a, true
+	return Agent{Pane: *codex, Label: "Codex", State: Trusted(codex.State, codex.StateCmd, codex.Command)}, true
 }
 
 func isCodex(command string) bool {

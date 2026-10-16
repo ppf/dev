@@ -28,20 +28,29 @@ func newRootCmd() *cobra.Command {
 		if len(args) == 0 {
 			return runPicker(cmd)
 		}
-		wt := ""
-		if len(args) == 2 {
-			if wt = args[1]; wt == "" {
-				return errors.New("empty worktree name")
-			}
+		wt, err := worktreeArg(args)
+		if err != nil {
+			return err
 		}
-		return runProject(cmd, args[0], wt)
+		return openProject(cmd, args[0], wt, false)
 	}
 	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
-		newResurrectCmd(), newCompactCmd())
+		newResurrectCmd(), newCompactCmd(), newAgentCmd())
 	return root
 }
 
-// Execute runs dev; errors are printed as "❌ <err>" (unless already shown) and exit 1.
+// worktreeArg is the optional second argument of `dev <project> [worktree]`: "" when absent.
+func worktreeArg(args []string) (string, error) {
+	if len(args) < 2 {
+		return "", nil
+	}
+	if args[1] == "" {
+		return "", errors.New("empty worktree name")
+	}
+	return args[1], nil
+}
+
+// Execute runs dev; errors are printed as "❌ <err>" (unless already shown) and exit with exitCode.
 func Execute() {
 	err := newRootCmd().Execute()
 	if err == nil {
@@ -54,7 +63,7 @@ func Execute() {
 			open.Pause(os.Stderr, "Press enter to close…")
 		}
 	}
-	os.Exit(1)
+	os.Exit(exitCode(err))
 }
 
 func runPicker(cmd *cobra.Command) error {
@@ -85,8 +94,9 @@ func runPicker(cmd *cobra.Command) error {
 	}, cmd.OutOrStdout())
 }
 
-// runProject opens project name, or its worktree wt (created when missing) when wt is set.
-func runProject(cmd *cobra.Command, name, wt string) error {
+// openProject opens project name, or its worktree wt (created when missing) when wt is set; detach
+// creates the session without attaching and sends messages to stderr, keeping stdout for results.
+func openProject(cmd *cobra.Command, name, wt string, detach bool) error {
 	// Rejected rather than stripped like picker input: a typo must not become a different branch.
 	if wt != "" && worktree.Sanitize(wt) != wt {
 		return fmt.Errorf("invalid worktree name %q: only A-Za-z0-9._/- allowed", wt)
@@ -108,7 +118,15 @@ func runProject(cmd *cobra.Command, name, wt string) error {
 	if err != nil {
 		return err
 	}
-	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt}, cmd.OutOrStdout())
+	out := cmd.OutOrStdout()
+	if detach {
+		out = cmd.ErrOrStderr()
+		// The worktree's git and rsync write to os.Stdout
+		stdout := os.Stdout
+		os.Stdout = os.Stderr
+		defer func() { os.Stdout = stdout }()
+	}
+	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach}, out)
 }
 
 // completeArgs completes project names (with descriptions), then that project's worktree names.

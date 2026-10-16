@@ -11,8 +11,11 @@ import (
 )
 
 func TestSessionName(t *testing.T) {
-	if got := sessionName("app", "feature/one/two"); got != "app-feature-one-two" {
-		t.Errorf("sessionName = %q", got)
+	if got := SessionName("app", "feature/one/two"); got != "app-feature-one-two" {
+		t.Errorf("SessionName = %q", got)
+	}
+	if got := SessionName("app", ""); got != "app" {
+		t.Errorf("SessionName main checkout = %q", got)
 	}
 }
 
