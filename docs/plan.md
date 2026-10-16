@@ -7,7 +7,7 @@ Decisions: new repo `ppf/dev` · strict parity first, features later · `project
 Replace the `dev` bash glue (7 session scripts plus the Claude hook, ~1,490 lines) with one tested Go binary on top of tmux. Behaviour must match exactly; each phase ships alone and has a rollback.
 
 **Non-goals (later):** Codex state, notifications, cost info, PR/Linear links, layouts beyond today's default, a `dev open <name> <worktree>` form, shell completion, CI, lint.
-**Later features, status 2026-10-16:** done: Codex state, notifications, PR links, `dev <project> <worktree>`, shell completion, CI and lint (with integration tests), plus Claude resume after restore and `dev agent`. Open: cost info, layouts beyond the default. Dropped: Linear links.
+**Later features, status 2026-10-16:** done: Codex state, notifications, PR links, `dev <project> <worktree>`, shell completion, CI and lint (with integration tests), plus Claude resume after restore and `dev agent`. Open: cost info. Dropped: Linear links, layouts beyond the default.
 **Stays as is:** tmux, `.tmux.conf` popups and keys (`g d f p P N e`), tmux-resurrect/continuum, Claude hooks config shape.
 
 ## Architecture
