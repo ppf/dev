@@ -22,7 +22,7 @@ dev agent list --json          # [{session, pane, agent, state, project, branch,
 dev agent get <target> --json
 ```
 
-`state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (Codex: no hook state). Claude panes without the `dev state` hook aren't listed.
+`state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). Claude panes without the `dev state` hook aren't listed.
 
 ## Start a worker
 
@@ -47,7 +47,7 @@ dev agent wait <target> --timeout 100s     # exit 2 = still working; read, then 
 dev agent read <target> --lines 40
 ```
 
-Plain `prompt` (no `--wait`) returns at once without that check; use it only for Codex, or to queue a follow-up you won't wait on.
+Plain `prompt` (no `--wait`) returns at once without that check; use it only for a Codex pane without hooks, or to queue a follow-up you won't wait on.
 
 - Multi-line prompts: pass them on stdin (`dev agent prompt <target> <<'EOF' … EOF`); they submit as one prompt. Text starting with `-` goes after `--` or on stdin, or it's read as a flag.
 - `--wait` needs the worker idle (or `waiting` only because it sat idle). If it is `working`, wait for it.
@@ -74,4 +74,4 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 ## Codex panes
 
-Codex has no hook state: `wait` and `prompt --wait` refuse it. Send with plain `prompt`, then poll `read` until its output stops changing.
+With its hooks (`dev state --codex`), a Codex pane has a state and works like Claude; an approval request shows as `waiting` and refuses prompts. Without them (`state` is `""`), `wait` and `prompt --wait` refuse it: send with plain `prompt`, then poll `read` until its output stops changing.

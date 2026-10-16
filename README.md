@@ -42,6 +42,24 @@ tmux set -g @dev_notify_activate com.mitchellh.ghostty     # app a click raises
 
 Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.claude/settings.json`) to avoid duplicate notifications. Hook errors go to stderr, which Claude Code hides for a successful hook; run `claude --debug` to see them.
 
+## Codex state
+
+Codex CLI hooks give Codex panes the same sidebar state and notifications (needs approval, done). In `~/.codex/hooks.json`, call `dev state --codex <state>`:
+
+| Event | State |
+|---|---|
+| `SessionStart` (matcher `startup\|resume\|clear`) | `idle` |
+| `UserPromptSubmit`, `PostToolUse` | `working` |
+| `PermissionRequest` | `waiting` |
+| `Stop`, `Interrupt` | `idle` |
+| `SessionEnd` | `clear` |
+
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "$HOME/go/bin/dev state --codex idle"}]}]}}
+```
+
+Codex runs hooks in its shared app-server daemon, whose `TMUX_PANE` is the pane that started it, so `--codex` picks the only pane running `codex` (or `codex-*`) whose directory is the hook's `cwd`. Nothing is recorded when no pane matches (Codex's background memory agent, a session started with `codex -C <other dir>`) or two or more Codex panes share a directory. A Codex session outside tmux (the desktop app) in a directory with a Codex pane counts as that pane's. Codex asks you to trust new hooks once (`/hooks`). With `approvals_reviewer = "guardian_subagent"` a reviewer, not you, answers approvals, so leave out `PermissionRequest`. Turn off Codex's own notifications (`[tui] notifications = false`) to avoid duplicates.
+
 ## Driving agents from an agent
 
 `dev agent` lets one Claude session (a coordinator) drive the agents in other sessions. Targets are session names or pane ids (`%12`), never sidebar positions.
@@ -56,7 +74,7 @@ dev agent send-keys <target> esc|enter|ctrl+c|1|…
 dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 ```
 
-Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hook, so Codex panes have none: `wait` and `prompt --wait` refuse them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
+Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hooks, so `wait` and `prompt --wait` refuse a Codex pane without them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
 
 ## Development
 

@@ -1,9 +1,12 @@
-// Package agent records Claude hook state on tmux panes and detects a session's agent pane.
+// Package agent records Claude and Codex hook state on tmux panes and detects a session's agent pane.
 package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -88,6 +91,54 @@ func Trusted(state, stateCmd, command string) string {
 		return ""
 	}
 	return state
+}
+
+type codexPane struct {
+	ID      string `tmux:"pane_id"`
+	Command string `tmux:"pane_current_command"`
+	Path    string `tmux:"pane_current_path"`
+}
+
+// CodexPane finds the pane of the Codex session a hook reports on: the only pane running codex whose
+// directory is the hook's cwd. Codex runs hooks in its shared app-server daemon, whose TMUX_PANE is the
+// pane that started it, so the hook's environment can't say. ok=false: no tmux server, no such pane
+// (e.g. Codex's background memory agent) or several in that directory. A missing cwd is an error.
+func CodexPane(c *tmux.Client, input []byte) (pane string, ok bool, err error) {
+	var hook struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(input, &hook); err != nil {
+		return "", false, fmt.Errorf("agent: hook input: %w", err)
+	}
+	if hook.Cwd == "" {
+		return "", false, errors.New("agent: hook input: no cwd")
+	}
+	// tmux reports pane paths with symlinks resolved
+	cwd, err := filepath.EvalSymlinks(hook.Cwd)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil // no pane is in a deleted directory
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("agent: hook cwd: %w", err)
+	}
+	panes, err := tmux.Query[codexPane](c, "list-panes", "-a", "-f", "#{m:codex*,#{pane_current_command}}")
+	if tmux.IsNoServer(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	for _, p := range panes {
+		if !isCodex(p.Command) || p.Path != cwd {
+			continue
+		}
+		// A window linked into several sessions lists its panes once per session
+		if pane != "" && pane != p.ID {
+			return "", false, nil
+		}
+		pane = p.ID
+	}
+	return pane, pane != "", nil
 }
 
 // Pane is a pane as the sidebar lists it (list-panes -a).

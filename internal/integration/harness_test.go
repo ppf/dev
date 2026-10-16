@@ -124,7 +124,7 @@ func (s *server) kill() {
 		roots += " " + pid
 	}
 	pids := s.descendants(strings.Fields(roots))
-	if _, err := s.tmux.Run("kill-server"); err != nil && !isNoServer(err) {
+	if _, err := s.tmux.Run("kill-server"); err != nil && !tmux.IsNoServer(err) {
 		s.t.Errorf("kill-server: %v", err)
 	}
 	for i := 0; slices.ContainsFunc(pids, alive); i++ {
@@ -172,12 +172,6 @@ func (s *server) descendants(roots []string) []int {
 
 func alive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
-}
-
-func isNoServer(err error) bool {
-	var tmuxErr *tmux.Error
-	return errors.As(err, &tmuxErr) &&
-		(strings.Contains(tmuxErr.Stderr, "no server running") || strings.Contains(tmuxErr.Stderr, "error connecting"))
 }
 
 // runScript runs a script with env and returns its combined output and error.

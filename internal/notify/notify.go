@@ -14,13 +14,15 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// event is the part of a Claude hook's stdin that notifications use.
+// event is the part of a Claude or Codex hook's stdin that notifications use.
 type event struct {
-	Name    string `json:"hook_event_name"`
-	Title   string `json:"title"`
-	Message string `json:"message"`
-	Last    string `json:"last_assistant_message"`
-	Error   string `json:"error"`
+	Name      string          `json:"hook_event_name"`
+	Title     string          `json:"title"`
+	Message   string          `json:"message"`
+	Last      string          `json:"last_assistant_message"`
+	Error     string          `json:"error"`
+	Tool      string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // note is a notification's text, without its title (the session name).
@@ -37,6 +39,12 @@ func decide(e event) (note, bool) {
 	switch e.Name {
 	case "Notification":
 		return note{Subtitle: cmp.Or(clean(e.Title), "Needs input"), Message: cmp.Or(clean(e.Message), "Needs input"), Sound: true}, true
+	case "PermissionRequest":
+		var in struct {
+			Description string `json:"description"`
+		}
+		_ = json.Unmarshal(e.ToolInput, &in) // tool_input may be a string (a patch) without a description
+		return note{Subtitle: "Needs approval", Message: cmp.Or(clean(in.Description), clean(e.Tool), "Needs approval"), Sound: true}, true
 	case "Stop":
 		return note{Subtitle: "Done", Message: cmp.Or(clean(e.Last), "Finished")}, true
 	case "StopFailure":
@@ -85,7 +93,7 @@ func visible(p paneView, clients []clientView) bool {
 	})
 }
 
-// Run notifies for the Claude hook event in input; bundleID is the click's fallback for @dev_notify_activate.
+// Run notifies for the Claude or Codex hook event in input; bundleID is the click's fallback for @dev_notify_activate.
 func Run(c *tmux.Client, pane string, input []byte, bundleID string) error {
 	// A field of the wrong type only matters to events that notify; Unmarshal still fills the rest.
 	var e event

@@ -142,7 +142,7 @@ func TestAgentControl(t *testing.T) {
 		_, errOut, status := devAgent(append(env, "TMUX_PANE="+w1), "", "wait", "w1")
 		check(t, "own pane", status+" "+errOut, "1 ❌ w1 is this agent's own pane\n")
 		_, errOut, status = devAgent(env, "", "wait", "cx")
-		check(t, "codex wait", status+" "+errOut, "1 ❌ agent has no hook state (Codex): use read\n")
+		check(t, "codex wait", status+" "+errOut, "1 ❌ agent has no hook state (Codex without its hooks): use read\n")
 		_, errOut, status = devAgent(env, "", "get", "plain")
 		check(t, "no agent", status+" "+errOut, "1 ❌ session \"plain\" has no agent pane\n")
 		_, errOut, status = devAgent(env, "", "get", "w")
