@@ -167,7 +167,7 @@ func copyIncluded(root, wt string) bool {
 	var ends []*os.File
 	defer func() {
 		for _, f := range ends {
-			f.Close()
+			_ = f.Close()
 		}
 	}()
 	for i := range len(stages) - 1 {
@@ -185,7 +185,7 @@ func copyIncluded(root, wt string) bool {
 	}
 	// Children hold their own copies; closing ours lets EOF and EPIPE reach them if a neighbour died
 	for _, f := range ends {
-		f.Close()
+		_ = f.Close()
 	}
 	ends = nil
 
