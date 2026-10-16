@@ -27,7 +27,7 @@ type parSide struct {
 // projects.conf; the tests close it with Esc).
 func parSides(t *testing.T, sessions ...string) []*parSide {
 	t.Helper()
-	home := tmuxHome()
+	home := tmuxHome(t)
 	keys := filepath.Join(home, "sessions/install-sidebar-keys.sh")
 	action := filepath.Join(home, "sessions/sidebar-action.sh")
 	toggle := filepath.Join(home, "sessions/toggle-sidebar.sh")

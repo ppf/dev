@@ -14,8 +14,8 @@ import (
 // servers: save writes <snapshot>.dev; a missing snapshot fails loudly and keeps the old file; prune
 // deletes only the .dev files whose snapshot is gone; pre-restore records the live sessions.
 func TestResurrectHooksParity(t *testing.T) {
-	script := filepath.Join(tmuxHome(), "sessions/dev-resurrect.sh")
-	requireFiles(t, filepath.Join(tmuxHome(), "plugins/tmux-resurrect/scripts/helpers.sh"))
+	script := filepath.Join(tmuxHome(t), "sessions/dev-resurrect.sh")
+	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/helpers.sh"))
 
 	got := map[string]string{}
 	for _, impl := range []string{"bash", "dev"} {

@@ -18,8 +18,9 @@ import (
 )
 
 // viewScript is the bash reference for the sidebar's screen.
-func viewScript() string {
-	return filepath.Join(tmuxHome(), "sessions/sidebar.sh")
+func viewScript(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(tmuxHome(t), "sessions/sidebar.sh")
 }
 
 // viewGitRepo returns a temp repository with one commit on branch.
@@ -111,7 +112,7 @@ func viewFocused(d *devServer, pane string) string {
 // server, so both read identical state): at widths 40, 30 and 11, unfocused and each focused, then after
 // a selection change.
 func TestSidebarViewParity(t *testing.T) {
-	script := viewScript()
+	script := viewScript(t)
 	d := newDevServer(t, "")
 	repo := viewGitRepo(t, "feature/login")
 	longRepo := viewGitRepo(t, "feature/a-branch-name-long-enough-to-cut")

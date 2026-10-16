@@ -17,7 +17,6 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      # Compile-only: the integration suite needs real tmux 3.8 + plugins and runs locally
       - run: go vet -tags integration ./...
       - run: go test ./...
 
@@ -31,3 +30,48 @@ jobs:
       - uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.14.0
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TMUX_VERSION: "3.8"
+      TMUX_SHA256: e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
+      # tmux-plugins/tmux-resurrect, the version the suite was written against
+      RESURRECT_SHA: cff343cf9e81983d3da0c8562b01616f12e8d548
+      # The bash reference lives in the private ppf/terminal: its parity tests skip
+      DEV_IT_NO_BASH_REF: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      # libevent/ncurses runtime libs are needed on a cache hit too
+      - run: sudo apt-get update && sudo apt-get install -y libevent-dev libncurses-dev bison pkg-config
+      # ImageOS/ImageVersion are runner env vars, not in the env context
+      - id: image
+        run: echo "key=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      - id: tmux-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.local/tmux
+          key: tmux-${{ env.TMUX_VERSION }}-${{ steps.image.outputs.key }}
+      - if: steps.tmux-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSLO "https://github.com/tmux/tmux/releases/download/$TMUX_VERSION/tmux-$TMUX_VERSION.tar.gz"
+          echo "$TMUX_SHA256  tmux-$TMUX_VERSION.tar.gz" | sha256sum -c
+          tar xzf "tmux-$TMUX_VERSION.tar.gz"
+          cd "tmux-$TMUX_VERSION"
+          ./configure --prefix="$HOME/.local/tmux"
+          make -j"$(nproc)"
+          make install
+      - run: |
+          echo "$HOME/.local/tmux/bin" >> "$GITHUB_PATH"
+          git clone --quiet https://github.com/tmux-plugins/tmux-resurrect ~/.tmux/plugins/tmux-resurrect
+          git -C ~/.tmux/plugins/tmux-resurrect checkout --quiet "$RESURRECT_SHA"
+          sudo locale-gen en_US.UTF-8
+      - run: test "$(tmux -V)" = "tmux $TMUX_VERSION"
+      - run: go test -tags integration -count=1 -timeout 15m -v ./internal/integration/
+      # Every test server runs on its own -L socket: the default one must never have been started
+      - if: always()
+        run: test ! -S "/tmp/tmux-$(id -u)/default"

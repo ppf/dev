@@ -93,7 +93,7 @@ Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up
 
 ```bash
 go test ./...                                              # unit tests, never start tmux
-go test -tags integration -count=1 ./internal/integration/ # isolated tmux servers; local only, needs tmux 3.8 + exported ~/.tmux
+go test -tags integration -count=1 ./internal/integration/ # isolated tmux servers; needs tmux 3.8, tmux plugins + a ppf/terminal clone (CI skips its parity tests)
 ```
 
 ## Sidebar PR links

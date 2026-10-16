@@ -221,8 +221,13 @@ func waitFor(t *testing.T, desc string, cond func() bool) {
 	t.Fatalf("❌ timeout waiting for: %s", desc)
 }
 
-// tmuxHome is bashHome's ~/.tmux, which the bash scripts run from.
-func tmuxHome() string {
+// tmuxHome is bashHome's ~/.tmux, which the bash scripts run from. It skips the test when the bash
+// reference is off.
+func tmuxHome(t *testing.T) string {
+	t.Helper()
+	if noBashRef {
+		t.Skip(noBashRefEnv + " is set: needs the bash reference from the private ppf/terminal clone")
+	}
 	return filepath.Join(bashHome, ".tmux")
 }
 

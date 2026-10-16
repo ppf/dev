@@ -13,6 +13,7 @@ import (
 // TestCompactDev is TestCompact against `dev compact`: the bash ~/.tmux.conf with its client-* hooks
 // pointed at the dev binary, and the sidebar flows run through `dev sidebar`.
 func TestCompactDev(t *testing.T) {
+	tmuxHome(t) // the server sources the bash ~/.tmux.conf
 	tmp := t.TempDir()
 	env := "XDG_STATE_HOME=" + filepath.Join(tmp, "state")
 	hook := `'run-shell "` + devBin + ` compact #{q:hook_client}"'`
