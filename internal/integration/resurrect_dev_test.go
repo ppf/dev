@@ -4,6 +4,7 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -13,16 +14,17 @@ import (
 )
 
 // TestRestore on dev: the resurrect hooks run `dev resurrect`, the sidebar comes back as a Go sidebar
-// and hiding sidebars goes through `dev sidebar toggle`. Panes run stubs, so resurrect restores the agent
-// pane as a bare shell.
+// and hiding sidebars goes through `dev sidebar toggle`. Resurrect doesn't restart claude, so dev types
+// each agent's resume command into its restored bare shell: its own conversation while the transcript
+// exists, else a fresh claude.
 func TestResurrectDev(t *testing.T) {
 	home := tmuxHome()
 	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
 	requireFiles(t, restore, save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))
-	dir := tempDir(t)
+	dir, dirU := tempDir(t), tempDir(t)
 	resurrectDir := tempDir(t)
-	cfg := writeProjects(t, [2]string{"devt", dir})
+	cfg := writeProjects(t, [2]string{"devt", dir}, [2]string{"devu", dirU})
 
 	// Overrides follow source-file, so nothing in ~/.tmux.conf points the hooks or snapshots elsewhere.
 	// Restore wants the slot's command to be basename(default-shell), and macOS's /bin/sh runs as bash.
@@ -31,7 +33,7 @@ set -g default-shell /bin/bash
 set -g default-command '/bin/bash --norc'
 set -g @dev_restored 1
 set -g @resurrect-dir ` + shellQuote(resurrectDir) + `
-set -g @resurrect-processes '"~^([^ ]*/)?claude( |$)->sleep 600"'
+set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 `
 	for hook, arg := range map[string]string{
 		"post-save-layout": "save", "post-save-all": "prune", "pre-restore-all": "pre-restore", "post-restore-all": "restore",
@@ -45,25 +47,69 @@ set -g @resurrect-processes '"~^([^ ]*/)?claude( |$)->sleep 600"'
 	}
 	sidebarOption := func() string { return d.T("show-option", "-qv", "-t", "=devt:", "@sidebar_pane") }
 
-	if out, err := runScript(d.scriptEnv(cfg), devBin, "devt"); err != nil {
-		t.Fatalf("dev devt: %v\n%s", err, out)
+	for _, name := range []string{"devt", "devu"} {
+		if out, err := runScript(d.scriptEnv(cfg), devBin, name); err != nil {
+			t.Fatalf("dev %s: %v\n%s", name, err, out)
+		}
+		d.waitForStubs(name)
 	}
-	d.waitForStubs("devt")
 	waitFor(t, "devt sidebar", func() bool { return sidebarOption() != "" })
+	// The Claude hook as the agents' first event; devu's transcript is gone by restore time
+	transcripts := tempDir(t)
+	hook := func(session, id string) string {
+		transcript := filepath.Join(transcripts, id+".jsonl")
+		writeFile(t, transcript, "{}\n")
+		input := `{"session_id":"` + id + `","transcript_path":"` + transcript + `"}`
+		cmd := exec.Command(devBin, "state", "idle")
+		cmd.Env = d.scriptEnv("TMUX_PANE=" + display("="+session+":1.2", "#{pane_id}"))
+		cmd.Stdin = strings.NewReader(input)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("dev state idle in %s: %v\n%s", session, err, out)
+		}
+		return transcript
+	}
+	hook("devt", "s0")
+	goneTranscript := hook("devu", "u1")
 	d.T("resize-pane", "-Z", "-t", "=devt:2.1") // a compact-mode zoom at save time
 	d.T("new-session", "-d", "-s", "plain")
 	d.T("run-shell", save+" quiet")
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
+	// A new conversation in the same layout: save.sh drops the identical snapshot, its .dev must win
+	transcript := hook("devt", "s1")
+	d.T("run-shell", save+" quiet")
+	again, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
+	check(t, "identical snapshot dropped", again, last)
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
-	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\n")
+	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\n"+
+		":agent\tdevt\t1.2\tclaude\ts1\t"+transcript+"\t"+dir+"\n"+
+		":agent\tdevu\t1.2\tclaude\tu1\t"+goneTranscript+"\t"+dirU+"\n")
 	check(t, "no save warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
+	if err := os.Remove(goneTranscript); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(d.stubLog, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cold start: the command the first `dev` of a server runs
 	d.kill()
 	d.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)
 	sessions := strings.Split(d.T("ls", "-F", "#{session_name}"), "\n")
 	sort.Strings(sessions)
-	check(t, "sessions restored", strings.Join(sessions, " "), "boot devt plain")
+	check(t, "sessions restored", strings.Join(sessions, " "), "boot devt devu plain")
+	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1\n" + display("=devu:1.2", "#{pane_id}") + " claude \n"
+	claudes := func() []string {
+		log, _ := os.ReadFile(d.stubLog)
+		var lines []string
+		for _, l := range strings.SplitAfter(string(log), "\n") {
+			if strings.Contains(l, " claude") {
+				lines = append(lines, l)
+			}
+		}
+		return lines
+	}
+	waitFor(t, "agents restarted", func() bool { return len(claudes()) == 2 })
+	check(t, "each agent pane resumes its conversation, else a fresh claude", strings.Join(claudes(), ""), agents)
 	sidebar := sidebarOption()
 	start := display(sidebar, "#{pane_start_command}")
 	t.Logf("rebuilt sidebar %s: %s", sidebar, start)
@@ -71,7 +117,9 @@ set -g @resurrect-processes '"~^([^ ]*/)?claude( |$)->sleep 600"'
 	check(t, "@project restored", d.T("show-option", "-qv", "-t", "=devt:", "@project"), "devt")
 	check(t, "restored zoom undone", display("=devt:2", "#{window_zoomed_flag}"), "0")
 	check(t, "focus stays on agent pane", display("=devt:1", "#{pane_index}"), "2")
-	check(t, "no restore warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
+	check(t, "restore warns only about devu's lost conversation", d.T("show", "-gqv", "@dev_resurrect_warnings"),
+		"devu:1.2: conversation u1 not resumed (directory changed or transcript gone), fresh agent; ")
+	d.T("set-option", "-gu", "@dev_resurrect_warnings")
 	// The dir must exist (pre-restore creates it), proving the hooks used the temp state dir
 	live, err := os.ReadDir(filepath.Join(d.tmp, "state/dev"))
 	check(t, "live list cleaned up", dirListing(live, err), "")

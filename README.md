@@ -42,6 +42,19 @@ tmux set -g @dev_notify_activate com.mitchellh.ghostty     # app a click raises
 
 Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.claude/settings.json`) to avoid duplicate notifications. Hook errors go to stderr, which Claude Code hides for a successful hook; run `claude --debug` to see them.
 
+## Session restore
+
+The `dev resurrect` [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) hooks bring back each session's `@project` and sidebar, and each agent's own Claude conversation: `dev state` records the hook's `session_id` and transcript on the pane, the save keeps them next to the snapshot, and the restore types `claude --resume <id>` into each agent pane it brought back as a bare shell (100 ms apart; sessions that were still running are left alone). A pane restored into another directory, or whose transcript is gone, gets a fresh `claude` and a warning.
+
+```tmux
+set -g @resurrect-hook-post-save-layout '$HOME/go/bin/dev resurrect save'
+set -g @resurrect-hook-post-save-all '$HOME/go/bin/dev resurrect prune'
+set -g @resurrect-hook-pre-restore-all '$HOME/go/bin/dev resurrect pre-restore'
+set -g @resurrect-hook-post-restore-all '$HOME/go/bin/dev resurrect restore'
+```
+
+Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (and off `:all:`): resurrect would start its own claude in the same pane, so dev warns and resumes nothing.
+
 ## Development
 
 ```bash

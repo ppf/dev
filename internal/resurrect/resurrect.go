@@ -1,25 +1,32 @@
 // Package resurrect keeps what tmux-resurrect doesn't restore — each dev session's @project and its
-// sidebar — in a .dev file next to every snapshot, and rebuilds them after a restore (dev-resurrect.sh).
-// Each function runs as a resurrect hook; every failure is warned in tmux before it is returned.
+// sidebar, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
+// after a restore (dev-resurrect.sh). Each function runs as a resurrect hook; every failure is warned in
+// tmux before it is returned.
 package resurrect
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project,
-// the position empty while its sidebar is hidden. A failure keeps the previous file.
+// the position empty while its sidebar is hidden, then an agentPrefix line per live agent pane with a
+// recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
+// last one's .dev instead. A failure keeps the previous file.
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
 		return fail(c, "snapshot '"+snapshot+"' missing, dev state not saved", err)
@@ -33,10 +40,15 @@ func Save(c *tmux.Client, snapshot string) error {
 		return fail(c, "list-sessions failed, dev state not saved", err)
 	}
 	panes, err := tmux.Query[struct {
-		Session string `tmux:"session_name"`
-		ID      string `tmux:"pane_id"`
-		Window  string `tmux:"window_index"`
-		Index   string `tmux:"pane_index"`
+		Session    string `tmux:"session_name"`
+		ID         string `tmux:"pane_id"`
+		Window     string `tmux:"window_index"`
+		Index      string `tmux:"pane_index"`
+		Command    string `tmux:"pane_current_command"`
+		Path       string `tmux:"pane_current_path"`
+		AgentCmd   string `tmux:"@agent_cmd"`
+		AgentID    string `tmux:"@agent_session"`
+		Transcript string `tmux:"@agent_transcript"`
 	}](c, "list-panes", "-a")
 	if err != nil {
 		return fail(c, "list-panes failed, dev state not saved", err)
@@ -55,7 +67,17 @@ func Save(c *tmux.Client, snapshot string) error {
 		// A stale id means the sidebar is gone, which is the same as hidden
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[sessionPane{s.Name, s.Sidebar}])
 	}
-	dev := snapshot + ".dev"
+	saved := map[string]bool{}
+	for _, p := range panes {
+		// Once per pane, under the first session listing a linked window; a crash's leftover isn't live
+		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] {
+			continue
+		}
+		saved[p.ID] = true
+		fmt.Fprintf(&b, "%s\t%s\t%s.%s\t%s\t%s\t%s\t%s\n", agentPrefix, p.Session, p.Window, p.Index,
+			agent.Claude, p.AgentID, p.Transcript, p.Path)
+	}
+	dev := devPath(snapshot)
 	err = os.WriteFile(dev+".tmp", []byte(b.String()), 0o644)
 	if err == nil {
 		err = os.Rename(dev+".tmp", dev)
@@ -64,6 +86,26 @@ func Save(c *tmux.Client, snapshot string) error {
 		return fail(c, "writing "+dev+" failed", err)
 	}
 	return nil
+}
+
+// devPath is where snapshot's state goes: next to it, or next to the last snapshot when save.sh will
+// delete snapshot as identical to that one (it compares them right after this hook).
+func devPath(snapshot string) string {
+	last := filepath.Join(filepath.Dir(snapshot), "last")
+	target, err := os.Readlink(last)
+	if err != nil {
+		return snapshot + ".dev"
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(last), target)
+	}
+	a, errA := os.ReadFile(snapshot)
+	b, errB := os.ReadFile(target)
+	// Like save.sh's cmp, an unreadable file counts as different
+	if target == snapshot || errA != nil || errB != nil || !bytes.Equal(a, b) {
+		return snapshot + ".dev"
+	}
+	return target + ".dev"
 }
 
 // Prune deletes .dev files whose snapshot is gone (save.sh deletes one identical to the last).
@@ -119,8 +161,8 @@ func PreRestore(c *tmux.Client) error {
 	return nil
 }
 
-// Restore sets @project, undoes restored zooms and rebuilds the sidebar of each session in the last
-// snapshot's .dev file that the restore created, preserving its active window and focus.
+// Restore restarts the agents, then sets @project, undoes restored zooms and rebuilds the sidebar of each
+// session in the last snapshot's .dev file that the restore created, preserving its active window and focus.
 func Restore(c *tmux.Client) error {
 	last, err := helper("last_resurrect_file")
 	if err != nil {
@@ -158,8 +200,13 @@ func Restore(c *tmux.Client) error {
 	shell = filepath.Base(strings.TrimSpace(shell))
 
 	liveSessions := strings.Split(string(liveData), "\n")
+	entries, agents := parseState(string(data))
 	var errs []error
-	for _, e := range parseState(string(data)) {
+	// First: rebuilding a sidebar renumbers its window's panes, and agents are saved by position
+	if err := resumeAgents(c, agents, liveSessions, shell); err != nil {
+		errs = append(errs, err)
+	}
+	for _, e := range entries {
 		// Sessions that were live before the restore are untouched by it — leave them alone
 		if slices.Contains(liveSessions, e.Session) {
 			continue
@@ -261,6 +308,83 @@ func rebuildSidebar(c *tmux.Client, e entry, shell string) error {
 	return nil
 }
 
+// stagger spaces agent restarts, so many agents don't start at once.
+var stagger = 100 * time.Millisecond
+
+var (
+	processEntry = regexp.MustCompile(`"[^"]*"|'[^']*'|\S+`)
+	namesClaude  = regexp.MustCompile(`\bclaude([^\w-]|$)`)
+)
+
+// restartsClaude reports whether resurrect restarts claude itself under procs, its process list: ":all:",
+// or an entry whose match part (before "->") names claude.
+func restartsClaude(procs string) bool {
+	for _, e := range processEntry.FindAllString(procs, -1) {
+		e = strings.Trim(e, `"'`)
+		match, _, _ := strings.Cut(e, "->")
+		if e == ":all:" || namesClaude.MatchString(match) {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeAgents types each saved agent's resume command into its restored pane, in a session the restore
+// created; a pane back in another directory gets a fresh agent, as its conversation is stored by directory.
+// Nothing is restarted while resurrect restarts claude itself: two commands would be typed into one pane.
+func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell string) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	// Resurrect restarts both lists
+	procs, err := c.Run("show-option", "-gqv", "@resurrect-default-processes", ";", "show-option", "-gqv", "@resurrect-processes")
+	if err != nil {
+		warn(c, "@resurrect-processes unknown, agents not restarted")
+		return &stepError{"show-option @resurrect-processes", err}
+	}
+	if restartsClaude(procs) {
+		warn(c, "@resurrect-processes restarts claude, agents not resumed: remove its claude entry")
+		return nil
+	}
+	var errs []error
+	started := false
+	for _, a := range agents {
+		if slices.Contains(live, a.Session) {
+			continue
+		}
+		slot := tmux.SessionTarget(a.Session) + a.Pos
+		out, err := display(c, slot, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
+		fields := strings.Split(out, tmux.Sep)
+		if err != nil || len(fields) != 3 || fields[0] != shell {
+			warn(c, a.Session+":"+a.Pos+" is not the agent's bare shell, agent not restarted")
+			continue
+		}
+		pane, path := fields[1], fields[2]
+		id := a.ID
+		if path != a.Path {
+			id = ""
+		}
+		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript)
+		if !ok {
+			warn(c, a.Session+":"+a.Pos+": unknown agent "+a.Kind+", not restarted")
+			continue
+		}
+		if !resumed {
+			warn(c, a.Session+":"+a.Pos+": conversation "+a.ID+" not resumed (directory changed or transcript gone), fresh agent")
+		}
+		if started {
+			time.Sleep(stagger)
+		}
+		started = true
+		if _, err := c.Run("send-keys", "-t", pane, "-l", cmd, ";", "send-keys", "-t", pane, "Enter"); err != nil {
+			err = &stepError{"send-keys " + a.Session + ":" + a.Pos, err}
+			warn(c, err.Error())
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // stepError is a tmux step of restoreSession that failed. Its text is Restore's warning, so it gives
 // what tmux printed rather than the argv (a Query's argv carries a format of \x1f-separated #{…}).
 type stepError struct {
@@ -294,18 +418,36 @@ type entry struct {
 	Pos     string // window.pane of the sidebar; "" while hidden
 }
 
-// parseState reads a .dev file's lines.
-func parseState(data string) []entry {
+// agentPrefix starts an agent line of a .dev file: "<prefix><TAB>session<TAB>window.pane<TAB>kind<TAB>id
+// <TAB>transcript<TAB>path". tmux session names can't contain ":", so older parsers take it for a session
+// that doesn't exist and skip it.
+const agentPrefix = ":agent"
+
+// agentEntry is one agent line of a .dev file.
+type agentEntry struct {
+	Session, Pos, Kind, ID, Transcript, Path string
+}
+
+// parseState reads a .dev file's session and agent lines.
+func parseState(data string) ([]entry, []agentEntry) {
 	var entries []entry
+	var agents []agentEntry
 	for _, line := range strings.Split(data, "\n") {
 		session, rest, _ := strings.Cut(line, "\t")
+		if session == agentPrefix {
+			f := strings.Split(rest, "\t")
+			if len(f) == 6 {
+				agents = append(agents, agentEntry{Session: f[0], Pos: f[1], Kind: f[2], ID: f[3], Transcript: f[4], Path: f[5]})
+			}
+			continue
+		}
 		if session == "" {
 			continue
 		}
 		project, pos, _ := strings.Cut(rest, "\t")
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
-	return entries
+	return entries, agents
 }
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.

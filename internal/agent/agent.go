@@ -1,9 +1,12 @@
-// Package agent records Claude hook state on tmux panes and detects a session's agent pane.
+// Package agent records Claude hook state on tmux panes, detects a session's agent pane and gives the
+// command that reopens a saved agent conversation.
 package agent
 
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -42,18 +45,70 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 	return state, true, nil
 }
 
-// Record writes state to @agent_state and the pane's current command to @agent_cmd in one chained
-// tmux call; Clear unsets both.
-func Record(c *tmux.Client, pane, state string) error {
-	var err error
+// Session is the conversation a hook event belongs to.
+type Session struct {
+	ID         string `json:"session_id"`
+	Transcript string `json:"transcript_path"`
+}
+
+// safeID is a session id that can be typed into a shell as one argument (Claude's are UUIDs).
+var safeID = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z_-]*$`)
+
+// HookSession reads the session from hook stdin that Resolve accepted; an id unsafe to type into a shell,
+// or a transcript path that would break the tab-separated resurrect state, gives no session.
+func HookSession(input []byte) Session {
+	var s Session
+	if json.Unmarshal(input, &s) != nil || !safeID.MatchString(s.ID) || strings.ContainsAny(s.Transcript, "\t\n") {
+		return Session{}
+	}
+	return s
+}
+
+// Record writes state to @agent_state, the pane's current command to @agent_cmd and s to @agent_session
+// and @agent_transcript in one chained tmux call; Clear (or no session) unsets the session options.
+func Record(c *tmux.Client, pane, state string, s Session) error {
+	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
+	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
+	var cmds [][]string
 	if state == Clear {
-		_, err = c.Run("set-option", "-pu", "-t", pane, "@agent_state", ";", "set-option", "-pu", "-t", pane, "@agent_cmd")
+		s = Session{}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd")}
 	} else {
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
-		_, err = c.Run("set-option", "-p", "-t", pane, "@agent_state", state, ";",
-			"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}")
+		cmds = [][]string{set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
 	}
+	if s.ID == "" {
+		cmds = append(cmds, unset("@agent_session"), unset("@agent_transcript"))
+	} else {
+		cmds = append(cmds, set("@agent_session", s.ID), set("@agent_transcript", s.Transcript))
+	}
+	var args []string
+	for i, cmd := range cmds {
+		if i > 0 {
+			args = append(args, ";")
+		}
+		args = append(args, cmd...)
+	}
+	_, err := c.Run(args...)
 	return err
+}
+
+// Claude is the agent kind whose sessions `dev state` records.
+const Claude = "claude"
+
+// ResumeCommand is the shell command that restarts an agent of kind: resumed, its conversation id when
+// the id is safe to type and the conversation's transcript still exists, else a fresh agent. ok=false for
+// an unknown kind.
+func ResumeCommand(kind, id, transcript string) (cmd string, resumed, ok bool) {
+	if kind != Claude {
+		return "", false, false
+	}
+	if safeID.MatchString(id) {
+		if _, err := os.Stat(transcript); err == nil {
+			return "claude --resume " + id, true, true
+		}
+	}
+	return "claude", false, true
 }
 
 // Pane is a pane as the sidebar lists it (list-panes -a).

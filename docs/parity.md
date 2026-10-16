@@ -142,6 +142,13 @@ instead, so they read the same state.
   hidden sidebars leaves live panes alone), `resurrect.TestRestore` (skipped live sessions, the slot check,
   warnings, focus and active window).
 - [ ] The `.tmux.conf` hooks call the binary. Cutover in ppf/terminal (4a).
+- [x] Agent resume (new, not in bash): `dev state` records `@agent_session` / `@agent_transcript`, `save`
+  adds `:agent` lines (for a snapshot identical to the last one, the whole state goes to the last one's
+  `.dev`), `restore` types `claude --resume <id>` or `claude` (warned) into each agent's bare shell before the
+  sidebars are rebuilt:
+  `TestResurrectDev`, `resurrect.TestSave`, `TestSaveIdenticalSnapshot`, `TestRestoreAgents`,
+  `agent.TestHookSession`, `TestRecord`, `TestResumeCommand`.
+- [ ] `@resurrect-processes` without its claude entry. Cutover in ppf/terminal.
 
 ## Compact mode (Phase 4)
 
