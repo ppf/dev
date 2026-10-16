@@ -85,6 +85,11 @@ func (b *branchCache) resolve(path string) branchEntry {
 	return branchEntry{head: head, mtime: info.ModTime(), branch: b.read(path)}
 }
 
+// Branch is path's branch without the cache, for one-off lookups (dev agent).
+func Branch(path string) string {
+	return (&branchCache{git: runGit}).read(path)
+}
+
 // read is load_session_metadata's branch lookup.
 func (b *branchCache) read(path string) string {
 	if branch, err := b.git(path, "branch", "--show-current"); err == nil && branch != "" {

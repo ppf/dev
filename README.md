@@ -42,6 +42,22 @@ tmux set -g @dev_notify_activate com.mitchellh.ghostty     # app a click raises
 
 Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.claude/settings.json`) to avoid duplicate notifications. Hook errors go to stderr, which Claude Code hides for a successful hook; run `claude --debug` to see them.
 
+## Driving agents from an agent
+
+`dev agent` lets one Claude session (a coordinator) drive the agents in other sessions. Targets are session names or pane ids (`%12`), never sidebar positions.
+
+```bash
+dev agent list [--json]                        # session, pane, agent, state, branch, path
+dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
+dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
+dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
+dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)
+dev agent send-keys <target> esc|enter|ctrl+c|1|…
+dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
+```
+
+Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hook, so Codex panes have none: `wait` and `prompt --wait` refuse them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
+
 ## Development
 
 ```bash

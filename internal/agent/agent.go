@@ -42,18 +42,52 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 	return state, true, nil
 }
 
+// IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
+const IdlePrompt = "idle_prompt"
+
+// Hook is the part of a hook's input Record needs.
+type Hook struct {
+	Event            string `json:"hook_event_name"`
+	NotificationType string `json:"notification_type"`
+}
+
+// ParseHook reads a hook's input; malformed input gives the zero Hook (Resolve reports it).
+func ParseHook(input []byte) Hook {
+	var h Hook
+	_ = json.Unmarshal(input, &h)
+	return h
+}
+
 // Record writes state to @agent_state and the pane's current command to @agent_cmd in one chained
-// tmux call; Clear unsets both.
-func Record(c *tmux.Client, pane, state string) error {
-	var err error
+// tmux call, bumping @agent_prompts on UserPromptSubmit and setting @agent_waiting_for to a waiting
+// state's notification type; Clear unsets state and command.
+func Record(c *tmux.Client, pane, state string, h Hook) error {
 	if state == Clear {
-		_, err = c.Run("set-option", "-pu", "-t", pane, "@agent_state", ";", "set-option", "-pu", "-t", pane, "@agent_cmd")
-	} else {
-		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
-		_, err = c.Run("set-option", "-p", "-t", pane, "@agent_state", state, ";",
-			"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}")
+		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
+		_, err := c.Run("set-option", "-pu", "-t", pane, "@agent_state", ";", "set-option", "-pu", "-t", pane, "@agent_cmd")
+		return err
 	}
+	// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
+	args := []string{"set-option", "-p", "-t", pane, "@agent_state", state, ";",
+		"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}
+	if h.Event == "UserPromptSubmit" {
+		// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
+		args = append(args, ";", "set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}")
+	}
+	if state == Waiting {
+		// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
+		args = append(args, ";", "set-option", "-p", "-t", pane, "@agent_waiting_for", h.NotificationType)
+	}
+	_, err := c.Run(args...)
 	return err
+}
+
+// Trusted is state when the process that recorded it (stateCmd) still runs in the pane, else "".
+func Trusted(state, stateCmd, command string) string {
+	if stateCmd == "" || stateCmd != command {
+		return ""
+	}
+	return state
 }
 
 // Pane is a pane as the sidebar lists it (list-panes -a).
@@ -97,11 +131,7 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 	if codex == nil {
 		return Agent{}, false
 	}
-	a := Agent{Pane: *codex, Label: "Codex"}
-	if codex.StateCmd == codex.Command {
-		a.State = codex.State
-	}
-	return a, true
+	return Agent{Pane: *codex, Label: "Codex", State: Trusted(codex.State, codex.StateCmd, codex.Command)}, true
 }
 
 func isCodex(command string) bool {

@@ -27,6 +27,7 @@ type Options struct {
 	Name     string // project key: session base name and @project
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
 	ForceNew bool   // picker path: suffix -2, -3, ... instead of attaching to an existing session
+	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach; not with ForceNew
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -48,7 +49,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	home := os.Getenv("HOME")
 	inTmux := os.Getenv("TMUX") != ""
 	path := opts.Path
-	session := opts.Name
+	session := SessionName(opts.Name, opts.Worktree)
 
 	if opts.Worktree != "" {
 		// Warnings must outlive the tmux popup this often runs in, hence display-message.
@@ -67,13 +68,15 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 			return fmt.Errorf("%w: %w", ErrShown, err)
 		}
 		path = wtPath
-		session = sessionName(opts.Name, opts.Worktree)
 	}
 
 	width, height := terminalSize(sizeSources(c, inTmux, os.Getenv)...)
 
-	if err := restoreOnce(c, home, out); err != nil {
-		return err
+	// Detached: tmux-resurrect's restore switches clients, which would pull the user's client away
+	if !opts.Detach {
+		if err := restoreOnce(c, home, out); err != nil {
+			return err
+		}
 	}
 
 	exists := func(name string) (bool, error) { return hasSession(c, name) }
@@ -84,11 +87,19 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 		}
 	}
 
-	fmt.Fprintf(out, "\033]2;%s\007", session)
+	if !opts.Detach {
+		fmt.Fprintf(out, "\033]2;%s\007", session)
+	}
 
 	found, err := exists(session)
 	if err != nil {
 		return err
+	}
+	if opts.Detach {
+		if found {
+			return nil
+		}
+		return createLayout(c, session, opts.Name, path, width, height)
 	}
 	if found {
 		ensureSidebar(c, session)
@@ -98,7 +109,11 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	return attach(c, session, inTmux)
 }
 
-func sessionName(name, wt string) string {
+// SessionName is the session opening project name's worktree wt gets; wt "" is the main checkout.
+func SessionName(name, wt string) string {
+	if wt == "" {
+		return name
+	}
 	return name + "-" + strings.ReplaceAll(wt, "/", "-")
 }
 

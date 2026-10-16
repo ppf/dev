@@ -44,7 +44,7 @@ func newStateCmd() *cobra.Command {
 				return nil
 			}
 			c := tmux.New()
-			if err := agent.Record(c, pane, state); err != nil {
+			if err := agent.Record(c, pane, state, agent.ParseHook(input)); err != nil {
 				return err
 			}
 			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
