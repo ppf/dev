@@ -19,6 +19,7 @@ const popupGuard = "SIDEBAR_SELECT_IN_POPUP=1"
 
 // projectScript is the bash reference for opening a session.
 func projectScript(t *testing.T) string {
+	t.Helper()
 	return filepath.Join(tmuxHome(t), "sessions/project.sh")
 }
 

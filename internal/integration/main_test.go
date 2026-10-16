@@ -85,7 +85,7 @@ func TestMain(m *testing.M) {
 
 // newBashHome lays out the bash reference from the ppf/terminal clone ($DEV_TERMINAL_REPO, default
 // ~/PhpstormProjects/ppf/terminal) at bashRef in home, as the export installs it, and links
-// home/.tmux/plugins to the real ~/.tmux/plugins.
+// home/.tmux/plugins to the real ~/.tmux/plugins. With noBashRef it only links the plugins.
 func newBashHome(home string) error {
 	userHome, err := os.UserHomeDir()
 	if err != nil {

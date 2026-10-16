@@ -19,6 +19,7 @@ import (
 
 // viewScript is the bash reference for the sidebar's screen.
 func viewScript(t *testing.T) string {
+	t.Helper()
 	return filepath.Join(tmuxHome(t), "sessions/sidebar.sh")
 }
 

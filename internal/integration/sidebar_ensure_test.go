@@ -28,7 +28,8 @@ func ensNewSide(t *testing.T, bash bool) *ensSide {
 	s := &ensSide{bash: bash}
 	if bash {
 		home := tmuxHome(t)
-		s.toggle, s.action = filepath.Join(home, "sessions/toggle-sidebar.sh"), filepath.Join(home, "sessions/sidebar-action.sh")
+		s.toggle = filepath.Join(home, "sessions/toggle-sidebar.sh")
+		s.action = filepath.Join(home, "sessions/sidebar-action.sh")
 	}
 	s.d = newDevServer(t, "")
 	for _, name := range []string{"alpha", "beta"} {
