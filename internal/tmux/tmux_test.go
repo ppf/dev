@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
@@ -75,6 +76,25 @@ func TestErrorWrapping(t *testing.T) {
 	if want := "tmux -L sock has-session -t =nope:: "; !strings.HasPrefix(err.Error(), want) ||
 		!strings.HasSuffix(err.Error(), ": can't find session: =nope:") {
 		t.Errorf("Error() = %q", err.Error())
+	}
+}
+
+func TestIsNoServer(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{&Error{Stderr: "no server running on /tmp/tmux-501/default"}, true},
+		{fmt.Errorf("wrapped: %w", &Error{Stderr: "error connecting to /tmp/tmux-501/x (No such file or directory)"}), true},
+		{&Error{Stderr: "error connecting to /tmp/tmux-501/x (Permission denied)"}, false},
+		{&Error{Stderr: "can't find session: =nope:"}, false},
+		{errors.New("no server running"), false},
+		{nil, false},
+	}
+	for _, tt := range tests {
+		if got := IsNoServer(tt.err); got != tt.want {
+			t.Errorf("IsNoServer(%v) = %v, want %v", tt.err, got, tt.want)
+		}
 	}
 }
 

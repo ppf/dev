@@ -16,9 +16,10 @@ import (
 var states = []string{agent.Working, agent.Waiting, agent.Idle, agent.Clear, agent.ToolFailed}
 
 func newStateCmd() *cobra.Command {
-	return &cobra.Command{
+	var codex bool
+	cmd := &cobra.Command{
 		Use:   "state <working|waiting|idle|clear|tool-failed>",
-		Short: "Claude hook: record the agent state on its tmux pane",
+		Short: "Claude or Codex hook: record the agent state on its tmux pane",
 		Args: cobra.MatchAll(cobra.ExactArgs(1), func(_ *cobra.Command, args []string) error {
 			if !slices.Contains(states, args[0]) {
 				return fmt.Errorf("unknown state %q, want one of %v", args[0], states)
@@ -27,7 +28,7 @@ func newStateCmd() *cobra.Command {
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pane := os.Getenv("TMUX_PANE")
-			if pane == "" {
+			if pane == "" && !codex {
 				return nil
 			}
 			input, err := io.ReadAll(cmd.InOrStdin())
@@ -44,6 +45,15 @@ func newStateCmd() *cobra.Command {
 				return nil
 			}
 			c := tmux.New()
+			if codex {
+				if pane, ok, err = agent.CodexPane(c, input); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if !ok {
+					return nil
+				}
+			}
 			if err := agent.Record(c, pane, state); err != nil {
 				return err
 			}
@@ -53,4 +63,6 @@ func newStateCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&codex, "codex", false, "Codex hook: find the pane by the hook's cwd instead of TMUX_PANE")
+	return cmd
 }
