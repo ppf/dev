@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // dev state against the bash hook (tmux-agent-state.sh) on two panes of a real server, step by step.
@@ -64,5 +66,77 @@ func TestState(t *testing.T) {
 			t.Errorf("❌ %s: bash hook: %v\n%s", st.name, err, out)
 		}
 		check(t, st.name+" (dev = bash)", state(goPane), state(bashPane))
+	}
+}
+
+// dev state --codex finds the pane by the hook's cwd, not TMUX_PANE (the Codex daemon's, here a plain pane).
+func TestCodexState(t *testing.T) {
+	s := newServer(t, "")
+	codex := sleeper(t, "codex")
+	dirA, dirB, other := t.TempDir(), t.TempDir(), t.TempDir()
+	s.T("new-session", "-d", "-s", "agents", "-c", dirA, codex)
+	a := s.T("display", "-t", "=agents:", "-p", "#{pane_id}")
+	daemon := s.T("split-window", "-t", a, "-PF", "#{pane_id}", "sleep 600")
+	b1 := s.T("split-window", "-t", a, "-c", dirB, "-PF", "#{pane_id}", codex)
+	b2 := s.T("split-window", "-t", a, "-c", dirB, "-PF", "#{pane_id}", codex)
+	waitFor(t, "codex stubs running", func() bool {
+		return s.T("display", "-t", b2, "-p", "#{pane_current_command}") == "codex"
+	})
+	cwdA, cwdB := s.T("display", "-t", a, "-p", "#{pane_current_path}"), s.T("display", "-t", b1, "-p", "#{pane_current_path}")
+	r := newNotifyRig(t, s)
+	state := func(pane string) string {
+		return s.T("show-option", "-pqv", "-t", pane, "@agent_state") + "/" + s.T("show-option", "-pqv", "-t", pane, "@agent_cmd")
+	}
+	run := func(env []string, st, stdin string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", "--codex", st)
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("❌ dev state --codex %s: %v\n%s", st, err, out)
+		}
+		return string(out)
+	}
+	env := s.scriptEnv("TMUX_PANE="+daemon, "PATH="+r.bin+":/usr/bin:/bin")
+	hook := func(st, event, cwd, extra string) {
+		t.Helper()
+		if out := run(env, st, `{"hook_event_name":"`+event+`","cwd":"`+cwd+`"`+extra+`}`); out != "" {
+			t.Errorf("❌ %s: output %q", event, out)
+		}
+	}
+
+	hook("working", "PostToolUse", cwdA, `,"session_id":"c1","transcript_path":"/t/c1.jsonl"`)
+	check(t, "state on the cwd's codex pane", state(a), "working/codex")
+	check(t, "no Claude session for restore to resume", s.T("show-option", "-pqv", "-t", a, "@agent_session"), "")
+	check(t, "TMUX_PANE's pane untouched", state(daemon), "/")
+
+	hook("waiting", "PermissionRequest", cwdA, `,"tool_name":"Bash","tool_input":{"command":"touch x","description":"May I run touch x?"}`)
+	check(t, "approval waits", state(a), "waiting/codex")
+	n := r.notes(t, 1)[0]
+	check(t, "approval note", arg(n, "-subtitle")+"/"+arg(n, "-message")+"/"+arg(n, "-sound"), "Needs approval/May I run touch x?/default")
+	check(t, "click switches to the codex pane", arg(n, "-execute"),
+		tmux.ShellJoin(filepath.Join(r.bin, "tmux"), "-S", s.socketPath(), "switch-client", "-t", a))
+
+	hook("idle", "Stop", other, `,"last_assistant_message":"memories consolidated"`)
+	hook("working", "PostToolUse", cwdB, "")
+	check(t, "no pane in cwd (memory agent) leaves panes alone", state(a), "waiting/codex")
+	check(t, "two codex panes in cwd leave both alone", state(b1)+" "+state(b2), "/ /")
+
+	hook("idle", "Stop", cwdA, `,"last_assistant_message":"All tests pass."`)
+	check(t, "stop", state(a), "idle/codex")
+	n = r.notes(t, 2)[1]
+	check(t, "unmatched Stop skipped, matched Stop notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Done/All tests pass.")
+
+	hook("working", "UserPromptSubmit", cwdA, "")
+	hook("idle", "Interrupt", cwdA, "")
+	check(t, "interrupt", state(a), "idle/codex")
+	hook("clear", "SessionEnd", cwdA, "")
+	check(t, "session end clears", state(a), "/")
+	r.notes(t, 2)
+
+	noServer := append(s.tmux.Env(), "TMUX_TMPDIR="+t.TempDir(), "PATH="+r.bin+":/usr/bin:/bin")
+	if out := run(noServer, "working", `{"hook_event_name":"PostToolUse","cwd":"`+cwdA+`"}`); out != "" {
+		t.Errorf("❌ no tmux server: output %q, want none", out)
 	}
 }
