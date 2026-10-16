@@ -21,7 +21,7 @@ var gitEnv = []string{
 // the dev picker: gitignored files matching .worktreeinclude are copied into a fresh worktree; a failed copy
 // removes the worktree and deletes the branch only if it was just created.
 func TestWorktreeInclude(t *testing.T) {
-	project := projectScript()
+	project := projectScript(t)
 	d := newDevServer(t, "set -g @dev_restored 1\n")
 	failingRsync := writeStubs(t, filepath.Join(d.tmp, "failing"), "exit 1", "rsync")
 

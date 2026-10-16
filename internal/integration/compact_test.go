@@ -12,7 +12,7 @@ import (
 // server runs the bash ~/.tmux.conf with continuum autosave off; its client is attached inside an outer
 // server's pane, which the test resizes to act as a narrow (iPad) or wide client.
 func TestCompact(t *testing.T) {
-	toggleScript := filepath.Join(tmuxHome(), "sessions/toggle-sidebar.sh")
+	toggleScript := filepath.Join(tmuxHome(t), "sessions/toggle-sidebar.sh")
 	tmp := t.TempDir()
 	env := "XDG_STATE_HOME=" + filepath.Join(tmp, "state")
 	in := newServer(t, `source-file ~/.tmux.conf

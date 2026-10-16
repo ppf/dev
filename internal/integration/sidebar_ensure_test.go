@@ -25,14 +25,18 @@ type ensSide struct {
 // ensNewSide starts a server with sessions alpha and beta (two panes each) beside the attached boot.
 func ensNewSide(t *testing.T, bash bool) *ensSide {
 	t.Helper()
-	d := newDevServer(t, "")
-	for _, s := range []string{"alpha", "beta"} {
-		d.T("new-session", "-d", "-s", s, "-x", "200", "-y", "50")
-		d.T("split-window", "-h", "-t", tmux.SessionTarget(s))
+	s := &ensSide{bash: bash}
+	if bash {
+		home := tmuxHome(t)
+		s.toggle, s.action = filepath.Join(home, "sessions/toggle-sidebar.sh"), filepath.Join(home, "sessions/sidebar-action.sh")
 	}
-	home := tmuxHome()
-	return &ensSide{d: d, bash: bash, toggle: filepath.Join(home, "sessions/toggle-sidebar.sh"),
-		action: filepath.Join(home, "sessions/sidebar-action.sh"), boot: d.T("display", "-t", "=boot:1.1", "-p", "#{pane_id}")}
+	s.d = newDevServer(t, "")
+	for _, name := range []string{"alpha", "beta"} {
+		s.d.T("new-session", "-d", "-s", name, "-x", "200", "-y", "50")
+		s.d.T("split-window", "-h", "-t", tmux.SessionTarget(name))
+	}
+	s.boot = s.d.T("display", "-t", "=boot:1.1", "-p", "#{pane_id}")
+	return s
 }
 
 // run runs one flow with the pane env a key binding in pane would give it: "toggle", "ensure <session>"
@@ -85,7 +89,7 @@ func ensState(d *devServer) string {
 // bash's sidebar-action.sh reads the @sidebar_session_order a dev sidebar wrote: j moves to the next
 // session in dev's grouped order (zeta joins alpha's group), not list-sessions' alphabetical one.
 func TestSessionOrderReadByBash(t *testing.T) {
-	action := filepath.Join(tmuxHome(), "sessions/sidebar-action.sh")
+	action := filepath.Join(tmuxHome(t), "sessions/sidebar-action.sh")
 	d := actServer(t, "alpha", "beta", "zeta")
 	d.T("set-option", "-t", "=zeta:", "@project", "alpha")
 	sidebar := actEnsure(d, "alpha")

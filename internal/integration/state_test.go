@@ -14,7 +14,7 @@ import (
 // dev state against the bash hook (tmux-agent-state.sh) on two panes of a real server, step by step.
 // Steps marked goOnly are the deliberate JSON fixes, where bash would record a different state.
 func TestState(t *testing.T) {
-	hook := filepath.Join(filepath.Dir(tmuxHome()), ".claude/hooks/tmux-agent-state.sh")
+	hook := filepath.Join(filepath.Dir(tmuxHome(t)), ".claude/hooks/tmux-agent-state.sh")
 	s := newServer(t, "")
 	s.T("new-session", "-d", "-s", "agents", "sleep 600")
 	goPane := s.T("display", "-t", "=agents:", "-p", "#{pane_id}")

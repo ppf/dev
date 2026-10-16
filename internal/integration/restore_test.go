@@ -17,7 +17,7 @@ import (
 // hooks) on the bash scripts. The agent pane runs a stand-in claude binary; the restore
 // relaunches it as `sleep`.
 func TestRestore(t *testing.T) {
-	home := tmuxHome()
+	home := tmuxHome(t)
 	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
 	project := filepath.Join(home, "sessions/project.sh")

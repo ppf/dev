@@ -13,7 +13,7 @@ import (
 // dev import-projects, dev list and an unknown `dev <name>` against select.sh on the same projects.conf.
 // Neither path reaches tmux.
 func TestListParity(t *testing.T) {
-	selectScript := filepath.Join(tmuxHome(), "sessions/select.sh")
+	selectScript := filepath.Join(tmuxHome(t), "sessions/select.sh")
 	home := t.TempDir() // select.sh reads $HOME/.tmux/sessions/projects.conf
 	conf := filepath.Join(home, ".tmux/sessions/projects.conf")
 	writeFile(t, conf, "# name|path|description\napp|~/src/app|Main app\nnotes|/tmp/notes|\ndocs|~/docs|Docs | extra\n")

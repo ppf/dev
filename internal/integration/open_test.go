@@ -18,8 +18,8 @@ import (
 const popupGuard = "SIDEBAR_SELECT_IN_POPUP=1"
 
 // projectScript is the bash reference for opening a session.
-func projectScript() string {
-	return filepath.Join(tmuxHome(), "sessions/project.sh")
+func projectScript(t *testing.T) string {
+	return filepath.Join(tmuxHome(t), "sessions/project.sh")
 }
 
 func tempDir(t *testing.T) string {
@@ -48,7 +48,7 @@ func devSidebarStart(start string) string {
 // `dev <name>` against `project.sh <path> <name>` on identical servers: the new-session layout, then the
 // existing-session path (attach, no duplicate).
 func TestOpenParity(t *testing.T) {
-	project := projectScript()
+	project := projectScript(t)
 	dir := tempDir(t)
 	cfg := writeProjects(t, [2]string{"app", dir})
 	impls := map[string]func(d *devServer) (string, error){
@@ -88,7 +88,7 @@ func TestOpenParity(t *testing.T) {
 	check(t, "dev: no duplicate session", dev.sessions, "app\nboot")
 	check(t, "dev: client switched", dev.clients, "app")
 	// The deliberate difference: the same pane runs dev's sidebar instead of sidebar.sh
-	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(), "sessions/sidebar.sh"))), "true")
+	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(t), "sessions/sidebar.sh"))), "true")
 	check(t, "dev: sidebar runs dev sidebar", devSidebarStart(dev.sidebar), "true")
 	for _, want := range []string{
 		"session app @project=app clients=app\n",
@@ -106,8 +106,8 @@ func TestOpenParity(t *testing.T) {
 // The first dev of a server restores saved sessions before the has-session check, so `dev app` attaches to
 // a restored app; it sets @dev_restored and prints then unsets the restore warnings. Later runs skip it.
 func TestOpenFirstRunRestore(t *testing.T) {
-	project := projectScript()
-	requireFiles(t, filepath.Join(tmuxHome(), "plugins/tmux-resurrect/scripts/restore.sh"))
+	project := projectScript(t)
+	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/restore.sh"))
 	dir := tempDir(t)
 	cfg := writeProjects(t, [2]string{"app", dir}, [2]string{"two", dir})
 	impls := map[string]func(d *devServer, name string) (string, error){
@@ -143,7 +143,7 @@ func TestOpenFirstRunRestore(t *testing.T) {
 // The picker path: Enter on a project that has a session opens name-2, name-3 (force-new); a typed worktree
 // name opens <name>-<worktree with / as -> in that worktree. Bash runs project.sh exactly as select.sh does.
 func TestOpenPicker(t *testing.T) {
-	project := projectScript()
+	project := projectScript(t)
 	plain := tempDir(t)
 	type run struct{ sessions, forced, wt, statuses, sidebars string }
 	got := map[string]run{}
@@ -203,7 +203,7 @@ var headSHA = regexp.MustCompile(`HEAD is now at [0-9a-f]+`)
 // worktree and session <name>-<worktree with / as ->, the second attaches to it. A rerun after the session
 // is gone reuses the worktree; a name sanitizing would change is rejected.
 func TestOpenWorktreeArg(t *testing.T) {
-	project := projectScript()
+	project := projectScript(t)
 	type run struct{ out, out2, statuses, sessions, first, second string }
 	got := map[string]run{}
 	for _, impl := range []string{"bash", "dev"} {

@@ -18,7 +18,7 @@ import (
 // each agent's resume command into its restored bare shell: its own conversation while the transcript
 // exists, else a fresh claude.
 func TestResurrectDev(t *testing.T) {
-	home := tmuxHome()
+	home := tmuxHome(t)
 	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
 	requireFiles(t, restore, save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))

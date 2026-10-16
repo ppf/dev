@@ -17,6 +17,10 @@ import (
 // bashRef is the last bash version in ppf/terminal; history keeps it after the scripts are deleted.
 const bashRef = "ac2cc87fda9ee3e14b08dd574badfca8fc5838e2"
 
+// noBashRefEnv turns the bash reference off where the private ppf/terminal clone isn't available (CI):
+// tests that need it skip.
+const noBashRefEnv = "DEV_IT_NO_BASH_REF"
+
 var (
 	// devBin is the dev binary built once for the whole suite.
 	devBin string
@@ -25,6 +29,8 @@ var (
 	// bashHome is every test server's HOME: the bash reference at bashRef with .tmux/plugins linked to
 	// the real plugins.
 	bashHome string
+	// noBashRef is set by noBashRefEnv: bashHome holds only the plugins link.
+	noBashRef = os.Getenv(noBashRefEnv) != ""
 )
 
 // TestMain pins a UTF-8 locale, builds dev and bashHome, kills servers left by an earlier run that died
@@ -85,6 +91,9 @@ func newBashHome(home string) error {
 	if err != nil {
 		return err
 	}
+	if noBashRef {
+		return linkPlugins(home, userHome)
+	}
 	repo := os.Getenv("DEV_TERMINAL_REPO")
 	if repo == "" {
 		repo = filepath.Join(userHome, "PhpstormProjects/ppf/terminal")
@@ -116,6 +125,14 @@ func newBashHome(home string) error {
 		if err := os.WriteFile(dst, out, mode); err != nil {
 			return err
 		}
+	}
+	return linkPlugins(home, userHome)
+}
+
+// linkPlugins links home/.tmux/plugins to the real ~/.tmux/plugins.
+func linkPlugins(home, userHome string) error {
+	if err := os.MkdirAll(filepath.Join(home, ".tmux"), 0o755); err != nil {
+		return err
 	}
 	return os.Symlink(filepath.Join(userHome, ".tmux/plugins"), filepath.Join(home, ".tmux/plugins"))
 }
