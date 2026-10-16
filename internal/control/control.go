@@ -41,6 +41,8 @@ type Agent struct {
 	Project string `json:"project"`
 	Branch  string `json:"branch"`
 	Path    string `json:"path"`
+	// CostUSD is the session's estimated cost (`dev statusline`); omitted when unknown.
+	CostUSD *float64 `json:"cost_usd,omitempty"`
 }
 
 // row is one list-panes -a row: agent.Pane's fields plus the session options Detect and Agent need.
@@ -53,6 +55,7 @@ type row struct {
 	Command  string `tmux:"pane_current_command"`
 	State    string `tmux:"@agent_state"`
 	StateCmd string `tmux:"@agent_cmd"`
+	Cost     string `tmux:"@agent_cost"`
 	Project  string `tmux:"@project"`
 	Sidebar  string `tmux:"@sidebar_pane"`
 }
@@ -83,7 +86,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		}
 		panes[r.Session] = append(panes[r.Session], agent.Pane{
 			Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path,
-			Title: r.Title, Command: r.Command, State: r.State, StateCmd: r.StateCmd,
+			Title: r.Title, Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost,
 		})
 	}
 	agents := []Agent{}
@@ -92,10 +95,14 @@ func list(c *tmux.Client) ([]Agent, error) {
 		if !ok {
 			continue
 		}
-		agents = append(agents, Agent{
+		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path,
-		})
+		}
+		if a.CostOK {
+			ag.CostUSD = &a.Cost
+		}
+		agents = append(agents, ag)
 	}
 	return agents, nil
 }

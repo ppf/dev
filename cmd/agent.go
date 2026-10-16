@@ -14,6 +14,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/open"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -52,7 +53,7 @@ func newAgentListCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List every session's agent: session, pane, agent, state, branch, path",
+		Short: "List every session's agent: session, pane, agent, state, branch, path, cost",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			agents, err := control.List(tmux.New())
@@ -84,7 +85,7 @@ func newAgentGetCmd() *cobra.Command {
 	return cmd
 }
 
-// printAgents prints agents as a JSON array or as tab-separated rows (state "-" when unknown).
+// printAgents prints agents as a JSON array or as tab-separated rows (state and cost "-" when unknown).
 func printAgents(out io.Writer, asJSON bool, agents []control.Agent) error {
 	if asJSON {
 		return printJSON(out, agents)
@@ -94,7 +95,11 @@ func printAgents(out io.Writer, asJSON bool, agents []control.Agent) error {
 		if state == "" {
 			state = "-"
 		}
-		fmt.Fprintln(out, strings.Join([]string{a.Session, a.Pane, a.Label, state, a.Branch, a.Path}, "\t"))
+		cost := "-"
+		if a.CostUSD != nil {
+			cost = sidebar.FormatCost(*a.CostUSD)
+		}
+		fmt.Fprintln(out, strings.Join([]string{a.Session, a.Pane, a.Label, state, a.Branch, a.Path, cost}, "\t"))
 	}
 	return nil
 }

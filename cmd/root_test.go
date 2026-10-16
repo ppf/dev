@@ -230,7 +230,7 @@ func TestCompletionScript(t *testing.T) {
 }
 
 func TestReservedNames(t *testing.T) {
-	for _, name := range []string{"list", "import-projects", "state", "sidebar", "goto", "new", "resurrect", "compact", "completion", "help"} {
+	for _, name := range []string{"list", "import-projects", "state", "sidebar", "goto", "new", "resurrect", "compact", "statusline", "completion", "help"} {
 		withConfig(t, "[[project]]\nname = \""+name+"\"\npath = \"/x\"\n")
 		_, _, err := execute(t, "", "list")
 		if err == nil || !strings.Contains(err.Error(), "clashes with a subcommand") {

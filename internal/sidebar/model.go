@@ -27,6 +27,7 @@ type paneRow struct {
 	Command  string `tmux:"pane_current_command"`
 	State    string `tmux:"@agent_state"`
 	StateCmd string `tmux:"@agent_cmd"`
+	Cost     string `tmux:"@agent_cost"`
 	Active   bool   `tmux:"pane_active"`
 	Width    int    `tmux:"pane_width"`
 	Height   int    `tmux:"pane_height"`
@@ -39,7 +40,7 @@ type paneRow struct {
 func (r paneRow) agentPane() agent.Pane {
 	return agent.Pane{
 		Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path,
-		Title: r.Title, Command: r.Command, State: r.State, StateCmd: r.StateCmd,
+		Title: r.Title, Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost,
 	}
 }
 
@@ -214,6 +215,9 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				title = ""
 			}
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, agentTitle(a.Label, title)
+			if a.CostOK {
+				sess.Cost = FormatCost(a.Cost)
+			}
 			sess.Branch = branch(a.Pane.Path)
 			if viewed {
 				sess.PR = pr(a.Pane.Path, sess.Branch)
