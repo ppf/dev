@@ -164,7 +164,7 @@ var ttySize sizeSource = func() (string, string, bool) {
 	if err != nil {
 		return "", "", false
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 	w, h, err := term.GetSize(int(tty.Fd()))
 	if err != nil {
 		return "", "", false

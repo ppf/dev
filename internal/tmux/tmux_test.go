@@ -89,7 +89,7 @@ type pane struct {
 	Title   string `tmux:"pane_title"`
 	Width   int    `tmux:"pane_width"`
 	Active  bool   `tmux:"pane_active"`
-	derived string
+	derived string //nolint:unused // untagged: Query must leave it out of the format
 }
 
 func TestQueryBuildsFormatAndParses(t *testing.T) {

@@ -152,8 +152,8 @@ func warn(c *tmux.Client, client, msg string) {
 		args = append(args, "-c", client)
 	}
 	// Best effort: warn is the only channel left to report on, so its own failures go nowhere
-	c.Run(append(args, "⚠ dev compact: "+msg)...)
-	c.Run("set-option", "-ga", "@dev_compact_warnings", msg+"; ")
+	_, _ = c.Run(append(args, "⚠ dev compact: "+msg)...)
+	_, _ = c.Run("set-option", "-ga", "@dev_compact_warnings", msg+"; ")
 }
 
 // fail warns msg and returns it as an error.
