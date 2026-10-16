@@ -45,6 +45,7 @@ func newStateCmd() *cobra.Command {
 				return nil
 			}
 			c := tmux.New()
+			session := agent.HookSession(input)
 			if codex {
 				if pane, ok, err = agent.CodexPane(c, input); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
@@ -53,8 +54,10 @@ func newStateCmd() *cobra.Command {
 				if !ok {
 					return nil
 				}
+				// Restore resumes Claude conversations only; a Codex id would make it type `claude --resume`
+				session = agent.Session{}
 			}
-			if err := agent.Record(c, pane, state); err != nil {
+			if err := agent.Record(c, pane, state, session); err != nil {
 				return err
 			}
 			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
