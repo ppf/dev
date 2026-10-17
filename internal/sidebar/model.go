@@ -34,6 +34,9 @@ type paneRow struct {
 	Project  string `tmux:"@project"`
 	Sidebar  string `tmux:"@sidebar_pane"`
 	Selected string `tmux:"@sidebar_selected_session"`
+	// Session id and options: who started it (dev agent start from a coordinator)
+	SessionID string `tmux:"session_id"`
+	StartedBy string `tmux:"@dev_started_by"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -208,7 +211,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			ps[i] = r.agentPane()
 		}
 		// Session options: every row of the session carries the same @project and @sidebar_pane
-		sess := Session{Name: name, Group: Group(name, rs[0].Project)}
+		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, StartedBy: rs[0].StartedBy}
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
 			title := cleanTitle(a.Pane.Title)
 			if isGenericTitle(title, name, host) {

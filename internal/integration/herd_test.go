@@ -21,31 +21,31 @@ func TestHerd(t *testing.T) {
 	agentStub(t, stubs, "claude")
 	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
 
-	herd := exec.Command(devBin, "herd")
+	herd := exec.Command(devBin, "boss")
 	herd.Env = env
 	if out, err := herd.CombinedOutput(); err != nil {
-		t.Fatalf("dev herd: %v: %s", err, out)
+		t.Fatalf("dev boss: %v: %s", err, out)
 	}
-	check(t, "client switched", d.T("list-clients", "-F", "#{client_session}"), "herd")
-	check(t, "herd option", d.T("show-option", "-qv", "-t", "=herd:", "@dev_herd"), "1")
-	panes := strings.Split(d.T("list-panes", "-t", "=herd:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
-	if len(panes) != 2 || !strings.Contains(panes[0], "claude --append-system-prompt") || !strings.Contains(panes[1], "herd --previews") {
+	check(t, "client switched", d.T("list-clients", "-F", "#{client_session}"), "boss")
+	check(t, "herd option", d.T("show-option", "-qv", "-t", "=boss:", "@dev_herd"), "1")
+	panes := strings.Split(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
+	if len(panes) != 2 || !strings.Contains(panes[0], "claude --append-system-prompt") || !strings.Contains(panes[1], "boss --previews") {
 		t.Fatalf("herd panes: %q", panes)
 	}
 	coordinator, previews := strings.Fields(panes[0])[0], strings.Fields(panes[1])[0]
-	check(t, "coordinator focused", d.T("display", "-t", "=herd:", "-p", "#{pane_id}"), coordinator)
+	check(t, "coordinator focused", d.T("display", "-t", "=boss:", "-p", "#{pane_id}"), coordinator)
 
 	again := exec.Command(devBin, "herd")
 	again.Env = env
 	if out, err := again.CombinedOutput(); err != nil {
 		t.Fatalf("dev herd again: %v: %s", err, out)
 	}
-	check(t, "reused", d.T("list-sessions", "-F", "#{session_name}"), "boot\nherd")
+	check(t, "reused", d.T("list-sessions", "-F", "#{session_name}"), "boot\nboss")
 
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
 	check(t, "started by the herd", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"),
-		d.T("display", "-t", "=herd:", "-p", "#{session_id}"))
+		d.T("display", "-t", "=boss:", "-p", "#{session_id}"))
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")
 
@@ -64,15 +64,15 @@ func TestHerd(t *testing.T) {
 	})
 
 	d.T("send-keys", "-t", previews, "C-c")
-	waitFor(t, "herd gone with its previews pane", func() bool {
-		_, err := d.Try("has-session", "-t", "=herd:")
+	waitFor(t, "boss gone with its previews pane", func() bool {
+		_, err := d.Try("has-session", "-t", "=boss:")
 		return err != nil
 	})
 
 	// A session named like a herd that isn't one is refused
-	d.T("new-session", "-d", "-s", "herd")
+	d.T("new-session", "-d", "-s", "boss")
 	refused := exec.Command(devBin, "herd")
 	refused.Env = env
 	out, err := refused.CombinedOutput()
-	check(t, "foreign herd refused", errStatus(err)+" "+string(out), "1 ❌ session \"herd\" exists and isn't a herd session (a restored herd isn't one either): kill or rename it\n")
+	check(t, "foreign boss refused", errStatus(err)+" "+string(out), "1 ❌ session \"boss\" exists and isn't a boss session (a restored boss isn't one either): kill or rename it\n")
 }

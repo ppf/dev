@@ -84,7 +84,7 @@ type refreshMsg struct {
 func Run(c *tmux.Client, pane string) error {
 	m := Model{c: c, pane: pane, look: sidebar.NewLookups()}
 	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
-		return fmt.Errorf("herd: %w", err)
+		return fmt.Errorf("boss: %w", err)
 	}
 	return nil
 }
@@ -187,7 +187,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		panes[r.Session] = append(panes[r.Session], r)
 	}
 	if !own {
-		return snapshot{}, fmt.Errorf("herd: pane %s not listed", pane)
+		return snapshot{}, fmt.Errorf("boss: pane %s not listed", pane)
 	}
 	c, _ := sidebar.ActiveClient(clients, s.name)
 	s.client = c.TTY

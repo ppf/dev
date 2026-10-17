@@ -313,7 +313,7 @@ func TestListStartedByAndHerd(t *testing.T) {
 	}
 	got := map[string]string{}
 	for _, a := range agents {
-		got[a.Session] = fmt.Sprintf("%s/%v", a.StartedBy, a.Herd)
+		got[a.Session] = fmt.Sprintf("%s/%v", a.StartedBy, a.Boss)
 	}
 	want := map[string]string{"herd": "/true", "fix-login": "herd/false", "mine-too": "herd/false", "user": "/false", "orphan": "/false"}
 	if !maps.Equal(got, want) {

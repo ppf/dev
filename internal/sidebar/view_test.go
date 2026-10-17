@@ -367,3 +367,48 @@ func TestFormatCost(t *testing.T) {
 		}
 	}
 }
+
+func TestViewIndentsWorkers(t *testing.T) {
+	m := Model{snap: snapshot{width: 40, height: 12, current: "x", sessions: []Session{
+		{Name: "herd-app", Group: "app", Agent: "Claude", State: "idle"},
+		{Name: "app-fix", Group: "app", Agent: "Claude", State: "working", Cost: "$0.42", Depth: 1, PR: PR{Number: 7, State: "open", URL: "u"}},
+		{Name: "app-fix-sub", Group: "app", Depth: 2},
+	}}}
+	f := m.render()
+	var got []string
+	for _, l := range f.lines[3:9] {
+		got = append(got, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	want := []string{
+		"  ● herd-app                        ×",
+		"    Claude · idle",
+		"  └ ● app-fix                       ×",
+		"      #7 open · Claude · working", // the cost doesn't fit whole past the indent
+		"    └ ○ app-fix-sub                 ×",
+		"        no agent",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("indented rows =\n%q\nwant\n%q", got, want)
+	}
+	// The PR tag's click zone moves with the indent
+	if len(f.links) != 1 || f.links[0].from != 6 {
+		t.Errorf("links = %+v, want the tag at column 6", f.links)
+	}
+}
+
+func TestViewIndentStaysLeftOfButtons(t *testing.T) {
+	for _, w := range []int{16, 20, 30} { // below 16 there are no buttons
+		m := Model{snap: snapshot{width: w, height: 8, current: "x", sessions: []Session{{Name: "deep-worker", Group: "g", Depth: 6}}}}
+		row := ansi.Strip(m.render().lines[3])
+		x := strings.Index(row, "×")
+		if x < 0 {
+			t.Errorf("width %d: no × in %q", w, row)
+			continue
+		}
+		col := ansi.StringWidth(row[:x])
+		name := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(row[:x]), "└ ○"))
+		if col != w-4 || name == "" {
+			t.Errorf("width %d: %q puts × at %d (want %d) with name %q", w, row, col, w-4, name)
+		}
+	}
+}

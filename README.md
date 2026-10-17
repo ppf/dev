@@ -95,12 +95,12 @@ Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up
 ## Coordinator view
 
 ```bash
-dev herd [<project>]    # open or attach the herd session: "herd", or "herd-<project>"
+dev boss [<project>]    # open or attach the boss session: "boss", or "boss-<project>"
 ```
 
 One window: a coordinator Claude on the left, started in the project's main checkout (default `$HOME`) and told to use the `dev-agents` skill, so its prompt is the one input field ("start workers for X and Y", "tell fix-login to add tests"). On the right, live previews of every other agent session: a tile per session with the sidebar's header (state dot, agent, state, cost, PR tag, branch; red while waiting) over the last lines of its agent pane. The grid reflows with the count and pane size, and pages past 12 tiles. It refreshes once a second, only while its window is on screen.
 
-Keys in the previews: `j`/`k` select, `⏎` (or a click on the selected tile) switches to that worker, `o` opens its PR, `x` kills a worker this herd's coordinator started (`dev agent start` from it marks the new session with `@dev_started_by`), after a `y`. Closing either pane ends the herd session, and it has no sidebar. Session restore doesn't bring a herd back: a restored `herd` session is a plain one, which `dev herd` refuses, like any session of that name it didn't create (kill it first). `herd` can't be a project name.
+Keys in the previews: `j`/`k` select, `⏎` (or a click on the selected tile) switches to that worker, `o` opens its PR, `x` kills a worker this boss's coordinator started (`dev agent start` from it marks the new session with `@dev_started_by`), after a `y`. Closing either pane ends the boss session, and it has no sidebar. Session restore doesn't bring a boss back: a restored `boss` session is a plain one, which `dev boss` refuses, like any session of that name it didn't create (kill it first). `boss` (and the old name `herd`) can't be a project name. In the sidebar, each worker a coordinator started sits indented (`└`) under the boss session, in its group; `dev goto` numbers follow the same order.
 
 ## Session cost
 

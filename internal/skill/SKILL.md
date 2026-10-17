@@ -7,7 +7,7 @@ description: Coordinate other Claude Code agents running in dev tmux sessions â€
 
 You are a coordinator. Other Claude Code agents run in their own tmux sessions, opened by `dev`. You drive them with `dev agent`; you never type into their panes any other way.
 
-A coordinator usually lives in `dev herd`: the user types requests into your prompt while the pane beside you previews every worker, so they see the workers you start without you pasting their screens.
+A coordinator usually lives in `dev boss`: the user types requests into your prompt while the pane beside you previews every worker, so they see the workers you start without you pasting their screens.
 
 ## Rules
 
@@ -20,14 +20,14 @@ A coordinator usually lives in `dev herd`: the user types requests into your pro
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?, started_by?, herd?}]
+dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?, started_by?, boss?}]
 dev agent list --mine --json   # only your workers: the sessions you started with dev agent start
 dev agent get <target> --json
 ```
 
 `state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). Claude panes without the `dev state` hook aren't listed.
 
-Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `herd: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
+Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
 ## Start a worker
 
