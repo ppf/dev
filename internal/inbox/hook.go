@@ -57,14 +57,18 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		// Most hook events (tool use) never concern a boss: no tmux call for them
 		return nil
 	}
-	b, worker, ok, err := BossOf(c, pane)
+	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil {
 		return err
 	}
 	if e.Name == "UserPromptSubmit" {
-		return b.Box.Forget(worker)
+		return b.Box.Forget(w.Session)
 	}
-	n, _ := FromHook(worker, input)
+	n, _ := FromHook(w.Session, input)
+	if n.Kind == Decision {
+		// Record already moved @agent_since into this wait: two dialogs alike in one turn are two notes
+		n.Key += "\x00" + w.Since
+	}
 	added, err := b.Box.Add(n)
 	if !added || err != nil {
 		return err

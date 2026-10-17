@@ -12,11 +12,12 @@ import (
 
 // sessionView is what finding a session's inbox reads.
 type sessionView struct {
-	ID     string `tmux:"session_id"`
-	Name   string `tmux:"session_name"`
-	Herd   string `tmux:"@dev_herd"`
-	Off    string `tmux:"@dev_boss_inbox"`
-	Socket string `tmux:"socket_path"`
+	ID      string `tmux:"session_id"`
+	Created string `tmux:"session_created"`
+	Name    string `tmux:"session_name"`
+	Herd    string `tmux:"@dev_herd"`
+	Off     string `tmux:"@dev_boss_inbox"`
+	Socket  string `tmux:"socket_path"`
 }
 
 func view(c *tmux.Client, target string) (sessionView, error) {
@@ -45,30 +46,38 @@ func (v sessionView) boss() (Boss, bool, error) {
 	if v.Herd == "" || v.Off == "off" {
 		return Boss{}, false, nil
 	}
-	box, err := Open(v.Socket, v.ID)
+	box, err := Open(v.Socket, v.ID+"-"+v.Created)
 	return Boss{Name: v.Name, Box: box}, err == nil, err
 }
 
-// BossOf is the boss that started pane's session (@dev_started_by), and that session's name.
-func BossOf(c *tmux.Client, pane string) (b Boss, worker string, ok bool, err error) {
-	out, err := c.Run("display-message", "-p", "-t", pane, "#{@dev_started_by}"+tmux.Sep+"#{session_name}")
+// workerView is a worker pane as BossOf reads it.
+type workerView struct {
+	StartedBy string `tmux:"@dev_started_by"`
+	Session   string `tmux:"session_name"`
+	Since     string `tmux:"@agent_since"`
+}
+
+// BossOf is the boss that started pane's session (@dev_started_by), and the worker pane itself.
+func BossOf(c *tmux.Client, pane string) (b Boss, w workerView, ok bool, err error) {
+	out, err := c.Run("display-message", "-p", "-t", pane, tmux.Format[workerView]())
 	if err != nil {
-		return Boss{}, "", false, err
+		return Boss{}, w, false, err
 	}
-	id, worker, _ := strings.Cut(strings.TrimSuffix(out, "\n"), tmux.Sep)
-	if id == "" {
-		return Boss{}, "", false, nil
+	rows, err := tmux.Parse[workerView](out)
+	if err != nil || len(rows) != 1 || rows[0].StartedBy == "" {
+		return Boss{}, w, false, err
 	}
-	v, err := view(c, id)
+	w = rows[0]
+	v, err := view(c, w.StartedBy)
 	if err != nil {
 		if strings.Contains(err.Error(), "can't find session") {
 			// The boss is gone; its workers outlive it
-			return Boss{}, "", false, nil
+			return Boss{}, w, false, nil
 		}
-		return Boss{}, "", false, err
+		return Boss{}, w, false, err
 	}
 	b, ok, err = v.boss()
-	return b, worker, ok, err
+	return b, w, ok, err
 }
 
 // Self is the boss whose own pane (the coordinator) pane is, ok=false for any other pane.
@@ -165,12 +174,20 @@ func undimmed(line string) string {
 		if !dim {
 			b.WriteString(line[:loc[0]])
 		}
-		for _, p := range strings.Split(line[loc[2]:loc[3]], ";") {
-			switch p {
+		params := strings.Split(line[loc[2]:loc[3]], ";")
+		for i := 0; i < len(params); i++ {
+			switch params[i] {
 			case "2":
 				dim = true
 			case "", "0", "22":
 				dim = false
+			case "38", "48", "58":
+				// Extended colours: their operands (5;n or 2;r;g;b) aren't attributes
+				if i+1 < len(params) && params[i+1] == "5" {
+					i += 2
+				} else if i+1 < len(params) && params[i+1] == "2" {
+					i += 4
+				}
 			}
 		}
 		line = line[loc[1]:]

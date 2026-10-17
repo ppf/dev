@@ -83,9 +83,9 @@ func TestBossInbox(t *testing.T) {
 func TestBossInboxNextTurn(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
-	run := func(pane, stdin string) string {
+	run := func(pane, stdin string, state ...string) string {
 		t.Helper()
-		cmd := exec.Command(devBin, "state", "idle")
+		cmd := exec.Command(devBin, "state", append(state, "idle")[0])
 		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
 		cmd.Stdin = strings.NewReader(stdin)
 		out, err := cmd.Output()
@@ -106,6 +106,15 @@ func TestBossInboxNextTurn(t *testing.T) {
 	run(worker, stop)
 	run(worker, `{"hook_event_name":"UserPromptSubmit"}`)
 	run(worker, stop)
-	check(t, "both turns as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),
-		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 2 worker update(s):\n- w finished: Done.\n- w finished: Done.","hookEventName":"UserPromptSubmit"}}`+"\n")
+	// Two alike permission dialogs in one turn, the tool running between them, are two decisions
+	ask := `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Allow Bash?"}`
+	run(worker, `{"hook_event_name":"UserPromptSubmit"}`, "working")
+	run(worker, ask, "waiting")
+	time.Sleep(1100 * time.Millisecond) // @agent_since counts seconds
+	run(worker, `{"hook_event_name":"PreToolUse"}`, "working")
+	run(worker, ask, "waiting")
+	run(worker, ask, "waiting")
+	check(t, "both turns and both dialogs as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),
+		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 4 worker update(s):\n- w finished: Done.\n- w finished: Done.\n`+
+			`- w needs a decision: Allow Bash?\n- w needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
 }

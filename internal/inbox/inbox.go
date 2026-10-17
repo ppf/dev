@@ -143,9 +143,9 @@ type Box struct{ path string }
 
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// Open is the inbox of the boss session id ($N) on the tmux server at socket, under
-// $XDG_STATE_HOME/dev/inbox (default ~/.local/state).
-func Open(socket, sessionID string) (Box, error) {
+// Open is the inbox of the boss session on the tmux server at socket, under $XDG_STATE_HOME/dev/inbox
+// (default ~/.local/state); session is its id ($N) and creation time, as a restarted server reuses ids.
+func Open(socket, session string) (Box, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -154,7 +154,7 @@ func Open(socket, sessionID string) (Box, error) {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	name := strings.Trim(unsafe.ReplaceAllString(socket+"-"+sessionID, "_"), "_")
+	name := strings.Trim(unsafe.ReplaceAllString(socket+"-"+session, "_"), "_")
 	return Box{path: filepath.Join(dir, "dev", "inbox", name+".json")}, nil
 }
 

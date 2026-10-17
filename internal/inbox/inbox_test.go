@@ -145,6 +145,8 @@ func TestInputEmpty(t *testing.T) {
 		{"blank", "output\n" + rule + "❯\u00a0\n" + rule + foot, true},
 		{"old box", "╭────────────────────────╮\n│ > \x1b[2mTry it\x1b[22m │\n╰────────────────────────╯\n", false},
 		{"draft", "output\n" + rule + "❯\u00a0fix the login\n" + rule + foot, false},
+		{"true-colour draft", "output\n" + rule + "❯\u00a0\x1b[38;2;100;100;100mfix the login\x1b[39m\n" + rule + foot, false},
+		{"256-colour draft", "output\n" + rule + "❯\u00a0\x1b[38;5;2mfix\x1b[39m\n" + rule + foot, false},
 		{"draft styled after dim reset", "output\n" + rule + "❯\u00a0\x1b[2m\x1b[0mfix\n" + rule + foot, false},
 		{"multi-line draft", "output\n" + rule + "❯\u00a0\nsecond line\n" + rule + foot, false},
 		{"no box (a dialog)", "Do you want to proceed?\n❯ 1. Yes\n  2. No\n", false},
