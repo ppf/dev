@@ -162,6 +162,8 @@ func TestSidebarViewParity(t *testing.T) {
 		waitFor(t, name("no hint before resize"), func() bool {
 			return !strings.Contains(viewCapture(d, bashPane), "j/k") && !strings.Contains(viewCapture(d, devPane), "j/k")
 		})
+		// The Go sidebar keeps the shared width: make it the width under test
+		d.T("set-option", "-g", "@sidebar_width", strconv.Itoa(w))
 		d.T("resize-window", "-t", bashPane, "-x", strconv.Itoa(3*w+2), "-y", "30")
 		d.T("select-layout", "-t", bashPane, "even-horizontal")
 		want := fmt.Sprintf("%dx30", w)

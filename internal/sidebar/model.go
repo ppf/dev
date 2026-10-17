@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,11 @@ type paneRow struct {
 	// Session id and options: who started it (dev agent start from a coordinator)
 	SessionID string `tmux:"session_id"`
 	StartedBy string `tmux:"@dev_started_by"`
+	// For the shared width: own window's width and zoom, and the global @sidebar_width
+	WindowWidth int    `tmux:"window_width"`
+	WindowPanes int    `tmux:"window_panes"`
+	Zoomed      bool   `tmux:"window_zoomed_flag"`
+	StoredWidth string `tmux:"@sidebar_width"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -59,16 +65,17 @@ type snapshot struct {
 
 // Model is the Bubble Tea sidebar.
 type Model struct {
-	c        *tmux.Client
-	pane     string // this sidebar's pane id (TMUX_PANE)
-	host     string // hostname: tmux's default pane title, so a generic title
-	branches *branchCache
-	prs      *prCache
-	snap     snapshot
-	selected string // local copy of @sidebar_selected_session
-	gen      int    // bumped by each local selection change, so a refresh already running can't undo it
-	order    string // @sidebar_session_order as this sidebar last wrote it
-	err      error  // last refresh failure; nil once a refresh succeeds
+	c         *tmux.Client
+	pane      string // this sidebar's pane id (TMUX_PANE)
+	host      string // hostname: tmux's default pane title, so a generic title
+	branches  *branchCache
+	prs       *prCache
+	snap      snapshot
+	selected  string     // local copy of @sidebar_selected_session
+	gen       int        // bumped by each local selection change, so a refresh already running can't undo it
+	order     string     // @sidebar_session_order as this sidebar last wrote it
+	widthSeen widthState // own width as of the last refresh
+	err       error      // last refresh failure; nil once a refresh succeeds
 
 	winWidth, winHeight int // Bubble Tea's window size: where an error shows before the first snapshot
 }
@@ -82,7 +89,8 @@ type refreshMsg struct {
 	selected string // after the selection sync
 	read     string // @sidebar_selected_session as the refresh read it
 	order    string // @sidebar_session_order after the refresh
-	gen      int    // Model.gen when the refresh started
+	width    widthState
+	gen      int // Model.gen when the refresh started
 	err      error
 }
 
@@ -155,9 +163,13 @@ func (m Model) refresh() tea.Cmd {
 				return fail(err)
 			}
 		}
+		width, err := m.syncWidth(rows)
+		if err != nil {
+			return fail(err)
+		}
 		// A global option: every row carries the same value, and buildSnapshot found at least one row
 		read := rows[0].Selected
-		return refreshMsg{snap: snap, selected: syncSelection(read, snap), read: read, order: order, gen: m.gen}
+		return refreshMsg{snap: snap, selected: syncSelection(read, snap), read: read, order: order, width: width, gen: m.gen}
 	}
 }
 
@@ -169,7 +181,7 @@ func (m Model) apply(msg refreshMsg) Model {
 		m.err = msg.err
 		return m
 	}
-	m.snap, m.order, m.err = msg.snap, msg.order, nil
+	m.snap, m.order, m.widthSeen, m.err = msg.snap, msg.order, msg.width, nil
 	if msg.gen != m.gen {
 		return m
 	}
@@ -278,4 +290,26 @@ func (m *Model) setSelection(name string) error {
 func (m Model) client() string {
 	c, _ := activeClient(m.snap.clients, m.snap.current)
 	return c.TTY
+}
+
+// syncWidth keeps this sidebar at the shared width (see syncWidth in width.go), from its row of the tick.
+func (m Model) syncWidth(rows []paneRow) (widthState, error) {
+	for _, r := range rows {
+		if r.ID != m.pane {
+			continue
+		}
+		next, resizeTo, store := syncWidth(m.widthSeen, r.Width, r.WindowWidth, r.WindowPanes, storedWidth(r.StoredWidth), r.Zoomed)
+		if store > 0 {
+			if _, err := m.c.Run("set-option", "-g", optWidth, strconv.Itoa(store)); err != nil {
+				return m.widthSeen, err
+			}
+		}
+		if resizeTo > 0 {
+			if _, err := m.c.Run("resize-pane", "-t", m.pane, "-x", strconv.Itoa(resizeTo)); err != nil {
+				return m.widthSeen, err
+			}
+		}
+		return next, nil
+	}
+	return m.widthSeen, nil
 }

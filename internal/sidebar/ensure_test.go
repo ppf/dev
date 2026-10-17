@@ -30,6 +30,7 @@ func ensTmux(out map[string]string, fail ...string) (*tmux.Client, func() []stri
 }
 
 const (
+	ensWidth  = "show-option -gqv @sidebar_width"
 	ensHidden = "show-option -gqv @sidebar_hidden"
 	ensPanes  = "list-panes -a -F #{pane_id}"
 )
@@ -126,7 +127,7 @@ func TestEnsure(t *testing.T) {
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-					ensContent("app"), ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
+					ensContent("app"), ensWidth, ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
 					"display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -137,7 +138,7 @@ func TestEnsure(t *testing.T) {
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"}
 			},
 		},
@@ -149,7 +150,7 @@ func TestEnsure(t *testing.T) {
 			},
 			fail: []string{"display-message -t %7 -p "},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p "}
 			},
 		},
@@ -160,7 +161,7 @@ func TestEnsure(t *testing.T) {
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5"}
 			},
 		},
@@ -183,7 +184,7 @@ func TestEnsure(t *testing.T) {
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, ensInfo("%3"), "kill-pane -t %3",
-					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensContent("app"), ensSplit(t, "%1"),
+					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensContent("app"), ensWidth, ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -228,7 +229,7 @@ func TestEnsure(t *testing.T) {
 			out:  map[string]string{ensContent("app"): tmux.FormatRow("%1", "")},
 			fail: []string{ensSplit(t, "%1")},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1")}
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1")}
 			},
 		},
 	}
@@ -274,7 +275,7 @@ func TestToggleShow(t *testing.T) {
 		t.Fatal(err)
 	}
 	ensCheck(t, log(), []string{ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-		"set-option -gu @sidebar_hidden", ensContent("app"), ensSplit(t, "%1"),
+		"set-option -gu @sidebar_hidden", ensContent("app"), ensWidth, ensSplit(t, "%1"),
 		"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"})
 
 	c, log = ensTmux(nil)
