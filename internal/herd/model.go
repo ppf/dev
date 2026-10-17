@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -78,6 +80,11 @@ type lookups interface {
 
 type tickMsg struct{}
 
+// watchMsg runs the inbox watch (stuck workers, deferred delivery) every watchInterval.
+type watchMsg struct{ err error }
+
+const watchInterval = 15 * time.Second
+
 type refreshMsg struct {
 	snap snapshot
 	err  error
@@ -93,7 +100,14 @@ func Run(c *tmux.Client, pane string) error {
 }
 
 // Init starts the first refresh.
-func (m Model) Init() tea.Cmd { return m.refresh() }
+func (m Model) Init() tea.Cmd { return tea.Batch(m.refresh(), m.watchLater()) }
+
+// watchLater runs inbox.Watch after watchInterval.
+func (m Model) watchLater() tea.Cmd {
+	return tea.Tick(watchInterval, func(time.Time) tea.Msg {
+		return watchMsg{err: inbox.Watch(m.c, control.RealClock, m.pane)}
+	})
+}
 
 // Update routes refreshes, size and input.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -118,6 +132,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		m.msg = msg.msg
 		return m, nil
+	case watchMsg:
+		if msg.err != nil {
+			m.msg = "❌ inbox: " + msg.err.Error()
+		}
+		return m, m.watchLater()
 	}
 	return m, nil
 }

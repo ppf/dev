@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -78,9 +79,11 @@ func TestHookSession(t *testing.T) {
 }
 
 func TestRecord(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
 	session := " ; set-option -p -t %1 @agent_session s ; set-option -p -t %1 @agent_transcript /t/s.jsonl"
 	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
-	recorded := "set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"
+	recorded := "set-option -pF -t %1 @agent_since #{?#{&&:#{==:#{@agent_state},idle},#{@agent_since}},#{@agent_since},100} ; set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"
 	tests := []struct {
 		name, state string
 		session     Session
@@ -89,7 +92,7 @@ func TestRecord(t *testing.T) {
 		{"state and session", Idle, Session{"s", "/t/s.jsonl"}, recorded + session},
 		{"no session unsets the old one", Idle, Session{}, recorded + noSession},
 		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost" + noSession},
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since" + noSession},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -198,13 +201,17 @@ func TestRecordHook(t *testing.T) {
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for PermissionRequest"},
 		{"session start drops a crashed session's cost", Idle, Hook{Event: "SessionStart"}, "set-option -p -t %1 @agent_state idle ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost"},
-		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
 			c := tmux.NewFake(func(args []string) (string, error) {
 				got = strings.Join(args, " ")
+				// TestRecord covers @agent_since
+				if rest, ok := strings.CutPrefix(got, "set-option -pF -t %1 @agent_since "); ok {
+					_, got, _ = strings.Cut(rest, " ; ")
+				}
 				return "", nil
 			})
 			if err := Record(c, "%1", tt.state, Session{}, tt.hook); err != nil || got != tt.want+noSession {
