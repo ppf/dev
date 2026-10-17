@@ -6,6 +6,7 @@ package sidebar
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -22,6 +23,26 @@ const (
 // OptHerd marks a dev boss session ("1").
 const OptHerd = "@dev_herd"
 
+// Starter is the @dev_started_by value dev agent start writes for a worker started from a session: a
+// boss's name, which outlives its session id across a reopen and a tmux restart, else the session id ($N),
+// which every reader still takes, as older versions wrote it for bosses too.
+func Starter(id, name string, boss bool) string {
+	if boss {
+		return name
+	}
+	return id
+}
+
+// Names reports whether the @dev_started_by value v names the session id/name, a boss when boss.
+func Names(v, id, name string, boss bool) bool {
+	return v != "" && (v == id || boss && v == name)
+}
+
+// IsSessionID reports a @dev_started_by value that is a session id ($N) rather than a boss's name.
+func IsSessionID(v string) bool {
+	return strings.HasPrefix(v, "$")
+}
+
 // Session is one sidebar entry.
 type Session struct {
 	Name   string
@@ -34,7 +55,8 @@ type Session struct {
 	Cost   string // the agent's estimated session cost, e.g. "$1.24"; "" when unknown
 
 	ID        string // tmux session id ($N)
-	StartedBy string // @dev_started_by: the id of the session whose coordinator started this one
+	Boss      bool   // a dev boss session (OptHerd)
+	StartedBy string // @dev_started_by: see Starter
 	Depth     int    // how deep Order nested it under the session that started it
 }
 

@@ -7,11 +7,11 @@ import (
 )
 
 func TestGoto(t *testing.T) {
-	sessions := "list-sessions -F #{session_name}\x1f#{@project}\x1f#{session_id}\x1f#{@dev_started_by}\x1f"
+	sessions := "list-sessions -F #{session_name}\x1f#{@project}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f"
 	clients := "list-clients -F #{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"
 	out := map[string]string{
 		// Order: alpha, app, app-2 (group app), boot
-		sessions:                                 tmux.FormatRow("boot", "", "$boot", "") + tmux.FormatRow("app-2", "", "$app-2", "") + tmux.FormatRow("app", "", "$app", "") + tmux.FormatRow("alpha", "", "$alpha", ""),
+		sessions:                                 tmux.FormatRow("boot", "", "$boot", "", "") + tmux.FormatRow("app-2", "", "$app-2", "", "") + tmux.FormatRow("app", "", "$app", "", "") + tmux.FormatRow("alpha", "", "$alpha", "", ""),
 		clients:                                  tmux.FormatRow("/dev/a", "app", "1"),
 		"display-message -t =app: -p #{pane_id}": "%1\n",
 		ensHidden:                                "1\n",

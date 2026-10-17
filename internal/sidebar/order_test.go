@@ -50,7 +50,7 @@ func TestModelOrder(t *testing.T) {
 
 func TestModelLoadOrder(t *testing.T) {
 	c, calls := recorder(func([]string) (string, error) {
-		return tmux.FormatRow("web", "", "$web", "") + tmux.FormatRow("app-2", "", "$app-2", "") + tmux.FormatRow("x", "app", "$x", "") + tmux.FormatRow("app", "", "$app", ""), nil
+		return tmux.FormatRow("web", "", "$web", "", "") + tmux.FormatRow("app-2", "", "$app-2", "", "") + tmux.FormatRow("x", "app", "$x", "", "") + tmux.FormatRow("app", "", "$app", "", ""), nil
 	})
 	names, err := LoadOrder(c)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestModelLoadOrder(t *testing.T) {
 	if want := []string{"app", "app-2", "x", "web"}; !slices.Equal(names, want) {
 		t.Errorf("LoadOrder = %q, want %q", names, want)
 	}
-	if want := []string{"list-sessions", "-F", "#{session_name}\x1f#{@project}\x1f#{session_id}\x1f#{@dev_started_by}\x1f"}; !slices.Equal((*calls)[0], want) {
+	if want := []string{"list-sessions", "-F", "#{session_name}\x1f#{@project}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f"}; !slices.Equal((*calls)[0], want) {
 		t.Errorf("args = %q, want %q", (*calls)[0], want)
 	}
 }
@@ -86,5 +86,44 @@ func TestOrderNestsWorkers(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Order =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A worker names its boss (it outlives the boss's id), or holds an older version's session id; a name
+// counts only for a session marked as a boss.
+func TestOrderNestsByBossName(t *testing.T) {
+	in := []Session{
+		{Name: "boss-app", Group: "boss-app", ID: "$10", Boss: true},
+		{Name: "app", Group: "app", ID: "$3"},
+		{Name: "app-fix", Group: "app", ID: "$5", StartedBy: "boss-app"},
+		{Name: "app-old", Group: "app", ID: "$6", StartedBy: "$10"},
+		{Name: "app-other", Group: "app", ID: "$7", StartedBy: "app"}, // app isn't a boss
+		{Name: "app-gone", Group: "app", ID: "$8", StartedBy: "boss-web"},
+	}
+	var got []string
+	for _, s := range Order(in) {
+		got = append(got, fmt.Sprintf("%s/%d", s.Name, s.Depth))
+	}
+	want := []string{"app/0", "app-gone/0", "app-other/0", "boss-app/0", "app-fix/1", "app-old/1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Order =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestStarter(t *testing.T) {
+	if got := Starter("$4", "boss-app", true); got != "boss-app" {
+		t.Errorf("Starter of a boss = %q, want its name", got)
+	}
+	if got := Starter("$4", "app", false); got != "$4" {
+		t.Errorf("Starter of a plain session = %q, want its id", got)
+	}
+	for _, tt := range []struct {
+		v    string
+		boss bool
+		want bool
+	}{{"boss-app", true, true}, {"$4", true, true}, {"$4", false, true}, {"boss-app", false, false}, {"", true, false}, {"$5", true, false}} {
+		if got := Names(tt.v, "$4", "boss-app", tt.boss); got != tt.want {
+			t.Errorf("Names(%q, boss=%v) = %v, want %v", tt.v, tt.boss, got, tt.want)
+		}
 	}
 }

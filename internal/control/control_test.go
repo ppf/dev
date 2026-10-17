@@ -297,7 +297,8 @@ func TestListStartedByAndHerd(t *testing.T) {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd)
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
-		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "")
+		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
+		line("by-name", "$6", "%6", "herd", "") + line("not-a-boss", "$7", "%7", "user", "")
 	c := tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
@@ -315,12 +316,13 @@ func TestListStartedByAndHerd(t *testing.T) {
 	for _, a := range agents {
 		got[a.Session] = fmt.Sprintf("%s/%v", a.StartedBy, a.Boss)
 	}
-	want := map[string]string{"herd": "/true", "fix-login": "herd/false", "mine-too": "herd/false", "user": "/false", "orphan": "/false"}
+	want := map[string]string{"herd": "/true", "fix-login": "herd/false", "mine-too": "herd/false", "user": "/false", "orphan": "/false",
+		"by-name": "herd/false", "not-a-boss": "/false"}
 	if !maps.Equal(got, want) {
 		t.Errorf("started_by/herd = %v, want %v", got, want)
 	}
 	mine, err := StartedBy(c, agents, "%1")
-	if err != nil || len(mine) != 2 || mine[0].Session != "fix-login" || mine[1].Session != "mine-too" {
-		t.Errorf("StartedBy = %+v, %v; want fix-login and mine-too", mine, err)
+	if err != nil || len(mine) != 3 || mine[0].Session != "fix-login" || mine[1].Session != "mine-too" || mine[2].Session != "by-name" {
+		t.Errorf("StartedBy = %+v, %v; want fix-login, mine-too and by-name", mine, err)
 	}
 }

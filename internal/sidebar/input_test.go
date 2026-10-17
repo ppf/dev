@@ -155,6 +155,7 @@ func TestInputKeys(t *testing.T) {
 			"set-option -gq @sidebar_selected_session a",
 		}},
 		{"r", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}, "b", []string{
+			"show-option -qv -t =b: @dev_herd",
 			"command-prompt -t /dev/tty1 -I b -p Rename session: rename-session -t '=b:' -- '%%'",
 		}},
 		{"unbound key", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}, "b", nil},

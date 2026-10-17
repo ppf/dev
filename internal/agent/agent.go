@@ -55,6 +55,12 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
 const IdlePrompt = "idle_prompt"
 
+// Deciding reports a trusted state waiting on the user's decision (a permission prompt or question),
+// not just Claude's idle reminder; waitingFor is @agent_waiting_for.
+func Deciding(state, waitingFor string) bool {
+	return state == Waiting && waitingFor != IdlePrompt
+}
+
 // Hook is the part of a hook's input Record needs besides the Session.
 type Hook struct {
 	Event            string `json:"hook_event_name"`

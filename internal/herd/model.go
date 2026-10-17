@@ -36,6 +36,7 @@ type row struct {
 	Sidebar      string `tmux:"@sidebar_pane"`
 	Herd         string `tmux:"@dev_herd"`
 	StartedBy    string `tmux:"@dev_started_by"`
+	WaitingFor   string `tmux:"@agent_waiting_for"`
 }
 
 // tile is one worker session's preview.
@@ -43,6 +44,7 @@ type tile struct {
 	sess      sidebar.Session
 	pane      string   // the agent pane
 	startedBy string   // OptStartedBy
+	deciding  bool     // the agent waits on the user's decision, see agent.Deciding
 	body      []string // the pane's last screen lines; nil when not captured this tick
 }
 
@@ -184,7 +186,7 @@ func (m Model) refresh() tea.Cmd {
 				snap.tiles[i].body = []string{err.Error()}
 				continue
 			}
-			snap.tiles[i].body = lastLines(out, g.tileH-1)
+			snap.tiles[i].body = tail(previewLines(out, snap.tiles[i]), g.tileH-1)
 		}
 		return refreshMsg{snap: snap}
 	}
@@ -238,7 +240,13 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			sess.PR = look.PR(a.Pane.Path, sess.Branch)
 		}
 		sessions = append(sessions, sess)
-		meta[name] = tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}
+		t := tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}
+		for _, r := range rs {
+			if r.ID == a.Pane.ID {
+				t.deciding = agent.Deciding(a.State, r.WaitingFor)
+			}
+		}
+		meta[name] = t
 	}
 	for _, sess := range sidebar.Order(sessions) {
 		t := meta[sess.Name]
@@ -263,10 +271,20 @@ var osc = regexp.MustCompile("\x1b\\][^\x07\x1b]*(\x07|\x1b\\\\)")
 
 // lastLines is the last n lines of a capture after dropping trailing blank lines.
 func lastLines(capture string, n int) []string {
+	return tail(screenLines(capture), n)
+}
+
+// screenLines splits a capture into lines without OSC sequences or trailing blank lines.
+func screenLines(capture string) []string {
 	lines := strings.Split(osc.ReplaceAllString(capture, ""), "\n")
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
+	return lines
+}
+
+// tail is the last n lines.
+func tail(lines []string, n int) []string {
 	if n <= 0 {
 		return []string{}
 	}
