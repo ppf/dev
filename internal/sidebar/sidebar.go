@@ -19,6 +19,9 @@ const (
 	optProject     = "@project"                  // session: the project key the sidebar groups by
 )
 
+// OptHerd marks a dev herd session ("1"), which has no sidebar.
+const OptHerd = "@dev_herd"
+
 // Session is one sidebar entry.
 type Session struct {
 	Name   string

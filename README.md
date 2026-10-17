@@ -91,6 +91,16 @@ dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 
 Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hooks, so `wait` and `prompt --wait` refuse a Codex pane without them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `agent` is a subcommand, so no project can be named `agent`.
 
+## Coordinator view
+
+```bash
+dev herd [<project>]    # open or attach the herd session: "herd", or "herd-<project>"
+```
+
+One window: a coordinator Claude on the left, started in the project's main checkout (default `$HOME`) and told to use the `dev-agents` skill, so its prompt is the one input field ("start workers for X and Y", "tell fix-login to add tests"). On the right, live previews of every other agent session: a tile per session with the sidebar's header (state dot, agent, state, cost, PR tag, branch; red while waiting) over the last lines of its agent pane. The grid reflows with the count and pane size, and pages past 12 tiles. It refreshes once a second, only while its window is on screen.
+
+Keys in the previews: `j`/`k` select, `⏎` (or a click on the selected tile) switches to that worker, `o` opens its PR, `x` kills a worker this herd's coordinator started (`dev agent start` from it marks the new session with `@dev_started_by`), after a `y`. Closing either pane ends the herd session, and it has no sidebar. Session restore doesn't bring a herd back: a restored `herd` session is a plain one, which `dev herd` refuses, like any session of that name it didn't create (kill it first). `herd` can't be a project name.
+
 ## Session cost
 
 The sidebar shows each Claude session's estimated cost (`Claude · idle · $1.24 · title`), and `dev agent list --json` reports it as `cost_usd`. The number is Claude Code's own `cost.total_cost_usd`, the list-price estimate `/cost` shows. It covers every API call of the conversation, and resets on `/clear`. It isn't your bill on a subscription plan. `dev statusline` records it from the status line input, so run your status line through it:

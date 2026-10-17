@@ -169,8 +169,7 @@ func (m Model) bottomRow() string {
 // errorRow is err in red on one line of width columns.
 func errorRow(err error, width int) string {
 	// One line: a tmux error carries stderr, whose newlines would add rows and scroll the header away
-	msg := strings.Join(strings.Fields(err.Error()), " ")
-	return " " + red + truncate(msg, width-1) + reset
+	return AlertRow(err.Error(), width)
 }
 
 // truncate cuts s to max display columns, ending in … when cut; max <= 0 gives "" (truncate_text).

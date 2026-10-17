@@ -161,6 +161,10 @@ func ensureSidebar(c *tmux.Client, target string, from Origin, toggle bool) erro
 		return nil
 	}
 
+	// A herd's previews pane stands in for its sidebar
+	if herd, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(target), OptHerd); err != nil || strings.TrimSpace(herd) != "" {
+		return err
+	}
 	anchor, err := firstContentPane(c, target)
 	if err != nil {
 		return err

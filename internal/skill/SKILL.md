@@ -7,6 +7,8 @@ description: Coordinate other Claude Code agents running in dev tmux sessions â€
 
 You are a coordinator. Other Claude Code agents run in their own tmux sessions, opened by `dev`. You drive them with `dev agent`; you never type into their panes any other way.
 
+A coordinator usually lives in `dev herd`: the user types requests into your prompt while the pane beside you previews every worker, so they see the workers you start without you pasting their screens.
+
 ## Rules
 
 - **Target by session name or pane id** (`%12`), exactly as `dev agent list` prints them. Never by sidebar position or number.
