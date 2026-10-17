@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -57,11 +59,31 @@ func newStateCmd() *cobra.Command {
 				// Restore resumes Claude conversations only; a Codex id would make it type `claude --resume`
 				session = agent.Session{}
 			}
+			var out string
+			busy := false
+			if !codex {
+				// Before Record: a Stop blocked with inbox notes keeps the boss working
+				if out, busy, err = inbox.BossHook(c, pane, input); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
+				}
+				if busy {
+					state = agent.Working
+				}
+			}
 			if err := agent.Record(c, pane, state, session, agent.ParseHook(input)); err != nil {
 				return err
 			}
-			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+			if !busy {
+				if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+				}
+			}
+			if err := inbox.WorkerHook(c, control.RealClock, pane, input); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
+			}
+			if out != "" {
+				// Claude reads a hook's stdout as JSON: nothing else may go there
+				fmt.Fprintln(cmd.OutOrStdout(), out)
 			}
 			return nil
 		},

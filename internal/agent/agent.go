@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -86,7 +87,7 @@ func HookSession(input []byte) Session {
 	return s
 }
 
-// Record writes state to @agent_state, the pane's current command to @agent_cmd and s to @agent_session
+// Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
 // and @agent_transcript in one chained tmux call, bumping @agent_prompts on UserPromptSubmit and setting
 // @agent_waiting_for to why a waiting state waits (Claude's notification type, else the event: Codex's
 // PermissionRequest); Clear (or no session) unsets the session options.
@@ -97,10 +98,12 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost")}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since")}
 	} else {
+		// @agent_since (unix seconds) only moves when the state changes, so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
-		cmds = [][]string{set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
+		since := "#{?#{&&:#{==:#{@agent_state}," + state + "},#{@agent_since}},#{@agent_since}," + strconv.FormatInt(now().Unix(), 10) + "}"
+		cmds = [][]string{{"set-option", "-pF", "-t", pane, "@agent_since", since}, set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
 		if h.Event == "SessionStart" {
 			// A crashed session's cost would show until the new one's first status line
 			cmds = append(cmds, unset("@agent_cost"))
@@ -129,6 +132,9 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	_, err := c.Run(args...)
 	return err
 }
+
+// now is the clock @agent_since reads; tests replace it.
+var now = time.Now
 
 // Trusted is state when the process that recorded it (stateCmd) still runs in the pane, else "".
 func Trusted(state, stateCmd, command string) string {

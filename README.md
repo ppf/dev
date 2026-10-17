@@ -102,6 +102,14 @@ One window: a coordinator Claude on the left, started in the project's main chec
 
 Keys in the previews: `j`/`k` select, `⏎` switches to that worker, `i` (or a click on its tile) types a reply to it on the bottom row without leaving (`⏎` sends it as a prompt, `esc` cancels), `1`–`9` answer a waiting worker's permission dialog, `o` opens its PR, `x` kills a worker this boss's coordinator started (`dev agent start` from it marks the new session with `@dev_started_by`), after a `y`. Closing the coordinator or the previews ends the boss session; it has a sidebar like any session (`prefix+S` hides it). Session restore doesn't bring a boss back: a restored `boss` session is a plain one, which `dev boss` refuses, like any session of that name it didn't create (kill it first). `boss` (and the old name `herd`) can't be a project name. In the sidebar, each worker a coordinator started sits indented (`└`) under the boss session, in its group; `dev goto` numbers follow the same order.
 
+### Boss inbox
+
+The coordinator hears of its workers on its own: a worker's `dev state` hook queues a one-line note for the boss that started it when the worker finishes (with its last message), fails, or needs a decision (permission prompt or question), and the previews add one for a worker working over 20 minutes or waiting on an unanswered decision over 3. Notes sit in `$XDG_STATE_HOME/dev/inbox/` (one locked file per boss), a worker's repeat note is dropped, and at most 20 wait. They reach the coordinator in one batch: when it stops (its Stop hook blocks the stop with the notes, so it carries on), when you send it a prompt (added as context), or pasted as a prompt while it's idle and its input box is empty, at most every 10 s. It never pastes into a box with a draft. The coordinator is told to act on clear, safe next steps itself, ask you about decisions and anything destructive or external, and roll up finished batches.
+
+```bash
+tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
+```
+
 ## Session cost
 
 The sidebar shows each Claude session's estimated cost (`Claude · idle · $1.24 · title`), and `dev agent list --json` reports it as `cost_usd`. The number is Claude Code's own `cost.total_cost_usd`, the list-price estimate `/cost` shows. It covers every API call of the conversation, and resets on `/clear`. It isn't your bill on a subscription plan. `dev statusline` records it from the status line input, so run your status line through it:

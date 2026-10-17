@@ -77,6 +77,15 @@ dev agent send-keys <target> esc       # stop the current turn
 
 Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `left`, `right`, `ctrl+c`, `ctrl+d`, or a single character. Avoid `ctrl+c` twice and `ctrl+d`: they quit Claude.
 
+## Boss inbox
+
+In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <question>`, `stuck: working for 25m` or `waiting on a decision for 4m, unanswered`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
+
+- **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
+- **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message.
+- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user.
+- **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
+
 ## Codex panes
 
 With its hooks (`dev state --codex`), a Codex pane has a state and works like Claude; an approval request shows as `waiting` and refuses prompts. Without them (`state` is `""`), `wait` and `prompt --wait` refuse it: send with plain `prompt`, then poll `read` until its output stops changing.
