@@ -20,11 +20,14 @@ A coordinator usually lives in `dev herd`: the user types requests into your pro
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?}]
+dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?, started_by?, herd?}]
+dev agent list --mine --json   # only your workers: the sessions you started with dev agent start
 dev agent get <target> --json
 ```
 
 `state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). Claude panes without the `dev state` hook aren't listed.
+
+Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `herd: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
 ## Start a worker
 
