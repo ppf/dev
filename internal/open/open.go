@@ -293,3 +293,13 @@ func Pause(out io.Writer, prompt string) {
 	// Any outcome, EOF included, means go on, as with bash's read.
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 }
+
+// ClientSize is the size a new session gets: the current client's inside tmux, else the terminal's.
+func ClientSize(c *tmux.Client) (width, height int) {
+	return terminalSize(sizeSources(c, os.Getenv("TMUX") != "", os.Getenv)...)
+}
+
+// Attach switches the current client to session inside tmux, else attaches this terminal to it.
+func Attach(c *tmux.Client, session string) error {
+	return attach(c, session, os.Getenv("TMUX") != "")
+}

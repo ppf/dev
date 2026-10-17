@@ -13,6 +13,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
@@ -262,10 +263,18 @@ wait until its agent's first hook registers it. An existing session is reused. P
 			if err != nil {
 				return err
 			}
+			c, session := tmux.New(), open.SessionName(args[0], wt)
+			_, missing := c.Run("has-session", "-t", tmux.SessionTarget(session))
 			if err := openProject(cmd, args[0], wt, true); err != nil {
 				return err
 			}
-			a, err := control.AwaitAgent(tmux.New(), control.RealClock, open.SessionName(args[0], wt), timeout)
+			// A herd's x only kills workers its coordinator started, never a reused session
+			if pane := os.Getenv("TMUX_PANE"); missing != nil && pane != "" {
+				if err := herd.MarkStartedBy(c, session, pane); err != nil {
+					return err
+				}
+			}
+			a, err := control.AwaitAgent(c, control.RealClock, session, timeout)
 			if err != nil {
 				return err
 			}

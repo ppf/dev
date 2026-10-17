@@ -1,0 +1,78 @@
+//go:build integration
+
+package integration
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// dev herd opens the coordinator and previews panes; a worker the coordinator starts is marked as its
+// own, shows as a tile with its screen, and Enter on the previews switches the client to it.
+func TestHerd(t *testing.T) {
+	d := newDevServer(t, "set -g @dev_notify off\n")
+	stubs := filepath.SplitList(d.path)[0]
+	if err := os.Remove(filepath.Join(stubs, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	agentStub(t, stubs, "claude")
+	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
+
+	herd := exec.Command(devBin, "herd")
+	herd.Env = env
+	if out, err := herd.CombinedOutput(); err != nil {
+		t.Fatalf("dev herd: %v: %s", err, out)
+	}
+	check(t, "client switched", d.T("list-clients", "-F", "#{client_session}"), "herd")
+	check(t, "herd option", d.T("show-option", "-qv", "-t", "=herd:", "@dev_herd"), "1")
+	panes := strings.Split(d.T("list-panes", "-t", "=herd:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
+	if len(panes) != 2 || !strings.Contains(panes[0], "claude --append-system-prompt") || !strings.Contains(panes[1], "herd --previews") {
+		t.Fatalf("herd panes: %q", panes)
+	}
+	coordinator, previews := strings.Fields(panes[0])[0], strings.Fields(panes[1])[0]
+	check(t, "coordinator focused", d.T("display", "-t", "=herd:", "-p", "#{pane_id}"), coordinator)
+
+	again := exec.Command(devBin, "herd")
+	again.Env = env
+	if out, err := again.CombinedOutput(); err != nil {
+		t.Fatalf("dev herd again: %v: %s", err, out)
+	}
+	check(t, "reused", d.T("list-sessions", "-F", "#{session_name}"), "boot\nherd")
+
+	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
+	check(t, "start from the coordinator", status+errOut, "0")
+	check(t, "started by the herd", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"),
+		d.T("display", "-t", "=herd:", "-p", "#{session_id}"))
+	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
+	check(t, "prompt", status+errOut, "0")
+
+	waitFor(t, "app tile with its screen", func() bool {
+		screen := d.T("capture-pane", "-p", "-t", previews)
+		return strings.Contains(screen, "● app Claude · idle") && strings.Contains(screen, "got: hello")
+	})
+	screen := d.T("capture-pane", "-p", "-t", previews)
+	if strings.Contains(screen, "● herd") {
+		t.Errorf("the herd session shows as a tile:\n%s", screen)
+	}
+	d.T("send-keys", "-t", previews, "Enter")
+	waitFor(t, "client on app", func() bool {
+		c, _ := d.Try("list-clients", "-F", "#{client_session}")
+		return c == "app"
+	})
+
+	d.T("send-keys", "-t", previews, "C-c")
+	waitFor(t, "herd gone with its previews pane", func() bool {
+		_, err := d.Try("has-session", "-t", "=herd:")
+		return err != nil
+	})
+
+	// A session named like a herd that isn't one is refused
+	d.T("new-session", "-d", "-s", "herd")
+	refused := exec.Command(devBin, "herd")
+	refused.Env = env
+	out, err := refused.CombinedOutput()
+	check(t, "foreign herd refused", errStatus(err)+" "+string(out), "1 ❌ session \"herd\" exists and isn't a herd session (a restored herd isn't one either): kill or rename it\n")
+}
