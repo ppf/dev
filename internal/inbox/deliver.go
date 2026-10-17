@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -24,8 +25,11 @@ func view(c *tmux.Client, target string) (sessionView, error) {
 		return sessionView{}, err
 	}
 	rows, err := tmux.Parse[sessionView](out)
-	if err != nil || len(rows) != 1 {
+	if err != nil {
 		return sessionView{}, err
+	}
+	if len(rows) != 1 {
+		return sessionView{}, fmt.Errorf("inbox: %d rows for %s", len(rows), target)
 	}
 	return rows[0], nil
 }
@@ -57,8 +61,11 @@ func BossOf(c *tmux.Client, pane string) (b Boss, worker string, ok bool, err er
 	}
 	v, err := view(c, id)
 	if err != nil {
-		// The boss may be gone; its workers outlive it
-		return Boss{}, "", false, nil
+		if strings.Contains(err.Error(), "can't find session") {
+			// The boss is gone; its workers outlive it
+			return Boss{}, "", false, nil
+		}
+		return Boss{}, "", false, err
 	}
 	b, ok, err = v.boss()
 	return b, worker, ok, err
@@ -75,7 +82,10 @@ func Self(c *tmux.Client, pane string) (Boss, bool, error) {
 		return b, ok, err
 	}
 	a, err := control.Resolve(c, b.Name)
-	if err != nil || a.Pane != pane {
+	if err != nil {
+		return Boss{}, false, err
+	}
+	if a.Pane != pane {
 		// The previews pane runs in the boss too
 		return Boss{}, false, nil
 	}

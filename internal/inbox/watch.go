@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
@@ -49,16 +50,17 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if !ok || err != nil {
 		return err
 	}
-	id, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}")
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}")
 	if err != nil {
 		return err
 	}
+	id := strings.TrimSpace(out)
 	rows, err := tmux.Query[paneRow](c, "list-panes", "-a")
 	if err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if r.StartedBy+"\n" != id {
+		if r.StartedBy != id {
 			continue
 		}
 		if n, ok := r.stuck(clk.Now()); ok {

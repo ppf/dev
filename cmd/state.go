@@ -70,20 +70,24 @@ func newStateCmd() *cobra.Command {
 					state = agent.Working
 				}
 			}
-			if err := agent.Record(c, pane, state, session, agent.ParseHook(input)); err != nil {
-				return err
+			recErr := agent.Record(c, pane, state, session, agent.ParseHook(input))
+			if out != "" {
+				// The notes are already out of the inbox: print them even if Record failed. Claude reads a
+				// hook's stdout as JSON, so nothing else may go there
+				fmt.Fprintln(cmd.OutOrStdout(), out)
 			}
-			if !busy {
-				if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
-				}
+			if recErr != nil {
+				return recErr
+			}
+			if busy {
+				// A blocked Stop isn't a finished turn, for notify or for a boss above this one
+				return nil
+			}
+			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 			}
 			if err := inbox.WorkerHook(c, control.RealClock, pane, input); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
-			}
-			if out != "" {
-				// Claude reads a hook's stdout as JSON: nothing else may go there
-				fmt.Fprintln(cmd.OutOrStdout(), out)
 			}
 			return nil
 		},

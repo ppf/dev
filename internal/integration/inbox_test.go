@@ -77,3 +77,35 @@ func TestBossInbox(t *testing.T) {
 	time.Sleep(time.Second)
 	check(t, "boss logs stay as they were", logOf("boss")+"|"+logOf("boss-draft"), want+"|")
 }
+
+// A worker's new prompt resets its dedupe: a second turn ending like the first still reaches the boss,
+// here as context on the coordinator's next prompt.
+func TestBossInboxNextTurn(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	run := func(pane, stdin string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", "idle")
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("❌ dev state: %v", err)
+		}
+		return string(out)
+	}
+	// A busy coordinator: notes wait for its own hooks
+	s.T("new-session", "-d", "-s", "boss", "sleep 600")
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", s.T("display", "-t", "=boss:", "-p", "#{session_id}"))
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	run(boss, `{"hook_event_name":"UserPromptSubmit"}`)
+	stop := `{"hook_event_name":"Stop","last_assistant_message":"Done."}`
+	run(worker, stop)
+	run(worker, `{"hook_event_name":"UserPromptSubmit"}`)
+	run(worker, stop)
+	check(t, "both turns as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),
+		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 2 worker update(s):\n- w finished: Done.\n- w finished: Done.","hookEventName":"UserPromptSubmit"}}`+"\n")
+}

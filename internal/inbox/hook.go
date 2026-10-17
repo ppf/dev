@@ -47,15 +47,24 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 
 // WorkerHook queues a note for the boss that started pane's session when the hook event is one a boss
 // hears of (finished, failed, needs a decision), then delivers the inbox if the coordinator is ready.
+// A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
+	var e bossEvent
+	if json.Unmarshal(input, &e) != nil {
+		return nil
+	}
+	if _, ok := FromHook("", input); !ok && e.Name != "UserPromptSubmit" {
+		// Most hook events (tool use) never concern a boss: no tmux call for them
+		return nil
+	}
 	b, worker, ok, err := BossOf(c, pane)
 	if !ok || err != nil {
 		return err
 	}
-	n, ok := FromHook(worker, input)
-	if !ok {
-		return nil
+	if e.Name == "UserPromptSubmit" {
+		return b.Box.Forget(worker)
 	}
+	n, _ := FromHook(worker, input)
 	added, err := b.Box.Add(n)
 	if !added || err != nil {
 		return err

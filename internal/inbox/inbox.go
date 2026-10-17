@@ -58,6 +58,14 @@ type hookEvent struct {
 	Error            string `json:"error"`
 }
 
+// Forget clears worker's last note key, so its next turn's note isn't taken for a repeat of the last one.
+func (b Box) Forget(worker string) error {
+	return b.update(func(s *state) error {
+		delete(s.Last, worker)
+		return nil
+	})
+}
+
 // FromHook builds worker's note for a Claude hook event; ok=false for events that make none (an idle
 // reminder, tool events).
 func FromHook(worker string, input []byte) (Note, bool) {
