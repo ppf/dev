@@ -19,7 +19,7 @@ const (
 	optProject     = "@project"                  // session: the project key the sidebar groups by
 )
 
-// OptHerd marks a dev herd session ("1"), which has no sidebar.
+// OptHerd marks a dev boss session ("1"), which has no sidebar.
 const OptHerd = "@dev_herd"
 
 // Session is one sidebar entry.
@@ -32,6 +32,10 @@ type Session struct {
 	Title  string // the agent pane's cleaned title, "" when generic
 	PR     PR     // Branch's pull request; none without a branch or while no client views this sidebar
 	Cost   string // the agent's estimated session cost, e.g. "$1.24"; "" when unknown
+
+	ID        string // tmux session id ($N)
+	StartedBy string // @dev_started_by: the id of the session whose coordinator started this one
+	Depth     int    // how deep Order nested it under the session that started it
 }
 
 // Client is an attached client as list-clients reports it.

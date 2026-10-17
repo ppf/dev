@@ -172,7 +172,7 @@ func TestKillGuard(t *testing.T) {
 		return next.(Model), cmd
 	}
 	m, _ = press(m, "x")
-	if m.confirm != "" || !strings.Contains(m.msg, "wasn't started from this herd") {
+	if m.confirm != "" || !strings.Contains(m.msg, "wasn't started from this boss") {
 		t.Errorf("x on a foreign worker: confirm %q msg %q", m.confirm, m.msg)
 	}
 	m.snap.tiles[1].startedBy = "$1"

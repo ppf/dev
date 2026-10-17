@@ -79,13 +79,23 @@ func (m Model) render() frame {
 		selected := s.Name == m.selected
 		f.rows = append(f.rows, rowStart{line: len(f.lines), session: s.Name})
 
-		display := truncate(s.Name, maxName)
+		// A worker sits under the session that started it. Deep nesting gives way before the name: one name
+		// column always stays left of the buttons, so a click on the name never lands on ×
+		indent := ""
+		if s.Depth > 0 && maxName > 2 {
+			indent = strings.Repeat("  ", min(s.Depth-1, (maxName-3)/2)) + "└ "
+		}
+		iw := ansi.StringWidth(indent)
+		display := truncate(s.Name, max(1, maxName-iw))
 		styled := display
 		if s.Name == m.snap.current {
 			styled = bold + display + reset
 		}
 		line := "  " + statusDot(s.Agent, s.State) + " " + styled
-		vis := 4 + ansi.StringWidth(display)
+		if indent != "" {
+			line = "  " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
+		}
+		vis := 4 + iw + ansi.StringWidth(display)
 		if s.Branch != "" {
 			if bmax := right - vis - 2; bmax > 3 {
 				bt := truncate(s.Branch, bmax)
@@ -116,10 +126,11 @@ func (m Model) render() frame {
 		if s.State == agent.Waiting {
 			colour = red
 		}
-		meta, vis := "", 4
+		// The second line starts under the name, past the indent
+		meta, vis := "", 4+iw
 		if s.PR.Number != 0 {
 			// First, so the end-cut takes the title before the tag
-			tag := truncate(fmt.Sprintf("#%d %s", s.PR.Number, s.PR.State), maxMeta)
+			tag := truncate(fmt.Sprintf("#%d %s", s.PR.Number, s.PR.State), maxMeta-iw)
 			tw := ansi.StringWidth(tag)
 			f.links = append(f.links, link{line: len(f.lines), from: vis, to: vis + tw, url: s.PR.URL})
 			meta, vis = prColour(s.PR.State)+tag+reset, vis+tw
@@ -138,7 +149,7 @@ func (m Model) render() frame {
 		}
 		body = truncate(body, avail)
 		meta += colour + body + reset
-		f.lines = append(f.lines, cardLine("    "+meta, vis+ansi.StringWidth(body), w, selected))
+		f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
 	}
 
 	// Exactly h lines: content reaching the bottom row gives way to it, as bash drew that row last

@@ -14,9 +14,10 @@ import (
 func newHerdCmd() *cobra.Command {
 	var previews bool
 	cmd := &cobra.Command{
-		Use:   "herd [project]",
-		Short: "Open the coordinator view: a coordinator Claude next to live previews of every agent session",
-		Long: `Open or attach the herd session ("herd", or "herd-<project>"): a coordinator Claude started in the
+		Use:     "boss [project]",
+		Aliases: []string{"herd"},
+		Short:   "Open the coordinator view: a coordinator Claude next to live previews of every agent session",
+		Long: `Open or attach the boss session ("boss", or "boss-<project>"): a coordinator Claude started in the
 project's main checkout (default: $HOME) that drives the other sessions with the dev-agents skill, next to
 live previews of every agent session.`,
 		Args:              cobra.MaximumNArgs(1),
@@ -48,7 +49,7 @@ live previews of every agent session.`,
 			return herd.Open(c, p.Name, dir)
 		},
 	}
-	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the herd session)")
+	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
 	return cmd
 }

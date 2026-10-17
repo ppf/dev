@@ -45,8 +45,8 @@ type Agent struct {
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 	// StartedBy is the session whose coordinator started this one with `dev agent start`; "" otherwise.
 	StartedBy string `json:"started_by,omitempty"`
-	// Herd marks a `dev herd` coordinator session.
-	Herd bool `json:"herd,omitempty"`
+	// Boss marks a `dev boss` coordinator session.
+	Boss bool `json:"boss,omitempty"`
 }
 
 // row is one list-panes -a row: agent.Pane's fields plus the session options Detect and Agent need.
@@ -107,7 +107,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		}
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
-			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Herd: r.Herd != "",
+			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost

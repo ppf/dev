@@ -39,7 +39,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if t := m.snap.tiles[i]; t.startedBy == "" || t.startedBy != m.snap.self {
-			m.msg = t.sess.Name + " wasn't started from this herd: kill it from its sidebar"
+			m.msg = t.sess.Name + " wasn't started from this boss: kill it from its sidebar"
 		} else {
 			m.confirm = t.sess.Name
 		}
