@@ -42,10 +42,6 @@ func ensInfo(pane string) string {
 	return "display-message -t " + pane + " -p #{pane_start_command}\x1f#{window_id}\x1f#{window_zoomed_flag}\x1f"
 }
 
-func ensHerd(session string) string {
-	return "show-option -qv -t =" + session + ": @dev_herd"
-}
-
 func ensContent(session string) string {
 	return "list-panes -t =" + session + ": -F #{pane_id}\x1f#{@sidebar_pane}\x1f"
 }
@@ -130,7 +126,7 @@ func TestEnsure(t *testing.T) {
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-					ensHerd("app"), ensContent("app"), ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
+					ensContent("app"), ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
 					"display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -141,7 +137,7 @@ func TestEnsure(t *testing.T) {
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"}
 			},
 		},
@@ -153,7 +149,7 @@ func TestEnsure(t *testing.T) {
 			},
 			fail: []string{"display-message -t %7 -p "},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p "}
 			},
 		},
@@ -164,7 +160,7 @@ func TestEnsure(t *testing.T) {
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5"}
 			},
 		},
@@ -173,7 +169,7 @@ func TestEnsure(t *testing.T) {
 			out: map[string]string{ensStored("app"): "%3\n", ensPanes: "%3\n", ensInfo("%3"): tmux.FormatRow(bashStart, "@1", "0")},
 			want: func(*testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, ensInfo("%3"), "kill-pane -t %3",
-					"set-option -t =app: -u @sidebar_pane", ensHerd("app"), ensContent("app")}
+					"set-option -t =app: -u @sidebar_pane", ensContent("app")}
 			},
 		},
 		{
@@ -187,7 +183,7 @@ func TestEnsure(t *testing.T) {
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, ensInfo("%3"), "kill-pane -t %3",
-					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
+					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensContent("app"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -232,7 +228,7 @@ func TestEnsure(t *testing.T) {
 			out:  map[string]string{ensContent("app"): tmux.FormatRow("%1", "")},
 			fail: []string{ensSplit(t, "%1")},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensHerd("app"), ensContent("app"), ensSplit(t, "%1")}
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensSplit(t, "%1")}
 			},
 		},
 	}
@@ -260,7 +256,7 @@ func TestToggleHide(t *testing.T) {
 	if err := Toggle(c, Origin{"app", "%1"}); err != nil {
 		t.Fatal(err)
 	}
-	ensCheck(t, log(), []string{ensHerd("app"), ensStored("app"), ensPanes, sessions,
+	ensCheck(t, log(), []string{ensStored("app"), ensPanes, sessions,
 		ensInfo("%3"), "kill-pane -t %3", "set-option -t =app: -u @sidebar_pane",
 		ensInfo("%8"), "kill-pane -t %8", "resize-pane -Z -t @4", "set-option -t =web: -u @sidebar_pane",
 		ensInfo("%9"), "kill-pane -t %9", "set-option -t =old: -u @sidebar_pane",
@@ -277,8 +273,8 @@ func TestToggleShow(t *testing.T) {
 	if err := Toggle(c, Origin{"app", "%1"}); err != nil {
 		t.Fatal(err)
 	}
-	ensCheck(t, log(), []string{ensHerd("app"), ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-		"set-option -gu @sidebar_hidden", ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
+	ensCheck(t, log(), []string{ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
+		"set-option -gu @sidebar_hidden", ensContent("app"), ensSplit(t, "%1"),
 		"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"})
 
 	c, log = ensTmux(nil)
@@ -300,21 +296,4 @@ func TestEnsureSwitchTo(t *testing.T) {
 		t.Error("failing switch-client: want error")
 	}
 	ensCheck(t, log(), []string{ensHidden, "switch-client -t =web:"})
-}
-
-// A herd session's previews pane stands in for its sidebar: none is created.
-func TestEnsureHerd(t *testing.T) {
-	c, calls := ensTmux(map[string]string{ensHerd("herd"): "1\n"})
-	if err := Ensure(c, "herd", Origin{}); err != nil {
-		t.Fatal(err)
-	}
-	ensCheck(t, calls(), []string{ensHidden, ensStored("herd"), ensHerd("herd")})
-}
-
-func TestToggleRefusesBossSession(t *testing.T) {
-	c, log := ensTmux(map[string]string{ensHerd("boss"): "1\n"})
-	if err := Toggle(c, Origin{"boss", "%1"}); err == nil || !strings.Contains(err.Error(), "boss session has no sidebar") {
-		t.Errorf("toggle in a boss session: %v", err)
-	}
-	ensCheck(t, log(), []string{ensHerd("boss")})
 }

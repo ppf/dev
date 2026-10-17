@@ -148,19 +148,26 @@ func TestSelectionAndClicks(t *testing.T) {
 		next, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 		return next.(Model), cmd
 	}
-	if m, _ = click(m, 3, 1); m.selected != "a" {
-		t.Errorf("click on tile a selects it, got %q", m.selected)
+	var ran []string
+	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
+	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
+	// A click answers in place: it selects the tile and opens the reply box for it, never switching
+	m, cmd := click(m, 3, 1)
+	if m.selected != "a" || m.reply != "a" || m.replyPane != "%5" || cmd != nil || len(ran) != 0 {
+		t.Errorf("click on tile a: selected %q reply %q pane %q, ran %q", m.selected, m.reply, m.replyPane, ran)
 	}
 	if _, cmd := click(m, 3, 5); cmd != nil {
 		t.Error("click on the gap row does something")
 	}
-	var ran []string
-	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
-	m.snap.client = "/dev/ttys1"
-	_, cmd := click(m, 3, 1)
-	cmd()
-	if !slices.Equal(ran, []string{"switch-client -c /dev/ttys1 -t =a:"}) {
-		t.Errorf("click on the selected tile ran %q", ran)
+	m.draft = []rune("half")
+	if m, _ = click(m, 3, 1); string(m.draft) != "half" {
+		t.Errorf("click on the same tile drops the draft: %q", string(m.draft))
+	}
+	if m, _ = click(m, 3, 7); m.reply != "b" || m.replyPane != "%6" || len(m.draft) != 0 {
+		t.Errorf("click on tile b: reply %q pane %q draft %q", m.reply, m.replyPane, string(m.draft))
+	}
+	if len(ran) != 0 {
+		t.Errorf("clicks ran %q", ran)
 	}
 }
 

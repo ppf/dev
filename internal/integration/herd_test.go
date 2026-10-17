@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // dev herd opens the coordinator and previews panes; a worker the coordinator starts is marked as its
@@ -28,11 +29,14 @@ func TestHerd(t *testing.T) {
 	}
 	check(t, "client switched", d.T("list-clients", "-F", "#{client_session}"), "boss")
 	check(t, "herd option", d.T("show-option", "-qv", "-t", "=boss:", "@dev_herd"), "1")
+	// Left to right: its sidebar, the coordinator, the previews
 	panes := strings.Split(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
-	if len(panes) != 2 || !strings.Contains(panes[0], "claude --append-system-prompt") || !strings.Contains(panes[1], "boss --previews") {
-		t.Fatalf("herd panes: %q", panes)
+	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], "claude --append-system-prompt") ||
+		!strings.Contains(panes[2], "boss --previews") {
+		t.Fatalf("boss panes: %q", panes)
 	}
-	coordinator, previews := strings.Fields(panes[0])[0], strings.Fields(panes[1])[0]
+	sidebarPane, coordinator, previews := strings.Fields(panes[0])[0], strings.Fields(panes[1])[0], strings.Fields(panes[2])[0]
+	check(t, "boss sidebar recorded", d.T("show-option", "-qv", "-t", "=boss:", "@sidebar_pane"), sidebarPane)
 	check(t, "coordinator focused", d.T("display", "-t", "=boss:", "-p", "#{pane_id}"), coordinator)
 
 	again := exec.Command(devBin, "herd")
@@ -62,6 +66,13 @@ func TestHerd(t *testing.T) {
 		c, _ := d.Try("list-clients", "-F", "#{client_session}")
 		return c == "app"
 	})
+
+	// Hiding the boss's sidebar leaves the boss alone
+	d.T("kill-pane", "-t", sidebarPane)
+	time.Sleep(300 * time.Millisecond)
+	if _, err := d.Try("has-session", "-t", "=boss:"); err != nil {
+		t.Fatal("❌ closing the boss's sidebar ended the boss session")
+	}
 
 	d.T("send-keys", "-t", previews, "C-c")
 	waitFor(t, "boss gone with its previews pane", func() bool {
