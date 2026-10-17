@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -172,7 +173,11 @@ func ensureSidebar(c *tmux.Client, target string, from Origin, toggle bool) erro
 	if err != nil {
 		return err
 	}
-	out, err := c.Run("split-window", "-t", anchor, "-hb", "-l", "40", "-PF", "#{pane_id}", cmd)
+	width, err := StoredWidth(c)
+	if err != nil {
+		return err
+	}
+	out, err := c.Run("split-window", "-t", anchor, "-hb", "-l", strconv.Itoa(width), "-PF", "#{pane_id}", cmd)
 	if err != nil {
 		return err
 	}

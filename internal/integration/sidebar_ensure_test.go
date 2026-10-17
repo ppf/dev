@@ -70,8 +70,9 @@ func (s *ensSide) sidebar(session string) string {
 }
 
 // ensState is what the parity steps compare: the global sidebar options, the client's session, and per
-// session whether a sidebar is tracked and every pane's geometry, focus and zoom. Pane ids and start
-// commands differ by design and are left out; the sidebar is marked instead.
+// session whether a sidebar is tracked and every pane's vertical geometry, focus and zoom. Pane ids and start
+// commands differ by design and are left out; the sidebar is marked instead. Widths and columns are left out
+// too: dev's sidebars keep one shared width where bash's are rescaled with their window (TestSidebarWidthShared).
 func ensState(d *devServer) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "hidden=%q selected=%q order=%q client=%s\n", d.T("show-option", "-gqv", "@sidebar_hidden"),
@@ -82,7 +83,7 @@ func ensState(d *devServer) string {
 		fmt.Fprintf(&b, "%s tracked=%t\n", s, d.T("show-option", "-qv", "-t", target, "@sidebar_pane") != "")
 		b.WriteString(d.T("list-panes", "-s", "-t", target, "-F",
 			"  #{window_index}.#{pane_index} active=#{pane_active} zoomed=#{window_zoomed_flag} "+
-				"#{pane_width}x#{pane_height}+#{pane_left}+#{pane_top} sidebar=#{==:#{pane_id},#{@sidebar_pane}}") + "\n")
+				"#{pane_height}+#{pane_top} sidebar=#{==:#{pane_id},#{@sidebar_pane}}") + "\n")
 	}
 	return b.String()
 }
