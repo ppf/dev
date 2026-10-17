@@ -2,6 +2,8 @@ package control
 
 import (
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -19,7 +21,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar)
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "")
 }
 
 func TestList(t *testing.T) {
@@ -287,5 +289,38 @@ func TestAwaitAgent(t *testing.T) {
 	start := clk.Now()
 	if _, err := AwaitAgent(broken, clk, "app", time.Minute); err == nil || errors.Is(err, ErrTimeout) || clk.Now() != start {
 		t.Errorf("AwaitAgent on a broken server = %v after %s", err, clk.Now().Sub(start))
+	}
+}
+
+func TestListStartedByAndHerd(t *testing.T) {
+	line := func(session, id, pane, startedBy, herd string) string {
+		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd)
+	}
+	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
+		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "")
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-panes":
+			return out, nil
+		case "display-message":
+			return "herd\n", nil
+		}
+		return "", nil
+	})
+	agents, err := list(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, a := range agents {
+		got[a.Session] = fmt.Sprintf("%s/%v", a.StartedBy, a.Herd)
+	}
+	want := map[string]string{"herd": "/true", "fix-login": "herd/false", "mine-too": "herd/false", "user": "/false", "orphan": "/false"}
+	if !maps.Equal(got, want) {
+		t.Errorf("started_by/herd = %v, want %v", got, want)
+	}
+	mine, err := StartedBy(c, agents, "%1")
+	if err != nil || len(mine) != 2 || mine[0].Session != "fix-login" || mine[1].Session != "mine-too" {
+		t.Errorf("StartedBy = %+v, %v; want fix-login and mine-too", mine, err)
 	}
 }

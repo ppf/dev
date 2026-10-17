@@ -24,7 +24,9 @@ const (
 // coordinatorPrompt is appended to the coordinator's system prompt, so its input box starts empty.
 const coordinatorPrompt = `You are the coordinator of a dev herd session. The user types requests here, such as ` +
 	`"start workers for X and Y" or "tell fix-login to add tests". Carry them out by driving worker agents ` +
-	`with the dev-agents skill (dev agent list/start/prompt/wait/read). The pane on your right previews every worker.`
+	`with the dev-agents skill (dev agent list/start/prompt/wait/read). The pane on your right previews every worker. ` +
+	`Your workers (child sessions) are ` + "`dev agent list --mine`" + `; the other dev sessions are the user's own, so ` +
+	`drive them only when asked. For dev sessions always use dev agent, not Claude's own session or agent tools.`
 
 // SessionName is the herd session for project ("" for none).
 func SessionName(project string) string {

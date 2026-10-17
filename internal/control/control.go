@@ -43,6 +43,10 @@ type Agent struct {
 	Path    string `json:"path"`
 	// CostUSD is the session's estimated cost (`dev statusline`); omitted when unknown.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
+	// StartedBy is the session whose coordinator started this one with `dev agent start`; "" otherwise.
+	StartedBy string `json:"started_by,omitempty"`
+	// Herd marks a `dev herd` coordinator session.
+	Herd bool `json:"herd,omitempty"`
 }
 
 // row is one list-panes -a row: agent.Pane's fields plus the session options Detect and Agent need.
@@ -58,6 +62,10 @@ type row struct {
 	Cost     string `tmux:"@agent_cost"`
 	Project  string `tmux:"@project"`
 	Sidebar  string `tmux:"@sidebar_pane"`
+	// The session's own id, the id of the session that started it, and the herd marker
+	SessionID string `tmux:"session_id"`
+	StartedBy string `tmux:"@dev_started_by"`
+	Herd      string `tmux:"@dev_herd"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -80,9 +88,11 @@ func list(c *tmux.Client) ([]Agent, error) {
 	}
 	var first []row // each session's first row: session options are the same on all its rows
 	panes := map[string][]agent.Pane{}
+	names := map[string]string{} // session id → name
 	for _, r := range rows {
 		if _, seen := panes[r.Session]; !seen {
 			first = append(first, r)
+			names[r.SessionID] = r.Session
 		}
 		panes[r.Session] = append(panes[r.Session], agent.Pane{
 			Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path,
@@ -97,7 +107,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		}
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
-			Project: r.Project, Path: a.Pane.Path,
+			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Herd: r.Herd != "",
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost
@@ -105,6 +115,22 @@ func list(c *tmux.Client) ([]Agent, error) {
 		agents = append(agents, ag)
 	}
 	return agents, nil
+}
+
+// StartedBy keeps the agents whose session was started (dev agent start) from pane's session.
+func StartedBy(c *tmux.Client, agents []Agent, pane string) ([]Agent, error) {
+	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+	if err != nil {
+		return nil, err
+	}
+	own = strings.TrimSpace(own)
+	mine := []Agent{}
+	for _, a := range agents {
+		if a.StartedBy == own {
+			mine = append(mine, a)
+		}
+	}
+	return mine, nil
 }
 
 // Resolve finds the agent a target names: a session name (exact) or an agent pane id (%N).

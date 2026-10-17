@@ -51,20 +51,31 @@ Run "dev agent skill" for the coordinator skill.`,
 }
 
 func newAgentListCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, mine bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List every session's agent: session, pane, agent, state, branch, path, cost",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			agents, err := control.List(tmux.New())
+			c := tmux.New()
+			agents, err := control.List(c)
 			if err != nil {
 				return err
+			}
+			if mine {
+				pane := os.Getenv("TMUX_PANE")
+				if pane == "" {
+					return errors.New("--mine lists the workers of the session it runs in: run it inside tmux")
+				}
+				if agents, err = control.StartedBy(c, agents, pane); err != nil {
+					return err
+				}
 			}
 			return printAgents(cmd.OutOrStdout(), asJSON, agents)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON array")
+	cmd.Flags().BoolVar(&mine, "mine", false, "only the workers this session started with dev agent start (its child sessions)")
 	return cmd
 }
 

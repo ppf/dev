@@ -81,6 +81,7 @@ Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (an
 
 ```bash
 dev agent list [--json]                        # session, pane, agent, state, branch, path, cost
+dev agent list --mine                          # only the workers this session started (its child sessions)
 dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
 dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
 dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
