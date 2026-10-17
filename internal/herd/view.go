@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/sidebar"
 )
 
@@ -89,9 +90,12 @@ func (m Model) render() []string {
 	}
 	pages := ""
 	if g.perPage > 0 && len(tiles) > g.perPage {
-		pages = fmt.Sprintf("  %d/%d", from/g.perPage+1, (len(tiles)+g.perPage-1)/g.perPage)
+		// First, so a narrow row cuts the hint, not the page
+		pages = fmt.Sprintf("%d/%d  ", from/g.perPage+1, (len(tiles)+g.perPage-1)/g.perPage)
 	}
 	switch {
+	case m.reply != "":
+		lines[h-1] = replyRow(m.reply, string(m.draft), w)
 	case m.confirm != "":
 		lines[h-1] = sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)
 	case m.msg != "":
@@ -99,7 +103,11 @@ func (m Model) render() []string {
 	case m.err != nil:
 		lines[h-1] = sidebar.AlertRow(m.err.Error(), w)
 	default:
-		lines[h-1] = sidebar.HintRow("j/k ⏎ switch  o PR  x kill"+pages, w)
+		hint := "j/k ⏎ switch  i reply  o PR  x kill"
+		if sel >= 0 && sel < len(tiles) && tiles[sel].sess.State == agent.Waiting {
+			hint = "1-9 answer  i reply  j/k ⏎ switch  x kill"
+		}
+		lines[h-1] = sidebar.HintRow(pages+hint, w)
 	}
 	return lines
 }
@@ -137,4 +145,24 @@ func (m Model) tileAt(x, y int) int {
 		return i
 	}
 	return -1
+}
+
+// replyRow is the reply being typed to session, its end kept in view, with a cursor.
+func replyRow(session, draft string, w int) string {
+	prefix := " " + session + " ❯ "
+	room := w - ansi.StringWidth(prefix) - 1
+	if room < 1 {
+		return ansi.Truncate(prefix, w, "")
+	}
+	// A pasted newline or escape would break the row (it's sent as typed): shown as ⏎
+	shown := strings.Map(func(c rune) rune {
+		if c < ' ' || c == 0x7f {
+			return '⏎'
+		}
+		return c
+	}, draft)
+	if over := ansi.StringWidth(shown) - room; over > 0 {
+		shown = ansi.TruncateLeft(shown, over, "")
+	}
+	return "\x1b[1m" + prefix + "\x1b[0m" + shown + "\x1b[7m \x1b[0m"
 }

@@ -260,7 +260,7 @@ func TestToggleHide(t *testing.T) {
 	if err := Toggle(c, Origin{"app", "%1"}); err != nil {
 		t.Fatal(err)
 	}
-	ensCheck(t, log(), []string{ensStored("app"), ensPanes, sessions,
+	ensCheck(t, log(), []string{ensHerd("app"), ensStored("app"), ensPanes, sessions,
 		ensInfo("%3"), "kill-pane -t %3", "set-option -t =app: -u @sidebar_pane",
 		ensInfo("%8"), "kill-pane -t %8", "resize-pane -Z -t @4", "set-option -t =web: -u @sidebar_pane",
 		ensInfo("%9"), "kill-pane -t %9", "set-option -t =old: -u @sidebar_pane",
@@ -277,7 +277,7 @@ func TestToggleShow(t *testing.T) {
 	if err := Toggle(c, Origin{"app", "%1"}); err != nil {
 		t.Fatal(err)
 	}
-	ensCheck(t, log(), []string{ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
+	ensCheck(t, log(), []string{ensHerd("app"), ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
 		"set-option -gu @sidebar_hidden", ensHerd("app"), ensContent("app"), ensSplit(t, "%1"),
 		"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"})
 
@@ -309,4 +309,12 @@ func TestEnsureHerd(t *testing.T) {
 		t.Fatal(err)
 	}
 	ensCheck(t, calls(), []string{ensHidden, ensStored("herd"), ensHerd("herd")})
+}
+
+func TestToggleRefusesBossSession(t *testing.T) {
+	c, log := ensTmux(map[string]string{ensHerd("boss"): "1\n"})
+	if err := Toggle(c, Origin{"boss", "%1"}); err == nil || !strings.Contains(err.Error(), "boss session has no sidebar") {
+		t.Errorf("toggle in a boss session: %v", err)
+	}
+	ensCheck(t, log(), []string{ensHerd("boss")})
 }
