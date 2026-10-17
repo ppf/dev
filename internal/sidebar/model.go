@@ -38,6 +38,7 @@ type paneRow struct {
 	// Session id and options: who started it (dev agent start from a coordinator)
 	SessionID string `tmux:"session_id"`
 	StartedBy string `tmux:"@dev_started_by"`
+	Herd      string `tmux:"@dev_herd"`
 	// For the shared width: own window's width and zoom, and the global @sidebar_width
 	WindowWidth int    `tmux:"window_width"`
 	WindowPanes int    `tmux:"window_panes"`
@@ -223,7 +224,8 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			ps[i] = r.agentPane()
 		}
 		// Session options: every row of the session carries the same @project and @sidebar_pane
-		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, StartedBy: rs[0].StartedBy}
+		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
+			StartedBy: rs[0].StartedBy}
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
 			title := cleanTitle(a.Pane.Title)
 			if isGenericTitle(title, name, host) {

@@ -36,6 +36,7 @@ type row struct {
 	Sidebar      string `tmux:"@sidebar_pane"`
 	Herd         string `tmux:"@dev_herd"`
 	StartedBy    string `tmux:"@dev_started_by"`
+	WaitingFor   string `tmux:"@agent_waiting_for"`
 }
 
 // tile is one worker session's preview.
@@ -43,6 +44,7 @@ type tile struct {
 	sess      sidebar.Session
 	pane      string   // the agent pane
 	startedBy string   // OptStartedBy
+	deciding  bool     // the agent waits on the user's decision, see agent.Deciding
 	body      []string // the pane's last screen lines; nil when not captured this tick
 }
 
@@ -184,11 +186,7 @@ func (m Model) refresh() tea.Cmd {
 				snap.tiles[i].body = []string{err.Error()}
 				continue
 			}
-			lines := screenLines(out)
-			if snap.tiles[i].sess.Agent == "Claude" {
-				lines = cropInput(lines)
-			}
-			snap.tiles[i].body = tail(lines, g.tileH-1)
+			snap.tiles[i].body = tail(previewLines(out, snap.tiles[i]), g.tileH-1)
 		}
 		return refreshMsg{snap: snap}
 	}
@@ -242,7 +240,13 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			sess.PR = look.PR(a.Pane.Path, sess.Branch)
 		}
 		sessions = append(sessions, sess)
-		meta[name] = tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}
+		t := tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}
+		for _, r := range rs {
+			if r.ID == a.Pane.ID {
+				t.deciding = agent.Deciding(a.State, r.WaitingFor)
+			}
+		}
+		meta[name] = t
 	}
 	for _, sess := range sidebar.Order(sessions) {
 		t := meta[sess.Name]

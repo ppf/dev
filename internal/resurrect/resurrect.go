@@ -1,5 +1,5 @@
-// Package resurrect keeps what tmux-resurrect doesn't restore — each dev session's @project and its
-// sidebar, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
+// Package resurrect keeps what tmux-resurrect doesn't restore — each dev session's @project, its
+// sidebar and the boss that started it, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
 // after a restore (dev-resurrect.sh). Each function runs as a resurrect hook; every failure is warned in
 // tmux before it is returned.
 package resurrect
@@ -25,16 +25,19 @@ import (
 
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project,
 // the position empty while its sidebar is hidden, then an agentPrefix line per live agent pane with a
-// recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
+// recorded session, and a startedByPrefix line per worker a boss started. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
 // last one's .dev instead. A failure keeps the previous file.
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
 		return fail(c, "snapshot '"+snapshot+"' missing, dev state not saved", err)
 	}
 	sessions, err := tmux.Query[struct {
-		Name    string `tmux:"session_name"`
-		Project string `tmux:"@project"`
-		Sidebar string `tmux:"@sidebar_pane"`
+		Name      string `tmux:"session_name"`
+		Project   string `tmux:"@project"`
+		Sidebar   string `tmux:"@sidebar_pane"`
+		ID        string `tmux:"session_id"`
+		StartedBy string `tmux:"@dev_started_by"`
+		Herd      string `tmux:"@dev_herd"`
 	}](c, "list-sessions")
 	if err != nil {
 		return fail(c, "list-sessions failed, dev state not saved", err)
@@ -66,6 +69,22 @@ func Save(c *tmux.Client, snapshot string) error {
 		}
 		// A stale id means the sidebar is gone, which is the same as hidden
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[sessionPane{s.Name, s.Sidebar}])
+	}
+	bosses := map[string]string{} // id → name
+	for _, s := range sessions {
+		if s.Herd != "" {
+			bosses[s.ID] = s.Name
+		}
+	}
+	for _, s := range sessions {
+		// A session id means nothing after a restart: an older version's id of a live boss becomes its name
+		boss := s.StartedBy
+		if sidebar.IsSessionID(boss) {
+			boss = bosses[boss]
+		}
+		if boss != "" {
+			fmt.Fprintf(&b, "%s\t%s\t%s\n", startedByPrefix, s.Name, boss)
+		}
 	}
 	saved := map[string]bool{}
 	for _, p := range panes {
@@ -200,7 +219,7 @@ func Restore(c *tmux.Client) error {
 	shell = filepath.Base(strings.TrimSpace(shell))
 
 	liveSessions := strings.Split(string(liveData), "\n")
-	entries, agents := parseState(string(data))
+	entries, agents, startedBy := parseState(string(data))
 	var errs []error
 	// First: rebuilding a sidebar renumbers its window's panes, and agents are saved by position
 	if err := resumeAgents(c, agents, liveSessions, shell); err != nil {
@@ -213,6 +232,18 @@ func Restore(c *tmux.Client) error {
 		}
 		if err := restoreSession(c, e, shell); err != nil {
 			warn(c, e.Session+": "+err.Error())
+			errs = append(errs, err)
+		}
+	}
+	for _, w := range startedBy {
+		if slices.Contains(liveSessions, w.Session) {
+			continue
+		}
+		if _, err := c.Run("has-session", "-t", "="+w.Session); err != nil {
+			continue
+		}
+		if _, err := c.Run("set-option", "-t", tmux.SessionTarget(w.Session), "@dev_started_by", w.Boss); err != nil {
+			warn(c, w.Session+": @dev_started_by not set")
 			errs = append(errs, err)
 		}
 	}
@@ -423,17 +454,31 @@ type entry struct {
 // that doesn't exist and skip it.
 const agentPrefix = ":agent"
 
+// startedByPrefix starts a "<prefix><TAB>session<TAB>boss" line of a .dev file: the boss (by name) whose
+// coordinator started session.
+const startedByPrefix = ":started_by"
+
+// startedByEntry is one started-by line of a .dev file.
+type startedByEntry struct{ Session, Boss string }
+
 // agentEntry is one agent line of a .dev file.
 type agentEntry struct {
 	Session, Pos, Kind, ID, Transcript, Path string
 }
 
-// parseState reads a .dev file's session and agent lines.
-func parseState(data string) ([]entry, []agentEntry) {
+// parseState reads a .dev file's session, agent and started-by lines.
+func parseState(data string) ([]entry, []agentEntry, []startedByEntry) {
 	var entries []entry
 	var agents []agentEntry
+	var startedBy []startedByEntry
 	for _, line := range strings.Split(data, "\n") {
 		session, rest, _ := strings.Cut(line, "\t")
+		if session == startedByPrefix {
+			if worker, boss, ok := strings.Cut(rest, "\t"); ok && worker != "" && boss != "" {
+				startedBy = append(startedBy, startedByEntry{worker, boss})
+			}
+			continue
+		}
 		if session == agentPrefix {
 			f := strings.Split(rest, "\t")
 			if len(f) == 6 {
@@ -447,7 +492,7 @@ func parseState(data string) ([]entry, []agentEntry) {
 		project, pos, _ := strings.Cut(rest, "\t")
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
-	return entries, agents
+	return entries, agents, startedBy
 }
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.

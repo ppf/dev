@@ -17,7 +17,7 @@ import (
 const (
 	// OptHerd marks a herd session; its sessions never show as tiles.
 	OptHerd = sidebar.OptHerd
-	// OptStartedBy is the session id ($N) of the session whose coordinator started a worker.
+	// OptStartedBy is the session whose coordinator started a worker, see sidebar.Starter.
 	OptStartedBy = "@dev_started_by"
 )
 
@@ -114,10 +114,12 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 
 // MarkStartedBy records on session that the coordinator in pane started it.
 func MarkStartedBy(c *tmux.Client, session, pane string) error {
-	id, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}")
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}\t#{session_name}\t#{"+OptHerd+"}")
 	if err != nil {
 		return err
 	}
-	_, err = c.Run("set-option", "-t", tmux.SessionTarget(session), OptStartedBy, strings.TrimSpace(id))
+	id, rest, _ := strings.Cut(strings.TrimSuffix(out, "\n"), "\t")
+	name, herd, _ := strings.Cut(rest, "\t")
+	_, err = c.Run("set-option", "-t", tmux.SessionTarget(session), OptStartedBy, sidebar.Starter(id, name, herd != ""))
 	return err
 }

@@ -160,14 +160,24 @@ func worktreeShared(c *tmux.Client, session, wtPath string) (bool, error) {
 }
 
 // rename opens client's command prompt, prefilled with target's name, to rename it (rename_selected_session).
+// A boss keeps its name: its workers and dev boss find it by it.
 func rename(c *tmux.Client, client, target string) error {
 	if target == "" {
 		return nil
 	}
+	boss, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(target), OptHerd)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(boss) != "" {
+		_, err := c.Run(append(append([]string{"display-message"}, clientFlag("-c", client)...),
+			target+" is a boss: it keeps its name, which its workers and dev boss find it by")...)
+		return err
+	}
 	args := append([]string{"command-prompt"}, clientFlag("-t", client)...)
 	// The template is parsed as a tmux command, so the target is quoted for it; '' quoting nests in tmux as in sh.
 	template := "rename-session -t " + tmux.ShellJoin(tmux.SessionTarget(target)) + " -- '%%'"
-	_, err := c.Run(append(args, "-I", target, "-p", "Rename session:", template)...)
+	_, err = c.Run(append(args, "-I", target, "-p", "Rename session:", template)...)
 	return err
 }
 

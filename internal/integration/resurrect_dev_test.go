@@ -72,6 +72,10 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	goneTranscript := hook("devu", "u1")
 	d.T("resize-pane", "-Z", "-t", "=devt:2.1") // a compact-mode zoom at save time
 	d.T("new-session", "-d", "-s", "plain")
+	// Workers' bosses: devu names its boss, devt holds an older version's id of a live boss (plain)
+	d.T("set-option", "-t", "=devu:", "@dev_started_by", "boss-x")
+	d.T("set-option", "-t", "=plain:", "@dev_herd", "1")
+	d.T("set-option", "-t", "=devt:", "@dev_started_by", display("=plain:", "#{session_id}"))
 	d.T("run-shell", save+" quiet")
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	// A new conversation in the same layout: save.sh drops the identical snapshot, its .dev must win
@@ -81,6 +85,7 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	check(t, "identical snapshot dropped", again, last)
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
 	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\n"+
+		":started_by\tdevt\tplain\n:started_by\tdevu\tboss-x\n"+
 		":agent\tdevt\t1.2\tclaude\ts1\t"+transcript+"\t"+dir+"\n"+
 		":agent\tdevu\t1.2\tclaude\tu1\t"+goneTranscript+"\t"+dirU+"\n")
 	check(t, "no save warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
@@ -115,6 +120,8 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	t.Logf("rebuilt sidebar %s: %s", sidebar, start)
 	check(t, "Go sidebar rebuilt", devSidebarStart(start), "true")
 	check(t, "@project restored", d.T("show-option", "-qv", "-t", "=devt:", "@project"), "devt")
+	check(t, "bosses restored by name", d.T("show-option", "-qv", "-t", "=devt:", "@dev_started_by")+" "+
+		d.T("show-option", "-qv", "-t", "=devu:", "@dev_started_by"), "plain boss-x")
 	check(t, "restored zoom undone", display("=devt:2", "#{window_zoomed_flag}"), "0")
 	check(t, "focus stays on agent pane", display("=devt:1", "#{pane_index}"), "2")
 	check(t, "restore warns only about devu's lost conversation", d.T("show", "-gqv", "@dev_resurrect_warnings"),

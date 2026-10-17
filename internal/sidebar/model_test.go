@@ -154,7 +154,7 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "120", "3", "0", "40")
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40")
 }
 
 func modelTestModel(c *tmux.Client) Model {
@@ -173,7 +173,7 @@ func TestModelRefresh(t *testing.T) {
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
 			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
-			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f"},
+			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
 	}

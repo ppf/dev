@@ -16,10 +16,20 @@ const (
 	minRule = 10
 )
 
+// previewLines is t's captured screen as its tile shows it: a Claude tile without Claude Code's input box,
+// unless it waits on a decision, as its question or dialog is what the user answers.
+func previewLines(capture string, t tile) []string {
+	lines := screenLines(capture)
+	if t.sess.Agent == "Claude" && !t.deciding {
+		return cropInput(lines)
+	}
+	return lines
+}
+
 // cropInput drops Claude Code's own input box from the bottom of its captured screen: a ❯ prompt row
 // between two full-width ─ rules, and the status lines under it. It looks like an input in a tile but
-// takes nothing typed there. A screen without that box, or with a numbered choice in it (a dialog
-// waiting for an answer), is returned unchanged.
+// takes nothing typed there. A screen without that box, or with a numbered option or dialog text between
+// the rules (a question waiting for an answer), is returned unchanged.
 func cropInput(lines []string) []string {
 	plain := make([]string, len(lines))
 	for i, l := range lines {
@@ -33,9 +43,14 @@ func cropInput(lines []string) []string {
 	if top < 0 || top == bottom-1 {
 		return lines
 	}
-	prompt, ok := strings.CutPrefix(plain[top+1], "❯")
-	if !ok || startsNumbered(strings.TrimSpace(prompt)) {
+	if !strings.HasPrefix(plain[top+1], "❯") {
 		return lines
+	}
+	for _, l := range plain[top+1 : bottom] {
+		// A question menu marks its selected option with ❯ too
+		if l = strings.TrimSpace(strings.TrimPrefix(l, "❯")); startsNumbered(l) || strings.Contains(l, "Do you want") {
+			return lines
+		}
 	}
 	end := top
 	for end > 0 && plain[end-1] == "" {

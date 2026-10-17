@@ -99,7 +99,7 @@ func TestBossInboxNextTurn(t *testing.T) {
 	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
 	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
 	s.T("new-session", "-d", "-s", "w", "sleep 600")
-	s.T("set-option", "-t", "=w:", "@dev_started_by", s.T("display", "-t", "=boss:", "-p", "#{session_id}"))
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss") // by name, as dev agent start writes it
 	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
 	run(boss, `{"hook_event_name":"UserPromptSubmit"}`)
 	stop := `{"hook_event_name":"Stop","last_assistant_message":"Done."}`

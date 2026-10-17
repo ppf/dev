@@ -7,6 +7,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -68,7 +69,11 @@ func BossOf(c *tmux.Client, pane string) (b Boss, w workerView, ok bool, err err
 		return Boss{}, w, false, err
 	}
 	w = rows[0]
-	v, err := view(c, w.StartedBy)
+	target := w.StartedBy
+	if !sidebar.IsSessionID(target) {
+		target = tmux.SessionTarget(target)
+	}
+	v, err := view(c, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "can't find session") {
 			// The boss is gone; its workers outlive it

@@ -88,11 +88,14 @@ func list(c *tmux.Client) ([]Agent, error) {
 	}
 	var first []row // each session's first row: session options are the same on all its rows
 	panes := map[string][]agent.Pane{}
-	names := map[string]string{} // session id → name
+	names := map[string]string{} // @dev_started_by value → the starter's name
 	for _, r := range rows {
 		if _, seen := panes[r.Session]; !seen {
 			first = append(first, r)
-			names[r.SessionID] = r.Session
+			names[sidebar.Starter(r.SessionID, r.Session, false)] = r.Session
+			if r.Herd != "" {
+				names[sidebar.Starter(r.SessionID, r.Session, true)] = r.Session
+			}
 		}
 		panes[r.Session] = append(panes[r.Session], agent.Pane{
 			Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path,

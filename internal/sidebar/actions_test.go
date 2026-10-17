@@ -19,7 +19,8 @@ type actWorld struct {
 	panes    []map[string]string
 	undying  bool // kill-session leaves the session in place
 	popupErr error
-	failCmd  string // this command fails
+	bosses   []string // sessions marked as a boss
+	failCmd  string   // this command fails
 	calls    [][]string
 }
 
@@ -62,7 +63,8 @@ func (w *actWorld) run(args []string) (string, error) {
 			}
 		}
 	case "show-option", "show-options":
-		if slices.Contains(args, optHidden) {
+		if slices.Contains(args, optHidden) || slices.Contains(args, OptHerd) && slices.ContainsFunc(w.bosses,
+			func(b string) bool { return tmux.SessionTarget(b) == target }) {
 			return "1\n", nil
 		}
 	case "display-popup":
@@ -339,9 +341,14 @@ func TestActionRename(t *testing.T) {
 		if err := rename(w.client(), tt.client, tt.target); err != nil {
 			t.Fatal(err)
 		}
-		if len(w.calls) != 1 || !slices.Equal(w.calls[0], tt.want) {
+		if len(w.calls) != 2 || !slices.Equal(w.calls[1], tt.want) {
 			t.Errorf("calls = %q, want %q", w.calls, tt.want)
 		}
+	}
+	boss := &actWorld{bosses: []string{"boss-app"}}
+	if err := rename(boss.client(), "/dev/tty1", "boss-app"); err != nil || len(boss.calls) != 2 ||
+		!slices.Equal(boss.calls[1][:3], []string{"display-message", "-c", "/dev/tty1"}) {
+		t.Errorf("renaming a boss: err %v, calls %q", err, boss.calls)
 	}
 	w := &actWorld{}
 	if err := rename(w.client(), "", ""); err != nil || len(w.calls) != 0 {

@@ -30,17 +30,20 @@ func Order(sessions []Session) []Session {
 	slices.SortStableFunc(sorted, func(a, b Session) int {
 		return cmp.Or(strings.Compare(a.Group, b.Group), strings.Compare(a.Name, b.Name))
 	})
-	listed := map[string]bool{}
+	starters := map[string]string{} // @dev_started_by value → the starter's id
 	for _, s := range sorted {
 		if s.ID != "" {
-			listed[s.ID] = true
+			starters[Starter(s.ID, s.Name, false)] = s.ID
+			if s.Boss {
+				starters[Starter(s.ID, s.Name, true)] = s.ID
+			}
 		}
 	}
 	children := map[string][]Session{}
 	var roots []Session
 	for _, s := range sorted {
-		if s.StartedBy != "" && s.StartedBy != s.ID && listed[s.StartedBy] {
-			children[s.StartedBy] = append(children[s.StartedBy], s)
+		if by, ok := starters[s.StartedBy]; ok && s.StartedBy != "" && by != s.ID {
+			children[by] = append(children[by], s)
 		} else {
 			roots = append(roots, s)
 		}
@@ -80,13 +83,14 @@ func LoadOrder(c *tmux.Client) ([]string, error) {
 		Project   string `tmux:"@project"`
 		ID        string `tmux:"session_id"`
 		StartedBy string `tmux:"@dev_started_by"`
+		Herd      string `tmux:"@dev_herd"`
 	}](c, "list-sessions")
 	if err != nil {
 		return nil, err
 	}
 	sessions := make([]Session, len(rows))
 	for i, r := range rows {
-		sessions[i] = Session{Name: r.Name, Group: Group(r.Name, r.Project), ID: r.ID, StartedBy: r.StartedBy}
+		sessions[i] = Session{Name: r.Name, Group: Group(r.Name, r.Project), ID: r.ID, Boss: r.Herd != "", StartedBy: r.StartedBy}
 	}
 	names := make([]string, 0, len(rows))
 	for _, s := range Order(sessions) {

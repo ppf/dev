@@ -48,8 +48,7 @@ func TestHerd(t *testing.T) {
 
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
-	check(t, "started by the herd", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"),
-		d.T("display", "-t", "=boss:", "-p", "#{session_id}"))
+	check(t, "started by the boss, by name", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"), "boss")
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")
 
@@ -79,6 +78,23 @@ func TestHerd(t *testing.T) {
 		_, err := d.Try("has-session", "-t", "=boss:")
 		return err != nil
 	})
+
+	// Reopened, the boss has a new session id but the same name: its workers are its own again
+	reopen := exec.Command(devBin, "boss")
+	reopen.Env = env
+	if out, err := reopen.CombinedOutput(); err != nil {
+		t.Fatalf("dev boss reopened: %v: %s", err, out)
+	}
+	panes = strings.Split(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id}"), "\n")
+	if len(panes) != 3 {
+		t.Fatalf("reopened boss panes: %q", panes)
+	}
+	mine, errOut, status := devAgent(append(env, "TMUX_PANE="+panes[1]), "", "list", "--mine")
+	check(t, "--mine in the reopened boss", status+errOut+" "+strings.Fields(mine + " -")[0], "0 app")
+	waitFor(t, "app nested under the reopened boss in its sidebar", func() bool {
+		return strings.Contains(d.T("capture-pane", "-p", "-t", panes[0]), "└ ● app")
+	})
+	d.T("kill-session", "-t", "=boss:")
 
 	// A session named like a herd that isn't one is refused
 	d.T("new-session", "-d", "-s", "boss")

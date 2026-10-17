@@ -7,6 +7,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -36,7 +37,7 @@ func (r paneRow) stuck(now time.Time) (Note, bool) {
 	held := now.Sub(time.Unix(sec, 0))
 	switch st := agent.Trusted(r.State, r.StateCmd, r.Command); {
 	case st == agent.Working && held >= StuckWorking,
-		st == agent.Waiting && r.WaitingFor != agent.IdlePrompt && held >= StuckDecision:
+		agent.Deciding(st, r.WaitingFor) && held >= StuckDecision:
 		return StuckNote(r.Session, st, held, r.Since), true
 	}
 	return Note{}, false
@@ -60,7 +61,7 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		return err
 	}
 	for _, r := range rows {
-		if r.StartedBy != id {
+		if !sidebar.Names(r.StartedBy, id, b.Name, true) {
 			continue
 		}
 		if n, ok := r.stuck(clk.Now()); ok {
