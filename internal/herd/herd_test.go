@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -80,7 +81,7 @@ func TestRenderGolden(t *testing.T) {
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
-		" \x1b[38;2;84;84;109mj/k ⏎ switch  o PR  x kill" + reset,
+		" \x1b[38;2;84;84;109mj/k ⏎ switch  i reply  o PR  x kill" + reset,
 	}
 	got := twoTiles().render()
 	for i := range max(len(got), len(want)) {
@@ -115,7 +116,7 @@ func TestRenderSideBySideAndPaging(t *testing.T) {
 	if s := ansi.Strip(got[0]); !strings.HasPrefix(s, " ● b ") {
 		t.Errorf("page of the selection shows %q", s)
 	}
-	if s := ansi.Strip(got[6]); !strings.HasSuffix(s, "2/2") {
+	if s := ansi.Strip(got[6]); !strings.HasPrefix(s, " 2/2  ") {
 		t.Errorf("bottom row %q", s)
 	}
 	m.snap.tiles = nil
@@ -267,5 +268,117 @@ func TestRefreshLastPage(t *testing.T) {
 	}
 	if !slices.Equal(captured, []string{"%w3"}) {
 		t.Errorf("captured %q", captured)
+	}
+}
+
+func TestReply(t *testing.T) {
+	var ran []string
+	status := tmux.FormatRow("claude", "idle", "claude", "3", "")
+	m := twoTiles()
+	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
+	paneCmd := "claude" // what runs in b's agent pane
+	m.c = tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-panes":
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", ""), nil
+		case "has-session":
+			return "", nil
+		}
+		ran = append(ran, args[0]+" "+args[len(args)-1])
+		if args[0] == "display-message" {
+			return status, nil
+		}
+		return "", nil
+	})
+	key := func(m Model, k tea.KeyMsg) (Model, tea.Cmd) {
+		next, cmd := m.Update(k)
+		return next.(Model), cmd
+	}
+	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
+	m, _ = key(m, runes("i"))
+	m, _ = key(m, runes("fix"))
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeySpace})
+	m, _ = key(m, runes("itx"))
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	if row := ansi.Strip(m.render()[11]); !strings.HasPrefix(row, " b ❯ fix it") {
+		t.Errorf("reply row %q", row)
+	}
+	// Keys go to the draft while typing: j doesn't move the selection
+	if m, _ = key(m, runes("j")); m.selected != "b" || string(m.draft) != "fix itj" {
+		t.Errorf("typing: selected %q draft %q", m.selected, string(m.draft))
+	}
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m, cmd := key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.reply != "" || cmd == nil {
+		t.Fatalf("enter: reply %q, cmd %v", m.reply, cmd)
+	}
+	if msg := cmd().(actionMsg); msg.msg != "Sent to b" {
+		t.Errorf("send: %q", msg.msg)
+	}
+	if want := []string{"display-message " + tmux.Format[control.Status](), "paste-buffer %6", "send-keys Enter"}; !slices.Equal(slices.DeleteFunc(slices.Clone(ran), func(s string) bool { return strings.HasPrefix(s, "load-buffer") }), want) {
+		t.Errorf("sent with %q", ran)
+	}
+
+	// Claude exited while the reply was typed: its pane's shell must not get the text
+	ran, paneCmd = nil, "zsh"
+	m, _ = key(m, runes("i"))
+	m, _ = key(m, runes("rm -rf x"))
+	_, cmd = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if msg := cmd().(actionMsg); !strings.Contains(msg.msg, "agent is gone") || len(ran) != 0 {
+		t.Errorf("gone agent: %q, ran %q", msg.msg, ran)
+	}
+	paneCmd = "claude"
+
+	ran = nil
+	m, _ = key(m, runes("i"))
+	m, _ = key(m, runes("never"))
+	if m, cmd = key(m, tea.KeyMsg{Type: tea.KeyEsc}); m.reply != "" || cmd != nil || len(ran) != 0 {
+		t.Errorf("esc: reply %q, ran %q", m.reply, ran)
+	}
+}
+
+func TestDialogKeys(t *testing.T) {
+	var ran []string
+	m := twoTiles()
+	m.snap.tiles[0].pane = "%5"
+	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
+	press := func(m Model, k string) (Model, tea.Cmd) {
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		return next.(Model), cmd
+	}
+	// b is selected and not waiting
+	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg, "isn't waiting") {
+		t.Errorf("1 on a worker that isn't waiting: msg %q", m.msg)
+	}
+	m.selected = "a"
+	if !strings.Contains(ansi.Strip(m.render()[11]), "1-9 answer") {
+		t.Errorf("waiting tile hint %q", ansi.Strip(m.render()[11]))
+	}
+	_, cmd := press(m, "2")
+	cmd()
+	if !slices.Equal(ran, []string{"send-keys -t %5 -l 2"}) {
+		t.Errorf("2 on the waiting worker ran %q", ran)
+	}
+}
+
+func TestReplyPasteAndQuit(t *testing.T) {
+	m := twoTiles()
+	m.snap.tiles[1].pane = "%6"
+	key := func(m Model, k tea.KeyMsg) (Model, tea.Cmd) {
+		next, cmd := m.Update(k)
+		return next.(Model), cmd
+	}
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line one\nline two\x1b[31m"), Paste: true})
+	got := m.render()
+	if len(got) != m.height || !strings.Contains(ansi.Strip(got[11]), "line one⏎line two⏎[31m") {
+		t.Errorf("pasted reply: %d lines, row %q", len(got), ansi.Strip(got[11]))
+	}
+	if string(m.draft) != "line one\nline two\x1b[31m" {
+		t.Errorf("draft keeps the paste as typed: %q", string(m.draft))
+	}
+	if _, cmd := key(m, tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil || cmd() != tea.Quit() {
+		t.Error("ctrl+c while typing doesn't quit")
 	}
 }

@@ -1,16 +1,24 @@
 package herd
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 // actionMsg is an action's outcome to show on the bottom row; "" clears it.
 type actionMsg struct{ msg string }
 
-// handleKey: j/k/↓/↑ move (wrapping), ⏎ switch to the worker, o open its PR, x kill (asks y/n), ctrl+c quit.
+// handleKey: j/k/↓/↑ move (wrapping), ⏎ switch to the worker, i reply to it here, 1-9 answer a waiting
+// worker's dialog, o open its PR, x kill (asks y/n), ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.reply != "" {
+		return m.typeReply(k)
+	}
 	key := k.String()
 	m.msg = ""
 	if m.confirm != "" {
@@ -32,6 +40,21 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selected = m.move(i, -1)
 	case "enter":
 		return m, m.switchTo(m.selected)
+	case "i":
+		if len(m.snap.tiles) > 0 {
+			t := m.snap.tiles[i]
+			m.reply, m.replyPane, m.draft = t.sess.Name, t.pane, nil
+		}
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if len(m.snap.tiles) == 0 {
+			return m, nil
+		}
+		t := m.snap.tiles[i]
+		if t.sess.State != agent.Waiting {
+			m.msg = "1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (i to reply)"
+			return m, nil
+		}
+		return m, m.action(func() error { return control.SendKeys(m.c, t.pane, []string{key}) })
 	case "o":
 		return m.openPR(i)
 	case "x":
@@ -115,4 +138,42 @@ func (m Model) action(fn func() error) tea.Cmd {
 		}
 		return actionMsg{}
 	}
+}
+
+// typeReply edits the reply on the bottom row: ⏎ sends it to the worker as a prompt (as dev agent prompt
+// does, so one waiting on a decision refuses it), esc cancels, backspace and ctrl+u delete, ctrl+c quits.
+func (m Model) typeReply(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch k.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.reply, m.draft = "", nil
+	case tea.KeyEnter:
+		text, target, pane := string(m.draft), m.reply, m.replyPane
+		m.reply, m.draft = "", nil
+		if strings.TrimSpace(text) == "" {
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			// The worker may have exited while the reply was typed: its pane's shell would run the text
+			if a, err := control.Resolve(m.c, target); err != nil || a.Pane != pane {
+				return actionMsg{"❌ " + target + ": its agent is gone, reply not sent"}
+			}
+			if err := control.Prompt(m.c, control.RealClock, pane, text); err != nil {
+				return actionMsg{"❌ " + target + ": " + err.Error()}
+			}
+			return actionMsg{"Sent to " + target}
+		}
+	case tea.KeyBackspace:
+		if len(m.draft) > 0 {
+			m.draft = m.draft[:len(m.draft)-1]
+		}
+	case tea.KeyCtrlU:
+		m.draft = nil
+	case tea.KeySpace:
+		m.draft = append(m.draft, ' ')
+	case tea.KeyRunes:
+		m.draft = append(m.draft, k.Runes...)
+	}
+	return m, nil
 }

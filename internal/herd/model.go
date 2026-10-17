@@ -64,6 +64,9 @@ type Model struct {
 	err           error
 	confirm       string // session waiting for y to be killed
 	msg           string // one-off message on the bottom row, until the next key
+	reply         string // session a reply is being typed to; "" when not typing
+	replyPane     string // its agent pane
+	draft         []rune // the reply so far
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
