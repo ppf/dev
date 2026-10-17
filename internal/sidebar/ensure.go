@@ -86,17 +86,7 @@ func Ensure(c *tmux.Client, target string, from Origin) error {
 
 // Toggle is prefix+S (toggle-sidebar.sh without arguments): when from's session shows a sidebar, every
 // sidebar is hidden and @sidebar_hidden set; otherwise it is cleared and from's session gets one.
-// A boss session has no sidebar to show back, so toggling there would hide every sidebar for good.
 func Toggle(c *tmux.Client, from Origin) error {
-	if from.Session != "" {
-		boss, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(from.Session), OptHerd)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(boss) != "" {
-			return errors.New("sidebar: a boss session has no sidebar; toggle sidebars from a project or worker session")
-		}
-	}
 	return ensureSidebar(c, from.Session, from, true)
 }
 
@@ -171,10 +161,6 @@ func ensureSidebar(c *tmux.Client, target string, from Origin, toggle bool) erro
 		return nil
 	}
 
-	// A herd's previews pane stands in for its sidebar
-	if herd, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(target), OptHerd); err != nil || strings.TrimSpace(herd) != "" {
-		return err
-	}
 	anchor, err := firstContentPane(c, target)
 	if err != nil {
 		return err

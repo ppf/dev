@@ -36,8 +36,8 @@ func SessionName(project string) string {
 	return "boss-" + project
 }
 
-// Open attaches to project's herd session, creating it in dir when missing: the coordinator Claude on
-// the left, the previews on the right. A session of that name that isn't a herd is refused.
+// Open attaches to project's boss session, creating it in dir when missing: the sidebar (unless sidebars
+// are hidden), the coordinator Claude, then the previews. A session of that name that isn't a boss is refused.
 func Open(c *tmux.Client, project, dir string) error {
 	session := SessionName(project)
 	target := tmux.SessionTarget(session)
@@ -49,19 +49,37 @@ func Open(c *tmux.Client, project, dir string) error {
 		if strings.TrimSpace(mark) == "" {
 			return fmt.Errorf("session %q exists and isn't a boss session (a restored boss isn't one either): kill or rename it", session)
 		}
-		return open.Attach(c, session)
+		return withSidebar(c, session, sidebar.Origin{})
 	}
-	if err := create(c, session, project, dir); err != nil {
-		return err
-	}
-	return open.Attach(c, session)
-}
-
-// create builds the herd layout; commands go to tmux as argv, so the prompt needs no shell quoting.
-func create(c *tmux.Client, session, project, dir string) error {
-	exe, err := os.Executable()
+	claude, err := create(c, session, project, dir)
 	if err != nil {
 		return err
+	}
+	return withSidebar(c, session, sidebar.Origin{Session: session, Pane: claude})
+}
+
+// withSidebar ensures session's sidebar, focus going back to from's pane, and attaches; a sidebar that
+// can't be made is reported after the attach rather than blocking it.
+func withSidebar(c *tmux.Client, session string, from sidebar.Origin) error {
+	ensureErr := sidebar.Ensure(c, session, from)
+	if from.Pane != "" {
+		// A new sidebar takes the focus; the user types to the coordinator
+		if _, err := c.Run("select-pane", "-t", from.Pane); err != nil {
+			return err
+		}
+	}
+	if err := open.Attach(c, session); err != nil {
+		return err
+	}
+	return ensureErr
+}
+
+// create builds the boss layout and returns the coordinator's pane; commands go to tmux as argv, so the
+// prompt needs no shell quoting.
+func create(c *tmux.Client, session, project, dir string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
 	}
 	width, height := open.ClientSize(c)
 	target := tmux.SessionTarget(session)
@@ -76,14 +94,17 @@ func create(c *tmux.Client, session, project, dir string) error {
 	claude := run("new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height), "-s", session,
 		"-c", dir, "-n", "Boss", "-PF", "#{pane_id}", "claude", "--append-system-prompt", coordinatorPrompt)
 	run("set-option", "-t", target, OptHerd, "1")
-	// Without the coordinator (or the previews) it is no herd: closing either pane ends the session
-	run("set-hook", "-t", target, "pane-exited", "kill-session -t "+tmux.ShellJoin(target))
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)
 	}
-	run("split-window", "-t", claude, "-h", "-l", "55%", "-c", dir, exe, "boss", "--previews")
+	previews := run("split-window", "-t", claude, "-h", "-l", "55%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
+	id := run("display-message", "-p", "-t", claude, "#{session_id}")
+	// Without the coordinator (or the previews) it is no boss: closing either ends the session; its sidebar
+	// comes and goes like any other. Pane and session ids ($N, %N) need no quoting, unlike a project name.
+	run("set-hook", "-t", target, "pane-exited", "if -F '#{||:#{==:#{hook_pane},"+claude+"},#{==:#{hook_pane},"+previews+"}}' "+
+		"{ kill-session -t '"+id+"' }")
 	run("select-pane", "-t", claude)
-	return err
+	return claude, err
 }
 
 // MarkStartedBy records on session that the coordinator in pane started it.

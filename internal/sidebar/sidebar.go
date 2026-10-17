@@ -19,7 +19,7 @@ const (
 	optProject     = "@project"                  // session: the project key the sidebar groups by
 )
 
-// OptHerd marks a dev boss session ("1"), which has no sidebar.
+// OptHerd marks a dev boss session ("1").
 const OptHerd = "@dev_herd"
 
 // Session is one sidebar entry.

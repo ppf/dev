@@ -72,7 +72,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click selects a tile; a click on the selected tile switches to it.
+// handleMouse: a left click on a tile selects it and opens the reply box for it, so the worker is answered
+// in place (⏎ without a reply open switches to it).
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
@@ -81,11 +82,11 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if i < 0 {
 		return m, nil
 	}
-	name := m.snap.tiles[i].sess.Name
-	if name == m.selected {
-		return m, m.switchTo(name)
+	t := m.snap.tiles[i]
+	if t.sess.Name != m.reply {
+		// A click on another tile moves the reply box there; one on the same keeps the draft
+		m.selected, m.reply, m.replyPane, m.draft = t.sess.Name, t.sess.Name, t.pane, nil
 	}
-	m.selected = name
 	return m, nil
 }
 
