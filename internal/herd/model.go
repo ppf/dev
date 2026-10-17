@@ -184,7 +184,11 @@ func (m Model) refresh() tea.Cmd {
 				snap.tiles[i].body = []string{err.Error()}
 				continue
 			}
-			snap.tiles[i].body = lastLines(out, g.tileH-1)
+			lines := screenLines(out)
+			if snap.tiles[i].sess.Agent == "Claude" {
+				lines = cropInput(lines)
+			}
+			snap.tiles[i].body = tail(lines, g.tileH-1)
 		}
 		return refreshMsg{snap: snap}
 	}
@@ -263,10 +267,20 @@ var osc = regexp.MustCompile("\x1b\\][^\x07\x1b]*(\x07|\x1b\\\\)")
 
 // lastLines is the last n lines of a capture after dropping trailing blank lines.
 func lastLines(capture string, n int) []string {
+	return tail(screenLines(capture), n)
+}
+
+// screenLines splits a capture into lines without OSC sequences or trailing blank lines.
+func screenLines(capture string) []string {
 	lines := strings.Split(osc.ReplaceAllString(capture, ""), "\n")
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
+	return lines
+}
+
+// tail is the last n lines.
+func tail(lines []string, n int) []string {
 	if n <= 0 {
 		return []string{}
 	}
