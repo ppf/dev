@@ -1,0 +1,40 @@
+\x1b[48;2;20;20;20m
+  \x1b[38;2;200;200;200m/p/t/c/-/b/scratchpad/play\x1b[39m                                                                                                            \x1b[38;2;220;220;220m25K / 256K\x1b[38;2;65;65;65m │ \x1b[38;2;108;108;108m[Dashboard]\x1b[39m
+
+  \x1b[48;2;36;36;36m                                                                                                                                                              \x1b[48;2;20;20;20m
+  \x1b[48;2;36;36;36m   \x1b[38;2;200;200;200m❯ \x1b[38;2;225;225;225mrebase onto master\x1b[39m                                                                                                                           \x1b[38;2;108;108;108m  11:20 AM\x1b[39m  \x1b[48;2;20;20;20m
+  \x1b[48;2;36;36;36m                                                                                                                                                              \x1b[48;2;20;20;20m
+
+     \x1b[38;2;108;108;108m◆ \x1b[1mThought\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m for 2.4s\x1b[39m
+
+     \x1b[38;2;200;200;200mI'll check the current branch and how it sits against \x1b[1m\x1b[38;2;58;149;171mmaster\x1b[0m\x1b[38;2;200;200;200m\x1b[48;2;20;20;20m, then rebase onto it.\x1b[39m                                                             \x1b[38;2;108;108;108m  11:20 AM\x1b[39m
+
+     \x1b[38;2;108;108;108m◈ \x1b[1m\x1b[38;2;120;120;120mRan\x1b[0m\x1b[38;2;120;120;120m\x1b[48;2;20;20;20m inspect branch, upstream, and master refs\x1b[39m
+
+     \x1b[38;2;200;200;200mThis directory is an empty repo with no commits and no \x1b[1m\x1b[38;2;58;149;171mmaster\x1b[0m\x1b[38;2;200;200;200m\x1b[48;2;20;20;20m. I'll look around for the real project the rebase should target.\x1b[39m                 \x1b[38;2;108;108;108m  11:20 AM\x1b[39m
+
+     \x1b[38;2;28;28;28m◈ \x1b[1m\x1b[38;2;120;120;120mRunning\x1b[0m\x1b[38;2;120;120;120m\x1b[48;2;20;20;20m 2 commands\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+   \x1b[38;2;200;200;200m⠧ Find ppf-dev and tile-crop worktree…\x1b[38;2;108;108;108m 2.3s\x1b[39m                                                                                              \x1b[38;2;108;108;108m25s ⇣25.6k [↓][stop]\x1b[39m
+
+  \x1b[38;2;225;225;225mHelp improve Grok\x1b[39m                                                                                                                           \x1b[38;2;120;120;120m[Opt out]\x1b[39m \x1b[38;2;225;225;225m[Opt in]\x1b[39m
+  \x1b[38;2;120;120;120mOff by default. Opt-in to allow SpaceXAI to retain coding data, e.g., prompts, traces, & metrics, for training and debugging purposes.\x1b[39m
+  \x1b[38;2;120;120;120mChange anytime via settings.\x1b[39m
+  \x1b[38;2;108;108;108mRead \x1b[4mTerms\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m and \x1b[4mPrivacy Policy\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m.\x1b[39m
+
+  \x1b[38;2;80;80;88m╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮\x1b[39m
+  \x1b[38;2;80;80;88m│\x1b[38;2;225;225;225m \x1b[38;2;200;200;200m❯ \x1b[38;2;225;225;225m                                                                                                                                                         \x1b[38;2;80;80;88m│\x1b[39m
+  \x1b[38;2;80;80;88m╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── \x1b[38;2;128;128;128mGrok 4.7 (high)\x1b[38;2;80;80;88m ─╯\x1b[39m
+
+  \x1b[1m\x1b[38;2;200;200;200mShift+Tab\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m:mode\x1b[2m  │  \x1b[0;1m\x1b[38;2;200;200;200m\x1b[48;2;20;20;20mCtrl+c\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m:cancel\x1b[2m  │  \x1b[0;1m\x1b[38;2;200;200;200m\x1b[48;2;20;20;20mCtrl+b\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m:send to bg\x1b[2m  │  \x1b[0;1m\x1b[38;2;200;200;200m\x1b[48;2;20;20;20mCtrl+x\x1b[0m\x1b[38;2;108;108;108m\x1b[48;2;20;20;20m:shortcuts                                                                                   \x1b[39m
+

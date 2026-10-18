@@ -74,6 +74,21 @@ func GrokSkip(input []byte) bool {
 	return e.Event == "Stop" && e.Reason != "end_turn"
 }
 
+// GrokStale reports a Grok turn end (Stop, StopFailure, StopCancelled) for another turn than the one the
+// pane runs: Grok sends a cancelled turn's report off its command loop, so it can land after the next
+// UserPromptSubmit. An event or pane without a prompt id isn't stale.
+func GrokStale(c *tmux.Client, pane string, h Hook) (bool, error) {
+	if h.PromptID == "" || h.Event != "Stop" && h.Event != "StopFailure" && h.Event != "StopCancelled" {
+		return false, nil
+	}
+	current, err := c.Run("display-message", "-t", pane, "-p", "#{@agent_prompt_id}")
+	if err != nil {
+		return false, err
+	}
+	current = strings.TrimSpace(current)
+	return current != "" && current != h.PromptID, nil
+}
+
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
 const IdlePrompt = "idle_prompt"
 
@@ -87,6 +102,7 @@ func Deciding(state, waitingFor string) bool {
 type Hook struct {
 	Event            string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type"`
+	PromptID         string `json:"promptId"` // Grok's turn id
 	ToolInput        struct {
 		Command string `json:"command"` // a shell tool's command
 	} `json:"tool_input"`
@@ -123,10 +139,10 @@ func HookSession(input []byte) Session {
 }
 
 // Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
-// and @agent_transcript in one chained tmux call, bumping @agent_prompts on UserPromptSubmit and setting
-// @agent_waiting_for to why a waiting state waits (Claude's notification type, else the event: Codex's
-// PermissionRequest) and bumping @dev_pr_gen on a PostToolUse of a gh command that changes a PR; Clear
-// (or no session) unsets the session options.
+// and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
+// @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
+// notification type, else the event: Codex's PermissionRequest) and bumping @dev_pr_gen on a PostToolUse of a
+// gh command that changes a PR; Clear (or no session) unsets the session options.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
@@ -134,7 +150,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since")}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since"), unset("@agent_prompt_id")}
 	} else {
 		// @agent_since (unix seconds) only moves when the state changes, so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
@@ -151,6 +167,9 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		if h.Event == "UserPromptSubmit" {
 			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
 			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
+			if h.PromptID != "" {
+				cmds = append(cmds, set("@agent_prompt_id", h.PromptID))
+			}
 		}
 		if state == Waiting {
 			// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog

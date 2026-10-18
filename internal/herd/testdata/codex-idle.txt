@@ -1,0 +1,66 @@
+
+  \x1b[38;2;99;168;248m>_ \x1b[1m\x1b[39mOpenAI Codex\x1b[0;2m (v0.163.0)\x1b[0m
+     \x1b[2m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[0m
+
+
+\x1b[1;2m› \x1b[0mRead README.md and reply in 3 short bullets: what this project does. Don't edit anything.
+
+
+\x1b[2m• \x1b[0mI’ll read README.md and summarize the project in three short bullets.
+
+\x1b[2m•\x1b[0m \x1b[1mExplored\x1b[0m
+\x1b[2m  └ \x1b[0m\x1b[38;2;99;168;248mRead\x1b[39m README.md
+\x1b[2m    + Show details
+\x1b[0m
+\x1b[2m• \x1b[0m• A Go CLI that launches tmux development workspaces with a project picker and Git worktree support.
+  • Tracks Claude, Codex, and Grok agents through a live sidebar, notifications, PR links, and Claude session restoration.
+  • Lets a coordinator start, prompt, and monitor multiple agents through a CLI and dashboard.
+
+\x1b[2m  Worked for 6s • 11:15
+
+
+
+
+
+\x1b[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m
+
+  \x1b[38;2;246;226;183mGPT-6.1-Sol high\x1b[39m · \x1b[38;2;171;223;167m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[39m · \x1b[38;2;143;179;239mtry-codex\x1b[39m · \x1b[38;2;242;181;144mContext 3% used\x1b[39m · \x1b[38;2;233;144;169m5h 85% left\x1b[39m · \x1b[38;2;233;144;169mweekly 98% left\x1b[39m · \x1b[38;2;200;169;238mFast off\x1b[39m
+  \x1b[1m←\x1b[0m for agents · \x1b[1m?\x1b[0m for shortcuts
