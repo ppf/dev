@@ -98,3 +98,17 @@ func TestSnapshotDeciding(t *testing.T) {
 		t.Errorf("deciding = %v, want %v", got, want)
 	}
 }
+
+func TestSnapshotCostOff(t *testing.T) {
+	for _, opt := range []string{"", "off"} {
+		rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", CostOpt: opt},
+			{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", Cost: "1.5", CostOpt: opt}}
+		s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := map[string]string{"": "$1.50", "off": ""}[opt]; len(s.tiles) != 1 || s.tiles[0].sess.Cost != want {
+			t.Errorf("@dev_cost %q: tiles %+v, want cost %q", opt, s.tiles, want)
+		}
+	}
+}

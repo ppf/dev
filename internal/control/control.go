@@ -47,6 +47,8 @@ type Agent struct {
 	StartedBy string `json:"started_by,omitempty"`
 	// Boss marks a `dev boss` coordinator session.
 	Boss bool `json:"boss,omitempty"`
+	// HideCost is @dev_cost off: text output leaves the cost out, --json keeps cost_usd.
+	HideCost bool `json:"-"`
 }
 
 // row is one list-panes -a row: agent.Pane's fields plus the session options Detect and Agent need.
@@ -66,6 +68,7 @@ type row struct {
 	SessionID string `tmux:"session_id"`
 	StartedBy string `tmux:"@dev_started_by"`
 	Herd      string `tmux:"@dev_herd"`
+	CostOpt   string `tmux:"@dev_cost"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -111,6 +114,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
+			HideCost: r.CostOpt == "off",
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost

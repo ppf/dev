@@ -108,7 +108,7 @@ func printAgents(out io.Writer, asJSON bool, agents []control.Agent) error {
 			state = "-"
 		}
 		cost := "-"
-		if a.CostUSD != nil {
+		if a.CostUSD != nil && !a.HideCost {
 			cost = sidebar.FormatCost(*a.CostUSD)
 		}
 		fmt.Fprintln(out, strings.Join([]string{a.Session, a.Pane, a.Label, state, a.Branch, a.Path, cost}, "\t"))

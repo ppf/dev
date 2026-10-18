@@ -223,10 +223,10 @@ func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "") +
-			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "") +
-			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "") +
-			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "") +
+			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "") +
+			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "") +
+			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -264,9 +264,9 @@ func TestRefresh(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "")
+	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {
@@ -297,7 +297,7 @@ func TestReply(t *testing.T) {
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", ""), nil
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", "", ""), nil
 		case "has-session":
 			return "", nil
 		}

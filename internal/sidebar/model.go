@@ -44,6 +44,7 @@ type paneRow struct {
 	WindowPanes int    `tmux:"window_panes"`
 	Zoomed      bool   `tmux:"window_zoomed_flag"`
 	StoredWidth string `tmux:"@sidebar_width"`
+	CostOpt     string `tmux:"@dev_cost"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -232,7 +233,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				title = ""
 			}
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, agentTitle(a.Label, title)
-			if a.CostOK {
+			if a.CostOK && rs[0].CostOpt != "off" {
 				sess.Cost = FormatCost(a.Cost)
 			}
 			sess.Branch = branch(a.Pane.Path)

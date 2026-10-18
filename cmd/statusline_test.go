@@ -79,3 +79,22 @@ func TestStatuslineRecordFailureStillRenders(t *testing.T) {
 		t.Errorf("wrapped: %q, %v; want the input passed through", out, err)
 	}
 }
+
+func TestPrintAgentsHideCost(t *testing.T) {
+	usd := 1.5
+	agents := []control.Agent{{Session: "app", Pane: "%1", Label: "Claude", CostUSD: &usd, HideCost: true}}
+	var out bytes.Buffer
+	if err := printAgents(&out, false, agents); err != nil {
+		t.Fatal(err)
+	}
+	if want := "app\t%1\tClaude\t-\t\t\t-\n"; out.String() != want {
+		t.Errorf("printAgents = %q, want %q", out.String(), want)
+	}
+	out.Reset()
+	if err := printAgents(&out, true, agents); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"cost_usd": 1.5`)) {
+		t.Errorf("JSON: %s; want cost_usd kept", out.String())
+	}
+}
