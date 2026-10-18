@@ -31,7 +31,11 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +
 	`worker, hand finished work to review or a PR) and report what you did in one or two lines. Ask the user only for real ` +
 	`decisions: permission prompts, anything destructive or external (merging, pushing, posting), unclear goals; batch ` +
-	`the questions. When a batch of work is done, give a short roll-up: what finished, what waits on the user, what's next.`
+	`the questions. When a batch of work is done, give a short roll-up: what finished, what waits on the user, what's next. ` +
+	`In a roll-up, or when idle with nothing pending (never mid-task), you may propose one or two improvements to the ` +
+	`project, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky ` +
+	`tests, recurring review findings, missing tooling, rough UX the user hit): one line each with why and a rough size. ` +
+	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined.`
 
 // SessionName is the boss session for project ("" for none).
 func SessionName(project string) string {
