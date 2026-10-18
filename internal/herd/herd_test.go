@@ -226,11 +226,15 @@ func TestKillGuard(t *testing.T) {
 	}
 }
 
-type fakeLookups struct{ prs int }
+type fakeLookups struct {
+	prs  int
+	args []string // the last PR call's
+}
 
 func (f *fakeLookups) Branch(path string) string { return "br-" + path }
-func (f *fakeLookups) PR(string, string) sidebar.PR {
+func (f *fakeLookups) PR(pane, stored, gen, path, branch string) sidebar.PR {
 	f.prs++
+	f.args = []string{pane, stored, gen, path, branch}
 	return sidebar.PR{Number: 1, State: "open"}
 }
 func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
@@ -239,10 +243,10 @@ func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "") +
-			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "") +
-			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "") +
-			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "") +
+			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2") +
+			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -267,6 +271,9 @@ func TestRefresh(t *testing.T) {
 			t.Fatalf("active=%s snapshot %+v", active, s)
 		}
 		if active == "1" {
+			if want := []string{"%3", "stored", "2", "/w1", "br-/w1"}; !slices.Equal(look.args, want) {
+				t.Errorf("PR(%q), want the agent pane's (%q)", look.args, want)
+			}
 			if !slices.Equal(ran, []string{"list-panes", "list-clients", "capture-pane"}) || look.prs != 1 ||
 				!slices.Equal(s.tiles[0].body, []string{"\x1b[32mgot: hi\x1b[0m"}) || s.tiles[0].sess.Cost != "$0.50" {
 				t.Errorf("visible: ran %q, prs %d, tile %+v", ran, look.prs, s.tiles[0])
@@ -280,9 +287,9 @@ func TestRefresh(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "")
+	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {

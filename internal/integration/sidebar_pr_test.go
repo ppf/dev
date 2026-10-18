@@ -4,9 +4,12 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A session whose branch has a PR shows its tag on the meta line; o on it and a click on the tag open it
@@ -61,4 +64,56 @@ esac`, "gh")
 	actWait(d, "click on the tag: gh --web", webCalls, call+"\n"+call)
 	check(t, "click on the tag: client stays", actClientSession(d), "a")
 	check(t, "click on the tag: sessions", d.T("list-sessions", "-F", "#{session_name}"), "a\nboot\nnopr\npr")
+}
+
+// A PR opened while a sidebar looks on shows within seconds: the worker's PostToolUse hook for gh pr create
+// bumps @dev_pr_gen, the viewed sidebar looks it up again, and a sidebar viewed next shows the
+// stored result without its own gh call.
+func TestSidebarPRShared(t *testing.T) {
+	d := actServer(t, "a", "b")
+	opened := filepath.Join(d.tmp, "pr-opened")
+	writeStubs(t, filepath.Join(d.tmp, "stubs"), `case "$*" in
+"pr view --json "*) echo "gh $*" >> "$DEV_STUB_LOG"
+	[ -e `+opened+` ] || { echo 'no pull requests found' >&2; exit 1; }
+	echo '{"number":35,"state":"OPEN","isDraft":false,"url":"https://github.com/o/r/pull/35"}' ;;
+*) exit 1 ;;
+esac`, "gh")
+	worker := d.T("new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "w", "-c", viewGitRepo(t, "feature/login"), "exec sleep 600")
+	d.T("set-option", "-p", "-t", worker, "@agent_cmd", "sleep")
+	d.T("set-option", "-p", "-t", worker, "@agent_state", "idle")
+	waitFor(t, "w runs sleep", func() bool {
+		cmd, _ := d.Try("display", "-t", worker, "-p", "#{pane_current_command}")
+		return cmd == "sleep"
+	})
+	lookups := func() int {
+		b, err := os.ReadFile(d.stubLog)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return strings.Count(string(b), "gh pr view")
+	}
+	a, b := actEnsure(d, "a"), actEnsure(d, "b")
+	actSwitch(d, "a")
+	waitFor(t, "a's sidebar stored no PR", func() bool {
+		v, _ := d.Try("show-option", "-pqv", "-t", worker, "@dev_pr")
+		return strings.Contains(v, `"branch":"feature/login"`)
+	})
+	check(t, "lookups before the PR", strconv.Itoa(lookups()), "1")
+
+	writeFile(t, opened, "")
+	cmd := exec.Command(devBin, "state", "working")
+	cmd.Env = append(d.scriptEnv(), "TMUX_PANE="+worker)
+	cmd.Stdin = strings.NewReader(`{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create --fill"}}`)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("dev state: %v\n%s", err, out)
+	}
+	check(t, "hook bumped the gen", d.T("show-option", "-pqv", "-t", worker, "@dev_pr_gen"), "1")
+	start := time.Now()
+	waitScreen(t, d.server, a, "#35 open")
+	t.Logf("viewed sidebar: badge %s after the hook", time.Since(start).Round(100*time.Millisecond))
+	check(t, "lookups after the hook", strconv.Itoa(lookups()), "2")
+
+	actSwitch(d, "b")
+	waitScreen(t, d.server, b, "#35 open")
+	check(t, "lookups after the switch", strconv.Itoa(lookups()), "2")
 }

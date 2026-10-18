@@ -130,9 +130,16 @@ type Hook struct {
 	Event            string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type"`
 	PromptID         string `json:"promptId"` // Grok's turn id
+	ToolInput        struct {
+		Command string `json:"command"` // a shell tool's command
+	} `json:"tool_input"`
 }
 
-// ParseHook reads a hook's input; malformed input gives the zero Hook (Resolve reports it).
+// prCommand is a gh command that opens a PR or changes its state, global flags (-R owner/repo) included.
+var prCommand = regexp.MustCompile(`\bgh(\s+-\S+(\s+[^-\s]\S*)?)*\s+pr\s+(create|merge|close|reopen|ready)\b`)
+
+// ParseHook reads a hook's input; input that isn't JSON gives the zero Hook (Resolve reports it), and a
+// field of another type (Codex's apply_patch tool_input is a string) is left zero.
 func ParseHook(input []byte) Hook {
 	var h Hook
 	_ = json.Unmarshal(input, &h)
@@ -160,8 +167,9 @@ func HookSession(input []byte) Session {
 
 // Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
 // and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
-// @agent_prompt_id) on UserPromptSubmit and setting @agent_waiting_for to why a waiting state waits (Claude's
-// notification type, else the event: Codex's PermissionRequest); Clear (or no session) unsets the session options.
+// @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
+// notification type, else the event: Codex's PermissionRequest) and bumping @dev_pr_gen on a PostToolUse of a
+// gh command that changes a PR; Clear (or no session) unsets the session options.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
@@ -178,6 +186,10 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		if h.Event == "SessionStart" {
 			// A crashed session's cost would show until the new one's first status line
 			cmds = append(cmds, unset("@agent_cost"))
+		}
+		if h.Event == "PostToolUse" && prCommand.MatchString(h.ToolInput.Command) {
+			// The views' shared PR lookup (@dev_pr) is stale: every view looks it up again
+			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@dev_pr_gen", "#{e|+:#{@dev_pr_gen},1}"})
 		}
 		if h.Event == "UserPromptSubmit" {
 			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls

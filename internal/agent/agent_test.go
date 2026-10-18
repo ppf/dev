@@ -269,9 +269,11 @@ func TestGrokStale(t *testing.T) {
 
 func TestParseHook(t *testing.T) {
 	for input, want := range map[string]Hook{
-		`{"hook_event_name":"UserPromptSubmit"}`:                               {Event: "UserPromptSubmit"},
-		`{"hook_event_name":"Notification","notification_type":"idle_prompt"}`: {Event: "Notification", NotificationType: IdlePrompt},
-		`{"hook_event_name":"StopCancelled","promptId":"p1"}`:                  {Event: "StopCancelled", PromptID: "p1"},
+		`{"hook_event_name":"UserPromptSubmit"}`:                                                                         {Event: "UserPromptSubmit"},
+		`{"hook_event_name":"Notification","notification_type":"idle_prompt"}`:                                           {Event: "Notification", NotificationType: IdlePrompt},
+		`{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create","description":"d"}}`: prHook("PostToolUse", "gh pr create"),
+		`{"hook_event_name":"PermissionRequest","tool_name":"apply_patch","tool_input":"*** Begin Patch"}`:               {Event: "PermissionRequest"},
+		`{"hook_event_name":"StopCancelled","promptId":"p1"}`:                                                            {Event: "StopCancelled", PromptID: "p1"},
 		`{}`: {},
 		`{`:  {},
 	} {
@@ -279,6 +281,13 @@ func TestParseHook(t *testing.T) {
 			t.Errorf("ParseHook(%s) = %+v, want %+v", input, got, want)
 		}
 	}
+}
+
+// prHook is a shell tool's hook event running command.
+func prHook(event, command string) Hook {
+	h := Hook{Event: event}
+	h.ToolInput.Command = command
+	return h
 }
 
 func TestRecordHook(t *testing.T) {
@@ -300,6 +309,21 @@ func TestRecordHook(t *testing.T) {
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for PermissionRequest"},
 		{"session start drops a crashed session's cost", Idle, Hook{Event: "SessionStart"}, "set-option -p -t %1 @agent_state idle ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost"},
+		{"gh pr create bumps the shared PR's gen", Working, prHook("PostToolUse", "cd /w && gh pr create --fill"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"gh pr merge too", Working, prHook("PostToolUse", "gh  pr merge 35 --squash"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"gh pr close too", Working, prHook("PostToolUse", "gh pr close 35"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"gh pr reopen too", Working, prHook("PostToolUse", "gh pr reopen 35"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"gh pr ready too", Working, prHook("PostToolUse", "gh pr ready"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"with gh's global flags too", Working, prHook("PostToolUse", "gh -R ppf/dev --repo=x pr merge 37"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"gh pr edit leaves it", Working, prHook("PostToolUse", "gh pr edit --title x"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
+		{"gh pr view leaves it", Working, prHook("PostToolUse", "gh pr view --json state"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
+		{"a failed gh pr create leaves it", Working, prHook("PostToolUseFailure", "gh pr create"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id"},
 	}
 	for _, tt := range tests {
