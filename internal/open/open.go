@@ -30,7 +30,7 @@ type Options struct {
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
 	ForceNew bool   // picker path: suffix -2, -3, ... instead of attaching to an existing session
 	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach; not with ForceNew
-	Agent    string // agent.Claude or agent.Codex, typed into the Agent pane; empty = claude
+	Agent    string // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.

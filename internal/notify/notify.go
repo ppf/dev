@@ -14,7 +14,7 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// event is the part of a Claude or Codex hook's stdin that notifications use.
+// event is the part of a Claude, Codex or Grok hook's stdin that notifications use.
 type event struct {
 	Name      string          `json:"hook_event_name"`
 	Title     string          `json:"title"`
@@ -93,7 +93,7 @@ func visible(p paneView, clients []clientView) bool {
 	})
 }
 
-// Run notifies for the Claude or Codex hook event in input; bundleID is the click's fallback for @dev_notify_activate.
+// Run notifies for the Claude, Codex or Grok hook event in input; bundleID is the click's fallback for @dev_notify_activate.
 func Run(c *tmux.Client, pane string, input []byte, bundleID string) error {
 	// A field of the wrong type only matters to events that notify; Unmarshal still fills the rest.
 	var e event

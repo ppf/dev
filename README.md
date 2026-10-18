@@ -62,6 +62,24 @@ Codex CLI hooks give Codex panes the same sidebar state and notifications (needs
 
 Codex runs hooks in its shared app-server daemon, whose `TMUX_PANE` is the pane that started it, so `--codex` picks the only pane running `codex` (or `codex-*`) whose directory is the hook's `cwd`. Nothing is recorded when no pane matches (Codex's background memory agent, a session started with `codex -C <other dir>`) or two or more Codex panes share a directory. A Codex session outside tmux (the desktop app) in a directory with a Codex pane counts as that pane's. Codex asks you to trust new hooks once (`/hooks`). With `approvals_reviewer = "guardian_subagent"` a reviewer, not you, answers approvals, so leave out `PermissionRequest`. Turn off Codex's own notifications (`[tui] notifications = false`) to avoid duplicates.
 
+## Grok state
+
+Grok CLI hooks give Grok panes the same sidebar state, notifications and boss notes. Grok runs hooks in the pane's own process (its default shell route; its `grok host-server` daemon route isn't supported), so plain `dev state` finds the pane through `TMUX_PANE`; it knows a Grok hook by `GROK_HOOK_EVENT` and then leaves out subagent events (`subagentType`) but their permission prompts and questions, and the extra `Stop` at session end, records no session (Grok panes aren't resumed) and never answers as a boss. In `~/.grok/hooks/dev.json`:
+
+| Event | State |
+|---|---|
+| `SessionStart` | `idle` |
+| `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure` | `working` |
+| `Notification` (matcher `permission_prompt\|elicitation_dialog\|idle_prompt`) | `waiting` |
+| `Stop`, `StopFailure`, `StopCancelled` | `idle` |
+| `SessionEnd` | `clear` |
+
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "$HOME/go/bin/dev state idle", "timeout": 10}]}]}}
+```
+
+Grok also runs the hooks in `~/.claude/settings.json`, so turn that off (`[compat.claude] hooks = false` in `~/.grok/config.toml`) to keep Claude's hooks from recording twice, and turn off Grok's own notifications (`[ui.notifications] condition = "never"`) to avoid duplicates. A Grok pane is one running `grok` (or `grok-*`, its versioned binary). Grok can report an interrupted turn after the next prompt started, which shows the new turn idle until its next tool call.
+
 ## Session restore
 
 The `dev resurrect` [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) hooks bring back each session's `@project` and sidebar, and each agent's own Claude conversation: `dev state` records the hook's `session_id` and transcript on the pane, the save keeps them next to the snapshot, and the restore types `claude --resume <id>` into each agent pane it brought back as a bare shell (100 ms apart; sessions that were still running are left alone). A pane restored into another directory, or whose transcript is gone, gets a fresh `claude` and a warning. Codex panes aren't resumed.
@@ -84,6 +102,7 @@ dev agent list [--json]                        # session, pane, agent, state, br
 dev agent list --mine                          # only the workers this session started (its child sessions)
 dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
 dev agent start <project> [<worktree>] --agent codex  # a new session runs codex; returns once codex runs
+dev agent start <project> [<worktree>] --agent grok   # same with grok
 dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
 dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
 dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)

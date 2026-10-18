@@ -142,7 +142,7 @@ func TestAgentControl(t *testing.T) {
 		_, errOut, status := devAgent(append(env, "TMUX_PANE="+w1), "", "wait", "w1")
 		check(t, "own pane", status+" "+errOut, "1 ❌ w1 is this agent's own pane\n")
 		_, errOut, status = devAgent(env, "", "wait", "cx")
-		check(t, "codex wait", status+" "+errOut, "1 ❌ agent has no hook state (Codex without its hooks): use read\n")
+		check(t, "codex wait", status+" "+errOut, "1 ❌ agent has no hook state (Codex or Grok without its hooks): use read\n")
 		_, errOut, status = devAgent(env, "", "get", "plain")
 		check(t, "no agent", status+" "+errOut, "1 ❌ session \"plain\" has no agent pane\n")
 		_, errOut, status = devAgent(env, "", "get", "w")
@@ -237,4 +237,16 @@ func TestAgentStart(t *testing.T) {
 	check(t, "codex pane is the layout's agent pane", d.T("display", "-t", cx["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
 	out, _, _ = devAgent(env, "", "list", "--mine")
 	check(t, "codex worker in --mine", strings.Split(out, "\t")[0], "cx")
+
+	// --agent grok: like codex, registered once grok runs
+	if err := os.Rename(sleeper(t, "grok"), filepath.Join(stubs, "grok")); err != nil {
+		t.Fatal(err)
+	}
+	env = append(d.scriptEnv(writeProjects(t, [2]string{"gk", tempDir(t)})), "TMUX_PANE="+boss)
+	out, errOut, status = devAgent(env, "", "start", "gk", "--agent", "grok", "--json", "--timeout", "30s")
+	var gk map[string]string
+	if err := json.Unmarshal([]byte(out), &gk); err != nil || status != "0" {
+		t.Fatalf("start grok: exit %s, %v: %q %q", status, err, out, errOut)
+	}
+	check(t, "grok agent", gk["session"]+" "+gk["agent"]+" "+gk["started_by"], "gk Grok boot")
 }

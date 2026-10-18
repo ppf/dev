@@ -25,7 +25,7 @@ var (
 	ErrStalled = errors.New("stalled: the agent never picked up the prompt")
 
 	// errNoState: waiting needs the hook state, which only Claude panes have.
-	errNoState = errors.New("agent has no hook state (Codex without its hooks): use read")
+	errNoState = errors.New("agent has no hook state (Codex or Grok without its hooks): use read")
 	// errGone: the hook state stopped being trusted mid-wait, as the agent left its pane.
 	errGone = errors.New("agent's hook state is gone: did it exit? read the pane")
 	// errNoAgentPane: the session exists but no agent registered in it (yet).
@@ -36,7 +36,7 @@ var (
 type Agent struct {
 	Session string `json:"session"`
 	Pane    string `json:"pane"`
-	Label   string `json:"agent"` // "Claude" or "Codex"
+	Label   string `json:"agent"` // "Claude", "Codex" or "Grok"
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
 	Project string `json:"project"`
 	Branch  string `json:"branch"`
@@ -238,7 +238,7 @@ var RealClock = Clock{Now: time.Now, Sleep: time.Sleep}
 const pollInterval = 200 * time.Millisecond
 
 // Wait polls pane until done reports true for its status, or timeout passes (ErrTimeout). A pane
-// without a trusted state (Codex without its hooks) fails at once.
+// without a trusted state (Codex or Grok without its hooks) fails at once.
 func Wait(c *tmux.Client, clk Clock, pane string, timeout time.Duration, done func(Status) bool) (Status, error) {
 	st, err := ReadStatus(c, pane)
 	if err != nil {

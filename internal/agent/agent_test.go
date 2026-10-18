@@ -160,6 +160,11 @@ func TestDetect(t *testing.T) {
 		{"codex with stale state", []Pane{{Window: 1, ID: "%3", Command: "codex-aarch64", State: Idle, StateCmd: "2.1.3"}}, "%0", "%3", "Codex", ""},
 		{"codexx is not codex", []Pane{{Window: 1, ID: "%3", Command: "codexx"}}, "%0", "", "", ""},
 		{"claude beats earlier codex", []Pane{{Window: 1, ID: "%3", Command: "codex"}, claude}, "%0", "%2", "Claude", Waiting},
+		{"grok", []Pane{{Window: 1, ID: "%5", Command: "grok-1.0.62-mac", State: Waiting, StateCmd: "grok-1.0.62-mac"}}, "%0", "%5", "Grok", Waiting},
+		{"grok without hook", []Pane{{Window: 1, ID: "%5", Command: "grok"}}, "%0", "%5", "Grok", ""},
+		{"claude beats earlier grok", []Pane{{Window: 1, ID: "%5", Command: "grok"}, claude}, "%0", "%2", "Claude", Waiting},
+		{"grok beats earlier codex", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%5", Command: "grok"}}, "%0", "%5", "Grok", ""},
+		{"grokky is not grok", []Pane{{Window: 1, ID: "%5", Command: "grokky"}}, "%0", "", "", ""},
 		{"first codex wins", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%4", Command: "codex"}}, "%0", "%3", "Codex", ""},
 	}
 	for _, tt := range tests {
@@ -169,6 +174,27 @@ func TestDetect(t *testing.T) {
 				t.Errorf("Detect = %+v, %v; want ID %q, Label %q, State %q", got, ok, tt.wantID, tt.label, tt.state)
 			}
 		})
+	}
+}
+
+func TestGrokSkip(t *testing.T) {
+	for input, want := range map[string]bool{
+		`{"hook_event_name":"PostToolUse"}`:                                                              false,
+		`{"hook_event_name":"PostToolUse","subagentType":"explore"}`:                                     true,
+		`{"hook_event_name":"StopCancelled","subagentType":""}`:                                          true,
+		`{"hook_event_name":"Stop","reason":"end_turn","subagentType":"x"}`:                              true,
+		`{"hook_event_name":"Notification","notification_type":"permission_prompt","subagentType":"x"}`:  false,
+		`{"hook_event_name":"Notification","notification_type":"idle_prompt","subagentType":"x"}`:        true,
+		`{"hook_event_name":"Notification","notification_type":"elicitation_dialog","subagentType":"x"}`: false,
+		`{"hook_event_name":"Stop","reason":"end_turn"}`:                                                 false,
+		`{"hook_event_name":"Stop","reason":"session_end"}`:                                              true,
+		`{"hook_event_name":"Stop"}`:                                                                     true,
+		`{"hook_event_name":"StopCancelled","reason":"user_interrupt"}`:                                  false,
+		`{`: false,
+	} {
+		if got := GrokSkip([]byte(input)); got != want {
+			t.Errorf("GrokSkip(%s) = %v, want %v", input, got, want)
+		}
 	}
 }
 

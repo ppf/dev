@@ -21,7 +21,7 @@ func newStateCmd() *cobra.Command {
 	var codex bool
 	cmd := &cobra.Command{
 		Use:   "state <working|waiting|idle|clear|tool-failed>",
-		Short: "Claude or Codex hook: record the agent state on its tmux pane",
+		Short: "Claude, Codex or Grok hook: record the agent state on its tmux pane",
 		Args: cobra.MatchAll(cobra.ExactArgs(1), func(_ *cobra.Command, args []string) error {
 			if !slices.Contains(states, args[0]) {
 				return fmt.Errorf("unknown state %q, want one of %v", args[0], states)
@@ -43,11 +43,17 @@ func newStateCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 				return nil
 			}
-			if !ok {
+			// Grok sets GROK_HOOK_EVENT on every hook, also on the Claude hooks it imports from ~/.claude
+			grok := os.Getenv("GROK_HOOK_EVENT") != ""
+			if !ok || grok && agent.GrokSkip(input) {
 				return nil
 			}
 			c := tmux.New()
-			session := agent.HookSession(input)
+			// Restore resumes Claude conversations only: a Codex or Grok id would make it type `claude --resume`
+			var session agent.Session
+			if !codex && !grok {
+				session = agent.HookSession(input)
+			}
 			if codex {
 				if pane, ok, err = agent.CodexPane(c, input); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
@@ -56,12 +62,11 @@ func newStateCmd() *cobra.Command {
 				if !ok {
 					return nil
 				}
-				// Restore resumes Claude conversations only; a Codex id would make it type `claude --resume`
-				session = agent.Session{}
 			}
 			var out string
 			busy := false
-			if !codex {
+			// Grok reads a Stop hook's stdout as a reply, and is never a boss
+			if !codex && !grok {
 				// Before Record: a Stop blocked with inbox notes keeps the boss working
 				if out, busy, err = inbox.BossHook(c, pane, input); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
