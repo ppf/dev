@@ -223,20 +223,33 @@ func TestPRCache(t *testing.T) {
 		t.Errorf("bumped during a lookup = %+v after %d calls, want %+v after %d", got, len(g.log()), want, calls+1)
 	}
 
-	// A failed lookup keeps the PR found and adds why, for every view
+	// A failed lookup keeps the PR found and adds why, in this view only: what it found may be older
+	// than another view's, so the option keeps the last success
 	g.mu.Lock()
 	g.err = errors.New("gh pr view: offline")
 	g.mu.Unlock()
 	now = now.Add(prTTL)
+	before, _ := st.get("%/r")
 	prGet(p, st, "/r")
 	p.wg.Wait()
+	ok := want
 	want.Err = "gh pr view: offline"
 	if got := prGet(p, st, "/r"); got != want {
 		t.Errorf("failed refresh = %+v, want %+v", got, want)
 	}
-	if got := prGet(prTestCache(g, st, &now), st, "/r"); got != want {
-		t.Errorf("failed refresh, new view = %+v, want %+v", got, want)
+	if after, _ := st.get("%/r"); after != before {
+		t.Errorf("failed refresh stored %s, want the last success kept: %s", after, before)
 	}
+	// Another view whose own lookup is due shows the last success while it looks up
+	g.mu.Lock()
+	g.err = nil
+	g.mu.Unlock()
+	if got := prGet(prTestCache(g, st, &now), st, "/r"); got != ok {
+		t.Errorf("failed refresh, new view = %+v, want %+v", got, ok)
+	}
+	g.mu.Lock()
+	g.err = errors.New("gh pr view: offline")
+	g.mu.Unlock()
 	// ...and with none found yet, it is none with the reason
 	prGet(p, st, "/other")
 	p.wg.Wait()
@@ -244,14 +257,17 @@ func TestPRCache(t *testing.T) {
 		t.Errorf("failed first lookup = %+v, want none with the reason", got)
 	}
 
-	// A failed write keeps the lookup here, after the lookup's own error, until the TTL
+	// A failed write keeps the lookup here, with why, until the TTL
+	g.mu.Lock()
+	g.err = nil
+	g.mu.Unlock()
 	st.fail(errors.New("tmux: no pane"))
 	prGet(p, st, "/down")
 	p.wg.Wait()
 	calls = len(g.log())
 	for range 3 {
-		if got := prGet(p, st, "/down"); got != (PR{Err: "gh pr view: offline; tmux: no pane"}) {
-			t.Errorf("failed write = %+v, want none with both reasons", got)
+		if got := prGet(p, st, "/down"); got != (PR{Err: "tmux: no pane"}) {
+			t.Errorf("failed write = %+v, want none with the reason", got)
 		}
 	}
 	p.wg.Wait()

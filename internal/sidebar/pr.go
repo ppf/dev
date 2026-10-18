@@ -60,7 +60,7 @@ type prStored struct {
 // hundreds of ms) and starts a lookup for a missing or expired key, whose result the next tick shows.
 // Results go to the pane's prOption, so one lookup serves every view, and a newer one found there is
 // adopted; a lookup from before the pane's last @dev_pr_gen bump is looked up again.
-// A failure keeps the last PR found (none at first) and its message for o.
+// A failure keeps the last PR found (none at first) and its message for o, in that view only.
 type prCache struct {
 	// gh runs gh args in dir and returns its stdout; tests replace it.
 	gh func(dir string, args ...string) ([]byte, error)
@@ -133,23 +133,26 @@ func (p *prCache) get(pane, stored, gen, path, branch string) PR {
 	return e.pr
 }
 
-// fetch looks k up and stores the result under gen, here and in k's pane.
+// fetch looks k up and stores the result under gen, here and, unless it failed, in k's pane.
 func (p *prCache) fetch(k prKey, gen string) {
 	defer p.wg.Done()
 	p.sem <- struct{}{}
 	pr, err := p.lookup(k)
 	<-p.sem
+	e := prEntry{pr: pr, fetched: p.now(), gen: gen}
+	if err == nil {
+		// Outside the lock, so a tick's get doesn't wait on tmux
+		v, _ := json.Marshal(prStored{Path: k.path, Branch: k.branch, Gen: gen, PR: pr, Fetched: e.fetched.UnixMilli()})
+		if err := p.store(k.pane, string(v)); err != nil {
+			e.pr.Err = err.Error()
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil {
-		pr = p.entries[k].pr
-		pr.Err = err.Error()
-	}
-	e := prEntry{pr: pr, fetched: p.now(), gen: gen}
-	v, _ := json.Marshal(prStored{Path: k.path, Branch: k.branch, Gen: gen, PR: pr, Fetched: e.fetched.UnixMilli()})
-	if err := p.store(k.pane, string(v)); err != nil {
-		// Kept here for o, after the lookup's own error
-		e.pr.Err = strings.TrimPrefix(pr.Err+"; "+err.Error(), "; ")
+		// Kept here only: this view's last PR may be older than one another view stored meanwhile
+		e.pr = p.entries[k].pr
+		e.pr.Err = err.Error()
 	}
 	p.entries[k] = e
 }

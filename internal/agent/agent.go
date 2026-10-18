@@ -108,8 +108,8 @@ type Hook struct {
 	} `json:"tool_input"`
 }
 
-// prCommand is a gh command that opens a PR or changes its state.
-var prCommand = regexp.MustCompile(`\bgh\s+pr\s+(create|merge|close|reopen|ready)\b`)
+// prCommand is a gh command that opens a PR or changes its state, global flags (-R owner/repo) included.
+var prCommand = regexp.MustCompile(`\bgh(\s+-\S+(\s+[^-\s]\S*)?)*\s+pr\s+(create|merge|close|reopen|ready)\b`)
 
 // ParseHook reads a hook's input; input that isn't JSON gives the zero Hook (Resolve reports it), and a
 // field of another type (Codex's apply_patch tool_input is a string) is left zero.

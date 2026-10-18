@@ -294,6 +294,8 @@ func TestRecordHook(t *testing.T) {
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
 		{"gh pr ready too", Working, prHook("PostToolUse", "gh pr ready"), "set-option -p -t %1 @agent_state working ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
+		{"with gh's global flags too", Working, prHook("PostToolUse", "gh -R ppf/dev --repo=x pr merge 37"), "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
 		{"gh pr edit leaves it", Working, prHook("PostToolUse", "gh pr edit --title x"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"gh pr view leaves it", Working, prHook("PostToolUse", "gh pr view --json state"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"a failed gh pr create leaves it", Working, prHook("PostToolUseFailure", "gh pr create"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
