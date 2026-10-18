@@ -120,6 +120,12 @@ The sidebar shows each Claude session's estimated cost (`Claude · idle · $1.24
 
 Without a command, `dev statusline` prints the cost as the status line. Codex panes show no cost.
 
+On a subscription plan, hide it from the sidebar, boss previews and `dev agent` text output (`--json` keeps `cost_usd`). Set on one session, it hides that session's cost wherever it shows. `dev statusline` without a command still prints it:
+
+```bash
+tmux set -g @dev_cost off           # or per session with -t
+```
+
 ## Development
 
 ```bash
