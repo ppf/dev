@@ -1,0 +1,24 @@
+{
+ "session_id": "f748fc3d-15a0-4132-896b-200fb6ceb96a",
+ "transcript_path": "/tmp/transcript_path",
+ "cwd": "/tmp/proj",
+ "scratchpad_dir": "/tmp/scratchpad_dir",
+ "prompt_id": "570b5bb6-ce4f-4f84-a432-a5d4172e266f",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PermissionRequest",
+ "tool_name": "Write",
+ "tool_input": {
+  "file_path": "/tmp/proj/notes.txt",
+  "content": "hi there\n"
+ },
+ "permission_suggestions": [
+  {
+   "type": "setMode",
+   "mode": "acceptEdits",
+   "destination": "session"
+  }
+ ]
+}

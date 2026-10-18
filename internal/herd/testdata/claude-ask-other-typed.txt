@@ -1,0 +1,45 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.302\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mHaiku 5.5 · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m/…/2ba67c60-ce05-4695-b09b-108feedd590f/scratchpad/cap/proj · \x1b[38;5;114m\x1b]8;id=17dqelr;https://claude.ai/code/session_01XLohuUubd2JvXbzjuYpuii?from=cli\x1b\/rc\x1b[39m\x1b]8;;\x1b\
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mCall the AskUserQuestion tool once, with two questions: (1) header "Color", question "Which color should the theme \x1b[39m
+  \x1b[38;5;231muse?", single select, options Red (desc "Warm and loud"), Green (desc "Calm"), Blue (desc "Cool and safe"); (2) \x1b[39m
+  \x1b[38;5;231mheader "Extras", question "Which extras do you want?", multiSelect true, options Tests (desc "Add unit tests"), Docs \x1b[39m
+  \x1b[38;5;231m(desc "Write README"), Lint (desc "Run linter"). Do nothing else.\x1b[39m
+
+\x1b[38;5;246m\x1b[49m⏺ \x1b[39mUser answered Claude's questions:
+\x1b[38;5;246m  ⎿  · Which color should the theme use? → Green\x1b[39m
+     \x1b[38;5;246m· Which extras do you want? → Tests, Lint\x1b[39m
+
+\x1b[38;5;231m⏺\x1b[39m Answers: Color → Green. Extras → Tests, Lint.
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mCooked for 4s · done 16:40\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mCall the AskUserQuestion tool once with one question: header "Size", question "Which size?", single select, options \x1b[39m
+  \x1b[38;5;231mSmall (desc "Fast"), Large (desc "Thorough"). Do nothing else.\x1b[39m
+\x1b[38;5;246m\x1b[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[38;5;16m\x1b[48;5;153m ☐ Size \x1b[39m\x1b[49m
+
+\x1b[1m\x1b[38;5;231mWhich size?\x1b[0m
+
+  \x1b[38;5;246m1.\x1b[39m Small
+     \x1b[38;5;246mFast\x1b[39m
+  \x1b[38;5;246m2.\x1b[39m Large
+     \x1b[38;5;246mThorough\x1b[39m
+\x1b[38;5;153m❯\x1b[39m \x1b[38;5;246m3. \x1b[39mmedium please
+\x1b[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  4. Chat about this
+
+\x1b[38;5;246mEnter to select · ↑/↓ to navigate · ctrl+g to edit in Vim · Esc to cancel\x1b[39m
+
+
+
+
+
+
+
+
+
+

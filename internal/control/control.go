@@ -426,3 +426,14 @@ func SendKeys(c *tmux.Client, pane string, keys []string) error {
 	}
 	return nil
 }
+
+// SendText types text into pane literally, as one send-keys.
+func SendText(c *tmux.Client, pane, text string) error {
+	if t, ok := strings.CutSuffix(text, ";"); ok {
+		// An argument's trailing ";" is tmux's command separator
+		text = t + `\;`
+	}
+	// "--": text starting with "-" would be taken for flags
+	_, err := c.Run("send-keys", "-t", pane, "-l", "--", text)
+	return err
+}

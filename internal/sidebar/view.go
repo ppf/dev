@@ -217,18 +217,27 @@ func prColour(state string) string {
 
 // statusDot is the coloured dot for an agent label and state (status_dot).
 func statusDot(label, state string) string {
+	if label == "" && state == "" {
+		return faint + "○" + reset
+	}
+	return StateColour(label, state) + "●" + reset
+}
+
+// StateColour is the escape colouring an agent label and state's dot: gold working, red waiting, green
+// idle, muted for an agent without state, faint for none.
+func StateColour(label, state string) string {
 	switch state {
 	case agent.Working:
-		return gold + "●" + reset
+		return gold
 	case agent.Waiting:
-		return red + "●" + reset
+		return red
 	case agent.Idle:
-		return green + "●" + reset
+		return green
 	}
 	if label != "" {
-		return muted + "●" + reset
+		return muted
 	}
-	return faint + "○" + reset
+	return faint
 }
 
 // CostHidden reports whether a session's @dev_cost (set globally or on the session) hides its cost.
