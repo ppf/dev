@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -473,8 +474,13 @@ func TestRestoreAgents(t *testing.T) {
 	fresh := func(session, id string) []string {
 		return warned(session + ":1.2: conversation " + id + " not resumed (directory changed or transcript gone), fresh agent")
 	}
+	argv, err := ptywrap.Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrap := tmux.ShellJoin(argv...)
 	send := func(pane, cmd string) string {
-		return "send-keys -t " + pane + " -l " + cmd + " ; send-keys -t " + pane + " Enter"
+		return "send-keys -t " + pane + " -l " + wrap + " " + cmd + " ; send-keys -t " + pane + " Enter"
 	}
 	slots := map[string]any{
 		procs:                            "\"~^([^ ]*/)?lazygit( |$)\"\n",

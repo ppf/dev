@@ -77,15 +77,29 @@ func writeProjects(t *testing.T, projects ...[2]string) string {
 	return "XDG_CONFIG_HOME=" + dir
 }
 
-// waitForStubs waits until session's claude, lazygit and nvim panes run their stub (sleep).
+// waitForStubs waits until session's claude, lazygit and nvim panes run their stub (sleep), dev's claude
+// under dev pty-wrap.
 func (d *devServer) waitForStubs(session string) {
 	d.t.Helper()
 	for _, pane := range []string{":1.2", ":1.3", ":2.1"} {
 		waitFor(d.t, "stub in "+session+pane, func() bool {
-			cmd, _ := d.Try("display", "-t", "="+session+pane, "-p", "#{pane_current_command}")
-			return cmd == "sleep"
+			out, _ := d.Try("display", "-t", "="+session+pane, "-p", "#{pane_current_command} #{pane_id}")
+			cmd, id, _ := strings.Cut(out, " ")
+			return cmd == "sleep" || cmd == filepath.Base(devBin) && strings.HasPrefix(d.stubs()[id], "claude ")
 		})
 	}
+}
+
+// stubs maps each pane id to the stub command line it ran.
+func (d *devServer) stubs() map[string]string {
+	stubs := map[string]string{}
+	log, _ := os.ReadFile(d.stubLog)
+	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if id, cmd, ok := strings.Cut(line, " "); ok {
+			stubs[id] = cmd
+		}
+	}
+	return stubs
 }
 
 type snapPane struct {
@@ -110,13 +124,7 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 	target := tmux.SessionTarget(session)
 	sidebar := d.T("show-option", "-qv", "-t", target, "@sidebar_pane")
 	clients := d.T("list-clients", "-F", "#{client_session}")
-	stubs := map[string]string{}
-	log, _ := os.ReadFile(d.stubLog)
-	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
-		if id, cmd, ok := strings.Cut(line, " "); ok {
-			stubs[id] = cmd
-		}
-	}
+	stubs := d.stubs()
 	r := strings.NewReplacer(replace...)
 
 	var b strings.Builder
@@ -129,6 +137,10 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 	}
 	for _, p := range panes {
 		cmd := p.Command
+		if cmd == filepath.Base(devBin) && strings.HasPrefix(stubs[p.ID], "claude ") {
+			// dev's claude runs under dev pty-wrap (see TestOpenParity), project.sh's doesn't
+			cmd = "sleep"
+		}
 		if p.ID == sidebar {
 			// The bash sidebar's current command changes as it polls tmux, and its start command runs
 			// sidebar.sh where dev's runs `dev sidebar` (see sidebarStart)

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/worktree"
@@ -98,7 +99,10 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	agentCmd := cmp.Or(opts.Agent, agent.Claude)
+	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude))
+	if err != nil {
+		return err
+	}
 	if opts.Detach {
 		if found {
 			return nil
@@ -238,6 +242,19 @@ func uniqueName(base string, exists func(string) (bool, error)) (string, error) 
 		}
 		name = base + "-" + strconv.Itoa(suffix)
 	}
+}
+
+// agentCommand is what a new session's Agent pane types to start kind: claude under dev pty-wrap, so its
+// images get through tmux.
+func agentCommand(kind string) (string, error) {
+	if kind != agent.Claude {
+		return kind, nil
+	}
+	argv, err := ptywrap.Argv(kind)
+	if err != nil {
+		return "", err
+	}
+	return tmux.ShellJoin(argv...), nil
 }
 
 // createLayout builds the default session: Agent (agentCmd | lazygit over a terminal, sidebar on the

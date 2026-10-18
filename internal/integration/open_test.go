@@ -39,6 +39,7 @@ type opened struct {
 	out2, status2     string
 	sessions, clients string
 	sidebar           string // the sidebar pane's start command
+	agent             string // the agent pane's current command
 }
 
 // devSidebarStart reports whether a sidebar start command runs the dev binary's sidebar.
@@ -63,6 +64,7 @@ func TestOpenParity(t *testing.T) {
 		out, err := open(d)
 		r.out, r.status = out, errStatus(err)
 		d.waitForStubs("app")
+		r.agent = d.T("display", "-t", "=app:1.2", "-p", "#{pane_current_command}")
 		r.first = d.snapshot("app")
 		out, err = open(d)
 		r.out2, r.status2 = out, errStatus(err)
@@ -91,6 +93,9 @@ func TestOpenParity(t *testing.T) {
 	// The deliberate difference: the same pane runs dev's sidebar instead of sidebar.sh
 	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(t), "sessions/sidebar.sh"))), "true")
 	check(t, "dev: sidebar runs dev sidebar", devSidebarStart(dev.sidebar), "true")
+	// And claude runs under dev pty-wrap
+	check(t, "bash: claude runs as is", bash.agent, "sleep")
+	check(t, "dev: claude runs under dev pty-wrap", dev.agent, filepath.Base(devBin))
 	for _, want := range []string{
 		"session app @project=app clients=app\n",
 		"window 1 Agent active=1 panes=4\nwindow 2 Files active=0 panes=3\n",

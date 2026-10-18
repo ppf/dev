@@ -146,6 +146,16 @@ On a subscription plan, hide it from the sidebar, boss previews and `dev agent` 
 tmux set -g @dev_cost off           # or per session with -t
 ```
 
+## Images in tmux
+
+Claude Code draws images (pasted image thumbnails) with kitty graphics, but writes them to tmux without the passthrough wrapping tmux needs: tmux drops them and sets them as the pane title (`Ga=d,d=I,i=2,q=2`). So dev starts claude (new sessions, the boss, `dev resurrect` resumes) under `dev pty-wrap`, which runs it on its own pty and wraps each graphics sequence for passthrough; everything else passes through unchanged. Images show in a terminal with kitty graphics (Ghostty, kitty) given:
+
+```bash
+tmux set -g allow-passthrough on
+```
+
+and `"CLAUDE_CODE_FORCE_TERMINAL_IMAGES": "1"` in the `env` of Claude's `settings.json` (inside tmux Claude Code turns images off otherwise). A claude you start by hand runs unwrapped; wrap it with `dev pty-wrap -- claude`. In the wrapped pane, tmux's `pane_current_command` is `dev`.
+
 ## Development
 
 ```bash
