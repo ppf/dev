@@ -337,3 +337,18 @@ func TestListCostOff(t *testing.T) {
 		t.Errorf("List = %+v, want HideCost with cost_usd 1.5 kept", got)
 	}
 }
+
+func TestSendText(t *testing.T) {
+	for text, want := range map[string]string{
+		"-R":     "send-keys -t %1 -l -- -R",
+		"a;b":    "send-keys -t %1 -l -- a;b",
+		"done;":  `send-keys -t %1 -l -- done\;`,
+		"medium": "send-keys -t %1 -l -- medium",
+	} {
+		var got string
+		c := tmux.NewFake(func(args []string) (string, error) { got = strings.Join(args, " "); return "", nil })
+		if err := SendText(c, "%1", text); err != nil || got != want {
+			t.Errorf("SendText(%q) ran %q, %v; want %q", text, got, err, want)
+		}
+	}
+}

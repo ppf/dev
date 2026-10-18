@@ -41,15 +41,18 @@ type row struct {
 	CostOpt      string `tmux:"@dev_cost"`
 	PR           string `tmux:"@dev_pr"`
 	PRGen        string `tmux:"@dev_pr_gen"`
+	Question     string `tmux:"@agent_question"`
 }
 
 // tile is one worker session's preview.
 type tile struct {
 	sess      sidebar.Session
-	pane      string   // the agent pane
-	startedBy string   // OptStartedBy
-	deciding  bool     // the agent waits on the user's decision, see agent.Deciding
-	body      []string // the pane's last screen lines; nil when not captured this tick
+	pane      string         // the agent pane
+	startedBy string         // OptStartedBy
+	deciding  bool           // the agent waits on the user's decision, see agent.Deciding
+	question  agent.Question // @agent_question, what its dialog asks
+	body      []string       // the pane's last screen lines; nil when not captured this tick
+	pick      *pick          // the dialog a deciding agent shows; nil when none or not captured
 }
 
 // snapshot is what one refresh saw.
@@ -72,9 +75,10 @@ type Model struct {
 	err           error
 	confirm       string // session waiting for y to be killed
 	msg           string // one-off message on the bottom row, until the next key
-	reply         string // session a reply is being typed to; "" when not typing
-	replyPane     string // its agent pane
-	draft         []rune // the reply so far
+	box           replyBox
+	answering     string   // the session an answer's keys go to, until its outcome; one at a time
+	history       []string // replies sent, oldest first
+	clk           control.Clock
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
@@ -98,7 +102,7 @@ type refreshMsg struct {
 
 // Run shows the previews in pane until its pane closes or Ctrl-C.
 func Run(c *tmux.Client, pane string) error {
-	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c)}
+	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c), clk: control.RealClock}
 	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		return fmt.Errorf("boss: %w", err)
 	}
@@ -126,6 +130,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.snap, m.err = msg.snap, nil
 			m.selected = m.validSelection()
+			m.syncPick()
 		}
 		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tea.WindowSizeMsg:
@@ -137,6 +142,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 	case actionMsg:
 		m.msg = msg.msg
+		return m, nil
+	case answeredMsg:
+		m.msg, m.answering = msg.msg, ""
+		if !msg.took && msg.session == m.box.session {
+			m.box.sent = ""
+		}
 		return m, nil
 	case watchMsg:
 		if msg.err != nil {
@@ -163,7 +174,7 @@ func (m Model) validSelection() string {
 // refresh lists panes and clients (two tmux calls), and while a client shows this window captures the
 // tiles on the selected page (one call each, at most maxTiles).
 func (m Model) refresh() tea.Cmd {
-	width, height, selected := m.width, m.height, m.selected
+	width, height, selected := m.width, m.gridHeight(), m.selected
 	return func() tea.Msg {
 		rows, err := tmux.Query[row](m.c, "list-panes", "-a")
 		if err != nil {
@@ -180,7 +191,7 @@ func (m Model) refresh() tea.Cmd {
 		if !snap.visible {
 			return refreshMsg{snap: snap}
 		}
-		g := layout(len(snap.tiles), width, height-1)
+		g := layout(len(snap.tiles), width, height)
 		from, to := g.page(index(snap.tiles, selected))
 		to = min(to, len(snap.tiles))
 		for i := from; i < to; i++ {
@@ -190,7 +201,15 @@ func (m Model) refresh() tea.Cmd {
 				snap.tiles[i].body = []string{err.Error()}
 				continue
 			}
-			snap.tiles[i].body = tail(previewLines(out, snap.tiles[i]), g.tileH-1)
+			t := &snap.tiles[i]
+			t.body = tail(previewLines(out, *t), g.tileH-1)
+			if !t.deciding {
+				continue
+			}
+			if d, ok := parseDialog(out); ok {
+				p := newPick(d, t.question, ansi.Strip(out))
+				t.pick = &p
+			}
 		}
 		return refreshMsg{snap: snap}
 	}
@@ -249,6 +268,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		for _, r := range rs {
 			if r.ID == a.Pane.ID {
 				t.deciding = agent.Deciding(a.State, r.WaitingFor)
+				t.question, _ = agent.ParseQuestion(r.Question)
 			}
 		}
 		meta[name] = t

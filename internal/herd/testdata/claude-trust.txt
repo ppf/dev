@@ -1,0 +1,45 @@
+cd /private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-reply-picker/2ba67c60-ce05-4695-b09b-
+108feedd590f/scratchpad/cap/proj && claude --settings /private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--cla
+ude-worktrees-reply-picker/2ba67c60-ce05-4695-b09b-108feedd590f/scratchpad/cap/settings.json --permission-mode default -
+-model haiku
+\x1b[35m❯\x1b[39m cd /private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-reply-picker/2ba67c60-ce05-4695-b09
+b-108feedd590f/scratchpad/cap/proj && claude --settings /private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--c
+laude-worktrees-reply-picker/2ba67c60-ce05-4695-b09b-108feedd590f/scratchpad/cap/settings.json --permission-mode default
+ --model haiku
+
+\x1b[38;5;220m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m \x1b[1m\x1b[38;5;220mAccessing\x1b[0m \x1b[1m\x1b[38;5;220mworkspace:\x1b[0m
+
+ \x1b[1m/private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-reply-picker/2ba67c60-ce05-4695-b09b-1\x1b[0m
+ \x1b[1m08feedd590f/scratchpad/cap/proj\x1b[0m
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source
+ project, or work from your team). If not, take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ \x1b[38;5;246m\x1b]8;id=zaxmda;https://code.claude.com/docs/en/security\x1b\Security guide\x1b[39m\x1b]8;;\x1b\
+
+ \x1b[38;5;153m❯\x1b[39m \x1b[38;5;153mNo,\x1b[39m \x1b[38;5;153mexit\x1b[39m
+   Yes, I trust this folder
+
+ \x1b[38;5;246mEnter\x1b[39m \x1b[38;5;246mto\x1b[39m \x1b[38;5;246mconfirm\x1b[39m \x1b[38;5;246m·\x1b[39m \x1b[38;5;246mEsc\x1b[39m \x1b[38;5;246mto\x1b[39m \x1b[38;5;246mcancel\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

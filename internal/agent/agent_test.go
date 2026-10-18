@@ -92,7 +92,7 @@ func TestRecord(t *testing.T) {
 		{"state and session", Idle, Session{"s", "/t/s.jsonl"}, recorded + session},
 		{"no session unsets the old one", Idle, Session{}, recorded + noSession},
 		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id" + noSession},
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question" + noSession},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -303,6 +303,7 @@ func TestRecordHook(t *testing.T) {
 		{"grok prompt records its id", Working, Hook{Event: "UserPromptSubmit", PromptID: "p1"}, "set-option -p -t %1 @agent_state working ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; " +
 			"set-option -p -t %1 @agent_prompt_id p1"},
+		{"a turn's end clears the question", Idle, Hook{Event: "Stop"}, "set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"waiting records why", Waiting, Hook{Event: "Notification", NotificationType: "permission_prompt"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt"},
 		{"codex approval records the event", Waiting, Hook{Event: "PermissionRequest"}, "set-option -p -t %1 @agent_state waiting ; " +
@@ -324,7 +325,7 @@ func TestRecordHook(t *testing.T) {
 		{"gh pr edit leaves it", Working, prHook("PostToolUse", "gh pr edit --title x"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"gh pr view leaves it", Working, prHook("PostToolUse", "gh pr view --json state"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"a failed gh pr create leaves it", Working, prHook("PostToolUseFailure", "gh pr create"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
-		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -337,7 +338,11 @@ func TestRecordHook(t *testing.T) {
 				}
 				return "", nil
 			})
-			if err := Record(c, "%1", tt.state, Session{}, tt.hook); err != nil || got != tt.want+noSession {
+			want := tt.want
+			if slices.Contains(turnBounds, tt.hook.Event) {
+				want += " ; set-option -pu -t %1 @agent_question"
+			}
+			if err := Record(c, "%1", tt.state, Session{}, tt.hook); err != nil || got != want+noSession {
 				t.Errorf("Record ran %q, %v; want %q", got, err, tt.want)
 			}
 		})

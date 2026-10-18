@@ -1,0 +1,34 @@
+{
+ "session_id": "f748fc3d-15a0-4132-896b-200fb6ceb96a",
+ "transcript_path": "/tmp/transcript_path",
+ "cwd": "/tmp/proj",
+ "scratchpad_dir": "/tmp/scratchpad_dir",
+ "prompt_id": "45cc55a6-e9ad-4654-befb-d72741d0eecf",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PermissionRequest",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "mkdir -p build/out && touch build/out/x.txt",
+  "description": "Create build/out directory and touch x.txt"
+ },
+ "permission_suggestions": [
+  {
+   "type": "addRules",
+   "rules": [
+    {
+     "toolName": "Bash",
+     "ruleContent": "mkdir -p build/out"
+    },
+    {
+     "toolName": "Bash",
+     "ruleContent": "touch build/out/x.txt"
+    }
+   ],
+   "behavior": "allow",
+   "destination": "localSettings"
+  }
+ ]
+}

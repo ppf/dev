@@ -1,0 +1,93 @@
+{
+ "session_id": "f748fc3d-15a0-4132-896b-200fb6ceb96a",
+ "transcript_path": "/tmp/transcript_path",
+ "cwd": "/tmp/proj",
+ "scratchpad_dir": "/tmp/scratchpad_dir",
+ "prompt_id": "a986893a-1feb-4adb-bb73-d7f3ac8b69aa",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "AskUserQuestion",
+ "tool_input": {
+  "questions": [
+   {
+    "question": "Which color?",
+    "header": "Color",
+    "options": [
+     {
+      "label": "Red",
+      "description": "Warm"
+     },
+     {
+      "label": "Blue",
+      "description": "Cool"
+     }
+    ],
+    "multiSelect": false
+   },
+   {
+    "question": "Which extras?",
+    "header": "Extras",
+    "options": [
+     {
+      "label": "Tests",
+      "description": "Unit tests"
+     },
+     {
+      "label": "Docs",
+      "description": "README"
+     }
+    ],
+    "multiSelect": true
+   }
+  ],
+  "answers": {
+   "Which color?": "purple",
+   "Which extras?": "Tests, ci"
+  },
+  "annotations": {}
+ },
+ "tool_response": {
+  "questions": [
+   {
+    "question": "Which color?",
+    "header": "Color",
+    "options": [
+     {
+      "label": "Red",
+      "description": "Warm"
+     },
+     {
+      "label": "Blue",
+      "description": "Cool"
+     }
+    ],
+    "multiSelect": false
+   },
+   {
+    "question": "Which extras?",
+    "header": "Extras",
+    "options": [
+     {
+      "label": "Tests",
+      "description": "Unit tests"
+     },
+     {
+      "label": "Docs",
+      "description": "README"
+     }
+    ],
+    "multiSelect": true
+   }
+  ],
+  "answers": {
+   "Which color?": "purple",
+   "Which extras?": "Tests, ci"
+  },
+  "annotations": {}
+ },
+ "tool_use_id": "toolu_01SZeJb82Uy9BDWmPKGaHBZC",
+ "duration_ms": 1
+}

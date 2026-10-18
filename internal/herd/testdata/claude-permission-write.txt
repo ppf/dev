@@ -1,0 +1,45 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.302\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mHaiku 5.5 · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m/…/2ba67c60-ce05-4695-b09b-108feedd590f/scratchpad/cap/proj · \x1b[38;5;114m\x1b]8;id=lfj79k;https://claude.ai/code/session_01VafY7DdXpYid4S5f9tXJTr?from=cli\x1b\/rc\x1b[39m\x1b]8;;\x1b\
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mRun this exact bash command with the Bash tool: mkdir -p build/out && touch build/out/x.txt\x1b[39m
+
+\x1b[49m  \x1b[38;5;246mRan \x1b[1m1\x1b[0m\x1b[38;5;246m shell command \x1b[39m
+\x1b[38;5;246m  ⎿  Interrupted · What should Claude do instead?\x1b[39m
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mBaked for 5s · done 4:42 PM\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mUse the Write tool to create notes.txt containing the single line: hi there. Nothing else.\x1b[39m
+
+\x1b[38;5;246m\x1b[49m⏺\x1b[39m \x1b[1mWrite\x1b[0m(\x1b]8;id=1odwfry;file:///private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-reply-picker/2ba67c60-ce05-4695-b09b-108feedd590f/scratchpad/cap/proj/notes.txt\x1b\notes.txt\x1b]8;;\x1b\)
+
+\x1b[38;5;153m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m \x1b[1m\x1b[38;5;153mCreate file\x1b[0m
+ \x1b[38;5;246mnotes.txt\x1b[39m
+\x1b[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+\x1b[39m \x1b[2m\x1b[38;5;231m 1 \x1b[0m\x1b[38;5;231mhi there\x1b[39m
+\x1b[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+\x1b[39m Do you want to create \x1b[1mnotes.txt\x1b[0m?
+ \x1b[38;5;153m❯\x1b[39m \x1b[38;5;246m1. \x1b[38;5;153mYes\x1b[39m
+   \x1b[38;5;246m2. \x1b[39mYes, and switch to \x1b[1maccept edits (auto-approve file edits and common file commands)\x1b[0m for this session \x1b[1m(shift+tab)\x1b[0m
+   \x1b[38;5;246m3. \x1b[39mNo
+
+ \x1b[38;5;246mEsc to cancel · Tab to amend\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

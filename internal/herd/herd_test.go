@@ -167,20 +167,23 @@ func TestSelectionAndClicks(t *testing.T) {
 	var ran []string
 	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
 	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
+	// Tall enough for both tiles with the box open
+	m.height = 14
 	// A click answers in place: it selects the tile and opens the reply box for it, never switching
 	m, cmd := click(m, 3, 1)
-	if m.selected != "a" || m.reply != "a" || m.replyPane != "%5" || cmd != nil || len(ran) != 0 {
-		t.Errorf("click on tile a: selected %q reply %q pane %q, ran %q", m.selected, m.reply, m.replyPane, ran)
+	if m.selected != "a" || m.box.session != "a" || m.box.pane != "%5" || cmd != nil || len(ran) != 0 {
+		t.Errorf("click on tile a: selected %q reply %q pane %q, ran %q", m.selected, m.box.session, m.box.pane, ran)
 	}
-	if _, cmd := click(m, 3, 5); cmd != nil {
+	// With the box open the tiles are 5 rows: the gap is row 5
+	if next, cmd := click(m, 3, 5); cmd != nil || next.box.session != "a" {
 		t.Error("click on the gap row does something")
 	}
-	m.draft = []rune("half")
-	if m, _ = click(m, 3, 1); string(m.draft) != "half" {
-		t.Errorf("click on the same tile drops the draft: %q", string(m.draft))
+	m.box.ed.set("half")
+	if m, _ = click(m, 3, 1); m.box.ed.String() != "half" {
+		t.Errorf("click on the same tile drops the draft: %q", m.box.ed.String())
 	}
-	if m, _ = click(m, 3, 7); m.reply != "b" || m.replyPane != "%6" || len(m.draft) != 0 {
-		t.Errorf("click on tile b: reply %q pane %q draft %q", m.reply, m.replyPane, string(m.draft))
+	if m, _ = click(m, 3, 6); m.box.session != "b" || m.box.pane != "%6" || m.box.ed.String() != "" {
+		t.Errorf("click on tile b: reply %q pane %q draft %q", m.box.session, m.box.pane, m.box.ed.String())
 	}
 	if len(ran) != 0 {
 		t.Errorf("clicks ran %q", ran)
@@ -243,10 +246,10 @@ func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "") +
-			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2") +
-			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "") +
+			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -287,9 +290,9 @@ func TestRefresh(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {
@@ -341,17 +344,17 @@ func TestReply(t *testing.T) {
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeySpace})
 	m, _ = key(m, runes("itx"))
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeyBackspace})
-	if row := ansi.Strip(m.render()[11]); !strings.HasPrefix(row, " b ❯ fix it") {
-		t.Errorf("reply row %q", row)
+	if got := m.render(); ansi.Strip(got[10]) != "─ ● b Codex #3 open fix "+strings.Repeat("─", 16) || ansi.Strip(got[11]) != "▎ fix it " {
+		t.Errorf("reply box %q", got[10:])
 	}
 	// Keys go to the draft while typing: j doesn't move the selection
-	if m, _ = key(m, runes("j")); m.selected != "b" || string(m.draft) != "fix itj" {
-		t.Errorf("typing: selected %q draft %q", m.selected, string(m.draft))
+	if m, _ = key(m, runes("j")); m.selected != "b" || m.box.ed.String() != "fix itj" {
+		t.Errorf("typing: selected %q draft %q", m.selected, m.box.ed.String())
 	}
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeyBackspace})
 	m, cmd := key(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.reply != "" || cmd == nil {
-		t.Fatalf("enter: reply %q, cmd %v", m.reply, cmd)
+	if m.box.session != "" || cmd == nil || !slices.Equal(m.history, []string{"fix it"}) {
+		t.Fatalf("enter: reply %q, cmd %v, history %q", m.box.session, cmd, m.history)
 	}
 	if msg := cmd().(actionMsg); msg.msg != "Sent to b" {
 		t.Errorf("send: %q", msg.msg)
@@ -373,8 +376,8 @@ func TestReply(t *testing.T) {
 	ran = nil
 	m, _ = key(m, runes("i"))
 	m, _ = key(m, runes("never"))
-	if m, cmd = key(m, tea.KeyMsg{Type: tea.KeyEsc}); m.reply != "" || cmd != nil || len(ran) != 0 {
-		t.Errorf("esc: reply %q, ran %q", m.reply, ran)
+	if m, cmd = key(m, tea.KeyMsg{Type: tea.KeyEsc}); m.box.session != "" || cmd != nil || len(ran) != 0 {
+		t.Errorf("esc: reply %q, ran %q", m.box.session, ran)
 	}
 }
 
@@ -410,13 +413,14 @@ func TestReplyPasteAndQuit(t *testing.T) {
 		return next.(Model), cmd
 	}
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line one\nline two\x1b[31m"), Paste: true})
+	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line one\r\nline two\x1b[31m"), Paste: true})
 	got := m.render()
-	if len(got) != m.height || !strings.Contains(ansi.Strip(got[11]), "line one⏎line two⏎[31m") {
-		t.Errorf("pasted reply: %d lines, row %q", len(got), ansi.Strip(got[11]))
+	// The box grows a row per line
+	if len(got) != m.height || ansi.Strip(got[10]) != "▎ line one" || ansi.Strip(got[11]) != "▎ line two⏎[31m " {
+		t.Errorf("pasted reply: %d lines, rows %q", len(got), got[9:])
 	}
-	if string(m.draft) != "line one\nline two\x1b[31m" {
-		t.Errorf("draft keeps the paste as typed: %q", string(m.draft))
+	if m.box.ed.String() != "line one\nline two\x1b[31m" {
+		t.Errorf("draft keeps the paste as typed: %q", m.box.ed.String())
 	}
 	if _, cmd := key(m, tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil || cmd() != tea.Quit() {
 		t.Error("ctrl+c while typing doesn't quit")
