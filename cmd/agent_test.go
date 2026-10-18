@@ -37,6 +37,7 @@ func TestAgentArgs(t *testing.T) {
 		{[]string{"agent", "send-keys", "app"}, "requires at least 2 arg(s), only received 1"},
 		{[]string{"agent", "prompt"}, "requires at least 1 arg(s), only received 0"},
 		{[]string{"agent", "start"}, "accepts between 1 and 2 arg(s), received 0"},
+		{[]string{"agent", "close"}, "accepts 1 arg(s), received 0"},
 		{[]string{"agent", "start", "app", ""}, "empty worktree name"},
 		{[]string{"agent", "start", "app", "--agent", "gemini"}, `unknown --agent "gemini", want claude, codex or grok`},
 		{[]string{"agent", "wait", "app", "--until", "done"}, `unknown --until "done", want idle, waiting or settled`},
@@ -44,5 +45,12 @@ func TestAgentArgs(t *testing.T) {
 		if _, _, err := execute(t, "", tt.args...); err == nil || err.Error() != tt.err {
 			t.Errorf("dev %q = %v, want %q", tt.args, err, tt.err)
 		}
+	}
+}
+
+func TestAgentCloseOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX_PANE", "")
+	if _, _, err := execute(t, "", "agent", "close", "app"); err == nil || !strings.Contains(err.Error(), "run it inside tmux") {
+		t.Errorf("agent close outside tmux = %v, want an inside-tmux error", err)
 	}
 }

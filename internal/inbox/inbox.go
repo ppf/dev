@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ppf/dev/internal/config"
 )
 
 // OptOff is the tmux option that turns the inbox off ("off"), globally or per boss session.
@@ -154,16 +156,12 @@ var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 // Open is the inbox of the boss session on the tmux server at socket, under $XDG_STATE_HOME/dev/inbox
 // (default ~/.local/state); session is its id ($N) and creation time, as a restarted server reuses ids.
 func Open(socket, session string) (Box, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Box{}, err
-		}
-		dir = filepath.Join(home, ".local", "state")
+	dir, err := config.StateDir()
+	if err != nil {
+		return Box{}, err
 	}
 	name := strings.Trim(unsafe.ReplaceAllString(socket+"-"+session, "_"), "_")
-	return Box{path: filepath.Join(dir, "dev", "inbox", name+".json")}, nil
+	return Box{path: filepath.Join(dir, "inbox", name+".json")}, nil
 }
 
 // lock takes the inbox's exclusive lock; close the file to release it.

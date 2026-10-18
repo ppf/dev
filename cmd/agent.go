@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,7 +47,7 @@ pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout, 3
 Run "dev agent skill" for the coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(),
-		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentSkillCmd())
+		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd())
 	return cmd
 }
 
@@ -304,6 +305,54 @@ screen before the first prompt). An existing session is reused; one running anot
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
 	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex or grok")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
+	return cmd
+}
+
+func newAgentCloseCmd() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "close <target>",
+		Short: "Close a finished worker this session started: kill its session, remove its worktree and branch",
+		Long: `Close a worker this session started with dev agent start, once its work is delivered. Refused,
+naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
+no changes to tracked files and its HEAD is in origin's default branch (fetched first). Its untracked,
+not ignored files (e.g. RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it
+move to this session, its session is killed, its worktree removed and its branch force-deleted.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pane := os.Getenv("TMUX_PANE")
+			if pane == "" {
+				return errors.New("close only closes workers of the session it runs in: run it inside tmux")
+			}
+			c := tmux.New()
+			a, err := resolveOther(c, args[0])
+			if err != nil {
+				return err
+			}
+			done, closeErr := control.Close(c, pane, a)
+			// Once files are archived, print where even if a later step failed
+			if closeErr != nil && done.Results == "" {
+				return closeErr
+			}
+			out := cmd.OutOrStdout()
+			if asJSON {
+				return cmp.Or(printJSON(out, done), closeErr)
+			}
+			if done.Results != "" {
+				fmt.Fprintf(out, "Saved %s's untracked files to %s: %s\n", done.Session, done.Results, strings.Join(done.Files, ", "))
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			fmt.Fprintf(out, "Closed %s, removed worktree %s", done.Session, done.Worktree)
+			if done.Branch != "" {
+				fmt.Fprintf(out, " and branch %s", done.Branch)
+			}
+			fmt.Fprintln(out)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
 	return cmd
 }
 
