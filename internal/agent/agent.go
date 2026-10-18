@@ -168,8 +168,9 @@ func HookSession(input []byte) Session {
 // Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
 // and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
-// notification type, else the event: Codex's PermissionRequest) and bumping @dev_pr_gen on a PostToolUse of a
-// gh command that changes a PR; Clear (or no session) unsets the session options.
+// notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
+// or end, and bumping @dev_pr_gen on a PostToolUse of a gh command that changes a PR; Clear (or no session) unsets the
+// session options.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
@@ -177,7 +178,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since"), unset("@agent_prompt_id")}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since"), unset("@agent_prompt_id"), unset(OptQuestion)}
 	} else {
 		// @agent_since (unix seconds) only moves when the state changes, so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
@@ -202,6 +203,10 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 			// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
 			cmds = append(cmds, set("@agent_waiting_for", cmp.Or(h.NotificationType, h.Event)))
 		}
+		if slices.Contains(turnBounds, h.Event) {
+			// Not on a PostToolUse: a tool run alongside may end while the dialog is still open
+			cmds = append(cmds, unset(OptQuestion))
+		}
 	}
 	if s.ID == "" {
 		cmds = append(cmds, unset("@agent_session"), unset("@agent_transcript"))
@@ -218,6 +223,9 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	_, err := c.Run(args...)
 	return err
 }
+
+// turnBounds are the hook events starting or ending a turn, which end any dialog in it.
+var turnBounds = []string{"SessionStart", "UserPromptSubmit", "Stop", "StopFailure"}
 
 // now is the clock @agent_since reads; tests replace it.
 var now = time.Now
