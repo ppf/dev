@@ -201,4 +201,28 @@ func TestGrokState(t *testing.T) {
 		data, _ := os.ReadFile(log)
 		return string(data) == "[dev boss inbox] 1 worker update(s):\n- gk finished: Tests pass\n"
 	})
+
+	// An earlier turn's reports landing after the next prompt leave that prompt's turn working
+	grok("working", `{"hook_event_name":"UserPromptSubmit","promptId":"p1"}`)
+	grok("working", `{"hook_event_name":"UserPromptSubmit","promptId":"p2"}`)
+	grok("idle", `{"hook_event_name":"StopCancelled","promptId":"p1","reason":"user_interrupt"}`)
+	grok("idle", `{"hook_event_name":"StopFailure","promptId":"p1","error":"rate_limit"}`)
+	check(t, "earlier turn's reports skipped", state(), "working/grok")
+	time.Sleep(time.Second)
+	check(t, "no note for an earlier turn", func() string { data, _ := os.ReadFile(log); return string(data) }(),
+		"[dev boss inbox] 1 worker update(s):\n- gk finished: Tests pass\n")
+	grok("idle", `{"hook_event_name":"StopCancelled","promptId":"p2","reason":"user_interrupt"}`)
+	check(t, "own turn's report", state(), "idle/grok")
+	grok("working", `{"hook_event_name":"PostToolUse"}`)
+	grok("idle", `{"hook_event_name":"StopFailure","promptId":"p1","error":"rate_limit"}`)
+	check(t, "earlier turn's report skipped after the next turn ended", state(), "working/grok")
+	time.Sleep(time.Second)
+	check(t, "still no note for an earlier turn", func() string { data, _ := os.ReadFile(log); return string(data) }(),
+		"[dev boss inbox] 1 worker update(s):\n- gk finished: Tests pass\n")
+	grok("working", `{"hook_event_name":"UserPromptSubmit","promptId":"p3"}`)
+	grok("idle", `{"hook_event_name":"Stop","reason":"end_turn"}`)
+	check(t, "turn end without a prompt id settles", state(), "idle/grok")
+	grok("working", `{"hook_event_name":"UserPromptSubmit","promptId":"p4"}`)
+	grok("clear", `{"hook_event_name":"SessionEnd"}`)
+	check(t, "session end drops the prompt id", s.T("show-option", "-pqv", "-t", gk, "@agent_prompt_id"), "")
 }
