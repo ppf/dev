@@ -209,10 +209,12 @@ func TestAgentStart(t *testing.T) {
 	second := start()
 	check(t, "reused", second["pane"], first["pane"])
 	check(t, "sessions", d.T("list-sessions", "-F", "#{session_name}"), "app\nboot")
+	out, errOut, status := devAgent(env, "", "start", "app", "--agent", "codex", "--timeout", "30s")
+	check(t, "reused session running another agent", out+status+" "+errOut, "1 ❌ session app already runs Claude, not codex\n")
 
 	repo := newRepo(t, "", "")
 	env = d.scriptEnv(append(gitEnv, writeProjects(t, [2]string{"repo", repo}))...)
-	out, errOut, status := devAgent(env, "", "start", "repo", "feature/x", "--json", "--timeout", "30s")
+	out, errOut, status = devAgent(env, "", "start", "repo", "feature/x", "--json", "--timeout", "30s")
 	var wt map[string]string
 	if err := json.Unmarshal([]byte(out), &wt); err != nil || status != "0" {
 		t.Fatalf("start worktree: exit %s, %v: %q %q", status, err, out, errOut)

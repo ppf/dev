@@ -153,6 +153,9 @@ func Trusted(state, stateCmd, command string) string {
 // Claude is the agent kind whose sessions `dev state` records.
 const Claude = "claude"
 
+// Codex is the other agent kind dev agent start can open.
+const Codex = "codex"
+
 // ResumeCommand is the shell command that restarts an agent of kind: resumed, its conversation id when
 // the id is safe to type and the conversation's transcript still exists, else a fresh agent. ok=false for
 // an unknown kind.

@@ -267,12 +267,13 @@ func newAgentStartCmd() *cobra.Command {
 		Use:   "start <project> [worktree]",
 		Short: "Open a project (or its worktree) in the background and wait until its agent is registered",
 		Long: `Open a project's session, or its worktree's (created when missing), without attaching to it, and
-wait until its agent's first hook registers it (a Codex pane counts once codex runs). An existing session
-is reused, whatever its agent. Prints the agent like get.`,
+wait until its agent's first hook registers it (a Codex pane counts once codex runs, so read its screen
+before the first prompt). An existing session is reused; one running another agent than an explicit
+--agent is an error. Prints the agent like get.`,
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if agentCmd != "claude" && agentCmd != "codex" {
+			if agentCmd != agent.Claude && agentCmd != agent.Codex {
 				return fmt.Errorf("unknown --agent %q, want claude or codex", agentCmd)
 			}
 			wt, err := worktreeArg(args)
@@ -294,11 +295,14 @@ is reused, whatever its agent. Prints the agent like get.`,
 			if err != nil {
 				return err
 			}
+			if missing == nil && cmd.Flags().Changed("agent") && !strings.EqualFold(a.Label, agentCmd) {
+				return fmt.Errorf("session %s already runs %s, not %s", session, a.Label, agentCmd)
+			}
 			return printAgent(cmd.OutOrStdout(), asJSON, a)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
-	cmd.Flags().StringVar(&agentCmd, "agent", "claude", "agent a new session starts: claude or codex")
+	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude or codex")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
 	return cmd
 }

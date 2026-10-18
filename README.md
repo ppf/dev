@@ -83,7 +83,7 @@ Keep claude out of `@resurrect-processes` and `@resurrect-default-processes` (an
 dev agent list [--json]                        # session, pane, agent, state, branch, path, cost
 dev agent list --mine                          # only the workers this session started (its child sessions)
 dev agent start <project> [<worktree>]         # open detached, return once its Claude registered
-dev agent start <project> <worktree> --agent codex  # same with a Codex worker (needs the Codex state hooks for wait/notes)
+dev agent start <project> [<worktree>] --agent codex  # a new session runs codex; returns once codex runs
 dev agent prompt <target> --wait "Fix the test" # paste + Enter; --wait returns when the turn ends
 dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
 dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)
@@ -105,7 +105,7 @@ A Claude tile leaves out Claude Code's own input box and status lines (they take
 
 ### Boss inbox
 
-The coordinator hears of its workers on its own: a worker's `dev state` hook queues a one-line note for the boss that started it when the worker finishes (with its last message), fails, or needs a decision (permission prompt or question; a Codex worker's `PermissionRequest`), and the previews add one for a worker working over 20 minutes or waiting on an unanswered decision over 3. Notes sit in `$XDG_STATE_HOME/dev/inbox/` (one locked file per boss), a worker's repeat note is dropped, and at most 20 wait. They reach the coordinator in one batch: when it stops (its Stop hook blocks the stop with the notes, so it carries on), when you send it a prompt (added as context), or pasted as a prompt while it's idle and its input box is empty, at most every 10 s. It never pastes into a box with a draft. The coordinator is told to act on clear, safe next steps itself, ask you about decisions and anything destructive or external, and roll up finished batches.
+The coordinator hears of its workers on its own: a worker's `dev state` hook queues a one-line note for the boss that started it when the worker finishes (with its last message), fails, or needs a decision (permission prompt or question; a Codex worker's `PermissionRequest`, with the command's description), and the previews add one for a worker working over 20 minutes or waiting on an unanswered decision over 3. Notes sit in `$XDG_STATE_HOME/dev/inbox/` (one locked file per boss), a worker's repeat note is dropped, and at most 20 wait. They reach the coordinator in one batch: when it stops (its Stop hook blocks the stop with the notes, so it carries on), when you send it a prompt (added as context), or pasted as a prompt while it's idle and its input box is empty, at most every 10 s. It never pastes into a box with a draft. The coordinator is told to act on clear, safe next steps itself, ask you about decisions and anything destructive or external, and roll up finished batches.
 
 ```bash
 tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
