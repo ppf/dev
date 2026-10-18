@@ -7,14 +7,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // dev agent close, run in a coordinator's pane, refuses a worker that isn't its own, is busy or awaiting
-// a decision, or whose worktree has uncommitted or unmerged work, leaving it untouched. A finished worker
-// is closed: its untracked files land in $XDG_STATE_HOME/dev/results/<session>/, the attached client
-// moves to the coordinator, and the session, worktree and branch are gone.
+// a decision (until its screen shows the dialog gone), or whose worktree has uncommitted or unmerged work,
+// leaving it untouched. A finished worker is closed: its untracked files land in
+// $XDG_STATE_HOME/dev/results/<session>/, the attached client moves to the coordinator, and the session,
+// worktree and branch are gone.
 func TestAgentClose(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_notify off\n")
 	root := newRepo(t, "", "")
@@ -95,6 +97,17 @@ func TestAgentClose(t *testing.T) {
 		if wt := filepath.Join(root, ".claude", "worktrees", name); name != "coord" && name != "main" && !strings.Contains(git(t, root, "worktree", "list"), wt) {
 			t.Errorf("❌ refused close of %s removed its worktree", name)
 		}
+	}
+
+	// Its dialog answered No: no hook, but Claude's input box is back in place of the dialog
+	rule := strings.Repeat("─", 40)
+	writeFile(t, d.T("display", "-t", "=deciding:", "-p", "#{pane_tty}"), "\x1b[2J\x1b[H"+rule+"\n❯ \n"+rule+"\n  ? for shortcuts\n")
+	waitFor(t, "deciding's input box drawn", func() bool { return strings.Contains(d.T("capture-pane", "-p", "-t", "=deciding:"), "? for shortcuts") })
+	// Recorded seconds ago, as Claude records a dialog seconds after drawing it
+	since, _ := strconv.ParseInt(d.T("show-option", "-pqv", "-t", "=deciding:", "@agent_since"), 10, 64)
+	d.T("set-option", "-p", "-t", "=deciding:", "@agent_since", strconv.FormatInt(since-3, 10))
+	if out, err := devCmd(coord, "", "agent", "close", "deciding"); err != nil {
+		t.Errorf("❌ close deciding after No: %v\n%s", err, out)
 	}
 
 	// Pushed to origin's main, then the local origin/main rewound: stale until close fetches

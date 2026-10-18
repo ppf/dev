@@ -20,6 +20,7 @@ const (
 // paneRow is one list-panes -a row for Watch.
 type paneRow struct {
 	Session    string `tmux:"session_name"`
+	Pane       string `tmux:"pane_id"`
 	StartedBy  string `tmux:"@dev_started_by"`
 	Command    string `tmux:"pane_current_command"`
 	State      string `tmux:"@agent_state"`
@@ -64,10 +65,25 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if !sidebar.Names(r.StartedBy, id, b.Name, true) {
 			continue
 		}
-		if n, ok := r.stuck(clk.Now()); ok {
-			if _, err := b.Box.Add(n); err != nil {
+		n, ok := r.stuck(clk.Now())
+		if !ok {
+			continue
+		}
+		if agent.Deciding(agent.Trusted(r.State, r.StateCmd, r.Command), r.WaitingFor) {
+			// A dialog answered No or Esc fired no hook: it isn't unanswered
+			st, err := control.ReadChecked(c, r.Pane)
+			if err != nil && strings.Contains(err.Error(), "can't find pane") {
+				continue // closed since list-panes
+			}
+			if err != nil {
 				return err
 			}
+			if !agent.Deciding(st.Trusted(), st.WaitingFor) {
+				continue
+			}
+		}
+		if _, err := b.Box.Add(n); err != nil {
+			return err
 		}
 	}
 	if pending, err := b.Box.Pending(); !pending || err != nil {

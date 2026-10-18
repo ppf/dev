@@ -98,7 +98,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 
 // closable refuses a working, deciding or hookless worker, or a shared, dirty or unmerged worktree.
 func closable(c *tmux.Client, a Agent, wt, base string) error {
-	st, err := ReadStatus(c, a.Pane)
+	st, err := ReadChecked(c, a.Pane)
 	if err != nil {
 		return err
 	}

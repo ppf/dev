@@ -1,0 +1,45 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.302\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mHaiku 5.5 · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m/…/scratchpad/live/proj · \x1b[38;5;114m\x1b]8;id=hbhzxg;https://claude.ai/code/session_x?from=cli\x1b\/rc\x1b[39m\x1b]8;;\x1b\
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mPlan adding a file hello.txt containing hi. Keep the plan to two lines, then exit plan mode right away for approval.\x1b[39m
+\x1b[49m
+\x1b[38;5;114m⏺\x1b[39m \x1b[1mUpdated plan\x1b[0m
+\x1b[38;5;246m  ⎿  /plan to preview\x1b[39m
+\x1b[38;5;246m  ⎿  \x1b[38;5;239mUser rejected Claude's plan:\x1b[39m
+     \x1b[38;5;73m╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+\x1b[39m     \x1b[38;5;73m│\x1b[39m 1. Create \x1b[38;5;153mhello.txt\x1b[39m in the project root (/tmp/scratchpad \x1b[38;5;73m│
+\x1b[39m     \x1b[38;5;73m│\x1b[39m    proj) containing the text \x1b[38;5;153mhi\x1b[39m.                                                                                \x1b[38;5;73m│
+\x1b[39m     \x1b[38;5;73m│\x1b[39m 2. Verify by reading the file back.                                                                                                                     \x1b[38;5;73m│
+\x1b[39m     \x1b[38;5;73m╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mCogitated for 4s · done 7:19 PM\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m❯ 
+\x1b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;73m⏸ plan mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m

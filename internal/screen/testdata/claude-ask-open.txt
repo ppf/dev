@@ -1,0 +1,45 @@
+
+  \x1b[38;5;246mRan \x1b[1m1\x1b[0m\x1b[38;5;246m shell command \x1b[39m
+\x1b[38;5;246m  ⎿  Interrupted · What should Claude do instead?\x1b[39m
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mCooked for 1s · done 7:00 PM\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mWrite a 300-word story about a lighthouse. Plain text, no tools.\x1b[39m
+\x1b[49m
+\x1b[38;5;231m⏺\x1b[39m The lighthouse on Carrick Point had not dimmed in ninety-one years, and Marta intended to keep it that way.
+
+  She inherited the post from her uncle, who inherited it from a woman named Ruth Ansel, whose name was painted in faded gold above the door of the keeper's
+  cottage. Marta had read the logbooks. Every night for almost a century, someone had written the same few words: \x1b[3mLamp lit. Weather fair. Nothing seen.\x1b[0m
+
+  The storm arrived on a Tuesday in October. The wind came off the water like a shoulder against a door, and the sea climbed the rocks until spray hit the
+  lantern glass. Marta climbed the iron stairs with a flashlight clamped in her teeth, her boots slipping on the wet treads. At the top, the lamp hummed and
+  flickered. A cracked wick, or a failing generator. She did not know which. She only knew the light had to stay on.
+
+  She worked until her fingers bled. Somewhere past midnight, the flame steadied.
+
+  When dawn came gray and thin, she climbed the stairs again and looked out. The water was calming. A fishing boat, small and battered, was limping toward the
+  harbor, its running lights blinking weakly. It was the first ship she had seen in three days.
+
+  She sat down on the cold floor beneath the lens and opened the logbook. Her pen hovered over the page, then began to move.
+
+  \x1b[3mLamp lit. Weather rough. One boat seen, safe home.\x1b[0m
+
+  She closed the book and, for the first time since arriving, smiled.
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mChurned for 4s · done 7:03 PM\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mUse the AskUserQuestion tool to ask me one question: "Pick a size" with options Small and Large. Nothing else.\x1b[39m
+\x1b[38;5;246m\x1b[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[38;5;16m\x1b[48;5;153m ☐ Size \x1b[39m\x1b[49m
+
+\x1b[1m\x1b[38;5;231mPick a size\x1b[0m
+
+\x1b[38;5;153m❯\x1b[39m \x1b[38;5;246m1.\x1b[39m \x1b[38;5;153mSmall\x1b[39m
+     \x1b[38;5;246mChoose small\x1b[39m
+  \x1b[38;5;246m2.\x1b[39m Large
+     \x1b[38;5;246mChoose large\x1b[39m
+  \x1b[38;5;246m3. Type something.\x1b[39m
+\x1b[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  4. Chat about this
+
+\x1b[38;5;246mEnter to select · ↑/↓ to navigate · Esc to cancel\x1b[39m

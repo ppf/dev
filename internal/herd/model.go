@@ -202,14 +202,22 @@ func (m Model) refresh() tea.Cmd {
 				continue
 			}
 			t := &snap.tiles[i]
+			if t.deciding {
+				if d, ok := parseDialog(out); ok {
+					p := newPick(d, t.question, ansi.Strip(out))
+					t.pick = &p
+				} else {
+					// Its dialog may have been answered No or Esc, which fires no hook
+					st, err := control.ReadChecked(m.c, t.pane)
+					if err != nil {
+						t.body = []string{err.Error()}
+						continue
+					}
+					t.deciding = agent.Deciding(st.Trusted(), st.WaitingFor)
+					t.sess.State = st.Trusted()
+				}
+			}
 			t.body = tail(previewLines(out, *t), g.tileH-1)
-			if !t.deciding {
-				continue
-			}
-			if d, ok := parseDialog(out); ok {
-				p := newPick(d, t.question, ansi.Strip(out))
-				t.pick = &p
-			}
 		}
 		return refreshMsg{snap: snap}
 	}
