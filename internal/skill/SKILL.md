@@ -83,7 +83,7 @@ In `dev boss`, you hear of your workers without polling: a prompt or extra conte
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
 - **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message.
-- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user.
+- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
 
