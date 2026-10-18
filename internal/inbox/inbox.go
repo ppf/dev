@@ -68,7 +68,7 @@ func (b Box) Forget(worker string) error {
 	})
 }
 
-// FromHook builds worker's note for a Claude or Codex hook event; ok=false for events that make none (an idle
+// FromHook builds worker's note for a Claude, Codex or Grok hook event; ok=false for events that make none (an idle
 // reminder, tool events).
 func FromHook(worker string, input []byte) (Note, bool) {
 	var e hookEvent

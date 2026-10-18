@@ -153,3 +153,52 @@ func TestBossInboxNextTurn(t *testing.T) {
 		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 4 worker update(s):\n- w finished: Done.\n- w finished: Done.\n`+
 			`- w needs a decision: Allow Bash?\n- w needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
 }
+
+// A Grok worker's hooks run plain `dev state` with GROK_HOOK_EVENT set: its subagents' events and the
+// extra Stop at session end are left out, no session is recorded, and its finished turn reaches the boss.
+func TestGrokState(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss.log")
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "gk", sleeper(t, "grok"))
+	s.T("set-option", "-t", "=gk:", "@dev_started_by", s.T("display", "-t", "=boss:", "-p", "#{session_id}"))
+	gk := s.T("display", "-t", "=gk:", "-p", "#{pane_id}")
+	waitFor(t, "grok stub running", func() bool { return s.T("display", "-t", gk, "-p", "#{pane_current_command}") == "grok" })
+	run := func(pane, st, stdin string, env ...string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv(append(env, "TMUX_PANE="+pane)...)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.Output()
+		if err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	grok := func(st, stdin string) { t.Helper(); run(gk, st, stdin, "GROK_HOOK_EVENT=x") }
+	state := func() string {
+		return s.T("show-option", "-pqv", "-t", gk, "@agent_state") + "/" + s.T("show-option", "-pqv", "-t", gk, "@agent_cmd")
+	}
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	waitFor(t, "stub box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", boss), "Try") })
+
+	grok("working", `{"hook_event_name":"UserPromptSubmit","session_id":"g1","transcript_path":"/t/g1.jsonl"}`)
+	check(t, "prompt", state(), "working/grok")
+	check(t, "no session for restore to resume", s.T("show-option", "-pqv", "-t", gk, "@agent_session"), "")
+	grok("idle", `{"hook_event_name":"StopCancelled","reason":"max_turns","subagentType":"explore"}`)
+	grok("idle", `{"hook_event_name":"Stop","reason":"session_end","last_assistant_message":"bye"}`)
+	check(t, "subagent and session-end events skipped", state(), "working/grok")
+	time.Sleep(time.Second)
+	check(t, "no note for skipped events", func() string { data, _ := os.ReadFile(log); return string(data) }(), "")
+
+	grok("idle", `{"hook_event_name":"Stop","reason":"end_turn","last_assistant_message":"Tests pass"}`)
+	check(t, "turn end", state(), "idle/grok")
+	waitFor(t, "boss gets the note", func() bool {
+		data, _ := os.ReadFile(log)
+		return string(data) == "[dev boss inbox] 1 worker update(s):\n- gk finished: Tests pass\n"
+	})
+}

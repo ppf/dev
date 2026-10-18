@@ -1,4 +1,4 @@
-// Package agent records Claude and Codex hook state on tmux panes, detects a session's agent pane and
+// Package agent records Claude, Codex and Grok hook state on tmux panes, detects a session's agent pane and
 // gives the command that reopens a saved Claude conversation.
 package agent
 
@@ -50,6 +50,28 @@ func Resolve(state string, input []byte) (resolved string, ok bool, err error) {
 		return Working, true, nil
 	}
 	return state, true, nil
+}
+
+// GrokSkip reports a Grok hook event that isn't the main session's turn, so it must not move the pane:
+//   - a subagent's event (Grok marks it with subagentType, not agent_id), except a permission prompt or
+//     question, which blocks the pane like the main session's;
+//   - the observe-only Stop at session end (reason other than end_turn), which would notify "done".
+//
+// Malformed input isn't skipped.
+func GrokSkip(input []byte) bool {
+	var e struct {
+		Event            string  `json:"hook_event_name"`
+		NotificationType string  `json:"notification_type"`
+		Subagent         *string `json:"subagentType"`
+		Reason           string  `json:"reason"`
+	}
+	if json.Unmarshal(input, &e) != nil {
+		return false
+	}
+	if e.Subagent != nil {
+		return e.Event != "Notification" || e.NotificationType != "permission_prompt" && e.NotificationType != "elicitation_dialog"
+	}
+	return e.Event == "Stop" && e.Reason != "end_turn"
 }
 
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
@@ -153,8 +175,11 @@ func Trusted(state, stateCmd, command string) string {
 // Claude is the agent kind whose sessions `dev state` records.
 const Claude = "claude"
 
-// Codex is the other agent kind dev agent start can open.
-const Codex = "codex"
+// Codex and Grok are the other agent kinds dev agent start can open.
+const (
+	Codex = "codex"
+	Grok  = "grok"
+)
 
 // ResumeCommand is the shell command that restarts an agent of kind: resumed, its conversation id when
 // the id is safe to type and the conversation's transcript still exists, else a fresh agent. ok=false for
@@ -235,7 +260,7 @@ type Pane struct {
 // Agent is a session's detected agent pane.
 type Agent struct {
 	Pane  Pane
-	Label string // "Claude" or "Codex"
+	Label string // "Claude", "Codex" or "Grok"
 	State string // hook state, only when @agent_cmd matches the pane's command; else ""
 	// Cost is @agent_cost in USD, only for a hook-registered Claude pane (@agent_cmd ties it to the process)
 	Cost   float64
@@ -243,12 +268,20 @@ type Agent struct {
 }
 
 // Detect finds the agent among one session's panes: in window 1, excluding sidebarPane, the pane whose
-// command equals its @agent_cmd (hook-registered Claude), else one whose command is codex or codex-*.
+// command equals its @agent_cmd (hook-registered Claude), else one whose command is grok or grok-*, else
+// one whose command is codex or codex-*.
 func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
-	var codex *Pane
+	var codex, grok *Pane
 	for i := range panes {
 		p := &panes[i]
 		if p.Window != 1 || p.ID == sidebarPane {
+			continue
+		}
+		// Before the Claude check: Grok's hooks set @agent_cmd too
+		if isGrok(p.Command) {
+			if grok == nil {
+				grok = p
+			}
 			continue
 		}
 		if isCodex(p.Command) {
@@ -263,6 +296,9 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 			return a, true
 		}
 	}
+	if grok != nil {
+		return Agent{Pane: *grok, Label: "Grok", State: Trusted(grok.State, grok.StateCmd, grok.Command)}, true
+	}
 	if codex == nil {
 		return Agent{}, false
 	}
@@ -271,6 +307,11 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 
 func isCodex(command string) bool {
 	return command == "codex" || strings.HasPrefix(command, "codex-")
+}
+
+// isGrok matches grok and its versioned binary (grok-1.0.62-macos-aarch64, cut by macOS to grok-1.0.62-mac).
+func isGrok(command string) bool {
+	return command == "grok" || strings.HasPrefix(command, "grok-")
 }
 
 // StatusCost reads cost.total_cost_usd from a Claude status line's stdin; ok=false when it's missing,

@@ -38,7 +38,7 @@ func TestAgentArgs(t *testing.T) {
 		{[]string{"agent", "prompt"}, "requires at least 1 arg(s), only received 0"},
 		{[]string{"agent", "start"}, "accepts between 1 and 2 arg(s), received 0"},
 		{[]string{"agent", "start", "app", ""}, "empty worktree name"},
-		{[]string{"agent", "start", "app", "--agent", "gemini"}, `unknown --agent "gemini", want claude or codex`},
+		{[]string{"agent", "start", "app", "--agent", "gemini"}, `unknown --agent "gemini", want claude, codex or grok`},
 		{[]string{"agent", "wait", "app", "--until", "done"}, `unknown --until "done", want idle, waiting or settled`},
 	} {
 		if _, _, err := execute(t, "", tt.args...); err == nil || err.Error() != tt.err {

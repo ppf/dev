@@ -48,7 +48,7 @@ type Session struct {
 	Name   string
 	Group  string // see Group
 	Branch string // the agent pane's branch; "" without an agent pane
-	Agent  string // "Claude", "Codex", or "" for no agent
+	Agent  string // "Claude", "Codex", "Grok", or "" for no agent
 	State  string // trusted hook state (working, waiting, idle) or ""
 	Title  string // the agent pane's cleaned title, "" when generic
 	PR     PR     // Branch's pull request; none without a branch or while no client views this sidebar
