@@ -98,3 +98,20 @@ func TestSnapshotDeciding(t *testing.T) {
 		t.Errorf("deciding = %v, want %v", got, want)
 	}
 }
+
+// A tile follows its worker session's @dev_cost (global or per session), not the boss's.
+func TestSnapshotCostOff(t *testing.T) {
+	for _, tc := range []struct{ boss, worker, want string }{
+		{"", "", "$1.50"}, {"off", "off", ""}, {"", "off", ""}, {"off", "", "$1.50"},
+	} {
+		rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", CostOpt: tc.boss},
+			{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", Cost: "1.5", CostOpt: tc.worker}}
+		s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.tiles) != 1 || s.tiles[0].sess.Cost != tc.want {
+			t.Errorf("@dev_cost boss %q worker %q: tiles %+v, want cost %q", tc.boss, tc.worker, s.tiles, tc.want)
+		}
+	}
+}
