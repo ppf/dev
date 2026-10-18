@@ -1,0 +1,40 @@
+
+  \x1b[38;2;99;168;248m>_ \x1b[1m\x1b[39mOpenAI Codex\x1b[0;2m (v0.163.0)\x1b[0m
+     \x1b[2m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[0m
+
+
+\x1b[1;2m› \x1b[0mrebase onto master
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[1m\x1b[38;2;128;128;128m•\x1b[0m \x1b[2mWorking\x1b[0m \x1b[2m(1s • \x1b[0;1mesc\x1b[0;2m to interrupt)\x1b[0m
+
+
+\x1b[1m›\x1b[0m second line
+
+  \x1b[38;2;246;226;183mGPT-6.1-Sol high\x1b[39m · \x1b[38;2;171;223;167m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[39m · \x1b[38;2;143;179;239mtry-codex\x1b[39m · \x1b[38;2;242;181;144mContext 0% used\x1b[39m · \x1b[38;2;233;144;169m5h 85% left\x1b[39m · \x1b[38;2;233;144;169mweekly 98% left\x1b[39m · \x1b[38;2;200;169;238mFast off\x1b[39m
+  \x1b[1mtab\x1b[0m to queue message
