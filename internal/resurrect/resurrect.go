@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -377,6 +378,12 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		warn(c, "@resurrect-processes restarts claude, agents not resumed: remove its claude entry")
 		return nil
 	}
+	argv, err := ptywrap.Argv()
+	if err != nil {
+		warn(c, "dev executable unknown, agents not restarted")
+		return &stepError{"dev pty-wrap", err}
+	}
+	wrap := tmux.ShellJoin(argv...)
 	var errs []error
 	started := false
 	for _, a := range agents {
@@ -407,7 +414,8 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 			time.Sleep(stagger)
 		}
 		started = true
-		if _, err := c.Run("send-keys", "-t", pane, "-l", cmd, ";", "send-keys", "-t", pane, "Enter"); err != nil {
+		// Under dev pty-wrap, as a new session's claude, so its images get through tmux
+		if _, err := c.Run("send-keys", "-t", pane, "-l", wrap+" "+cmd, ";", "send-keys", "-t", pane, "Enter"); err != nil {
 			err = &stepError{"send-keys " + a.Session + ":" + a.Pos, err}
 			warn(c, err.Error())
 			errs = append(errs, err)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ppf/dev/internal/open"
+	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -90,6 +91,10 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	coordinator, err := ptywrap.Argv("claude", "--append-system-prompt", coordinatorPrompt)
+	if err != nil {
+		return "", err
+	}
 	width, height := open.ClientSize(c)
 	target := tmux.SessionTarget(session)
 	run := func(args ...string) string {
@@ -100,8 +105,8 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 		res, err = c.Run(args...)
 		return strings.TrimSpace(res)
 	}
-	claude := run("new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height), "-s", session,
-		"-c", dir, "-n", "Boss", "-PF", "#{pane_id}", "claude", "--append-system-prompt", coordinatorPrompt)
+	claude := run(append([]string{"new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height), "-s", session,
+		"-c", dir, "-n", "Boss", "-PF", "#{pane_id}"}, coordinator...)...)
 	run("set-option", "-t", target, OptHerd, "1")
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)

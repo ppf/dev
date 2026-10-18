@@ -31,7 +31,7 @@ func TestHerd(t *testing.T) {
 	check(t, "herd option", d.T("show-option", "-qv", "-t", "=boss:", "@dev_herd"), "1")
 	// Left to right: its sidebar, the coordinator, the previews
 	panes := strings.Split(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
-	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], "claude --append-system-prompt") ||
+	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], "pty-wrap -- claude --append-system-prompt") ||
 		!strings.Contains(panes[2], "boss --previews") {
 		t.Fatalf("boss panes: %q", panes)
 	}
