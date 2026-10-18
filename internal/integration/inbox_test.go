@@ -78,6 +78,50 @@ func TestBossInbox(t *testing.T) {
 	check(t, "boss logs stay as they were", logOf("boss")+"|"+logOf("boss-draft"), want+"|")
 }
 
+// A worker's Stop that only waits on background tasks keeps it working, from the turn's start, and tells
+// its boss nothing; the Stop after they finish is its finished turn. A coordinator's such Stop leaves it idle.
+func TestBossInboxBackgrounded(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss.log")
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	run := func(pane, st, stdin string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	state := func() string {
+		return s.T("show-option", "-pqv", "-t", worker, "@agent_state") + "@" + s.T("show-option", "-pqv", "-t", worker, "@agent_since")
+	}
+	boxLog := func() string { data, _ := os.ReadFile(log); return string(data) }
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	waitFor(t, "stub box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", boss), "Try") })
+	bg := `"background_tasks":[{"id":"a1","type":"subagent","status":"running"},{"id":"b1","type":"shell","status":"running"}]`
+	run(boss, "idle", `{"hook_event_name":"Stop",`+bg+`}`)
+	check(t, "backgrounded coordinator stays idle", s.T("show-option", "-pqv", "-t", boss, "@agent_state"), "idle")
+
+	run(worker, "working", `{"hook_event_name":"UserPromptSubmit"}`)
+	start := state()
+	time.Sleep(1100 * time.Millisecond) // @agent_since counts seconds
+	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"⏳ Trimming fix comments.",`+bg+`}`)
+	check(t, "backgrounded Stop keeps the turn working", state(), start)
+	run(worker, "working", `{"hook_event_name":"UserPromptSubmit","prompt":"<task-notification>"}`)
+	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Done.","background_tasks":[]}`)
+	check(t, "finished turn", strings.Split(state(), "@")[0], "idle")
+	waitFor(t, "boss gets only the finished note", func() bool { return boxLog() == "[dev boss inbox] 1 worker update(s):\n- w finished: Done.\n" })
+}
+
 // A Codex worker's approval request, found by its hook's cwd, reaches its boss as a decision note.
 func TestBossInboxCodexDecision(t *testing.T) {
 	tmp := t.TempDir()

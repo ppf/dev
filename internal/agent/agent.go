@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,32 @@ func GrokSkip(input []byte) bool {
 		return e.Event != "Notification" || e.NotificationType != "permission_prompt" && e.NotificationType != "elicitation_dialog"
 	}
 	return e.Event == "Stop" && e.Reason != "end_turn"
+}
+
+// resumers are the background task types whose end resumes Claude on its own. Left out: Claude's own
+// housekeeping (dream, auto-mode scan, memory import), and monitors and teammates, which stay registered
+// as running while idle.
+var resumers = []string{"subagent", "workflow", "shell", "MCP task", "cloud session"}
+
+// Backgrounded reports a Claude Stop with background tasks (subagents, shells) still running or pending:
+// Claude resumes when they finish, so it isn't a finished turn.
+func Backgrounded(input []byte) bool {
+	var e struct {
+		Event string `json:"hook_event_name"`
+		Tasks []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"background_tasks"`
+	}
+	if json.Unmarshal(input, &e) != nil || e.Event != "Stop" {
+		return false
+	}
+	for _, t := range e.Tasks {
+		if slices.Contains(resumers, t.Type) && (t.Status == "running" || t.Status == "pending") {
+			return true
+		}
+	}
+	return false
 }
 
 // GrokStale reports a Grok turn end (Stop, StopFailure, StopCancelled) for another turn than the one the
