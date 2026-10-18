@@ -403,7 +403,7 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		if path != a.Path {
 			id = ""
 		}
-		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript)
+		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript, a.Session)
 		if !ok {
 			warn(c, a.Session+":"+a.Pos+": unknown agent "+a.Kind+", not restarted")
 			continue

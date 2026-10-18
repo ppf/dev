@@ -121,15 +121,15 @@ func TestResumeCommand(t *testing.T) {
 		want                       string
 		resumed, ok                bool
 	}{
-		{"resumes its conversation", Claude, "s", transcript, "claude --resume s", true, true},
-		{"transcript gone", Claude, "s", transcript + ".gone", "claude", false, true},
-		{"no id", Claude, "", transcript, "claude", false, true},
-		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, "claude", false, true},
+		{"resumes its conversation", Claude, "s", transcript, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
+		{"transcript gone", Claude, "s", transcript + ".gone", `'claude' '--remote-control=dev-x'`, false, true},
+		{"no id", Claude, "", transcript, `'claude' '--remote-control=dev-x'`, false, true},
+		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, `'claude' '--remote-control=dev-x'`, false, true},
 		{"unknown kind", "codex", "s", transcript, "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript)
+			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript, "dev-x")
 			if got != tt.want || resumed != tt.resumed || ok != tt.ok {
 				t.Errorf("ResumeCommand = %q, %v, %v; want %q, %v, %v", got, resumed, ok, tt.want, tt.resumed, tt.ok)
 			}

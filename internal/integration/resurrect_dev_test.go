@@ -102,7 +102,7 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	sessions := strings.Split(d.T("ls", "-F", "#{session_name}"), "\n")
 	sort.Strings(sessions)
 	check(t, "sessions restored", strings.Join(sessions, " "), "boot devt devu plain")
-	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1\n" + display("=devu:1.2", "#{pane_id}") + " claude \n"
+	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1 --remote-control=devt\n" + display("=devu:1.2", "#{pane_id}") + " claude --remote-control=devu\n"
 	claudes := func() []string {
 		log, _ := os.ReadFile(d.stubLog)
 		var lines []string
@@ -114,7 +114,7 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 		return lines
 	}
 	waitFor(t, "agents restarted", func() bool { return len(claudes()) == 2 })
-	check(t, "each agent pane resumes its conversation, else a fresh claude", strings.Join(claudes(), ""), agents)
+	check(t, "each agent pane resumes its conversation, else a fresh claude, named its session in Remote Control", strings.Join(claudes(), ""), agents)
 	sidebar := sidebarOption()
 	start := display(sidebar, "#{pane_start_command}")
 	t.Logf("rebuilt sidebar %s: %s", sidebar, start)

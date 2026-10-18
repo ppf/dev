@@ -40,6 +40,7 @@ type opened struct {
 	sessions, clients string
 	sidebar           string // the sidebar pane's start command
 	agent             string // the agent pane's current command
+	stub              string // the stub command line the agent pane ran
 }
 
 // devSidebarStart reports whether a sidebar start command runs the dev binary's sidebar.
@@ -65,6 +66,7 @@ func TestOpenParity(t *testing.T) {
 		r.out, r.status = out, errStatus(err)
 		d.waitForStubs("app")
 		r.agent = d.T("display", "-t", "=app:1.2", "-p", "#{pane_current_command}")
+		r.stub = d.agentStub("app")
 		r.first = d.snapshot("app")
 		out, err = open(d)
 		r.out2, r.status2 = out, errStatus(err)
@@ -96,6 +98,7 @@ func TestOpenParity(t *testing.T) {
 	// And claude runs under dev pty-wrap
 	check(t, "bash: claude runs as is", bash.agent, "sleep")
 	check(t, "dev: claude runs under dev pty-wrap", dev.agent, filepath.Base(devBin))
+	check(t, "dev: claude named app in Remote Control", dev.stub, "claude --remote-control=app")
 	for _, want := range []string{
 		"session app @project=app clients=app\n",
 		"window 1 Agent active=1 panes=4\nwindow 2 Files active=0 panes=3\n",
@@ -151,7 +154,7 @@ func TestOpenFirstRunRestore(t *testing.T) {
 func TestOpenPicker(t *testing.T) {
 	project := projectScript(t)
 	plain := tempDir(t)
-	type run struct{ sessions, forced, wt, statuses, sidebars string }
+	type run struct{ sessions, forced, wt, statuses, sidebars, stubs string }
 	got := map[string]run{}
 	for _, impl := range []string{"bash", "dev"} {
 		d := newDevServer(t, "set -g @dev_restored 1\n")
@@ -187,6 +190,7 @@ func TestOpenPicker(t *testing.T) {
 		r.forced = d.snapshot("app-2")
 		r.wt = d.snapshot("repo-feature-x", repo, "<repo>")
 		r.sidebars = d.sidebarStart("app-2") + "\n" + d.sidebarStart("repo-feature-x")
+		r.stubs = d.agentStub("app-2") + "\n" + d.agentStub("repo-feature-x")
 		got[impl] = r
 	}
 	dev, bash := got["dev"], got["bash"]
@@ -195,6 +199,7 @@ func TestOpenPicker(t *testing.T) {
 	check(t, "worktree session (dev = bash)", dev.wt, bash.wt)
 	check(t, "dev: statuses", dev.statuses, "0000")
 	check(t, "dev: sessions", dev.sessions, "app\napp-2\napp-3\nboot\nrepo-feature-x")
+	check(t, "dev: claude named its session in Remote Control", dev.stubs, "claude --remote-control=app-2\nclaude --remote-control=repo-feature-x")
 	for _, start := range strings.Split(dev.sidebars, "\n") {
 		check(t, "dev: sidebar runs dev sidebar", devSidebarStart(start), "true")
 	}

@@ -482,13 +482,15 @@ func TestRestoreAgents(t *testing.T) {
 	send := func(pane, cmd string) string {
 		return "send-keys -t " + pane + " -l " + wrap + " " + cmd + " ; send-keys -t " + pane + " Enter"
 	}
+	resumeT, resumeU := `'claude' '--resume' 's1' '--remote-control=devt'`, `'claude' '--resume' 's1' '--remote-control=devu'`
+	freshT, freshU := `'claude' '--remote-control=devt'`, `'claude' '--remote-control=devu'`
 	slots := map[string]any{
-		procs:                            "\"~^([^ ]*/)?lazygit( |$)\"\n",
-		slotQuery("devt"):                "zsh" + tmux.Sep + "%2" + tmux.Sep + "/repo\n",
-		slotQuery("devu"):                "zsh" + tmux.Sep + "%5" + tmux.Sep + "/repo\n",
-		send("%2", "claude --resume s1"): "",
-		send("%2", "claude"):             "",
-		send("%5", "claude"):             "",
+		procs:               "\"~^([^ ]*/)?lazygit( |$)\"\n",
+		slotQuery("devt"):   "zsh" + tmux.Sep + "%2" + tmux.Sep + "/repo\n",
+		slotQuery("devu"):   "zsh" + tmux.Sep + "%5" + tmux.Sep + "/repo\n",
+		send("%2", resumeT): "",
+		send("%2", freshT):  "",
+		send("%5", freshU):  "",
 	}
 	with := func(overrides map[string]any) map[string]any {
 		m := map[string]any{}
@@ -511,14 +513,14 @@ func TestRestoreAgents(t *testing.T) {
 			name:    "resumes each agent's conversation, else starts a fresh one",
 			state:   line("devt", "claude", "s1", transcript, "/repo") + line("devu", "claude", "s9", transcript+".gone", "/repo"),
 			replies: slots,
-			want: slices.Concat([]string{procs, slotQuery("devt"), send("%2", "claude --resume s1"), slotQuery("devu")},
-				fresh("devu", "s9"), []string{send("%5", "claude")}),
+			want: slices.Concat([]string{procs, slotQuery("devt"), send("%2", resumeT), slotQuery("devu")},
+				fresh("devu", "s9"), []string{send("%5", freshU)}),
 		},
 		{
 			name:    "a pane back in another directory gets a fresh agent",
 			state:   line("devt", "claude", "s1", transcript, "/elsewhere"),
 			replies: slots,
-			want:    slices.Concat([]string{procs, slotQuery("devt")}, fresh("devt", "s1"), []string{send("%2", "claude")}),
+			want:    slices.Concat([]string{procs, slotQuery("devt")}, fresh("devt", "s1"), []string{send("%2", freshT)}),
 		},
 		{
 			name:    "agents of sessions live before the restore are left alone",
@@ -530,7 +532,7 @@ func TestRestoreAgents(t *testing.T) {
 			name:    "agents restart before the sidebar is rebuilt",
 			state:   "devt\tp\t\n" + line("devt", "claude", "s1", transcript, "/repo"),
 			replies: with(map[string]any{"has-session -t =devt": "", "set-option -t =devt: @project p": "", "list-windows -t =devt:": ""}),
-			want: []string{procs, slotQuery("devt"), send("%2", "claude --resume s1"),
+			want: []string{procs, slotQuery("devt"), send("%2", resumeT),
 				"has-session -t =devt", "set-option -t =devt: @project p", "list-windows -t =devt:"},
 		},
 		{
@@ -549,13 +551,13 @@ func TestRestoreAgents(t *testing.T) {
 			name:    "another claude-named process doesn't count",
 			state:   line("devt", "claude", "s1", transcript, "/repo"),
 			replies: with(map[string]any{procs: "\"~claude-monitor\"\n"}),
-			want:    []string{procs, slotQuery("devt"), send("%2", "claude --resume s1")},
+			want:    []string{procs, slotQuery("devt"), send("%2", resumeT)},
 		},
 		{
 			name:    "claude in another process's restore command doesn't count",
 			state:   line("devt", "claude", "s1", transcript, "/repo"),
 			replies: with(map[string]any{procs: "\n\"~^([^ ]*/)?nvim( |$)->nvim ~/.claude/settings.json\" 'claude-monitor'\n"}),
-			want:    []string{procs, slotQuery("devt"), send("%2", "claude --resume s1")},
+			want:    []string{procs, slotQuery("devt"), send("%2", resumeT)},
 		},
 		{
 			name:    "claude in the default process list",
@@ -591,9 +593,9 @@ func TestRestoreAgents(t *testing.T) {
 		{
 			name:    "send-keys failure is warned and returned, the next agent still starts",
 			state:   line("devt", "claude", "s1", transcript, "/repo") + line("devu", "claude", "s1", transcript, "/repo"),
-			replies: with(map[string]any{send("%2", "claude --resume s1"): &tmux.Error{Stderr: "can't find pane: %2", Err: errors.New("exit status 1")}, send("%5", "claude --resume s1"): ""}),
-			want: slices.Concat([]string{procs, slotQuery("devt"), send("%2", "claude --resume s1")},
-				warned("send-keys devt:1.2 failed: can't find pane: %2"), []string{slotQuery("devu"), send("%5", "claude --resume s1")}),
+			replies: with(map[string]any{send("%2", resumeT): &tmux.Error{Stderr: "can't find pane: %2", Err: errors.New("exit status 1")}, send("%5", resumeU): ""}),
+			want: slices.Concat([]string{procs, slotQuery("devt"), send("%2", resumeT)},
+				warned("send-keys devt:1.2 failed: can't find pane: %2"), []string{slotQuery("devu"), send("%5", resumeU)}),
 			wantErr: true,
 		},
 	}
