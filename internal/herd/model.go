@@ -37,6 +37,7 @@ type row struct {
 	Herd         string `tmux:"@dev_herd"`
 	StartedBy    string `tmux:"@dev_started_by"`
 	WaitingFor   string `tmux:"@agent_waiting_for"`
+	CostOpt      string `tmux:"@dev_cost"`
 }
 
 // tile is one worker session's preview.
@@ -233,7 +234,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		}
 		sess := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), Agent: a.Label, State: a.State,
 			Branch: look.Branch(a.Pane.Path)}
-		if a.CostOK {
+		if a.CostOK && !sidebar.CostHidden(rs[0].CostOpt) {
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
 		if s.visible {

@@ -15,6 +15,11 @@ const (
 	minTileH = 5
 	// maxTiles caps the captures per refresh.
 	maxTiles = 12
+
+	rule      = "\x1b[38;2;84;84;109m" // the sidebar's faint
+	headerBG  = "\x1b[48;2;30;30;38m"
+	waitingBG = "\x1b[48;2;48;28;32m"
+	reset     = "\x1b[0m"
 )
 
 // grid is the tile layout: cols×rows tiles of tileW×tileH, one column and one row apart; perPage
@@ -79,13 +84,21 @@ func (m Model) render() []string {
 	if len(tiles) == 0 {
 		lines[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 	}
-	for i := from; i < to; i++ {
-		k := i - from
-		x, y := k%g.cols*(g.tileW+1), k/g.cols*(g.tileH+1)
-		for j, l := range tileLines(tiles[i], g.tileW, g.tileH, tiles[i].sess.Name == m.selected) {
-			if y+j < h-1 {
-				lines[y+j] = pad(lines[y+j], x) + l
+	for k := 0; from+k < to; k += g.cols {
+		y := k / g.cols * (g.tileH + 1)
+		var row [][]string
+		for _, t := range tiles[from+k : min(from+k+g.cols, to)] {
+			row = append(row, tileLines(t, g.tileW, g.tileH, t.sess.Name == m.selected))
+		}
+		for j := range min(g.tileH, h-1-y) {
+			cells := make([]string, len(row))
+			for c, tl := range row {
+				cells[c] = tl[j]
 			}
+			lines[y+j] = strings.Join(cells, rule+"│"+reset)
+		}
+		if below := from + k + g.cols; below < to && y+g.tileH < h-1 {
+			lines[y+g.tileH] = divider(g, to-below)
 		}
 	}
 	pages := ""
@@ -112,12 +125,38 @@ func (m Model) render() []string {
 	return lines
 }
 
-// tileLines is a tile's header and body, each exactly w columns wide.
+// divider is the ─ rule between two rows of tiles, crossing the │ rules of a next row holding n tiles.
+func divider(g grid, n int) string {
+	cells := make([]string, g.cols)
+	for c := range cells {
+		cells[c] = strings.Repeat("─", g.tileW)
+		if c == g.cols-1 {
+			continue
+		}
+		if c+1 < n {
+			cells[c] += "┼"
+		} else {
+			cells[c] += "┴"
+		}
+	}
+	return rule + strings.Join(cells, "") + reset
+}
+
+// tileLines is a tile's header and body, each exactly w columns wide; an unselected header sits on a
+// faint background, red-tinted while waiting, so each tile's start shows.
 func tileLines(t tile, w, h int, selected bool) []string {
-	lines := []string{pad(sidebar.Header(t.sess, w, selected), w)}
+	header := pad(sidebar.Header(t.sess, w, selected), w)
+	if !selected {
+		bg := headerBG
+		if t.sess.State == agent.Waiting {
+			bg = waitingBG
+		}
+		header = bg + strings.ReplaceAll(header, reset, reset+bg) + reset
+	}
+	lines := []string{header}
 	for _, l := range t.body {
 		l = ansi.Truncate(l, w, "")
-		lines = append(lines, "\x1b[0m"+l+"\x1b[0m"+strings.Repeat(" ", w-ansi.StringWidth(l)))
+		lines = append(lines, reset+l+reset+strings.Repeat(" ", w-ansi.StringWidth(l)))
 	}
 	for len(lines) < h {
 		lines = append(lines, strings.Repeat(" ", w))

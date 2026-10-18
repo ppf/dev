@@ -21,7 +21,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "")
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "")
 }
 
 func TestList(t *testing.T) {
@@ -294,7 +294,7 @@ func TestAwaitAgent(t *testing.T) {
 
 func TestListStartedByAndHerd(t *testing.T) {
 	line := func(session, id, pane, startedBy, herd string) string {
-		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd)
+		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "")
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
 		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
@@ -324,5 +324,16 @@ func TestListStartedByAndHerd(t *testing.T) {
 	mine, err := StartedBy(c, agents, "%1")
 	if err != nil || len(mine) != 3 || mine[0].Session != "fix-login" || mine[1].Session != "mine-too" || mine[2].Session != "by-name" {
 		t.Errorf("StartedBy = %+v, %v; want fix-login, mine-too and by-name", mine, err)
+	}
+}
+
+func TestListCostOff(t *testing.T) {
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off")
+	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].HideCost || got[0].CostUSD == nil || *got[0].CostUSD != 1.5 {
+		t.Errorf("List = %+v, want HideCost with cost_usd 1.5 kept", got)
 	}
 }
