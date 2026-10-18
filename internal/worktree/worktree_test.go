@@ -390,3 +390,146 @@ func TestRemove(t *testing.T) {
 		t.Errorf("second Remove err = %v, want git's message", err)
 	}
 }
+
+func TestDirty(t *testing.T) {
+	root := newRepo(t, "", "")
+	for _, tt := range []struct {
+		name  string
+		setup func()
+		want  bool
+	}{
+		{"clean", func() {}, false},
+		{"untracked only", func() { writeFile(t, filepath.Join(root, "new.txt"), "x") }, false},
+		{"staged", func() { git(t, root, "add", "new.txt") }, true},
+		{"modified", func() {
+			git(t, root, "rm", "-q", "--cached", "new.txt")
+			writeFile(t, filepath.Join(root, ".gitignore"), "x")
+		}, true},
+	} {
+		tt.setup()
+		if got, err := Dirty(root); err != nil || got != tt.want {
+			t.Errorf("%s: Dirty = %t, %v; want %t", tt.name, got, err, tt.want)
+		}
+	}
+}
+
+// commit commits a new file name in dir.
+func commit(t *testing.T, dir, name string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, name), name)
+	git(t, dir, "add", name)
+	git(t, dir, "commit", "-qm", name)
+}
+
+func TestMerged(t *testing.T) {
+	root := newRepo(t, "", "")
+	wt, err := Ensure(root, "feat", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := func(name string, want bool) {
+		t.Helper()
+		base, err := FetchDefault(root)
+		if err != nil || base != "origin/main" {
+			t.Fatalf("FetchDefault = %q, %v; want origin/main", base, err)
+		}
+		if got, err := Merged(wt, base); err != nil || got != want {
+			t.Errorf("%s: Merged = %t, %v; want %t", name, got, err, want)
+		}
+	}
+	merged("fresh worktree", true)
+
+	// The PR's branch is pushed, then gets one more commit merged without pushing it again: origin/feat
+	// is stale, so git branch -d refuses, though everything is in origin/main
+	commit(t, wt, "a.txt")
+	git(t, wt, "push", "-q", "-u", "origin", "feat")
+	commit(t, wt, "b.txt")
+	merged("commits not in origin/main", false)
+	other := filepath.Join(filepath.Dir(root), "other")
+	git(t, root, "clone", "-q", filepath.Join(filepath.Dir(root), "origin.git"), other)
+	git(t, other, "fetch", "-q", wt, "feat")
+	git(t, other, "merge", "-q", "--no-ff", "-m", "merge", "FETCH_HEAD")
+	git(t, other, "push", "-q", "origin", "main")
+	if got, err := Merged(wt, "origin/main"); err != nil || got {
+		t.Errorf("before the fetch: Merged = %t, %v; want false", got, err)
+	}
+	merged("merged on origin, upstream stale", true)
+	if _, err := Merged(wt, "origin/nope"); err == nil {
+		t.Error("Merged with an unknown ref: no error")
+	}
+	if err := Remove(root, wt); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", root, "branch", "-d", "feat").CombinedOutput(); err == nil {
+		t.Errorf("git branch -d deleted feat despite its stale upstream: %s", out)
+	}
+	if err := DeleteBranch(root, "feat"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBranch(t *testing.T) {
+	root := newRepo(t, "", "")
+	wt, err := Ensure(root, "feat", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Branch(wt); err != nil || got != "feat" {
+		t.Errorf("Branch = %q, %v; want feat", got, err)
+	}
+	git(t, wt, "checkout", "-q", "--detach")
+	if got, err := Branch(wt); err != nil || got != "" {
+		t.Errorf("detached: Branch = %q, %v; want empty", got, err)
+	}
+	if err := DeleteBranch(root, "feat"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteBranch(root, "feat"); err == nil {
+		t.Error("second DeleteBranch: no error")
+	}
+}
+
+func TestArchiveUntracked(t *testing.T) {
+	root := newRepo(t, "ignored.txt\n", "")
+	writeFile(t, filepath.Join(root, "RESULT.md"), "result")
+	writeFile(t, filepath.Join(root, "notes", "a.txt"), "a")
+	writeFile(t, filepath.Join(root, "ignored.txt"), "ignored")
+	if err := os.Chmod(filepath.Join(root, "notes", "a.txt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("RESULT.md", filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "inner")
+	git(t, root, "init", "-q", nested)
+	writeFile(t, filepath.Join(nested, "f.txt"), "f")
+
+	paths, err := Untracked(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"RESULT.md", "inner/", "link", "notes/a.txt"}; !slices.Equal(paths, want) {
+		t.Fatalf("Untracked = %q, want %q", paths, want)
+	}
+	dir := filepath.Join(sandbox(t), "results", "s")
+	if err := Archive(root, dir, paths); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"RESULT.md": "result", "notes/a.txt": "a", "inner/f.txt": "f", "link": "result"} {
+		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v; want %q", name, got, err, want)
+		}
+	}
+	if link, err := os.Readlink(filepath.Join(dir, "link")); err != nil || link != "RESULT.md" {
+		t.Errorf("link -> %q, %v; want a symlink to RESULT.md", link, err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "notes", "a.txt")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Errorf("notes/a.txt mode = %v, %v; want 0755", info.Mode(), err)
+	}
+	if exists(filepath.Join(dir, "ignored.txt")) {
+		t.Error("ignored file archived")
+	}
+	if err := Archive(root, dir, paths); err != nil {
+		t.Errorf("second Archive: %v", err)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -505,15 +506,11 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry) {
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.
 func livePath() (string, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".local", "state")
+	dir, err := config.StateDir()
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(dir, "dev", "live-before-restore"), nil
+	return filepath.Join(dir, "live-before-restore"), nil
 }
 
 // helper returns the output of a tmux-resurrect helpers.sh function (resurrect_dir,

@@ -12,7 +12,7 @@ A coordinator usually lives in `dev boss`: the user types requests into your pro
 ## Rules
 
 - **Target by session name or pane id** (`%12`), exactly as `dev agent list` prints them. Never by sidebar position or number.
-- **Only close, kill or clean up what you started.** Never kill sessions, panes or worktrees you didn't create in this task, and never kill a session at all unless the user asked.
+- **Close only your own workers, and only with `dev agent close`.** Never kill sessions, panes or worktrees any other way (no raw `tmux kill-session` or `git worktree remove`), and never close or kill ones you didn't start. If `close` refuses and the user still wants a worker gone, tell them why; don't work around it.
 - **Never target your own pane.** `dev agent` refuses it.
 - **Keep every call under your Bash tool timeout** (2 minutes by default, 10 at most). The `wait` and `prompt --wait` defaults (5m) exceed it: pass `--timeout` below it, or run long waits with `run_in_background`.
 - Exit status: `0` ok, `1` error (bad target, no agent, agent busy or awaiting a decision, agent exited), `2` timeout, `3` stalled (the prompt wasn't picked up).
@@ -69,6 +69,16 @@ This is the worker's screen: Claude Code usually draws full-screen, so there is 
 
 > When done, write your findings to `<worktree>/RESULT.md` and reply with just that path.
 
+## Close finished workers
+
+```bash
+dev agent close <target> [--json]   # → {session, worktree, branch?, results?, files?}
+```
+
+Once a worker's work is delivered (its PR merged, or its result reported with nothing left for it) and the user hasn't asked to keep it, close it without asking and mention it in one line ("closed fix-login: PR #12 merged"). Keep it when a follow-up for it is likely soon.
+
+It closes only a worker you started, idle (or waiting only because it sat idle), whose worktree has no uncommitted changes to tracked files and whose commits are all in origin's default branch (it fetches first). A squash- or rebase-merged PR fails that check, as its commits aren't ancestors: leave the worker or ask the user. Otherwise it refuses, naming the failed check, and touches nothing in the worker: fix the cause, or leave the worker. Untracked files (e.g. `RESULT.md`) are copied to `$XDG_STATE_HOME/dev/results/<session>/` first (`<session>.2`, … when a closed worker of that name already left one), and it prints where; ignored files are discarded, so a result goes in a file git doesn't ignore. Then it kills the session (moving clients watching it to yours), removes the worktree and force-deletes the branch.
+
 ## Interrupt
 
 ```bash
@@ -82,7 +92,7 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <question>`, `stuck: working for 25m` or `waiting on a decision for 4m, unanswered`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
-- **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message.
+- **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.
 - **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.

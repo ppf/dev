@@ -34,6 +34,16 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
+func TestStateDir(t *testing.T) {
+	for xdg, want := range map[string]string{"/xdg": "/xdg/dev", "": "/home/u/.local/state/dev"} {
+		t.Setenv("HOME", "/home/u")
+		t.Setenv("XDG_STATE_HOME", xdg)
+		if got, err := StateDir(); err != nil || got != want {
+			t.Errorf("XDG_STATE_HOME=%q: StateDir = %q, %v; want %q", xdg, got, err, want)
+		}
+	}
+}
+
 func TestLoad(t *testing.T) {
 	reserved := []string{"list", "sidebar"}
 	tests := []struct {

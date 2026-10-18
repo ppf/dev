@@ -258,7 +258,7 @@ func TestActionWorktreeShared(t *testing.T) {
 		{"self", wt, false},
 	} {
 		w := &actWorld{panes: []map[string]string{actPane("self", "%1", "", wt), actPane(tt.session, "%2", "", tt.path)}}
-		got, err := worktreeShared(w.client(), "self", wt)
+		got, err := WorktreeShared(w.client(), "self", wt)
 		if err != nil || got != tt.want {
 			t.Errorf("%s in %s: shared = %t, %v; want %t", tt.session, tt.path, got, err, tt.want)
 		}

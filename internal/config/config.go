@@ -36,6 +36,19 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "dev", "projects.toml"), nil
 }
 
+// StateDir is $XDG_STATE_HOME/dev, else ~/.local/state/dev.
+func StateDir() (string, error) {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("config: %w", err)
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(dir, "dev"), nil
+}
+
 // Load reads and validates projects.toml: names non-empty, unique and not in reserved (subcommand
 // names); paths non-empty.
 func Load(path string, reserved []string) ([]Project, error) {

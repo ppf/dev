@@ -4,6 +4,8 @@ package worktree
 import (
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,6 +121,131 @@ func Remove(mainRoot, wtPath string) error {
 	}
 	if msg := strings.TrimRight(string(out), "\n"); msg != "" {
 		return errors.New(msg)
+	}
+	return err
+}
+
+// Dirty reports whether wt has changes to tracked files, staged or not.
+func Dirty(wt string) (bool, error) {
+	// Submodule edits count even where .gitmodules says to ignore them
+	out, err := gitOutput(wt, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=none")
+	return out != "", err
+}
+
+// FetchDefault fetches origin into the repo at root and returns origin's default branch (origin/HEAD), e.g. origin/main.
+func FetchDefault(root string) (string, error) {
+	// A credential prompt would hang the coordinator's call
+	fetch := exec.Command("git", "-C", root, "fetch", "--quiet", "origin")
+	fetch.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git fetch origin: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	// fetch leaves origin/HEAD where it was when the remote's default branch changed
+	if _, err := gitOutput(root, "remote", "set-head", "--auto", "origin"); err != nil {
+		return "", err
+	}
+	ref, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("no origin/HEAD (git remote set-head origin --auto sets it): %w", err)
+	}
+	return ref, nil
+}
+
+// Merged reports whether wt's HEAD is an ancestor of ref. merge-base, not branch -d: that one checks
+// the branch's own upstream and refuses when its remote ref is stale.
+func Merged(wt, ref string) (bool, error) {
+	_, err := gitOutput(wt, "merge-base", "--is-ancestor", "HEAD", ref)
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Branch is the branch checked out in wt, "" for a detached HEAD.
+func Branch(wt string) (string, error) {
+	return gitOutput(wt, "branch", "--show-current")
+}
+
+// DeleteBranch force-deletes branch name in the repo at root.
+func DeleteBranch(root, name string) error {
+	_, err := gitOutput(root, "branch", "-D", name)
+	return err
+}
+
+// Untracked lists wt's untracked files relative to wt, ignored ones left out; a nested repo is one
+// entry ending in /.
+func Untracked(wt string) ([]string, error) {
+	out, err := gitOutput(wt, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// Archive copies paths (relative to wt, as Untracked lists them) to the same paths under dir, keeping
+// their modes and copying symlinks as links.
+func Archive(wt, dir string, paths []string) error {
+	for _, p := range paths {
+		err := filepath.WalkDir(filepath.Join(wt, p), func(src string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(wt, src)
+			if err != nil {
+				return err
+			}
+			dst := filepath.Join(dir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(dst, 0o755)
+			}
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			switch {
+			case d.Type()&fs.ModeSymlink != 0:
+				link, err := os.Readlink(src)
+				if err != nil {
+					return err
+				}
+				if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+				return os.Symlink(link, dst)
+			case d.Type().IsRegular():
+				return copyFile(src, dst)
+			}
+			return fmt.Errorf("%s is not a file, directory or symlink", src)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
 	}
 	return err
 }

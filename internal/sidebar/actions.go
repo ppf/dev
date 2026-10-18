@@ -67,7 +67,7 @@ func kill(c *tmux.Client, client, current, target string) error {
 	}
 	if ok {
 		// A worktree another session still uses (the picker allows reusing one) is closed plainly.
-		shared, err := worktreeShared(c, target, wt)
+		shared, err := WorktreeShared(c, target, wt)
 		if err != nil {
 			return err
 		}
@@ -142,8 +142,8 @@ func sessionWorktree(c *tmux.Client, session string) (mainRoot, wtPath string, o
 	return mainRoot, wtPath, ok, nil
 }
 
-// worktreeShared reports whether a pane of another session runs in wtPath or below it.
-func worktreeShared(c *tmux.Client, session, wtPath string) (bool, error) {
+// WorktreeShared reports whether a pane of another session runs in wtPath or below it.
+func WorktreeShared(c *tmux.Client, session, wtPath string) (bool, error) {
 	panes, err := tmux.Query[struct {
 		Session string `tmux:"session_name"`
 		Path    string `tmux:"pane_current_path"`
