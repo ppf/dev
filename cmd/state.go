@@ -82,6 +82,16 @@ func newStateCmd() *cobra.Command {
 				if out, busy, err = inbox.BossHook(c, pane, input); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
 				}
+				// So does a worker's Stop waiting on background tasks: Claude carries on by itself when they end,
+				// and @agent_since stays put, so a long wait still makes a stuck note. A coordinator stays idle,
+				// as Deliver pastes only into an idle boss and its background waits can outlast its workers
+				if !busy && agent.Backgrounded(input) {
+					_, boss, err := inbox.Self(c, pane)
+					if err != nil {
+						fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
+					}
+					busy = !boss
+				}
 				if busy {
 					state = agent.Working
 				}
@@ -96,7 +106,7 @@ func newStateCmd() *cobra.Command {
 				return recErr
 			}
 			if busy {
-				// A blocked Stop isn't a finished turn, for notify or for a boss above this one
+				// A blocked or backgrounded Stop isn't a finished turn, for notify or for a boss above this one
 				return nil
 			}
 			if err := notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")); err != nil {

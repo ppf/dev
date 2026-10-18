@@ -198,6 +198,31 @@ func TestGrokSkip(t *testing.T) {
 	}
 }
 
+func TestBackgrounded(t *testing.T) {
+	// A real Claude 2.1.302 Stop, paths trimmed: a subagent and a shell started with run_in_background
+	captured := `{"session_id":"859a43b1","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"launched",` +
+		`"background_tasks":[{"id":"a33ece8726c455030","type":"subagent","status":"running","description":"Sleep 45 subagent","agent_type":"general-purpose"},` +
+		`{"id":"boqhda862","type":"shell","status":"running","description":"Sleep 30 seconds in background","command":"sleep 30"}],"session_crons":[]}`
+	for input, want := range map[string]bool{
+		captured: true,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"shell","status":"pending"}]}`:                                              true,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"dream","status":"running"},{"type":"workflow","status":"running"}]}`:       true,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"subagent","status":"completed"}]}`:                                         false,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"subagent"}]}`:                                                              false,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"dream","status":"running"},{"type":"auto-mode scan","status":"running"}]}`: false,
+		`{"hook_event_name":"Stop","background_tasks":[{"type":"monitor","status":"running"},{"type":"teammate","status":"running"}]}`:     false,
+		`{"hook_event_name":"Stop","background_tasks":[]}`:                                                                                 false,
+		`{"hook_event_name":"Stop"}`: false,
+		`{"hook_event_name":"SubagentStop","background_tasks":[{"type":"subagent","status":"running"}]}`: false,
+		`{"hook_event_name":"Stop","background_tasks":"x"}`:                                              false,
+		`{`: false,
+	} {
+		if got := Backgrounded([]byte(input)); got != want {
+			t.Errorf("Backgrounded(%s) = %v, want %v", input, got, want)
+		}
+	}
+}
+
 func TestGrokStale(t *testing.T) {
 	tests := []struct {
 		name    string
