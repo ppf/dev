@@ -219,4 +219,20 @@ func TestAgentStart(t *testing.T) {
 	}
 	check(t, "worktree agent", wt["session"]+" "+wt["path"], "repo-feature-x "+filepath.Join(repo, ".claude/worktrees/feature/x"))
 	check(t, "worktree: client not switched", d.T("list-clients", "-F", "#{client_session}"), "boot")
+
+	// --agent codex: the worker's pane runs codex, which counts as registered without a hook
+	if err := os.Rename(sleeper(t, "codex"), filepath.Join(stubs, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	boss := d.T("display", "-t", "=boot:", "-p", "#{pane_id}")
+	env = append(d.scriptEnv(writeProjects(t, [2]string{"cx", tempDir(t)})), "TMUX_PANE="+boss)
+	out, errOut, status = devAgent(env, "", "start", "cx", "--agent", "codex", "--json", "--timeout", "30s")
+	var cx map[string]string
+	if err := json.Unmarshal([]byte(out), &cx); err != nil || status != "0" {
+		t.Fatalf("start codex: exit %s, %v: %q %q", status, err, out, errOut)
+	}
+	check(t, "codex agent", cx["session"]+" "+cx["agent"]+" "+cx["started_by"], "cx Codex boot")
+	check(t, "codex pane is the layout's agent pane", d.T("display", "-t", cx["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
+	out, _, _ = devAgent(env, "", "list", "--mine")
+	check(t, "codex worker in --mine", strings.Split(out, "\t")[0], "cx")
 }

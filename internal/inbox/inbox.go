@@ -56,6 +56,7 @@ type hookEvent struct {
 	Message          string `json:"message"`
 	Last             string `json:"last_assistant_message"`
 	Error            string `json:"error"`
+	Tool             string `json:"tool_name"`
 }
 
 // Forget clears worker's last note key, so its next turn's note isn't taken for a repeat of the last one.
@@ -79,8 +80,9 @@ func FromHook(worker string, input []byte) (Note, bool) {
 		n = Note{Kind: Finished, Text: clean(e.Last)}
 	case e.Name == "StopFailure":
 		n = Note{Kind: Failed, Text: cmp.Or(clean(e.Error), "stopped on an error")}
-	case e.Name == "Notification" && (e.NotificationType == "permission_prompt" || e.NotificationType == "elicitation_dialog"):
-		n = Note{Kind: Decision, Text: clean(e.Message)}
+	case e.Name == "Notification" && (e.NotificationType == "permission_prompt" || e.NotificationType == "elicitation_dialog"),
+		e.Name == "PermissionRequest": // Codex's
+		n = Note{Kind: Decision, Text: cmp.Or(clean(e.Message), strings.TrimSpace("permission request "+e.Tool))}
 	default:
 		return Note{}, false
 	}

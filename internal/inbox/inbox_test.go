@@ -21,6 +21,7 @@ func TestFromHook(t *testing.T) {
 		{"permission", `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`,
 			"w needs a decision: Claude needs your permission to use Bash", true},
 		{"question", `{"hook_event_name":"Notification","notification_type":"elicitation_dialog","message":"Pick one"}`, "w needs a decision: Pick one", true},
+		{"codex permission", `{"hook_event_name":"PermissionRequest","tool_name":"Bash"}`, "w needs a decision: permission request Bash", true},
 		{"idle reminder makes none", `{"hook_event_name":"Notification","notification_type":"idle_prompt"}`, "", false},
 		{"tool event makes none", `{"hook_event_name":"PostToolUse"}`, "", false},
 		{"malformed makes none", `{`, "", false},
