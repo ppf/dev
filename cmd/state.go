@@ -49,6 +49,17 @@ func newStateCmd() *cobra.Command {
 				return nil
 			}
 			c := tmux.New()
+			hook := agent.ParseHook(input)
+			if grok {
+				stale, err := agent.GrokStale(c, pane, hook)
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if stale {
+					return nil
+				}
+			}
 			// Restore resumes Claude conversations only: a Codex or Grok id would make it type `claude --resume`
 			var session agent.Session
 			if !codex && !grok {
@@ -85,7 +96,7 @@ func newStateCmd() *cobra.Command {
 					state = agent.Working
 				}
 			}
-			recErr := agent.Record(c, pane, state, session, agent.ParseHook(input))
+			recErr := agent.Record(c, pane, state, session, hook)
 			if out != "" {
 				// The notes are already out of the inbox: print them even if Record failed. Claude reads a
 				// hook's stdout as JSON, so nothing else may go there
