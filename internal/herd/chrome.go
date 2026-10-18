@@ -14,6 +14,8 @@ const (
 	maxBoxLines = 20
 	// minRule is the shortest ─ run taken for the box's border.
 	minRule = 10
+	// maxBanner bounds Grok's opt-in banner, wrapped in a narrow pane.
+	maxBanner = 10
 )
 
 // previewLines is t's captured screen as its tile shows it: without the agent's own input box, unless it
@@ -35,7 +37,7 @@ func previewLines(capture string, t tile) []string {
 }
 
 // squeezeBlank drops leading blank lines and collapses each run of blank lines to one: Codex and Grok
-// leave the screen mostly blank under a short conversation, with Grok's opt-in banner below the gap.
+// leave long blank gaps on screen, as between a short conversation and the spinner at the bottom.
 func squeezeBlank(lines []string) []string {
 	var out []string
 	blank := true
@@ -98,7 +100,8 @@ func cropCodexInput(lines []string) []string {
 }
 
 // cropGrokInput drops Grok's input box from the bottom of its captured screen: a rounded box (╭…╮, │ ❯ …│,
-// ╰… model ─╯) and the status lines below it. A box holding a numbered option or dialog text is returned unchanged.
+// ╰… model ─╯), the status lines below it and the opt-in banner above it. A box holding a numbered option or
+// dialog text is returned unchanged.
 func cropGrokInput(lines []string) []string {
 	plain := plainLines(lines)
 	bottom := -1
@@ -124,6 +127,17 @@ func cropGrokInput(lines []string) []string {
 	for _, l := range plain[top+1 : bottom] {
 		if asksChoice(strings.TrimPrefix(boxText(l), "❯")) {
 			return lines
+		}
+	}
+	end := top
+	for end > 0 && plain[end-1] == "" {
+		end--
+	}
+	if end > 0 && plain[end-1] == "Read Terms and Privacy Policy." {
+		for i := end - 1; i >= 0 && i >= end-maxBanner; i-- {
+			if strings.HasPrefix(plain[i], "Help improve Grok") {
+				return cutAt(lines, plain, i)
+			}
 		}
 	}
 	return cutAt(lines, plain, top)

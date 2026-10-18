@@ -82,19 +82,18 @@ func TestPreviewLines(t *testing.T) {
 // Real Codex v0.163.0 and Grok 1.0.62 screens (tmux capture-pane -p -e, ESC written as \x1b) lose their
 // input box and the status lines under it; a › menu stays whole.
 func TestPreviewLinesGolden(t *testing.T) {
-	const banner = "Read Terms and Privacy Policy." // Grok's opt-in banner sits above its box
-	// shown is a line the tile keeps despite the blank screen under it
+	// last starts the tile's last line; shown is a line the tile keeps despite the blank screen under it
 	tests := []struct{ file, agent, last, shown string }{
 		{"codex-idle", "Codex", "Worked for 6s • 11:15", "• Explored"},
 		{"codex-draft", "Codex", "~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex", ">_ OpenAI Codex (v0.163.0)"},
 		{"codex-working-draft", "Codex", "• Working (1s • esc to interrupt)", ">_ OpenAI Codex (v0.163.0)"},
 		{"codex-interrupted", "Codex", "■ Conversation interrupted - use /feedback if something went wrong", "› rebase onto master"},
 		{"codex-trust", "Codex", "enter continue · esc back", "› 1. Trust and continue"}, // a › menu, not the input: whole
-		{"grok-idle", "Grok", banner, "Worked for 10s"},
-		{"grok-start", "Grok", banner, "Grok Build  1.0.62"},
-		{"grok-draft", "Grok", banner, "[Dashboard]"},
-		{"grok-working-draft", "Grok", banner, "Waiting for response…"},
-		{"grok-working", "Grok", banner, "Find ppf-dev and tile-crop worktree"},
+		{"grok-idle", "Grok", "Worked for 10s", "Hi. What do you want to work on?"},
+		{"grok-start", "Grok", "╰─", "Grok Build  1.0.62"},
+		{"grok-draft", "Grok", "/p/t/c/-/b/scratchpad/play", "[Dashboard]"},
+		{"grok-working-draft", "Grok", "⠦ Waiting for response…", "❯ rebase onto master"},
+		{"grok-working", "Grok", "⠧ Find ppf-dev and tile-crop worktree…", "◆ Thought for 2.4s"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -108,7 +107,8 @@ func TestPreviewLinesGolden(t *testing.T) {
 				t.Fatal("empty tile")
 			}
 			plain := ansi.Strip(strings.Join(got, "\n"))
-			if last := strings.TrimSpace(ansi.Strip(got[len(got)-1])); last != tt.last || !strings.Contains(plain, tt.shown) {
+			if last := strings.TrimSpace(ansi.Strip(got[len(got)-1])); !strings.HasPrefix(last, tt.last) || !strings.Contains(plain, tt.shown) ||
+				strings.Contains(plain, "Help improve Grok") {
 				t.Errorf("last line %q, want %q, showing %q; tile:\n%s", last, tt.last, tt.shown, plain)
 			}
 			deciding := tile{sess: sidebar.Session{Agent: tt.agent, State: agent.Waiting}, deciding: true}
@@ -162,6 +162,12 @@ func TestCropGrokInput(t *testing.T) {
 	far := append(screen("❯ "), slices.Repeat([]string{"  text"}, maxBelowBox-3)...)
 	tall := screen(slices.Repeat([]string{"❯ line"}, maxBoxLines+1)...)
 	open := append(slices.Clone(conversation), row("❯ "), bottom)
+	banner := []string{"  Help improve Grok        [Opt out] [Opt in]", "  Off by default.", "  Change anytime via settings.", "  Read Terms and Privacy Policy.", ""}
+	withBanner := append(append(slices.Clone(conversation), banner...), screen("❯ ")[len(conversation):]...)
+	wrapped := slices.Insert(slices.Clone(banner), 2, "  for training and", "  debugging purposes.")
+	wrappedBanner := append(append(slices.Clone(conversation), wrapped...), screen("❯ ")[len(conversation):]...)
+	farBanner := append(append(append(slices.Clone(conversation), banner[0]), slices.Repeat([]string{"  text"}, maxBanner-1)...), banner[3])
+	headingOnly := append(append(slices.Clone(conversation), banner[0], "  text"), screen("❯ ")[len(conversation):]...)
 	tests := []struct {
 		name  string
 		lines []string
@@ -175,6 +181,10 @@ func TestCropGrokInput(t *testing.T) {
 		{"a box far from the bottom", far, far},
 		{"a box taller than a draft", tall, tall},
 		{"rows without a top border", open, open},
+		{"opt-in banner above the box", withBanner, conversation[:3]},
+		{"opt-in banner wrapped in a narrow pane", wrappedBanner, conversation[:3]},
+		{"a banner heading far above the box stays", append(slices.Clone(farBanner), screen("❯ ")[len(conversation):]...), farBanner},
+		{"a banner heading without the banner's last line stays", headingOnly, headingOnly[:len(conversation)+2]},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
