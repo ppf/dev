@@ -45,6 +45,8 @@ type paneRow struct {
 	Zoomed      bool   `tmux:"window_zoomed_flag"`
 	StoredWidth string `tmux:"@sidebar_width"`
 	CostOpt     string `tmux:"@dev_cost"`
+	PR          string `tmux:"@dev_pr"`
+	PRGen       string `tmux:"@dev_pr_gen"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -111,7 +113,7 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache()}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c)}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
@@ -197,9 +199,10 @@ func (m Model) apply(msg refreshMsg) Model {
 }
 
 // buildSnapshot turns the query rows into sessions in display order, own pane geometry and focus.
-// branch returns a path's branch and pr a branch's PR (the caches in production); pr is only asked
-// while a client views this sidebar's session, as every session's sidebar would query every PR.
-func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch func(path string) string, pr func(path, branch string) PR) (snapshot, error) {
+// branch returns a path's branch and pr a branch's PR given the agent pane's prOption (the caches in
+// production); pr is only asked while a client views this sidebar's session, as every session's sidebar
+// would query every PR.
+func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch func(path string) string, pr func(pane, stored, gen, path, branch string) PR) (snapshot, error) {
 	s := snapshot{clients: clients}
 	own := false
 	var names []string
@@ -238,7 +241,8 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			}
 			sess.Branch = branch(a.Pane.Path)
 			if viewed {
-				sess.PR = pr(a.Pane.Path, sess.Branch)
+				i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
+				sess.PR = pr(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
 			}
 		}
 		sessions = append(sessions, sess)

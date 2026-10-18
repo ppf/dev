@@ -3,6 +3,7 @@ package herd
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +39,8 @@ type row struct {
 	StartedBy    string `tmux:"@dev_started_by"`
 	WaitingFor   string `tmux:"@agent_waiting_for"`
 	CostOpt      string `tmux:"@dev_cost"`
+	PR           string `tmux:"@dev_pr"`
+	PRGen        string `tmux:"@dev_pr_gen"`
 }
 
 // tile is one worker session's preview.
@@ -77,7 +80,7 @@ type Model struct {
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
 type lookups interface {
 	Branch(path string) string
-	PR(path, branch string) sidebar.PR
+	PR(pane, stored, gen, path, branch string) sidebar.PR
 	OpenPR(url string) error
 }
 
@@ -95,7 +98,7 @@ type refreshMsg struct {
 
 // Run shows the previews in pane until its pane closes or Ctrl-C.
 func Run(c *tmux.Client, pane string) error {
-	m := Model{c: c, pane: pane, look: sidebar.NewLookups()}
+	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c)}
 	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		return fmt.Errorf("boss: %w", err)
 	}
@@ -238,7 +241,8 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
 		if s.visible {
-			sess.PR = look.PR(a.Pane.Path, sess.Branch)
+			i := slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })
+			sess.PR = look.PR(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
 		}
 		sessions = append(sessions, sess)
 		t := tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}

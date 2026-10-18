@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // Lookups are the sidebar's branch and PR caches for another view of the sessions (dev herd). Branch
@@ -16,16 +17,19 @@ type Lookups struct {
 	prs      *prCache
 }
 
-// NewLookups returns empty caches running the real git and gh.
-func NewLookups() *Lookups {
-	return &Lookups{branches: newBranchCache(), prs: newPRCache()}
+// NewLookups returns empty caches running the real git and gh, sharing PRs through c.
+func NewLookups(c *tmux.Client) *Lookups {
+	return &Lookups{branches: newBranchCache(), prs: newPRCache(c)}
 }
 
 // Branch returns path's branch, "" outside a repo.
 func (l *Lookups) Branch(path string) string { return l.branches.get(path) }
 
-// PR returns branch's PR as last looked up in path, starting a background lookup when due.
-func (l *Lookups) PR(path, branch string) PR { return l.prs.get(path, branch) }
+// PR returns branch's PR as last looked up in path by the agent pane whose prOption reads stored and
+// @dev_pr_gen gen, starting a background lookup when due.
+func (l *Lookups) PR(pane, stored, gen, path, branch string) PR {
+	return l.prs.get(pane, stored, gen, path, branch)
+}
 
 // OpenPR shows url in the browser.
 func (l *Lookups) OpenPR(url string) error { return l.prs.open(url) }

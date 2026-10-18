@@ -25,7 +25,7 @@ func TestModelAgentPane(t *testing.T) {
 func modelRows() []paneRow {
 	return []paneRow{
 		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
-		{Session: "app", Window: 1, ID: "%1", Path: "/app", Title: "✳ Fix login", Command: "claude", State: "working", StateCmd: "claude", Cost: "1.5", Sidebar: "%0"},
+		{Session: "app", Window: 1, ID: "%1", Path: "/app", Title: "✳ Fix login", Command: "claude", State: "working", StateCmd: "claude", Cost: "1.5", Sidebar: "%0", PR: "stored", PRGen: "3"},
 		{Session: "app", Window: 1, ID: "%2", Path: "/app", Command: "lazygit", Sidebar: "%0"},
 		{Session: "app", Window: 2, ID: "%3", Path: "/app", Command: "nvim", Sidebar: "%0"},
 		{Session: "app-2", Window: 1, ID: "%4", Path: "/app2", Command: "lazygit"},
@@ -44,8 +44,8 @@ func TestModelBuildSnapshot(t *testing.T) {
 		branched = append(branched, path)
 		return "br" + path
 	}
-	pr := func(path, branch string) PR {
-		if path != "/app" || branch != "br/app" {
+	pr := func(pane, stored, gen, path, branch string) PR {
+		if pane != "%1" || stored != "stored" || gen != "3" || path != "/app" || branch != "br/app" {
 			return PR{}
 		}
 		return PR{Number: 7, State: "open", URL: "u"}
@@ -76,7 +76,10 @@ func TestModelBuildSnapshot(t *testing.T) {
 
 	// No client views app: no PR lookups, as another session's sidebar is out of sight
 	s, err = buildSnapshot(modelRows(), []Client{{TTY: "/dev/a", Session: "web"}}, "%0", "host", branch,
-		func(string, string) PR { t.Error("PR looked up for an unviewed sidebar"); return PR{} })
+		func(string, string, string, string, string) PR {
+			t.Error("PR looked up for an unviewed sidebar")
+			return PR{}
+		})
 	if err != nil || s.sessions[0].PR != (PR{}) {
 		t.Errorf("unviewed: %v, %+v", err, s.sessions[0])
 	}
@@ -154,13 +157,13 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "")
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "")
 }
 
 func modelTestModel(c *tmux.Client) Model {
 	return Model{c: c, pane: "%0", host: "host",
 		branches: &branchCache{git: (&modelFakeGit{}).run, now: time.Now, entries: map[string]branchEntry{}},
-		prs:      &prCache{gh: (&prFakeGH{}).run, branch: prOnBranch(""), now: time.Now, sem: make(chan struct{}, prLookups), entries: map[prKey]prEntry{}}}
+		prs:      &prCache{gh: (&prFakeGH{}).run, branch: prOnBranch(""), store: newPRFakeStore().store, now: time.Now, sem: make(chan struct{}, prLookups), entries: map[prKey]prEntry{}}}
 }
 
 func TestModelRefresh(t *testing.T) {
@@ -173,7 +176,7 @@ func TestModelRefresh(t *testing.T) {
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
 			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
-			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f"},
+			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f#{@dev_pr}\x1f#{@dev_pr_gen}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
 	}
@@ -274,7 +277,7 @@ func TestModelClient(t *testing.T) {
 }
 
 func TestModelBuildSnapshotCostOff(t *testing.T) {
-	branch, pr := func(string) string { return "" }, func(string, string) PR { return PR{} }
+	branch, pr := func(string) string { return "" }, func(string, string, string, string, string) PR { return PR{} }
 	on, err := buildSnapshot(modelRows(), nil, "%0", "host", branch, pr)
 	if err != nil {
 		t.Fatal(err)
