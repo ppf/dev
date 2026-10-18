@@ -56,7 +56,6 @@ func TestLastLines(t *testing.T) {
 const (
 	red   = "\x1b[38;2;228;104;118m"
 	muted = "\x1b[38;2;114;113;105m"
-	reset = "\x1b[0m"
 )
 
 func twoTiles() Model {
@@ -66,16 +65,16 @@ func twoTiles() Model {
 	}}}
 }
 
-// Golden: two stacked 40×5 tiles; the waiting one in red, the selected one on the selection background,
-// a body line cropped with its colour reset.
+// Golden: two stacked 40×5 tiles split by a faint rule; the waiting one in red on a red-tinted header,
+// the selected one on the selection background, a body line cropped with its colour reset.
 func TestRenderGolden(t *testing.T) {
 	want := []string{
-		" " + red + "●" + reset + " \x1b[1m" + red + "a" + reset + " " + red + "Claude · waiting · $1.20" + reset + "           ",
+		waitingBG + " " + red + "●" + reset + waitingBG + " \x1b[1m" + red + "a" + reset + waitingBG + " " + red + "Claude · waiting · $1.20" + reset + waitingBG + "           " + reset,
 		reset + "\x1b[31mred line that is far too long to fit\x1b[0m" + reset + "    ",
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
-		"",
+		rule + strings.Repeat("─", 40) + reset,
 		"\x1b[48;2;42;42;55m " + muted + "●" + reset + "\x1b[48;2;42;42;55m \x1b[1m" + muted + "b" + reset + "\x1b[48;2;42;42;55m " + muted + "Codex" + reset + "\x1b[48;2;42;42;55m \x1b[38;2;152;187;108m#3 open" + reset + "\x1b[48;2;42;42;55m \x1b[38;2;84;84;109mfix" + reset + "\x1b[48;2;42;42;55m                  " + reset,
 		reset + "x" + reset + strings.Repeat(" ", 39),
 		strings.Repeat(" ", 40),
@@ -90,7 +89,7 @@ func TestRenderGolden(t *testing.T) {
 		}
 	}
 	for i, l := range got[:11] {
-		if l != "" && ansi.StringWidth(l) != 40 {
+		if ansi.StringWidth(l) != 40 {
 			t.Errorf("line %d is %d wide", i, ansi.StringWidth(l))
 		}
 	}
@@ -109,6 +108,23 @@ func TestRenderSideBySideAndPaging(t *testing.T) {
 	got := m.render()
 	if !strings.Contains(got[0], "a") || !strings.Contains(ansi.Strip(got[0]), " b ") || ansi.StringWidth(got[0]) != 79 {
 		t.Errorf("side by side header %q", ansi.Strip(got[0]))
+	}
+	m.snap.tiles = append(m.snap.tiles, m.snap.tiles[1], m.snap.tiles[1])
+	m.snap.tiles[2].sess.Name, m.snap.tiles[3].sess.Name = "c", "d"
+	m.height = 24
+	got = m.render()
+	if s := ansi.Strip(got[1]); []rune(s)[39] != '│' || ansi.StringWidth(got[1]) != 79 {
+		t.Errorf("2x2 body row %q", s)
+	}
+	if !strings.HasPrefix(got[12], headerBG) {
+		t.Errorf("unselected header off the faint band %q", got[12])
+	}
+	if s := ansi.Strip(got[11]); s != strings.Repeat("─", 39)+"┼"+strings.Repeat("─", 39) {
+		t.Errorf("2x2 rule %q", s)
+	}
+	m.snap.tiles = m.snap.tiles[:3]
+	if s := ansi.Strip(m.render()[11]); s != strings.Repeat("─", 39)+"┴"+strings.Repeat("─", 39) {
+		t.Errorf("rule over a short row %q", s)
 	}
 	m = twoTiles()
 	m.width, m.height = 40, 7 // room for one tile: paged
