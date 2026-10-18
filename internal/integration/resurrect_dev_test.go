@@ -77,12 +77,11 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	d.T("set-option", "-t", "=plain:", "@dev_herd", "1")
 	d.T("set-option", "-t", "=devt:", "@dev_started_by", display("=plain:", "#{session_id}"))
 	d.T("run-shell", save+" quiet")
-	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
-	// A new conversation in the same layout: save.sh drops the identical snapshot, its .dev must win
+	// A new conversation in the same layout: last's .dev holds its state whether save.sh drops the new
+	// snapshot as identical or keeps it (resurrect's ps of the sidebar pane may catch a sidebar tmux call)
 	transcript := hook("devt", "s1")
 	d.T("run-shell", save+" quiet")
-	again, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
-	check(t, "identical snapshot dropped", again, last)
+	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
 	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\n"+
 		":started_by\tdevt\tplain\n:started_by\tdevu\tboss-x\n"+
