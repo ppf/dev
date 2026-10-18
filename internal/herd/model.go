@@ -234,7 +234,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		}
 		sess := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), Agent: a.Label, State: a.State,
 			Branch: look.Branch(a.Pane.Path)}
-		if a.CostOK && rs[0].CostOpt != "off" {
+		if a.CostOK && !sidebar.CostHidden(rs[0].CostOpt) {
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
 		if s.visible {

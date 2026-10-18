@@ -97,7 +97,7 @@ func newAgentGetCmd() *cobra.Command {
 	return cmd
 }
 
-// printAgents prints agents as a JSON array or as tab-separated rows (state and cost "-" when unknown).
+// printAgents prints agents as a JSON array or as tab-separated rows (state "-" when unknown, cost "-" when unknown or hidden).
 func printAgents(out io.Writer, asJSON bool, agents []control.Agent) error {
 	if asJSON {
 		return printJSON(out, agents)

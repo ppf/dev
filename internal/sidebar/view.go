@@ -231,6 +231,11 @@ func statusDot(label, state string) string {
 	return faint + "○" + reset
 }
 
+// CostHidden reports whether a session's @dev_cost (set globally or on the session) hides its cost.
+func CostHidden(opt string) bool {
+	return opt == "off"
+}
+
 // FormatCost renders a session cost in USD for the sidebar and dev agent.
 func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)

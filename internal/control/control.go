@@ -114,7 +114,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
-			HideCost: r.CostOpt == "off",
+			HideCost: sidebar.CostHidden(r.CostOpt),
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost

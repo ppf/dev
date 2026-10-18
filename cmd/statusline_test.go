@@ -94,7 +94,7 @@ func TestPrintAgentsHideCost(t *testing.T) {
 	if err := printAgents(&out, true, agents); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(out.Bytes(), []byte(`"cost_usd": 1.5`)) {
-		t.Errorf("JSON: %s; want cost_usd kept", out.String())
+	if !bytes.Contains(out.Bytes(), []byte(`"cost_usd": 1.5`)) || bytes.Contains(out.Bytes(), []byte("HideCost")) {
+		t.Errorf("JSON: %s; want cost_usd kept and no HideCost key", out.String())
 	}
 }

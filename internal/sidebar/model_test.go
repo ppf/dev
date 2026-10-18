@@ -274,17 +274,24 @@ func TestModelClient(t *testing.T) {
 }
 
 func TestModelBuildSnapshotCostOff(t *testing.T) {
+	branch, pr := func(string) string { return "" }, func(string, string) PR { return PR{} }
+	on, err := buildSnapshot(modelRows(), nil, "%0", "host", branch, pr)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rows := modelRows()
 	for i := range rows {
 		rows[i].CostOpt = "off"
 	}
-	s, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(string, string) PR { return PR{} })
+	off, err := buildSnapshot(rows, nil, "%0", "host", branch, pr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sess := range s.sessions {
-		if sess.Cost != "" {
-			t.Errorf("%s: cost %q with @dev_cost off", sess.Name, sess.Cost)
-		}
+	want := slices.Clone(on.sessions)
+	for i := range want {
+		want[i].Cost = ""
+	}
+	if !slices.Equal(off.sessions, want) || slices.Equal(on.sessions, want) {
+		t.Errorf("@dev_cost off sessions =\n%+v\nwant\n%+v (costs dropped, all else kept)", off.sessions, want)
 	}
 }

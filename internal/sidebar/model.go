@@ -233,7 +233,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				title = ""
 			}
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, agentTitle(a.Label, title)
-			if a.CostOK && rs[0].CostOpt != "off" {
+			if a.CostOK && !CostHidden(rs[0].CostOpt) {
 				sess.Cost = FormatCost(a.Cost)
 			}
 			sess.Branch = branch(a.Pane.Path)
