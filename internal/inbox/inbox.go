@@ -51,11 +51,13 @@ const (
 
 // hookEvent is the part of a worker's hook input a note needs.
 type hookEvent struct {
-	Name             string `json:"hook_event_name"`
-	NotificationType string `json:"notification_type"`
-	Message          string `json:"message"`
-	Last             string `json:"last_assistant_message"`
-	Error            string `json:"error"`
+	Name             string          `json:"hook_event_name"`
+	NotificationType string          `json:"notification_type"`
+	Message          string          `json:"message"`
+	Last             string          `json:"last_assistant_message"`
+	Error            string          `json:"error"`
+	Tool             string          `json:"tool_name"`
+	ToolInput        json.RawMessage `json:"tool_input"`
 }
 
 // Forget clears worker's last note key, so its next turn's note isn't taken for a repeat of the last one.
@@ -66,7 +68,7 @@ func (b Box) Forget(worker string) error {
 	})
 }
 
-// FromHook builds worker's note for a Claude hook event; ok=false for events that make none (an idle
+// FromHook builds worker's note for a Claude or Codex hook event; ok=false for events that make none (an idle
 // reminder, tool events).
 func FromHook(worker string, input []byte) (Note, bool) {
 	var e hookEvent
@@ -81,6 +83,12 @@ func FromHook(worker string, input []byte) (Note, bool) {
 		n = Note{Kind: Failed, Text: cmp.Or(clean(e.Error), "stopped on an error")}
 	case e.Name == "Notification" && (e.NotificationType == "permission_prompt" || e.NotificationType == "elicitation_dialog"):
 		n = Note{Kind: Decision, Text: clean(e.Message)}
+	case e.Name == "PermissionRequest": // Codex's; Claude's hooks report permissions as a Notification
+		var in struct {
+			Description string `json:"description"`
+		}
+		_ = json.Unmarshal(e.ToolInput, &in) // tool_input may be a string (a patch) without a description
+		n = Note{Kind: Decision, Text: cmp.Or(clean(in.Description), strings.TrimSpace("permission request "+e.Tool))}
 	default:
 		return Note{}, false
 	}

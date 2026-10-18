@@ -78,6 +78,41 @@ func TestBossInbox(t *testing.T) {
 	check(t, "boss logs stay as they were", logOf("boss")+"|"+logOf("boss-draft"), want+"|")
 }
 
+// A Codex worker's approval request, found by its hook's cwd, reaches its boss as a decision note.
+func TestBossInboxCodexDecision(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss.log")
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "cx", sleeper(t, "codex"))
+	s.T("set-option", "-t", "=cx:", "@dev_started_by", s.T("display", "-t", "=boss:", "-p", "#{session_id}"))
+	run := func(env []string, stdin string, argv ...string) {
+		t.Helper()
+		cmd := exec.Command(devBin, argv...)
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev %s: %v %s", strings.Join(argv, " "), err, out)
+		}
+	}
+	run(s.scriptEnv("TMUX_PANE="+boss), `{"hook_event_name":"SessionStart"}`, "state", "idle")
+	waitFor(t, "stub box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", boss), "Try") })
+
+	cwd := s.T("display", "-t", "=cx:", "-p", "#{pane_current_path}")
+	run(s.scriptEnv(), `{"hook_event_name":"SessionStart","cwd":"`+cwd+`"}`, "state", "--codex", "idle")
+	run(s.scriptEnv(), `{"hook_event_name":"PermissionRequest","cwd":"`+cwd+`","tool_name":"Bash",`+
+		`"tool_input":{"command":"rm -rf build","description":"Delete build/"}}`, "state", "--codex", "waiting")
+	want := "[dev boss inbox] 1 worker update(s):\n- cx needs a decision: Delete build/\n"
+	waitFor(t, "boss gets the decision note", func() bool {
+		data, _ := os.ReadFile(log)
+		return string(data) == want
+	})
+}
+
 // A worker's new prompt resets its dedupe: a second turn ending like the first still reaches the boss,
 // here as context on the coordinator's next prompt.
 func TestBossInboxNextTurn(t *testing.T) {

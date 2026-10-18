@@ -3,6 +3,7 @@ package open
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/worktree"
@@ -28,6 +30,7 @@ type Options struct {
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
 	ForceNew bool   // picker path: suffix -2, -3, ... instead of attaching to an existing session
 	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach; not with ForceNew
+	Agent    string // agent.Claude or agent.Codex, typed into the Agent pane; empty = claude
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -95,15 +98,16 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	agentCmd := cmp.Or(opts.Agent, agent.Claude)
 	if opts.Detach {
 		if found {
 			return nil
 		}
-		return createLayout(c, session, opts.Name, path, width, height)
+		return createLayout(c, session, opts.Name, path, agentCmd, width, height)
 	}
 	if found {
 		ensureSidebar(c, session)
-	} else if err := createLayout(c, session, opts.Name, path, width, height); err != nil {
+	} else if err := createLayout(c, session, opts.Name, path, agentCmd, width, height); err != nil {
 		return err
 	}
 	return attach(c, session, inTmux)
@@ -236,9 +240,9 @@ func uniqueName(base string, exists func(string) (bool, error)) (string, error) 
 	}
 }
 
-// createLayout builds the default session: Agent (claude | lazygit over a terminal, sidebar on the
-// left) and Files (nvim | two terminals), finishing on the claude pane.
-func createLayout(c *tmux.Client, session, project, path string, width, height int) error {
+// createLayout builds the default session: Agent (agentCmd | lazygit over a terminal, sidebar on the
+// left) and Files (nvim | two terminals), finishing on the agent pane.
+func createLayout(c *tmux.Client, session, project, path, agentCmd string, width, height int) error {
 	target := tmux.SessionTarget(session)
 	sidebarCmd, err := sidebar.PaneCommand()
 	if err != nil {
@@ -256,7 +260,7 @@ func createLayout(c *tmux.Client, session, project, path string, width, height i
 	run("new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height),
 		"-s", session, "-c", path, "-n", "Agent")
 	run("set-option", "-t", target, "@project", project)
-	run("send-keys", "-t", target+"1", "claude", "Enter")
+	run("send-keys", "-t", target+"1", agentCmd, "Enter")
 	claude := run("display-message", "-t", target+"1.1", "-p", "#{pane_id}")
 	lazygit := run("split-window", "-t", claude, "-h", "-l", "50%", "-c", path, "-PF", "#{pane_id}")
 	run("send-keys", "-t", lazygit, "lazygit status --screen-mode=half", "Enter")

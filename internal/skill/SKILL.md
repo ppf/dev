@@ -35,7 +35,7 @@ Your workers ("child sessions") are the ones `--mine` lists; `started_by` names 
 dev agent start <project> <worktree> --json   # creates the worktree and session if missing, never attaches
 ```
 
-Give each worker its own worktree (a short branch-like name: `fix-login`, `docs/api`). It returns once the worker's Claude registered (default `--timeout 1m`); a timeout prints the worker's screen — often a trust or login prompt for the user. An existing session is reused, not recreated.
+Give each worker its own worktree (a short branch-like name: `fix-login`, `docs/api`). It returns once the worker's Claude registered (default `--timeout 1m`); a timeout prints the worker's screen — often a trust or login prompt for the user. An existing session is reused, not recreated. `--agent codex` starts a Codex worker instead (only when the user asks for Codex). It returns once codex runs, before it may show a trust or login screen: `read` it and answer with `send-keys` (or ask the user) before the first prompt. `prompt --wait`/`wait` work only if the user set up its Codex hooks, else use plain `prompt` and `read`. A reused session running another agent than `--agent` asks for is an error.
 
 ## Prompt and wait
 
