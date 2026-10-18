@@ -82,8 +82,11 @@ func child(mode string) {
 		select {} // the signal may land after Kill returns
 	case "suspend":
 		// Claude's Ctrl-Z: release the terminal, stop the whole process group, take it back on SIGCONT
+		cont := make(chan os.Signal, 1)
+		signal.Notify(cont, syscall.SIGCONT)
 		fmt.Print("suspending\n")
 		_ = syscall.Kill(0, syscall.SIGTSTP)
+		<-cont // Kill may return before the stop lands (Linux delivers it to any thread)
 		fmt.Print("resumed\n")
 		os.Exit(5)
 	case "cooked":
