@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -101,6 +102,10 @@ func TestAgentClose(t *testing.T) {
 	// Its dialog answered No: no hook, but Claude's input box is back in place of the dialog
 	rule := strings.Repeat("─", 40)
 	writeFile(t, d.T("display", "-t", "=deciding:", "-p", "#{pane_tty}"), "\x1b[2J\x1b[H"+rule+"\n❯ \n"+rule+"\n  ? for shortcuts\n")
+	waitFor(t, "deciding's input box drawn", func() bool { return strings.Contains(d.T("capture-pane", "-p", "-t", "=deciding:"), "? for shortcuts") })
+	// Recorded seconds ago, as Claude records a dialog seconds after drawing it
+	since, _ := strconv.ParseInt(d.T("show-option", "-pqv", "-t", "=deciding:", "@agent_since"), 10, 64)
+	d.T("set-option", "-p", "-t", "=deciding:", "@agent_since", strconv.FormatInt(since-3, 10))
 	if out, err := devCmd(coord, "", "agent", "close", "deciding"); err != nil {
 		t.Errorf("❌ close deciding after No: %v\n%s", err, out)
 	}
