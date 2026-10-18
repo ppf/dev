@@ -209,7 +209,7 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 		return false, err
 	}
 	ready := func() (bool, error) {
-		st, err := control.ReadStatus(c, a.Pane)
+		st, err := control.ReadChecked(c, a.Pane)
 		if err != nil {
 			return false, err
 		}

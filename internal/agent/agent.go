@@ -119,6 +119,9 @@ func GrokStale(c *tmux.Client, pane string, h Hook) (bool, error) {
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
 const IdlePrompt = "idle_prompt"
 
+// PermissionPrompt is the Notification type of Claude's permission prompts and questions.
+const PermissionPrompt = "permission_prompt"
+
 // Deciding reports a trusted state waiting on the user's decision (a permission prompt or question),
 // not just Claude's idle reminder; waitingFor is @agent_waiting_for.
 func Deciding(state, waitingFor string) bool {
@@ -180,9 +183,14 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		s = Session{}
 		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since"), unset("@agent_prompt_id"), unset(OptQuestion)}
 	} else {
-		// @agent_since (unix seconds) only moves when the state changes, so it must run before @agent_state is set;
+		// @agent_since (unix seconds) only moves when the state changes (or a decision comes), so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
-		since := "#{?#{&&:#{==:#{@agent_state}," + state + "},#{@agent_since}},#{@agent_since}," + strconv.FormatInt(now().Unix(), 10) + "}"
+		stamp := strconv.FormatInt(now().Unix(), 10)
+		since := "#{?#{&&:#{==:#{@agent_state}," + state + "},#{@agent_since}},#{@agent_since}," + stamp + "}"
+		if state == Waiting && h.NotificationType != IdlePrompt {
+			// Each decision starts its own stretch, so DialogGone never takes a newer dialog for the one it read
+			since = stamp
+		}
 		cmds = [][]string{{"set-option", "-pF", "-t", pane, "@agent_since", since}, set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
 		if h.Event == "SessionStart" {
 			// A crashed session's cost would show until the new one's first status line
@@ -221,6 +229,21 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		args = append(args, cmd...)
 	}
 	_, err := c.Run(args...)
+	return err
+}
+
+// DialogGone records state (Idle or Working) on a pane whose dialog closed without a hook (Claude fires
+// none when it's answered No or Esc), unsetting @agent_question; since is the @agent_since read with the
+// waiting state. A pane whose state changed since (its @agent_since moved) is left alone: the check and the
+// writes run as one tmux command.
+func DialogGone(c *tmux.Client, pane, state, since string) error {
+	cond := "#{&&:#{==:#{@agent_state}," + Waiting + "},#{==:#{@agent_since}," + since + "}}"
+	set := strings.Join([]string{
+		"set-option -p -t " + pane + " @agent_state " + state,
+		"set-option -p -t " + pane + " @agent_since " + strconv.FormatInt(now().Unix(), 10),
+		"set-option -pu -t " + pane + " " + OptQuestion,
+	}, " ; ")
+	_, err := c.Run("if-shell", "-F", "-t", pane, cond, set)
 	return err
 }
 
@@ -376,6 +399,12 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 		return Agent{}, false
 	}
 	return Agent{Pane: *codex, Label: "Codex", State: Trusted(codex.State, codex.StateCmd, codex.Command)}, true
+}
+
+// ClaudeCommand reports a pane command that isn't Codex's or Grok's: Claude's screens are the only ones
+// screen.ClaudeState reads.
+func ClaudeCommand(command string) bool {
+	return !isCodex(command) && !isGrok(command)
 }
 
 func isCodex(command string) bool {

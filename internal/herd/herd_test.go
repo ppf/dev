@@ -287,6 +287,49 @@ func TestRefresh(t *testing.T) {
 	}
 }
 
+// A deciding tile whose screen shows Claude's input box back (its dialog answered No or Esc, no hook) is
+// settled idle and cropped like any idle tile; one still showing its dialog gets a picker and no extra reads.
+func TestRefreshDialogGone(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
+	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
+	r := tmux.FormatRow
+	rows := r("herd", "$1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "")
+	for _, screen := range []string{gone, open} {
+		var ran []string
+		state := "waiting"
+		c := tmux.NewFake(func(args []string) (string, error) {
+			ran = append(ran, args[0])
+			switch args[0] {
+			case "list-panes":
+				return rows, nil
+			case "list-clients":
+				return r("/dev/ttys1", "herd", "5"), nil
+			case "display-message":
+				return r("claude", state, "claude", "1", "permission_prompt", "50"), nil
+			case "if-shell":
+				state = "idle"
+			}
+			return screen, nil
+		})
+		m := Model{c: c, pane: "%2", look: &fakeLookups{}, width: 80, height: 20}
+		msg := m.refresh()().(refreshMsg)
+		if msg.err != nil {
+			t.Fatal(msg.err)
+		}
+		tl := msg.snap.tiles[0]
+		body := strings.Join(tl.body, "\n")
+		if screen == gone {
+			if tl.deciding || tl.sess.State != "idle" || strings.Contains(body, "❯") || !slices.Contains(ran, "if-shell") {
+				t.Errorf("dialog gone: deciding %v, state %q, ran %q, body:\n%s", tl.deciding, tl.sess.State, ran, body)
+			}
+		} else if !tl.deciding || tl.pick == nil || slices.Contains(ran, "display-message") {
+			t.Errorf("dialog open: deciding %v, pick %v, ran %q", tl.deciding, tl.pick != nil, ran)
+		}
+	}
+}
+
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
@@ -316,7 +359,7 @@ func TestRefreshLastPage(t *testing.T) {
 
 func TestReply(t *testing.T) {
 	var ran []string
-	status := tmux.FormatRow("claude", "idle", "claude", "3", "")
+	status := tmux.FormatRow("claude", "idle", "claude", "3", "", "")
 	m := twoTiles()
 	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
 	paneCmd := "claude" // what runs in b's agent pane

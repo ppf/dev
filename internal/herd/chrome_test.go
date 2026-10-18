@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ppf/dev/internal/agent"
+	scr "github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 )
 
@@ -123,7 +124,7 @@ func TestCropCodexInput(t *testing.T) {
 	status := []string{"", "  GPT-6.1-Sol high · ~/src/app · Context 3% used", "  ← for agents · ? for shortcuts"}
 	conversation := []string{"› fix the test", "", "• Fixed.", ""}
 	screen := func(box ...string) []string { return append(append(slices.Clone(conversation), box...), status...) }
-	old := append([]string{"› quoted"}, slices.Repeat([]string{"  text"}, maxBoxLines+maxBelowBox)...)
+	old := append([]string{"› quoted"}, slices.Repeat([]string{"  text"}, scr.MaxBoxLines+scr.MaxBelowBox)...)
 	tests := []struct {
 		name  string
 		lines []string
@@ -159,8 +160,8 @@ func TestCropGrokInput(t *testing.T) {
 		return append(lines, bottom, "", "  Shift+Tab:mode  │  Ctrl+x:shortcuts", "", "  [stable]")
 	}
 	splash := []string{top, row("Grok Build  1.0.62"), bottom}
-	far := append(screen("❯ "), slices.Repeat([]string{"  text"}, maxBelowBox-3)...)
-	tall := screen(slices.Repeat([]string{"❯ line"}, maxBoxLines+1)...)
+	far := append(screen("❯ "), slices.Repeat([]string{"  text"}, scr.MaxBelowBox-3)...)
+	tall := screen(slices.Repeat([]string{"❯ line"}, scr.MaxBoxLines+1)...)
 	open := append(slices.Clone(conversation), row("❯ "), bottom)
 	banner := []string{"  Help improve Grok        [Opt out] [Opt in]", "  Off by default.", "  Change anytime via settings.", "  Read Terms and Privacy Policy.", ""}
 	withBanner := append(append(slices.Clone(conversation), banner...), screen("❯ ")[len(conversation):]...)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -187,6 +188,7 @@ type Status struct {
 	StateCmd   string `tmux:"@agent_cmd"`
 	Prompts    string `tmux:"@agent_prompts"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
+	Since      string `tmux:"@agent_since"`
 }
 
 // Trusted is the state when the hook that wrote it still runs in the pane, else "".
@@ -224,6 +226,43 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 	}
 	return rows[0], nil
 }
+
+// ReadChecked is ReadStatus, but a decision (agent.Deciding) is checked against pane's screen first: Claude
+// fires no hook when its dialog is answered No or Esc, so the state would stay waiting. Its own input box
+// back at the bottom (screen.ClaudeState) means no dialog is open; the state it shows, idle or working, is
+// recorded and returned.
+func ReadChecked(c *tmux.Client, pane string) (Status, error) {
+	st, err := ReadStatus(c, pane)
+	// Only permission prompts and questions: no other dialog's screen is known to replace the input box
+	if err != nil || st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt || !agent.ClaudeCommand(st.Command) {
+		return st, err
+	}
+	// Claude draws a dialog seconds before its Notification records it: a fresh decision's dialog may not be
+	// on screen yet
+	sec, err := strconv.ParseInt(st.Since, 10, 64)
+	if err != nil || now().Sub(time.Unix(sec, 0)) < dialogGrace {
+		return st, nil
+	}
+	capture, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil {
+		return st, err
+	}
+	state := screen.ClaudeState(capture)
+	if state == "" {
+		return st, nil
+	}
+	if err := agent.DialogGone(c, pane, state, st.Since); err != nil {
+		return st, err
+	}
+	// A hook may have moved the pane on meanwhile
+	return ReadStatus(c, pane)
+}
+
+// dialogGrace is how old a decision must be before ReadChecked reads its screen.
+const dialogGrace = 2 * time.Second
+
+// now is the clock ReadChecked ages decisions by; tests replace it.
+var now = time.Now
 
 // Clock is what polling needs from time; tests replace it.
 type Clock struct {
@@ -288,14 +327,25 @@ func poll(c *tmux.Client, clk Clock, pane string, timeout time.Duration, check f
 const enterDelay = 150 * time.Millisecond
 
 // Prompt pastes text into pane as one bracketed paste, then presses Enter, so multi-line text submits
-// as a single prompt. A busy agent queues it; one waiting on a decision is refused.
+// as a single prompt. A busy agent queues it; one waiting on a decision, or a busy Claude whose screen shows
+// no input box (a dialog not reported yet), is refused.
 func Prompt(c *tmux.Client, clk Clock, pane, text string) error {
-	st, err := ReadStatus(c, pane)
+	st, err := ReadChecked(c, pane)
 	if err != nil {
 		return err
 	}
 	if err := st.checkPromptable(); err != nil {
 		return err
+	}
+	if st.Trusted() == agent.Working && agent.ClaudeCommand(st.Command) {
+		// Claude records a dialog seconds after drawing it (not at all while someone types in it)
+		capture, err := c.Run("capture-pane", "-p", "-t", pane)
+		if err != nil {
+			return err
+		}
+		if screen.ClaudeState(capture) == "" {
+			return errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")
+		}
 	}
 	return paste(c, clk, pane, text)
 }
@@ -335,7 +385,7 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 // the agent settled again, so a turn shorter than a poll isn't missed and the settled state from before
 // isn't taken for done. No count within stall is ErrStalled; no settled state within timeout is ErrTimeout.
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
-	before, err := ReadStatus(c, pane)
+	before, err := ReadChecked(c, pane)
 	if err != nil {
 		return before, err
 	}

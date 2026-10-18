@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/ppf/dev/internal/screen"
 )
 
 // maxDialogTail is how close to the screen's bottom a dialog's last option must be (it, then hints or a
@@ -167,7 +168,7 @@ const maxWhat = 30
 // isTopRule is a full ─ rule, as tops Claude's dialogs; its ╌ rules frame a command inside one.
 func isTopRule(l string) bool {
 	t := strings.TrimSpace(l)
-	return len([]rune(t)) >= minRule && strings.Trim(t, "─") == ""
+	return len([]rune(t)) >= screen.MinRule && strings.Trim(t, "─") == ""
 }
 
 // unbox is a │…│ box row's inside (Grok's dialogs), keeping its indentation.

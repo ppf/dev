@@ -91,6 +91,8 @@ func TestRecord(t *testing.T) {
 	}{
 		{"state and session", Idle, Session{"s", "/t/s.jsonl"}, recorded + session},
 		{"no session unsets the old one", Idle, Session{}, recorded + noSession},
+		{"a decision starts its own stretch", Waiting, Session{}, "set-option -pF -t %1 @agent_since 100 ; set-option -p -t %1 @agent_state waiting ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt" + noSession},
 		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
 			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question" + noSession},
 	}
@@ -101,13 +103,35 @@ func TestRecord(t *testing.T) {
 				calls = append(calls, strings.Join(args, " "))
 				return "", nil
 			})
-			if err := Record(c, "%1", tt.state, tt.session, Hook{}); err != nil {
+			h := Hook{}
+			if tt.state == Waiting {
+				h = Hook{Event: "Notification", NotificationType: "permission_prompt"}
+			}
+			if err := Record(c, "%1", tt.state, tt.session, h); err != nil {
 				t.Fatal(err)
 			}
 			if len(calls) != 1 || calls[0] != tt.want {
 				t.Errorf("calls = %q, want one: %q", calls, tt.want)
 			}
 		})
+	}
+}
+
+func TestDialogGone(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	var calls [][]string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		calls = append(calls, args)
+		return "", nil
+	})
+	if err := DialogGone(c, "%1", Idle, "50"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},waiting},#{==:#{@agent_since},50}}",
+		"set-option -p -t %1 @agent_state idle ; set-option -p -t %1 @agent_since 100 ; set-option -pu -t %1 @agent_question"}
+	if len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("calls = %q, want one: %q", calls, want)
 	}
 }
 
