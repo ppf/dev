@@ -1,0 +1,40 @@
+
+  \x1b[38;2;99;168;248m>_ \x1b[1m\x1b[39mOpenAI Codex\x1b[0;2m (v0.163.0)\x1b[0m
+     \x1b[2m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[0m
+
+
+\x1b[1;2m› \x1b[0mrebase onto master
+
+
+\x1b[2m• \x1b[0mI’ll check the branch and worktree, then rebase onto the local \x1b[38;2;166;227;161mmaster\x1b[39m branch and resolve any conflicts.
+
+\x1b[1m\x1b[38;5;1m•\x1b[0m \x1b[1mFailed (exit 1)\x1b[0m \x1b[38;2;137;180;250mgit\x1b[38;2;205;214;244m status\x1b[38;2;147;153;178m --\x1b[38;2;235;160;172mshort\x1b[38;2;147;153;178m --\x1b[38;2;235;160;172mbranch\x1b[38;2;205;214;244m \x1b[38;2;148;226;213m&&\x1b[38;2;205;214;244m \x1b[38;2;137;180;250mgit\x1b[38;2;205;214;244m branch\x1b[38;2;147;153;178m --\x1b[38;2;235;160;172mshow-current\x1b[38;2;205;214;244m \x1b[38;2;148;226;213m&&\x1b[38;2;205;214;244m \x1b[38;2;137;180;250mgit\x1b[38;2;205;214;244m branch\x1b[38;2;147;153;178m -\x1b[38;2;235;160;172mvv\x1b[38;2;205;214;244m \x1b[38;2;148;226;213m&&\x1b[38;2;205;214;244m \x1b[38;2;137;180;250mgit\x1b[38;2;205;214;244m remote\x1b[38;2;147;153;178m -\x1b[38;2;235;160;172mv\x1b[38;2;205;214;244m \x1b[38;2;148;226;213m&&\x1b[38;2;205;214;244m \x1b[38;2;137;180;250mrg\x1b[38;2;147;153;178m --\x1b[38;2;235;160;172mfiles\x1b[38;2;147;153;178m -\x1b[38;2;235;160;172mg\x1b[38;2;205;214;244m AGENTS.md\x1b[38;2;147;153;178m -\x1b[38;2;235;160;172mg\x1b[38;2;205;214;244m \x1b[38;2;166;227;161m'!node_modules'\x1b[38;2;147;153;178m -\x1b[38;2;235;160;172mg\x1b[38;2;205;214;244m \x1b[38;2;166;227;161m'!…
+\x1b[2m\x1b[39m  └ + try-grok             55817d9 (/Users/storm/PhpstormProjects/ppf/dev/.claude/worktrees/try-grok) [origin/main] Merge pull request #34 from ppf/grok-agent\x1b[0m
+\x1b[2m    origin    git@github.com:ppf/dev.git (fetch)\x1b[0m
+\x1b[2m    origin    git@github.com:ppf/dev.git (push)\x1b[0m
+\x1b[2m    + 6 lines (⌃t to expand)
+\x1b[0m
+\x1b[2m•\x1b[0m \x1b[1mExplored\x1b[38;5;1m · 1 failed\x1b[0m
+\x1b[2m  └ \x1b[0m\x1b[38;2;99;168;248mSearch\x1b[39m try-codex|ppf/dev|rebase\x1b[2m in \x1b[0mMEMORY.md\x1b[2m (exit 1)\x1b[0m
+\x1b[2m    + Show details
+\x1b[0m
+■ Conversation interrupted - use /feedback if something went wrong
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[1m›\x1b[0m second line
+
+  \x1b[38;2;246;226;183mGPT-6.1-Sol high\x1b[39m · \x1b[38;2;171;223;167m~/PhpstormProjects/ppf/dev/.claude/worktrees/try-codex\x1b[39m · \x1b[38;2;143;179;239mtry-codex\x1b[39m · \x1b[38;2;242;181;144mContext 3% used\x1b[39m · \x1b[38;2;233;144;169m5h 85% left\x1b[39m · \x1b[38;2;233;144;169mweekly 98% left\x1b[39m · \x1b[38;2;200;169;238mFast off\x1b[39m
+
