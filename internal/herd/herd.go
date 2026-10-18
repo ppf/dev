@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
@@ -94,7 +95,7 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	coordinator, err := ptywrap.Argv("claude", "--append-system-prompt", coordinatorPrompt)
+	coordinator, err := ptywrap.Argv(agent.ClaudeArgv(session, "--append-system-prompt", coordinatorPrompt)...)
 	if err != nil {
 		return "", err
 	}

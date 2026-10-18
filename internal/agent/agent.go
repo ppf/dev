@@ -247,19 +247,26 @@ const (
 	Grok  = "grok"
 )
 
-// ResumeCommand is the shell command that restarts an agent of kind: resumed, its conversation id when
-// the id is safe to type and the conversation's transcript still exists, else a fresh agent. ok=false for
-// an unknown kind.
-func ResumeCommand(kind, id, transcript string) (cmd string, resumed, ok bool) {
+// ClaudeArgv is claude's argv with args, its Remote Control session named session. Not --name: that pins
+// the pane title to the name, leaving the sidebar and previews no task title. Joined with =, as the name
+// is optional: a name starting with - would be taken for a flag.
+func ClaudeArgv(session string, args ...string) []string {
+	return append(append([]string{Claude}, args...), "--remote-control="+session)
+}
+
+// ResumeCommand is the shell command that restarts an agent of kind in session: resumed, its conversation
+// id when the id is safe to type and the conversation's transcript still exists, else a fresh agent.
+// ok=false for an unknown kind.
+func ResumeCommand(kind, id, transcript, session string) (cmd string, resumed, ok bool) {
 	if kind != Claude {
 		return "", false, false
 	}
 	if safeID.MatchString(id) {
 		if _, err := os.Stat(transcript); err == nil {
-			return "claude --resume " + id, true, true
+			return tmux.ShellJoin(ClaudeArgv(session, "--resume", id)...), true, true
 		}
 	}
-	return "claude", false, true
+	return tmux.ShellJoin(ClaudeArgv(session)...), false, true
 }
 
 type codexPane struct {

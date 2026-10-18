@@ -90,6 +90,11 @@ func (d *devServer) waitForStubs(session string) {
 	}
 }
 
+// agentStub is the stub command line session's agent pane ran.
+func (d *devServer) agentStub(session string) string {
+	return d.stubs()[d.T("display", "-t", "="+session+":1.2", "-p", "#{pane_id}")]
+}
+
 // stubs maps each pane id to the stub command line it ran.
 func (d *devServer) stubs() map[string]string {
 	stubs := map[string]string{}
@@ -127,8 +132,9 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 	stubs := d.stubs()
 	r := strings.NewReplacer(replace...)
 
+	name := d.T("display", "-t", target, "-p", "#{session_name}")
 	var b strings.Builder
-	fmt.Fprintf(&b, "session %s @project=%s clients=%s\n", d.T("display", "-t", target, "-p", "#{session_name}"),
+	fmt.Fprintf(&b, "session %s @project=%s clients=%s\n", name,
 		d.T("show-option", "-qv", "-t", target, "@project"), strings.ReplaceAll(clients, "\n", ","))
 	b.WriteString(d.T("list-windows", "-t", target, "-F", "window #{window_index} #{window_name} active=#{window_active} panes=#{window_panes}") + "\n")
 	panes, err := tmux.Query[snapPane](d.tmux, "list-panes", "-s", "-t", target)
@@ -136,10 +142,11 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 		d.t.Fatal(err)
 	}
 	for _, p := range panes {
-		cmd := p.Command
-		if cmd == filepath.Base(devBin) && strings.HasPrefix(stubs[p.ID], "claude ") {
-			// dev's claude runs under dev pty-wrap (see TestOpenParity), project.sh's doesn't
-			cmd = "sleep"
+		cmd, stub := p.Command, stubs[p.ID]
+		if cmd == filepath.Base(devBin) && strings.HasPrefix(stub, "claude ") {
+			// dev's claude runs under dev pty-wrap, named its session in Remote Control (see TestOpenParity);
+			// project.sh's doesn't
+			cmd, stub = "sleep", strings.TrimSuffix(stub, "--remote-control="+name)
 		}
 		if p.ID == sidebar {
 			// The bash sidebar's current command changes as it polls tmux, and its start command runs
@@ -147,7 +154,7 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 			cmd, p.Start = "<sidebar>", "<sidebar>"
 		}
 		fmt.Fprintf(&b, "pane %d.%d active=%t %dx%d+%d+%d cmd=%s start=%q path=%s stub=%q\n",
-			p.Window, p.Index, p.Active, p.Width, p.Height, p.Left, p.Top, cmd, p.Start, r.Replace(p.Path), stubs[p.ID])
+			p.Window, p.Index, p.Active, p.Width, p.Height, p.Left, p.Top, cmd, p.Start, r.Replace(p.Path), stub)
 	}
 	if sidebar == "" {
 		b.WriteString("no @sidebar_pane\n")

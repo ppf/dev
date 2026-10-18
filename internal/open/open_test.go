@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -16,6 +17,19 @@ func TestSessionName(t *testing.T) {
 	}
 	if got := SessionName("app", ""); got != "app" {
 		t.Errorf("SessionName main checkout = %q", got)
+	}
+}
+
+func TestAgentCommand(t *testing.T) {
+	got, err := agentCommand("claude", "dev-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, `'pty-wrap' '--' 'claude' '--remote-control=dev-x'`) {
+		t.Errorf("claude = %q, want it under pty-wrap, named dev-x in Remote Control", got)
+	}
+	if got, _ := agentCommand("codex", "dev-x"); got != "codex" {
+		t.Errorf("codex = %q, want it as is", got)
 	}
 }
 

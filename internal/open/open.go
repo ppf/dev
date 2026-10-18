@@ -99,7 +99,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude))
+	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude), session)
 	if err != nil {
 		return err
 	}
@@ -244,13 +244,13 @@ func uniqueName(base string, exists func(string) (bool, error)) (string, error) 
 	}
 }
 
-// agentCommand is what a new session's Agent pane types to start kind: claude under dev pty-wrap, so its
-// images get through tmux.
-func agentCommand(kind string) (string, error) {
+// agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control,
+// under dev pty-wrap so its images get through tmux.
+func agentCommand(kind, session string) (string, error) {
 	if kind != agent.Claude {
 		return kind, nil
 	}
-	argv, err := ptywrap.Argv(kind)
+	argv, err := ptywrap.Argv(agent.ClaudeArgv(session)...)
 	if err != nil {
 		return "", err
 	}

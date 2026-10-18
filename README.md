@@ -82,7 +82,7 @@ Grok also runs the hooks in `~/.claude/settings.json`, so turn that off (`[compa
 
 ## Session restore
 
-The `dev resurrect` [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) hooks bring back each session's `@project` and sidebar, and each agent's own Claude conversation: `dev state` records the hook's `session_id` and transcript on the pane, the save keeps them next to the snapshot, and the restore types `claude --resume <id>` into each agent pane it brought back as a bare shell (100 ms apart; sessions that were still running are left alone). A pane restored into another directory, or whose transcript is gone, gets a fresh `claude` and a warning. Codex panes aren't resumed.
+The `dev resurrect` [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) hooks bring back each session's `@project` and sidebar, and each agent's own Claude conversation: `dev state` records the hook's `session_id` and transcript on the pane, the save keeps them next to the snapshot, and the restore types `claude --resume <id> --remote-control=<session>` into each agent pane it brought back as a bare shell (100 ms apart; sessions that were still running are left alone). A pane restored into another directory, or whose transcript is gone, gets a fresh agent and a warning. Codex panes aren't resumed.
 
 ```tmux
 set -g @resurrect-hook-post-save-layout '$HOME/go/bin/dev resurrect save'
@@ -173,6 +173,10 @@ tmux set -g allow-passthrough on
 ```
 
 and `"CLAUDE_CODE_FORCE_TERMINAL_IMAGES": "1"` in the `env` of Claude's `settings.json` (inside tmux Claude Code turns images off otherwise). A claude you start by hand runs unwrapped; wrap it with `dev pty-wrap -- claude`. In the wrapped pane, tmux's `pane_current_command` is `dev`.
+
+## Remote Control names
+
+dev starts claude (new sessions and workers, the boss, `dev resurrect` resumes) with `--remote-control=<session>`, so in Remote Control each shows as its tmux session (`dev-flaky-tests`, `boss-dev`) rather than a title made from its first message; a resume keeps the name. This turns Remote Control on for those sessions even without `remoteControlAtStartup`. dev doesn't use `--name`: it would pin the pane title to the session name, and the sidebar and boss previews would lose the task title Claude sets there. Codex and Grok panes start unnamed.
 
 ## Development
 
