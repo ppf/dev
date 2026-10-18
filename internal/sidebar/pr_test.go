@@ -244,9 +244,12 @@ func TestPRCache(t *testing.T) {
 	g.mu.Lock()
 	g.err = nil
 	g.mu.Unlock()
-	if got := prGet(prTestCache(g, st, &now), st, "/r"); got != ok {
+	view := prTestCache(g, st, &now)
+	if got := prGet(view, st, "/r"); got != ok {
 		t.Errorf("failed refresh, new view = %+v, want %+v", got, ok)
 	}
+	// Its lookup would otherwise land among the calls counted below
+	view.wg.Wait()
 	g.mu.Lock()
 	g.err = errors.New("gh pr view: offline")
 	g.mu.Unlock()
