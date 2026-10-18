@@ -92,7 +92,7 @@ func TestRecord(t *testing.T) {
 		{"state and session", Idle, Session{"s", "/t/s.jsonl"}, recorded + session},
 		{"no session unsets the old one", Idle, Session{}, recorded + noSession},
 		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since" + noSession},
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id" + noSession},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -198,10 +198,55 @@ func TestGrokSkip(t *testing.T) {
 	}
 }
 
+func TestGrokStale(t *testing.T) {
+	tests := []struct {
+		name    string
+		hook    Hook
+		current string
+		want    bool
+	}{
+		{"own turn", Hook{Event: "Stop", PromptID: "p2"}, "p2\n", false},
+		{"earlier turn cancelled", Hook{Event: "StopCancelled", PromptID: "p1"}, "p2\n", true},
+		{"earlier turn failed", Hook{Event: "StopFailure", PromptID: "p1"}, "p2\n", true},
+		{"earlier turn stopped", Hook{Event: "Stop", PromptID: "p1"}, "p2\n", true},
+		{"turn end without a prompt id", Hook{Event: "Stop"}, "", false},
+		{"pane has no prompt id", Hook{Event: "StopCancelled", PromptID: "p1"}, "\n", false},
+		{"not a turn end", Hook{Event: "Notification", PromptID: "p1"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			c := tmux.NewFake(func(args []string) (string, error) {
+				calls = append(calls, strings.Join(args, " "))
+				return tt.current, nil
+			})
+			got, err := GrokStale(c, "%1", tt.hook)
+			if err != nil || got != tt.want {
+				t.Errorf("GrokStale = %v, %v; want %v", got, err, tt.want)
+			}
+			// No current id given: the event alone decides, without a tmux call
+			want := []string{"display-message -t %1 -p #{@agent_prompt_id}"}
+			if tt.current == "" {
+				want = nil
+			}
+			if !slices.Equal(calls, want) {
+				t.Errorf("calls = %q, want %q", calls, want)
+			}
+		})
+	}
+	t.Run("tmux error", func(t *testing.T) {
+		c := tmux.NewFake(func([]string) (string, error) { return "", errors.New("no server") })
+		if got, err := GrokStale(c, "%1", Hook{Event: "Stop", PromptID: "p1"}); err == nil || got {
+			t.Errorf("GrokStale = %v, %v; want an error", got, err)
+		}
+	})
+}
+
 func TestParseHook(t *testing.T) {
 	for input, want := range map[string]Hook{
 		`{"hook_event_name":"UserPromptSubmit"}`:                               {Event: "UserPromptSubmit"},
 		`{"hook_event_name":"Notification","notification_type":"idle_prompt"}`: {Event: "Notification", NotificationType: IdlePrompt},
+		`{"hook_event_name":"StopCancelled","promptId":"p1"}`:                  {Event: "StopCancelled", PromptID: "p1"},
 		`{}`: {},
 		`{`:  {},
 	} {
@@ -221,13 +266,16 @@ func TestRecordHook(t *testing.T) {
 		{"state", Working, Hook{Event: "PostToolUse"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"prompt counted", Working, Hook{Event: "UserPromptSubmit"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command} ; " +
 			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1}"},
+		{"grok prompt records its id", Working, Hook{Event: "UserPromptSubmit", PromptID: "p1"}, "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; " +
+			"set-option -p -t %1 @agent_prompt_id p1"},
 		{"waiting records why", Waiting, Hook{Event: "Notification", NotificationType: "permission_prompt"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt"},
 		{"codex approval records the event", Waiting, Hook{Event: "PermissionRequest"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for PermissionRequest"},
 		{"session start drops a crashed session's cost", Idle, Hook{Event: "SessionStart"}, "set-option -p -t %1 @agent_state idle ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost"},
-		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
