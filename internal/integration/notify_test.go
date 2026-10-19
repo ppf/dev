@@ -94,6 +94,7 @@ func arg(note []string, flag string) string {
 const (
 	needsInput = `{"hook_event_name":"Notification","title":"Permission needed","message":"Claude needs your permission to use Bash"}`
 	stopped    = `{"hook_event_name":"Stop","last_assistant_message":"All tests pass."}`
+	failed     = `{"hook_event_name":"StopFailure","error":"rate_limit"}`
 )
 
 // A pane no client shows notifies; non-notifying events and @dev_notify off don't, each followed by a
@@ -120,22 +121,23 @@ func TestNotifyUnwatched(t *testing.T) {
 	r.state(t, pane, "working", `{"hook_event_name":"PostToolUse"}`, "")
 	r.state(t, pane, "idle", `{"hook_event_name":"SessionStart"}`, "")
 	r.state(t, pane, "idle", stopped, "")
+	r.state(t, pane, "idle", failed, "")
 	n = r.notes(t, 2)[1]
-	check(t, "non-notifying events skipped, Stop notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Done/All tests pass.")
-	check(t, "no sound on Stop", arg(n, "-sound"), "<no -sound>")
+	check(t, "non-notifying events and Stop skipped, StopFailure notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Failed/rate_limit")
+	check(t, "no sound on StopFailure", arg(n, "-sound"), "<no -sound>")
 
 	s.T("set", "-g", "@dev_notify", "off")
 	r.state(t, pane, "waiting", needsInput, "")
 	s.T("set", "-gu", "@dev_notify")
 	s.T("set", "-t", "=agents:", "@dev_notify_activate", "com.other.term")
-	r.state(t, pane, "idle", `{"hook_event_name":"StopFailure","error":"rate_limit"}`, "")
+	r.state(t, pane, "idle", `{"hook_event_name":"StopFailure","error":"overloaded"}`, "")
 	n = r.notes(t, 3)[2]
-	check(t, "@dev_notify off skipped, StopFailure notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Failed/rate_limit")
+	check(t, "@dev_notify off skipped, StopFailure notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Failed/overloaded")
 	check(t, "@dev_notify_activate overrides", arg(n, "-activate"), "com.other.term")
 
 	noNotifier := filepath.Join(t.TempDir(), "bin")
 	linkTmux(t, noNotifier)
-	out := r.state(t, pane, "idle", stopped, noNotifier)
+	out := r.state(t, pane, "idle", failed, noNotifier)
 	if !strings.HasPrefix(out, "❌ dev state: notify: ") {
 		t.Errorf("❌ missing notifier: output %q, want a ❌ dev state: notify: line", out)
 	}
@@ -152,13 +154,13 @@ func TestNotifyWatched(t *testing.T) {
 
 	r.state(t, pane, "waiting", needsInput, "")
 	d.T("split-window", "-t", pane, "sleep 600") // another pane active, window still in view
-	r.state(t, pane, "idle", `{"hook_event_name":"Stop","last_assistant_message":"split"}`, "")
+	r.state(t, pane, "idle", `{"hook_event_name":"StopFailure","error":"split"}`, "")
 
 	d.outer.T("send-keys", "-t", "out", "-H", "1b", "5b", "4f")
 	waitFor(t, "client unfocused", func() bool { return !focused() })
-	r.state(t, pane, "idle", stopped, "")
+	r.state(t, pane, "idle", failed, "")
 	n := r.notes(t, 1)[0]
-	check(t, "watched skipped, unfocused notifies", arg(n, "-message"), "All tests pass.")
+	check(t, "watched skipped, unfocused notifies", arg(n, "-message"), "rate_limit")
 }
 
 // A slow notifier doesn't hold up the hook: dev state returns, pipes closed, while it still runs.
@@ -175,7 +177,7 @@ func TestNotifyDoesNotWait(t *testing.T) {
 	})
 
 	start := time.Now()
-	r.state(t, pane, "idle", stopped, "")
+	r.state(t, pane, "idle", failed, "")
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("❌ dev state took %v with a notifier that sleeps 30s", d)
 	}

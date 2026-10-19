@@ -33,7 +33,7 @@ If `dev` is a zsh alias rather than the binary on `PATH`, also `setopt completea
 
 ## Notifications
 
-`dev state` (the Claude hook) sends a macOS notification through [terminal-notifier](https://github.com/julienXX/terminal-notifier) (`brew install terminal-notifier`) when Claude needs input, finishes or fails. It skips a pane you're looking at: its window is current, not zoomed onto another pane, and a focused tmux client shows it. That needs `set -g focus-events on`; without it every pane counts as not in view. A click switches to the pane and raises the terminal app that started tmux.
+`dev state` (the Claude hook) sends a macOS notification through [terminal-notifier](https://github.com/julienXX/terminal-notifier) (`brew install terminal-notifier`) when Claude needs input or a decision (permission prompt, question) or fails; a finished turn doesn't notify. It skips a pane you're looking at: its window is current, not zoomed onto another pane, and a focused tmux client shows it. That needs `set -g focus-events on`; without it every pane counts as not in view. A click switches to the pane and raises the terminal app that started tmux.
 
 ```bash
 tmux set -g @dev_notify off                                # turn off (or per session with -t)
@@ -46,7 +46,7 @@ Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.cl
 
 ## Codex state
 
-Codex CLI hooks give Codex panes the same sidebar state and notifications (needs approval, done). In `~/.codex/hooks.json`, call `dev state --codex <state>`:
+Codex CLI hooks give Codex panes the same sidebar state and notifications (needs approval). In `~/.codex/hooks.json`, call `dev state --codex <state>`:
 
 | Event | State |
 |---|---|

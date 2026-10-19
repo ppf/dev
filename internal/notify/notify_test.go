@@ -23,13 +23,13 @@ func TestDecide(t *testing.T) {
 		{"notification title cleaned", event{Name: "Notification", Title: "(x) T", Message: "m"}, note{"x) T", "m", true}, true},
 		{"notification without title", event{Name: "Notification", Message: "m"}, note{"Needs input", "m", true}, true},
 		{"notification without message", event{Name: "Notification"}, note{"Needs input", "Needs input", true}, true},
-		{"stop previews last message", event{Name: "Stop", Last: "  Fixed\n\nthe   bug.  "}, note{"Done", "Fixed the bug.", false}, true},
-		{"stop without message", event{Name: "Stop"}, note{"Done", "Finished", false}, true},
-		{"stop truncates by rune", event{Name: "Stop", Last: long}, note{"Done", strings.Repeat("é", 99) + "…", false}, true},
-		{"stop strips plist delimiters", event{Name: "Stop", Last: `["(x) done`}, note{"Done", "x) done", false}, true},
-		{"stop strips a leading bullet", event{Name: "Stop", Last: "- Fixed X\n- Fixed Y"}, note{"Done", "Fixed X - Fixed Y", false}, true},
-		{"stop strips a leading minus", event{Name: "Stop", Last: "-1 tests failed"}, note{"Done", "1 tests failed", false}, true},
-		{"stop only delimiters", event{Name: "Stop", Last: "[[( -"}, note{"Done", "Finished", false}, true},
+		{"notification collapses whitespace", event{Name: "Notification", Message: "  Pick\n\none   option.  "}, note{"Needs input", "Pick one option.", true}, true},
+		{"notification truncates by rune", event{Name: "Notification", Message: long}, note{"Needs input", strings.Repeat("é", 99) + "…", true}, true},
+		{"notification strips plist delimiters", event{Name: "Notification", Message: `["(x) pick`}, note{"Needs input", "x) pick", true}, true},
+		{"notification strips a leading bullet", event{Name: "Notification", Message: "- Allow X\n- Allow Y"}, note{"Needs input", "Allow X - Allow Y", true}, true},
+		{"notification strips a leading minus", event{Name: "Notification", Message: "-1 option left"}, note{"Needs input", "1 option left", true}, true},
+		{"notification only delimiters", event{Name: "Notification", Message: "[[( -"}, note{"Needs input", "Needs input", true}, true},
+		{"finished turn", event{Name: "Stop"}, note{}, false},
 		{"codex approval", event{Name: "PermissionRequest", Tool: "Bash", ToolInput: json.RawMessage(`{"description":"May I run touch?"}`)},
 			note{"Needs approval", "May I run touch?", true}, true},
 		{"codex approval of a patch", event{Name: "PermissionRequest", Tool: "apply_patch", ToolInput: json.RawMessage(`"*** Begin Patch"`)},
@@ -74,7 +74,7 @@ func fakeTmux(pane paneView, clients ...clientView) (*tmux.Client, *[]string) {
 	}), &got
 }
 
-var done = note{Subtitle: "Done", Message: "done"}
+var failed = note{Subtitle: "Failed", Message: "rate_limit"}
 
 func TestBuildArgsVisibility(t *testing.T) {
 	shown := paneView{FocusEvents: true, Session: "web", WindowActive: true, PaneActive: true, Socket: "/tmp/tmux-1/s"}
@@ -102,7 +102,7 @@ func TestBuildArgsVisibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := fakeTmux(tt.pane, tt.clients...)
-			_, ok, err := buildArgs(c, "%3", done, "/bin/tmux", "")
+			_, ok, err := buildArgs(c, "%3", failed, "/bin/tmux", "")
 			if err != nil || ok != tt.ok {
 				t.Errorf("buildArgs ok = %v, %v; want %v", ok, err, tt.ok)
 			}
@@ -112,7 +112,7 @@ func TestBuildArgsVisibility(t *testing.T) {
 
 func TestBuildArgsBadNotifyValue(t *testing.T) {
 	c, _ := fakeTmux(paneView{Notify: "0", Session: "web"})
-	if _, ok, err := buildArgs(c, "%3", done, "/bin/tmux", ""); ok || err == nil || !strings.Contains(err.Error(), `@dev_notify is "0", want on or off`) {
+	if _, ok, err := buildArgs(c, "%3", failed, "/bin/tmux", ""); ok || err == nil || !strings.Contains(err.Error(), `@dev_notify is "0", want on or off`) {
 		t.Errorf("buildArgs = %v, %v; want the @dev_notify error", ok, err)
 	}
 }
@@ -136,14 +136,14 @@ func TestBuildArgsContent(t *testing.T) {
 
 	pane.Activate = "com.example.term"
 	c, _ = fakeTmux(pane)
-	args, _, _ = buildArgs(c, "%3", done, "/opt/bin/tmux", "com.mitchellh.ghostty")
+	args, _, _ = buildArgs(c, "%3", failed, "/opt/bin/tmux", "com.mitchellh.ghostty")
 	if i := slices.Index(args, "-activate"); i < 0 || args[i+1] != "com.example.term" || slices.Contains(args, "-sound") {
 		t.Errorf("@dev_notify_activate override, no sound without Sound: %q", args)
 	}
 
 	pane.Activate = ""
 	c, _ = fakeTmux(pane)
-	if args, _, _ = buildArgs(c, "%3", done, "/opt/bin/tmux", ""); slices.Contains(args, "-activate") {
+	if args, _, _ = buildArgs(c, "%3", failed, "/opt/bin/tmux", ""); slices.Contains(args, "-activate") {
 		t.Errorf("no app to activate: %q", args)
 	}
 }
@@ -151,21 +151,21 @@ func TestBuildArgsContent(t *testing.T) {
 func TestBuildArgsTmuxError(t *testing.T) {
 	boom := errors.New("can't find pane")
 	c := tmux.NewFake(func([]string) (string, error) { return "", boom })
-	if _, ok, err := buildArgs(c, "%3", done, "tmux", ""); ok || !errors.Is(err, boom) {
+	if _, ok, err := buildArgs(c, "%3", failed, "tmux", ""); ok || !errors.Is(err, boom) {
 		t.Errorf("buildArgs = %v, %v; want %v", ok, err, boom)
 	}
 }
 
 func TestRunSkipsNonNotifyingEvents(t *testing.T) {
 	c := tmux.NewFake(func([]string) (string, error) { t.Fatal("tmux queried for a non-notifying event"); return "", nil })
-	for _, input := range []string{`{"hook_event_name":"PostToolUse"}`, `{"session_id":"s"}`, `{"x":{"hook_event_name":"Stop"}}`,
+	for _, input := range []string{`{"hook_event_name":"PostToolUse"}`, `{"session_id":"s"}`, `{"x":{"hook_event_name":"Stop"}}`, `{"hook_event_name":"Stop","last_assistant_message":"done"}`,
 		`{"hook_event_name":"PostToolUseFailure","error":{"code":1}}`} {
 		if err := Run(c, "%3", []byte(input), ""); err != nil {
 			t.Errorf("Run(%s) = %v", input, err)
 		}
 	}
-	if err := Run(c, "%3", []byte(`{"hook_event_name":"Stop","last_assistant_message":5}`), ""); err == nil ||
+	if err := Run(c, "%3", []byte(`{"hook_event_name":"StopFailure","error":5}`), ""); err == nil ||
 		!strings.HasPrefix(err.Error(), "notify: hook input: ") {
-		t.Errorf("Run(Stop with a numeric message) = %v; want a hook input error", err)
+		t.Errorf("Run(StopFailure with a numeric error) = %v; want a hook input error", err)
 	}
 }

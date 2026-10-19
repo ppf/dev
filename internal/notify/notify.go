@@ -1,5 +1,5 @@
-// Package notify sends a macOS notification (terminal-notifier) when an agent needs input, finishes or
-// fails, unless its pane is in view.
+// Package notify sends a macOS notification (terminal-notifier) when an agent needs input or a decision,
+// or fails, unless its pane is in view.
 package notify
 
 import (
@@ -19,7 +19,6 @@ type event struct {
 	Name      string          `json:"hook_event_name"`
 	Title     string          `json:"title"`
 	Message   string          `json:"message"`
-	Last      string          `json:"last_assistant_message"`
 	Error     string          `json:"error"`
 	Tool      string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
@@ -34,7 +33,7 @@ type note struct {
 
 const maxText = 100
 
-// decide maps a hook event to its note; ok=false for events that never notify.
+// decide maps a hook event to its note; ok=false for events that never notify, a finished turn (Stop) among them.
 func decide(e event) (note, bool) {
 	switch e.Name {
 	case "Notification":
@@ -45,8 +44,6 @@ func decide(e event) (note, bool) {
 		}
 		_ = json.Unmarshal(e.ToolInput, &in) // tool_input may be a string (a patch) without a description
 		return note{Subtitle: "Needs approval", Message: cmp.Or(clean(in.Description), clean(e.Tool), "Needs approval"), Sound: true}, true
-	case "Stop":
-		return note{Subtitle: "Done", Message: cmp.Or(clean(e.Last), "Finished")}, true
 	case "StopFailure":
 		return note{Subtitle: "Failed", Message: cmp.Or(clean(e.Error), "Stopped on an error")}, true
 	}
