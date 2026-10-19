@@ -125,8 +125,9 @@ func TestCodexState(t *testing.T) {
 
 	hook("idle", "Stop", cwdA, `,"last_assistant_message":"All tests pass."`)
 	check(t, "stop", state(a), "idle/codex")
+	hook("waiting", "PermissionRequest", cwdA, `,"tool_name":"Bash","tool_input":{"command":"rm x","description":"May I run rm x?"}`)
 	n = r.notes(t, 2)[1]
-	check(t, "unmatched Stop skipped, matched Stop notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Done/All tests pass.")
+	check(t, "Stops skipped, next approval notifies", arg(n, "-subtitle")+"/"+arg(n, "-message"), "Needs approval/May I run rm x?")
 
 	hook("working", "UserPromptSubmit", cwdA, "")
 	hook("idle", "Interrupt", cwdA, "")
