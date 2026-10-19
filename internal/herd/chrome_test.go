@@ -239,8 +239,8 @@ func TestSnapshotMine(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []string
-	for _, t := range s.tiles {
-		got = append(got, t.sess.Name)
+	for _, tl := range s.tiles {
+		got = append(got, tl.sess.Name)
 	}
 	slices.Sort(got)
 	if want := []string{"by-id", "by-name"}; !slices.Equal(got, want) {

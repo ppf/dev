@@ -190,7 +190,7 @@ func TestSelectionAndClicks(t *testing.T) {
 	}
 }
 
-func TestKillGuard(t *testing.T) {
+func TestKill(t *testing.T) {
 	var ran []string
 	m := twoTiles()
 	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
@@ -198,21 +198,6 @@ func TestKillGuard(t *testing.T) {
 		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
 		return next.(Model), cmd
 	}
-	m, _ = press(m, "x")
-	if m.confirm != "" || !strings.Contains(m.msg, "wasn't started from this boss") {
-		t.Errorf("x on a foreign worker: confirm %q msg %q", m.confirm, m.msg)
-	}
-	m.snap.name = "boss"
-	m.snap.tiles[1].startedBy = "boss-web"
-	if m, _ = press(m, "x"); m.confirm != "" {
-		t.Error("x on another boss's worker asks to kill it")
-	}
-	m.snap.tiles[1].startedBy = "boss"
-	if m, _ = press(m, "x"); m.confirm != "b" {
-		t.Errorf("x on a worker naming this boss: confirm %q", m.confirm)
-	}
-	m.confirm = ""
-	m.snap.tiles[1].startedBy = "$1" // as older versions wrote
 	m, _ = press(m, "x")
 	if m.confirm != "b" || !strings.Contains(ansi.Strip(m.render()[11]), "Kill b? y/n") {
 		t.Fatalf("x asks: confirm %q", m.confirm)
@@ -270,7 +255,7 @@ func TestRefresh(t *testing.T) {
 			t.Fatal(msg.err)
 		}
 		s := msg.snap
-		if len(s.tiles) != 1 || s.tiles[0].sess.Name != "w1" || s.tiles[0].startedBy != "$1" || s.self != "$1" || s.client != "/dev/ttys1" {
+		if len(s.tiles) != 1 || s.tiles[0].sess.Name != "w1" || s.self != "$1" || s.client != "/dev/ttys1" {
 			t.Fatalf("active=%s snapshot %+v", active, s)
 		}
 		if active == "1" {

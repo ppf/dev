@@ -1,5 +1,5 @@
-// Package herd is dev herd: a session where a coordinator Claude drives the other agent sessions,
-// next to a pane previewing every one of them.
+// Package herd is dev herd: a session where a coordinator Claude drives worker agent sessions,
+// next to a pane previewing the ones it started.
 package herd
 
 import (

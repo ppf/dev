@@ -46,13 +46,12 @@ type row struct {
 
 // tile is one worker session's preview.
 type tile struct {
-	sess      sidebar.Session
-	pane      string         // the agent pane
-	startedBy string         // OptStartedBy
-	deciding  bool           // the agent waits on the user's decision, see agent.Deciding
-	question  agent.Question // @agent_question, what its dialog asks
-	body      []string       // the pane's last screen lines; nil when not captured this tick
-	pick      *pick          // the dialog a deciding agent shows; nil when none or not captured
+	sess     sidebar.Session
+	pane     string         // the agent pane
+	deciding bool           // the agent waits on the user's decision, see agent.Deciding
+	question agent.Question // @agent_question, what its dialog asks
+	body     []string       // the pane's last screen lines; nil when not captured this tick
+	pick     *pick          // the dialog a deciding agent shows; nil when none or not captured
 }
 
 // snapshot is what one refresh saw.
@@ -223,8 +222,8 @@ func (m Model) refresh() tea.Cmd {
 	}
 }
 
-// buildSnapshot turns the rows into tiles in sidebar order, leaving out herd sessions and sessions
-// without an agent. PRs are only looked up while visible.
+// buildSnapshot turns the rows into tiles in sidebar order, keeping only agent sessions this boss
+// started. PRs are only looked up while visible.
 func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look lookups) (snapshot, error) {
 	var s snapshot
 	own := false
@@ -272,7 +271,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			sess.PR = look.PR(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
 		}
 		sessions = append(sessions, sess)
-		t := tile{pane: a.Pane.ID, startedBy: rs[0].StartedBy}
+		t := tile{pane: a.Pane.ID}
 		for _, r := range rs {
 			if r.ID == a.Pane.ID {
 				t.deciding = agent.Deciding(a.State, r.WaitingFor)
