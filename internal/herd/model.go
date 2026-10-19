@@ -250,7 +250,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 	meta := map[string]tile{}
 	for _, name := range names {
 		rs := panes[name]
-		if rs[0].Herd != "" {
+		if rs[0].Herd != "" || !sidebar.Names(rs[0].StartedBy, s.self, s.name, true) {
 			continue
 		}
 		ps := make([]agent.Pane, len(rs))

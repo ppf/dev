@@ -210,7 +210,7 @@ func TestSnapshotDeciding(t *testing.T) {
 		{"asks", agent.Waiting, "permission_prompt"}, {"reminded", agent.Waiting, agent.IdlePrompt}, {"busy", agent.Working, ""},
 	} {
 		rows = append(rows, row{Session: w.name, SessionID: "$" + w.name, ID: "%" + w.name, Window: 1, Command: "claude",
-			State: w.state, StateCmd: "claude", WaitingFor: w.waitingFor})
+			State: w.state, StateCmd: "claude", WaitingFor: w.waitingFor, StartedBy: "$1"})
 	}
 	s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
 	if err != nil {
@@ -225,13 +225,36 @@ func TestSnapshotDeciding(t *testing.T) {
 	}
 }
 
+// Only sessions this boss started show, by session id or by its name.
+func TestSnapshotMine(t *testing.T) {
+	rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1"}}
+	for _, w := range []struct{ name, startedBy string }{
+		{"by-id", "$1"}, {"by-name", "boss"}, {"other-boss", "boss-x"}, {"other-id", "$9"}, {"user", ""},
+	} {
+		rows = append(rows, row{Session: w.name, SessionID: "$" + w.name, ID: "%" + w.name, Window: 1, Command: "claude",
+			State: agent.Idle, StateCmd: "claude", StartedBy: w.startedBy})
+	}
+	s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, t := range s.tiles {
+		got = append(got, t.sess.Name)
+	}
+	slices.Sort(got)
+	if want := []string{"by-id", "by-name"}; !slices.Equal(got, want) {
+		t.Errorf("tiles %q, want %q", got, want)
+	}
+}
+
 // A tile follows its worker session's @dev_cost (global or per session), not the boss's.
 func TestSnapshotCostOff(t *testing.T) {
 	for _, tc := range []struct{ boss, worker, want string }{
 		{"", "", "$1.50"}, {"off", "off", ""}, {"", "off", ""}, {"off", "", "$1.50"},
 	} {
 		rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", CostOpt: tc.boss},
-			{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", Cost: "1.5", CostOpt: tc.worker}}
+			{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", Cost: "1.5", CostOpt: tc.worker, StartedBy: "boss"}}
 		s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
 		if err != nil {
 			t.Fatal(err)

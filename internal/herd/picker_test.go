@@ -346,7 +346,7 @@ func TestRefreshPick(t *testing.T) {
 		case "list-panes":
 			r := tmux.FormatRow
 			return r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "") +
-				r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "", "permission_prompt", "", "", "", q.String()), nil
+				r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", q.String()), nil
 		case "list-clients":
 			return tmux.FormatRow("/dev/ttys1", "herd", "5"), nil
 		}
