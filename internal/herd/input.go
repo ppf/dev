@@ -7,7 +7,6 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -149,12 +148,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.snap.tiles) == 0 {
 			return m, nil
 		}
-		// The previews run in a boss
-		if t := m.snap.tiles[i]; !sidebar.Names(t.startedBy, m.snap.self, m.snap.name, true) {
-			m.msg = t.sess.Name + " wasn't started from this boss: kill it from its sidebar"
-		} else {
-			m.confirm = t.sess.Name
-		}
+		m.confirm = m.snap.tiles[i].sess.Name
 	case "ctrl+c":
 		return m, tea.Quit
 	}

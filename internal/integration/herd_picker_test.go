@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,9 +50,21 @@ func TestHerdPicker(t *testing.T) {
 		out, _, _ := devAgent(env, "", "list")
 		return strings.Contains(out, "w1\t") && strings.Contains(out, "\tidle\t")
 	})
-	d.T("new-session", "-d", "-s", "herd", devBin+" boss --previews")
+	// A coordinator for w1's inbox news to reach, beside the previews
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	d.T("new-session", "-d", "-s", "herd", "bash", script, "", filepath.Join(tmp, "boss.log"))
 	d.T("set-option", "-t", "=herd:", "@dev_herd", "1")
-	previews := d.T("display", "-t", "=herd:", "-p", "#{pane_id}")
+	d.T("set-option", "-t", "=w1:", "@dev_started_by", d.T("display", "-t", "=herd:", "-p", "#{session_id}"))
+	coord := d.T("display", "-t", "=herd:", "-p", "#{pane_id}")
+	cmd := exec.Command(devBin, "state", "idle")
+	cmd.Env = d.scriptEnv("TMUX_PANE=" + coord)
+	cmd.Stdin = strings.NewReader(`{"hook_event_name":"SessionStart"}`)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("❌ coordinator state: %v %s", err, out)
+	}
+	previews := d.T("split-window", "-t", coord, "-h", "-PF", "#{pane_id}", devBin+" boss --previews")
 	d.T("switch-client", "-t", "=herd:")
 
 	_, errOut, status := devAgent(env, "", "prompt", "w1", "ask")
