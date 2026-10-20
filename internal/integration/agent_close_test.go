@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,6 +109,52 @@ func TestAgentClose(t *testing.T) {
 	d.T("set-option", "-p", "-t", "=deciding:", "@agent_since", strconv.FormatInt(since-3, 10))
 	if out, err := devCmd(coord, "", "agent", "close", "deciding"); err != nil {
 		t.Errorf("❌ close deciding after No: %v\n%s", err, out)
+	}
+
+	// Squash-merged PRs: none of the worker's commits are in origin's main. gh answers with the PR in
+	// <worktree name>.json, else fails
+	prs := t.TempDir()
+	writeStubs(t, filepath.Join(d.tmp, "stubs"), `cat "`+prs+`/$(basename "$PWD").json" 2>/dev/null || { echo "no pull requests found" >&2; exit 1; }`, "gh")
+	squash := func(name, state, base string) (wt, head string) {
+		t.Helper()
+		wt = worker(name, true, "idle", idle)
+		writeFile(t, filepath.Join(wt, name+".txt"), name)
+		git(t, wt, "add", name+".txt")
+		git(t, wt, "commit", "-qm", name)
+		head = strings.TrimSpace(git(t, wt, "rev-parse", "HEAD"))
+		git(t, root, "merge", "-q", "--squash", name)
+		git(t, root, "commit", "-qm", "squash "+name)
+		git(t, root, "push", "-q", "origin", "main")
+		writeFile(t, filepath.Join(prs, name+".json"), fmt.Sprintf(`{"state":%q,"headRefOid":%q,"baseRefName":%q}`, state, head, base))
+		return wt, head
+	}
+	squash("squashed", "MERGED", "main")
+	if out, err := devCmd(coord, "", "agent", "close", "squashed"); err != nil {
+		t.Errorf("❌ close squashed: %v\n%s", err, out)
+	}
+	later, merged := squash("later", "MERGED", "main")
+	writeFile(t, filepath.Join(later, "more.txt"), "more")
+	git(t, later, "add", "more.txt")
+	git(t, later, "commit", "-qm", "more")
+	squash("open", "OPEN", "main")
+	squash("elsewhere", "MERGED", "release")
+	squash("nopr", "MERGED", "main")
+	if err := os.Remove(filepath.Join(prs, "nopr.json")); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"later":     "its PR was merged at " + merged + ", not at its HEAD " + strings.TrimSpace(git(t, later, "rev-parse", "HEAD")),
+		"open":      "its PR is open",
+		"elsewhere": "its PR was merged into release",
+		"nopr":      "gh pr view --json state,headRefOid,baseRefName: no pull requests found",
+	} {
+		out, err := devCmd(coord, "", "agent", "close", name)
+		if want = "has commits that aren't in origin/main, and no PR merged at its HEAD: " + want; err == nil || !strings.Contains(out, want) {
+			t.Errorf("❌ close %s = %v, %q; want an error with %q", name, err, out, want)
+		}
+		if _, err := d.Try("has-session", "-t", "="+name+":"); err != nil {
+			t.Errorf("❌ refused close of %s killed it", name)
+		}
 	}
 
 	// Pushed to origin's main, then the local origin/main rewound: stale until close fetches

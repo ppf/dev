@@ -112,7 +112,7 @@ func (r *promptRig) client() *tmux.Client {
 			if len(r.statuses) > 1 {
 				r.statuses = r.statuses[1:]
 			}
-			return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since), nil
+			return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since, st.Session), nil
 		case "capture-pane":
 			return r.screen, nil
 		case "load-buffer":
@@ -183,6 +183,43 @@ func TestPromptWait(t *testing.T) {
 			buffer := "dev-agent-" + strconv.Itoa(os.Getpid())
 			if want := []string{"paste-buffer -p -d -b " + buffer + " -t %1", "send-keys -t %1 Enter"}; !slices.Equal(r.cmds, want) {
 				t.Errorf("cmds = %q, want %q", r.cmds, want)
+			}
+		})
+	}
+}
+
+// TestPromptWaitClear: /clear starts no turn (no prompt counted); the new session's SessionStart confirms it.
+func TestPromptWaitClear(t *testing.T) {
+	in := func(session string, st Status) Status {
+		st.Session = session
+		return st
+	}
+	cleared := Status{Command: "claude", Prompts: "4"}
+	tests := []struct {
+		name     string
+		statuses []Status
+		err      error
+		errText  string
+		sent     bool
+	}{
+		{name: "new session starts idle", statuses: []Status{in("a", status("idle", "4")), in("a", status("idle", "4")), cleared, in("b", status("idle", "4"))}, sent: true},
+		{name: "idle-waiting before", statuses: []Status{in("a", waitingFor("idle_prompt", "4")), in("b", status("idle", "4"))}, sent: true},
+		{name: "session never changes", statuses: []Status{in("a", status("idle", "4"))}, err: ErrStalled, sent: true},
+		{name: "a counted prompt isn't the reset", statuses: []Status{in("a", status("idle", "4")), in("a", status("idle", "5"))}, err: ErrStalled, sent: true},
+		{name: "no session recorded: refused", statuses: []Status{status("idle", "4")}, errText: "--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &promptRig{statuses: tt.statuses}
+			st, err := PromptWait(r.client(), fakeClock(), "%1", "/clear\n", 5*time.Second, time.Minute)
+			switch {
+			case tt.err != nil && !errors.Is(err, tt.err), tt.errText != "" && (err == nil || err.Error() != tt.errText):
+				t.Errorf("err = %v, want %v%s", err, tt.err, tt.errText)
+			case tt.err == nil && tt.errText == "" && (err != nil || st.Session != "b" || st.Trusted() != "idle"):
+				t.Errorf("PromptWait = %+v, %v; want session b idle", st, err)
+			}
+			if sent := r.pasted != ""; sent != tt.sent {
+				t.Errorf("sent = %v, want %v", sent, tt.sent)
 			}
 		})
 	}

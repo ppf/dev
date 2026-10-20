@@ -339,7 +339,7 @@ func TestPROpen(t *testing.T) {
 	}
 }
 
-// GH against a gh script on PATH: no prompts, and stderr in the error rather than on the screen.
+// RunGH against a gh script on PATH: no prompts, and stderr in the error rather than on the screen.
 func TestPRRunGH(t *testing.T) {
 	bin := t.TempDir()
 	script := "#!/bin/sh\n" +
@@ -354,14 +354,14 @@ func TestPRRunGH(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := GH(dir, "pr", "view")
+	out, err := RunGH(dir, "pr", "view")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := string(out), "1 1 "+dir+" pr view\n"; got != want {
 		t.Errorf("stdout %q, want %q", got, want)
 	}
-	if _, err := GH(dir, "fail"); err == nil || err.Error() != "gh fail: no pull requests" {
+	if _, err := RunGH(dir, "fail"); err == nil || err.Error() != "gh fail: no pull requests" {
 		t.Errorf("error %v, want gh's stderr in it", err)
 	}
 }

@@ -99,7 +99,7 @@ type prCheck struct {
 
 // ghPR asks gh for the PR at url's state, mergeability and checks; tests replace it.
 var ghPR = func(url string) ([]byte, error) {
-	return sidebar.GH("", "pr", "view", url, "--json", "state,mergeable,statusCheckRollup")
+	return sidebar.RunGH("", "pr", "view", url, "--json", "state,mergeable,statusCheckRollup")
 }
 
 // checkPR checks pr, the worker's open PR as its pane last looked it up in dir. A repo without GitHub
