@@ -28,7 +28,7 @@ while IFS= read -r line; do printf '%s\n' "$line" >> "$2"; done
 // Stop hook instead (blocked, recorded as working).
 func TestBossInbox(t *testing.T) {
 	tmp := t.TempDir()
-	s := newServer(t, "set -g base-index 1\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
 	script := filepath.Join(tmp, "boss.sh")
 	writeFile(t, script, stubBoss)
 	run := func(pane, stdin string, argv ...string) string {
@@ -36,9 +36,11 @@ func TestBossInbox(t *testing.T) {
 		cmd := exec.Command(devBin, argv...)
 		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
 		cmd.Stdin = strings.NewReader(stdin)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("❌ dev %s: %v", strings.Join(argv, " "), err)
+		if err != nil || stderr.Len() > 0 {
+			t.Fatalf("❌ dev %s: %v, stderr %q", strings.Join(argv, " "), err, stderr.String())
 		}
 		return string(out)
 	}
@@ -68,7 +70,10 @@ func TestBossInbox(t *testing.T) {
 	check(t, "worker hook prints nothing", run(pane["boss-worker"], stop, "state", "idle"), "")
 	want := "[dev boss inbox] 1 worker update(s):\n- boss-worker finished: All done. PR #7 opened\n"
 	waitFor(t, "boss gets the note", func() bool { return logOf("boss") == want })
-	check(t, "a repeat note isn't sent", run(pane["boss-worker"], stop, "state", "idle"), "")
+	// The pasted prompt's own hooks find the inbox drained, also after a repeat note
+	check(t, "pasted notes aren't context again", run(pane["boss"], `{"hook_event_name":"UserPromptSubmit"}`, "state", "working"), "")
+	run(pane["boss-worker"], stop, "state", "idle")
+	check(t, "pasted and repeat notes don't block the Stop", run(pane["boss"], `{"hook_event_name":"Stop"}`, "state", "idle"), "")
 
 	run(pane["boss-draft-worker"], stop, "state", "idle")
 	time.Sleep(time.Second)
@@ -226,18 +231,21 @@ func TestBossInboxCodexDecision(t *testing.T) {
 }
 
 // A worker's new prompt resets its dedupe: a second turn ending like the first still reaches the boss,
-// here as context on the coordinator's next prompt.
+// here as context on the coordinator's next prompt. Each note reaches it once, as context or through a
+// blocked Stop, never both.
 func TestBossInboxNextTurn(t *testing.T) {
 	tmp := t.TempDir()
-	s := newServer(t, "set -g base-index 1\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
 	run := func(pane, stdin string, state ...string) string {
 		t.Helper()
 		cmd := exec.Command(devBin, "state", append(state, "idle")[0])
 		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
 		cmd.Stdin = strings.NewReader(stdin)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("❌ dev state: %v", err)
+		if err != nil || stderr.Len() > 0 {
+			t.Fatalf("❌ dev state: %v, stderr %q", err, stderr.String())
 		}
 		return string(out)
 	}
@@ -248,7 +256,8 @@ func TestBossInboxNextTurn(t *testing.T) {
 	s.T("new-session", "-d", "-s", "w", "sleep 600")
 	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss") // by name, as dev agent start writes it
 	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
-	run(boss, `{"hook_event_name":"UserPromptSubmit"}`)
+	run(boss, `{"hook_event_name":"SessionStart"}`)
+	run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "working")
 	stop := `{"hook_event_name":"Stop","last_assistant_message":"Done."}`
 	run(worker, stop)
 	run(worker, `{"hook_event_name":"UserPromptSubmit"}`)
@@ -263,9 +272,16 @@ func TestBossInboxNextTurn(t *testing.T) {
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 	run(worker, ask, "waiting")
 	run(worker, ask, "waiting")
-	check(t, "both turns and both dialogs as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),
+	check(t, "both turns and both dialogs as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "working"),
 		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 4 worker update(s):\n- w finished: Done.\n- w finished: Done.\n`+
 			`- w needs a decision: Allow Bash?\n- w needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
+	// Each note reaches the coordinator once, whichever hook takes it
+	check(t, "notes given as context don't block the Stop", run(boss, `{"hook_event_name":"Stop"}`), "")
+	run(worker, `{"hook_event_name":"UserPromptSubmit"}`, "working")
+	run(worker, stop)
+	check(t, "boss Stop blocks with the note", run(boss, `{"hook_event_name":"Stop"}`),
+		`{"decision":"block","reason":"[dev boss inbox] 1 worker update(s):\n- w finished: Done."}`+"\n")
+	check(t, "notes a Stop blocked with aren't context again", run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "working"), "")
 }
 
 // A Grok worker's hooks run plain `dev state` with GROK_HOOK_EVENT set: its subagents' events and the
