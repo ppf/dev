@@ -29,8 +29,7 @@ type Options struct {
 	Path     string // project directory, ~ already expanded
 	Name     string // project key: session base name and @project
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
-	ForceNew bool   // picker path: suffix -2, -3, ... instead of attaching to an existing session
-	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach; not with ForceNew
+	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach
 	Agent    string // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
 }
 
@@ -47,7 +46,7 @@ var (
 	stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 )
 
-// Run opens the session: worktree, first-run restore, force-new suffix, title, then attach to an
+// Run opens the session: worktree, first-run restore, title, then attach to an
 // existing session or create the layout and attach. out receives user-facing messages.
 func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	home := os.Getenv("HOME")
@@ -56,7 +55,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	session := SessionName(opts.Name, opts.Worktree)
 
 	if opts.Worktree != "" {
-		// Warnings must outlive the tmux popup this often runs in, hence display-message.
+		// Warnings must outlive the switch to the new session, hence display-message.
 		notify := func(msg string) {
 			fmt.Fprintln(out, msg)
 			if inTmux {
@@ -78,24 +77,13 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 
 	// Detached: tmux-resurrect's restore switches clients, which would pull the user's client away
 	if !opts.Detach {
-		if err := restoreOnce(c, home, out); err != nil {
+		if err := RestoreOnce(c, home, out); err != nil {
 			return err
 		}
-	}
-
-	exists := func(name string) (bool, error) { return hasSession(c, name) }
-	if opts.ForceNew {
-		var err error
-		if session, err = uniqueName(session, exists); err != nil {
-			return err
-		}
-	}
-
-	if !opts.Detach {
 		fmt.Fprintf(out, "\033]2;%s\007", session)
 	}
 
-	found, err := exists(session)
+	found, err := hasSession(c, session)
 	if err != nil {
 		return err
 	}
@@ -196,9 +184,9 @@ func tput(capability string) string {
 	return strings.TrimSpace(string(res))
 }
 
-// restoreOnce restores saved sessions on the first dev of a tmux server, so `dev <name>` attaches to
+// RestoreOnce restores saved sessions on the first dev of a tmux server, so `dev <name>` attaches to
 // the restored session instead of creating a new one.
-func restoreOnce(c *tmux.Client, home string, out io.Writer) error {
+func RestoreOnce(c *tmux.Client, home string, out io.Writer) error {
 	// An error here is usually "no server running": nothing restored yet either.
 	if done, err := c.Run("show-option", "-gqv", "@dev_restored"); err == nil && strings.TrimSpace(done) != "" {
 		return nil
@@ -231,17 +219,6 @@ func hasSession(c *tmux.Client, name string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func uniqueName(base string, exists func(string) (bool, error)) (string, error) {
-	name := base
-	for suffix := 2; ; suffix++ {
-		found, err := exists(name)
-		if err != nil || !found {
-			return name, err
-		}
-		name = base + "-" + strconv.Itoa(suffix)
-	}
 }
 
 // agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control,
