@@ -4,6 +4,7 @@ package inbox
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,12 +149,19 @@ func (bt Batch) String() string {
 	return b.String()
 }
 
-// state is an inbox file: the pending notes, each worker's last note key (dedupe) and the last paste.
+// state is an inbox file: the pending notes, each worker's last note key (dedupe), last stuck note and the last paste.
 type state struct {
-	Notes     []Note            `json:"notes"`
-	Last      map[string]string `json:"last"`
-	Dropped   int               `json:"dropped,omitempty"`
-	LastPaste int64             `json:"last_paste,omitempty"`
+	Notes     []Note               `json:"notes"`
+	Last      map[string]string    `json:"last"`
+	Stuck     map[string]stuckMark `json:"stuck,omitempty"`
+	Dropped   int                  `json:"dropped,omitempty"`
+	LastPaste int64                `json:"last_paste,omitempty"`
+}
+
+// stuckMark is a worker's last queued stuck note: its key and a hash of the worker's screen.Snapshot then.
+type stuckMark struct {
+	Key    string `json:"key"`
+	Screen string `json:"screen"`
 }
 
 // Box is one boss's inbox file.
@@ -204,6 +212,9 @@ func (b Box) read() (state, error) {
 	if s.Last == nil {
 		s.Last = map[string]string{}
 	}
+	if s.Stuck == nil {
+		s.Stuck = map[string]stuckMark{}
+	}
 	return s, nil
 }
 
@@ -236,18 +247,39 @@ func (b Box) update(f func(*state) error) error {
 // whether it was queued.
 func (b Box) Add(n Note) (added bool, err error) {
 	err = b.update(func(s *state) error {
-		if s.Last[n.Worker] == n.Key {
-			return nil
-		}
-		s.Last[n.Worker] = n.Key
-		s.Notes = append(s.Notes, n)
-		if over := len(s.Notes) - maxNotes; over > 0 {
-			s.Notes, s.Dropped = s.Notes[over:], s.Dropped+over
-		}
-		added = true
+		added = s.add(n)
 		return nil
 	})
 	return added, err
+}
+
+// AddStuck is Add for a stuck note, screen being its worker's screen.Snapshot. A worker's new prompt lets
+// the same stretch's note through again (Forget), but it's queued only while the screen is what it was at
+// that stretch's last stuck note: a worker whose screen moved on is progressing.
+func (b Box) AddStuck(n Note, screen string) (added bool, err error) {
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(screen)))
+	err = b.update(func(s *state) error {
+		if m, ok := s.Stuck[n.Worker]; ok && m.Key == n.Key && m.Screen != sum {
+			return nil
+		}
+		if added = s.add(n); added {
+			s.Stuck[n.Worker] = stuckMark{Key: n.Key, Screen: sum}
+		}
+		return nil
+	})
+	return added, err
+}
+
+func (s *state) add(n Note) bool {
+	if s.Last[n.Worker] == n.Key {
+		return false
+	}
+	s.Last[n.Worker] = n.Key
+	s.Notes = append(s.Notes, n)
+	if over := len(s.Notes) - maxNotes; over > 0 {
+		s.Notes, s.Dropped = s.Notes[over:], s.Dropped+over
+	}
+	return true
 }
 
 // Take removes and returns the pending batch.

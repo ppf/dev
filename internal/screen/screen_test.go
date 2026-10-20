@@ -82,3 +82,55 @@ func TestClaudeState(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshot(t *testing.T) {
+	rule := strings.Repeat("─", 60)
+	claude := func(spin, tool, draft, status string, out ...string) string {
+		lines := append([]string{"⏺ Running the tests.", ""}, out...)
+		return strings.Join(append(lines, "⏺ Bash(go test ./...)", "  ⎿  "+tool, "", spin, "", rule, "❯ "+draft, rule, "  "+status, ""), "\n")
+	}
+	base := claude("✻ Brewing… (5m 6s · ↓ 2.8k tokens · esc to interrupt)", "Running… (3m 2s)", "", "~/repo · 12:41 · $1.24")
+	tests := []struct {
+		name, capture string
+		same          bool
+	}{
+		{"timers, spinner and status line tick",
+			claude("✶ Percolating… (6m 40s · ↑ 4.1k tokens · esc to interrupt)", "Running… (4m 36s)", "", "~/repo · 12:43 · $1.31"), true},
+		{"a custom verb and a new tip",
+			claude("✻ Thinking it over… (6m 40s · esc to interrupt)\n  ⎿  Tip: Run /init", "Running… (4m 36s)", "", "~/repo · 12:43 · $1.31"), true},
+		{"a draft typed in the box", claude("✻ Brewing… (5m 6s · ↓ 2.8k tokens · esc to interrupt)", "Running… (3m 2s)", "check CI", "~/repo · 12:41 · $1.24"), true},
+		{"new output", claude("✻ Brewing… (5m 6s · ↓ 2.8k tokens · esc to interrupt)", "Running… (3m 2s)", "", "~/repo · 12:41 · $1.24", "⏺ Tests pass.", ""), false},
+		{"tool output changed", claude("✻ Brewing… (5m 6s · ↓ 2.8k tokens · esc to interrupt)", "ok  ./internal (3m 2s)", "", "~/repo · 12:41 · $1.24"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Snapshot(tt.capture) == Snapshot(base); got != tt.same {
+				t.Errorf("same = %v, want %v:\n%s\nvs\n%s", got, tt.same, Snapshot(tt.capture), Snapshot(base))
+			}
+		})
+	}
+	if Snapshot("main.go:12:34: undefined: x\n") == Snapshot("main.go:40:21: undefined: x\n") {
+		t.Error("a file position taken for a clock")
+	}
+	if Snapshot("done 6:58 PM\n") != Snapshot("done 7:00 PM\n") {
+		t.Error("clock counted")
+	}
+	if Snapshot("⎿  Running… (59s)\n") != Snapshot("⎿  Running… (1m 0s)\n") {
+		t.Error("a timer gaining a unit counted")
+	}
+	grok := golden(t, "../herd/testdata/grok-working.txt")
+	if Snapshot(grok) != Snapshot(strings.NewReplacer("⠧", "⠦", "⇣25.6k", "⇣31.2k").Replace(grok)) {
+		t.Error("Grok's spinner frame counted")
+	}
+	// Without Claude's box (Codex, Grok) the timers still don't count
+	if Snapshot("• Working (5m 03s • esc to interrupt)\n› ") != Snapshot("• Working (12m 40s • esc to interrupt)\n› ") {
+		t.Error("Codex timer counted")
+	}
+	working := golden(t, "testdata/claude-working.txt")
+	if Snapshot(working) != Snapshot(strings.ReplaceAll(working, "done 7:00 PM", "done 7:42 PM")) {
+		t.Error("golden: clock counted")
+	}
+	if Snapshot(working) == Snapshot(strings.Replace(working, "keeper's", "keeper's cottage", 1)) {
+		t.Error("golden: new text not counted")
+	}
+}

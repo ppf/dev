@@ -6,9 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/inbox"
 )
 
 // stubBoss draws Claude's input box (empty, or holding draft) and appends every line it reads to log.
@@ -120,6 +124,70 @@ func TestBossInboxBackgrounded(t *testing.T) {
 	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Done.","background_tasks":[]}`)
 	check(t, "finished turn", strings.Split(state(), "@")[0], "idle")
 	waitFor(t, "boss gets only the finished note", func() bool { return boxLog() == "[dev boss inbox] 1 worker update(s):\n- w finished: Done.\n" })
+}
+
+// A worker working past the threshold gets one stuck note; a new prompt (a background task's
+// notification) lets it repeat only while its screen, timers and spinner aside, hasn't moved on.
+func TestBossInboxStuckRepeat(t *testing.T) {
+	tmp := t.TempDir()
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir) // Watch runs in this process
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	// A draft in the coordinator's box keeps the notes in the inbox
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "a draft", filepath.Join(tmp, "boss.log"))
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	run := func(pane, st, stdin string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	prompt := `{"hook_event_name":"UserPromptSubmit","prompt":"<task-notification>"}`
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	run(worker, "working", prompt)
+	s.T("set-option", "-p", "-t", worker, "@agent_since", strconv.FormatInt(time.Now().Add(-21*time.Minute).Unix(), 10))
+	tty := s.T("display", "-t", worker, "-p", "#{pane_tty}")
+	rule := strings.Repeat("─", 40)
+	draw := func(spinner, output string) {
+		t.Helper()
+		writeFile(t, tty, "\x1b[2J\x1b[H⏺ Running the tests.\n"+output+"\n"+spinner+"\n\n"+rule+"\n❯ \n"+rule+"\n  ~/repo · 12:41\n")
+		waitFor(t, "worker screen drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", worker), spinner) })
+	}
+	watch := func() string {
+		t.Helper()
+		if err := inbox.Watch(s.tmux, control.RealClock, boss); err != nil {
+			t.Fatal(err)
+		}
+		b, ok, err := inbox.Here(s.tmux, boss)
+		if !ok || err != nil {
+			t.Fatalf("❌ no boss inbox: %v", err)
+		}
+		bt, err := b.Box.Take()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bt.String()
+	}
+	note := "[dev boss inbox] 1 worker update(s):\n- w stuck: working for 21m"
+
+	draw("✻ Brewing… (21m 3s · esc to interrupt)", "")
+	check(t, "first stuck note", watch(), note)
+	check(t, "no repeat without a prompt", watch(), "")
+	run(worker, "working", prompt)
+	draw("✶ Percolating… (21m 40s · esc to interrupt)", "")
+	check(t, "repeat for an unchanged screen", watch(), note)
+	run(worker, "working", prompt)
+	draw("✶ Percolating… (21m 52s · esc to interrupt)", "ok  ./internal/inbox")
+	check(t, "no repeat for a moved-on screen", watch(), "")
 }
 
 // A Codex worker's approval request, found by its hook's cwd, reaches its boss as a decision note.
