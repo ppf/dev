@@ -86,6 +86,9 @@ func runPicker(cmd *cobra.Command) error {
 	if err != nil || !res.Chosen {
 		return err
 	}
+	if res.Session {
+		return openProject(cmd, res.Project.Name, "", false, false, "")
+	}
 	dir, err := res.Project.Dir()
 	if err != nil {
 		return err

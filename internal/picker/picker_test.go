@@ -150,6 +150,11 @@ func TestFinderEnter(t *testing.T) {
 		t.Errorf("no match: quit=%v picked=%d, want -1", quit, f.picked())
 	}
 
+	f, quit = feed(t, newFinder("Select project", rows, nil), append(typed("web"), key(tea.KeyCtrlO))...)
+	if !quit || f.aborted || !f.alt || f.picked() != 1 {
+		t.Errorf("ctrl-o: quit=%v aborted=%v alt=%v picked=%d, want web row as a plain session", quit, f.aborted, f.alt, f.picked())
+	}
+
 	for _, k := range []tea.KeyType{tea.KeyEsc, tea.KeyCtrlC} {
 		f, quit = feed(t, newFinder("Select project", rows, nil), key(k))
 		if !quit || !f.aborted {
@@ -165,7 +170,7 @@ func TestProjectView(t *testing.T) {
 	})
 	f, _ = feed(t, f, tea.WindowSizeMsg{Width: 80, Height: 10}, key(tea.KeyDown))
 	lines := strings.Split(f.View(), "\n")
-	if !strings.HasPrefix(lines[0], "> ") || !strings.Contains(lines[1], "2/2") || !strings.Contains(lines[2], "Select project") {
+	if !strings.HasPrefix(lines[0], "> ") || !strings.Contains(lines[1], "2/2") || !strings.Contains(lines[2], "Select project  ctrl-o: plain") {
 		t.Errorf("chrome lines = %q", lines[:3])
 	}
 	if !strings.HasPrefix(lines[3], "  dev Go rewrite") || !strings.HasPrefix(lines[4], "> web") {

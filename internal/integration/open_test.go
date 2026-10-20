@@ -178,6 +178,27 @@ func TestPickerBoss(t *testing.T) {
 	check(t, "repo coordinator in the main checkout", d.T("display", "-t", "=boss-repo:1.2", "-p", "#{pane_current_path}"), repo)
 }
 
+// ctrl-o in the picker opens the project's plain session instead of its boss, as dev <name> does: created
+// in the main checkout (a git repo too, no worktree step), attached the second time.
+func TestPickerSession(t *testing.T) {
+	d := newDevServer(t, "set -g @dev_restored 1\n")
+	plain, repo := tempDir(t), newRepo(t, "", "")
+	env := append([]string{writeProjects(t, [2]string{"app", plain}, [2]string{"repo", repo}), popupGuard}, gitEnv...)
+	var statuses string
+	for range 2 {
+		_, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"C-o"}})
+		statuses += status
+		check(t, "client on the session", d.T("list-clients", "-F", "#{client_session}"), "app")
+	}
+	_, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"repo", "C-o"}})
+	statuses += status
+	check(t, "statuses", statuses, "000")
+	check(t, "plain sessions, no boss or duplicate", d.T("list-sessions", "-F", "#{session_name}"), "app\nboot\nrepo")
+	check(t, "client on the repo session", d.T("list-clients", "-F", "#{client_session}"), "repo")
+	d.waitForStubs("repo")
+	check(t, "repo session in the main checkout", d.T("display", "-t", "=repo:1.2", "-p", "#{pane_current_path}"), repo)
+}
+
 // The picker restores saved sessions on the first dev of a server too, then opens the chosen boss.
 func TestPickerFirstRunRestore(t *testing.T) {
 	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/restore.sh"))

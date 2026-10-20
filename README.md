@@ -15,7 +15,7 @@ go install github.com/ppf/dev@latest
 Projects live in `~/.config/dev/projects.toml` (`[[project]]` entries with `name`, `path`, `description`).
 
 ```bash
-dev                         # picker: choose a project, open or attach its boss (see Coordinator view)
+dev                         # picker: ⏎ opens or attaches the project's boss (see Coordinator view), ctrl-o its plain session
 dev <project>               # open the project's main checkout; attaches if the session exists
 dev <project> <worktree>    # open <repo>/.claude/worktrees/<worktree>, creating it if missing
 dev list                    # name<TAB>description<TAB>path
@@ -121,7 +121,7 @@ Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up
 dev boss [<project>]    # open or attach the boss session: "boss", or "boss-<project>"
 ```
 
-Bare `dev` (and the sidebar's picker) is a project picker for `dev boss <project>`; open a plain session with `dev <project>`, a worktree with `dev <project> <worktree>`. Inside tmux it runs in a popup and switches your client to the boss.
+Bare `dev` (and the sidebar's picker) is a project picker for `dev boss <project>`: `⏎` opens or attaches the boss, `ctrl-o` the project's plain session instead (`dev <project>`, main checkout); a worktree is `dev <project> <worktree>`. Inside tmux it runs in a popup and switches your client to the chosen session.
 
 One window: a coordinator Claude on the left, started in the project's main checkout (default `$HOME`) and told to use the `dev-agents` skill, so its prompt is the one input field ("start workers for X and Y", "tell fix-login to add tests"). It's told to delegate, not do: it only starts, prompts and reads workers, relays their results, asks you and runs single-command lookups to route work; anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker: a fresh one (new session and worktree) for each new feature or piece of work, an existing one of its own only for changes to that worker's current work (fixes, review findings, changes to the same feature or PR), never for unrelated or merely related work, and when unsure it delegates. On the right, live previews of this boss's workers (the agent sessions its coordinator started, see `@dev_started_by` below; other bosses' workers and your own sessions don't show): a tile per worker with the sidebar's header (state dot, agent, state, cost, PR tag, branch; red while waiting) over the last lines of its agent pane; faint │ and ─ rules split the tiles and each unselected header sits on a faint band (red-tinted while waiting). The grid reflows with the count and pane size, and pages past 12 tiles. It refreshes once a second, only while its window is on screen.
 
