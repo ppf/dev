@@ -48,7 +48,7 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 
 // WorkerHook queues a note for the boss that started pane's session when the hook event is one a boss
 // hears of (finished, failed, needs a decision), then delivers the inbox if the coordinator is ready. Any
-// started worker's pane gets the note too (OptNote), also with the inbox off or the boss gone.
+// started worker's agent pane gets the note too (OptNote), also with the inbox off or the boss gone.
 // A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
 	var e bossEvent
@@ -60,18 +60,27 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		return nil
 	}
 	b, w, ok, err := BossOf(c, pane)
+	if err != nil || w.StartedBy == "" {
+		return err
+	}
+	rows, err := tmux.Query[paneRow](c, "list-panes", "-s", "-t", pane)
 	if err != nil {
 		return err
 	}
 	n, _ := FromHook(w.Session, input)
+	if agentPanes(rows)[w.Session] != pane {
+		// A teammate: only its decisions, named by its pane. Its prompts mustn't reset the worker's dedupe
+		if !ok || n.Kind != Decision {
+			return nil
+		}
+		n.Worker += " (" + pane + ")"
+		return deliverNote(c, clk, b, w, n, e.Name)
+	}
 	if ok {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
-	if w.StartedBy != "" {
-		// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-		err = errors.Join(err, setNote(c, pane, n.Summary()))
-	}
-	return err
+	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
+	return errors.Join(err, setNote(c, pane, n.Summary()))
 }
 
 // deliverNote queues n for b and delivers the inbox; a new prompt (event UserPromptSubmit) only resets the dedupe.

@@ -356,3 +356,63 @@ func TestGrokState(t *testing.T) {
 	grok("clear", `{"hook_event_name":"SessionEnd"}`)
 	check(t, "session end drops the prompt id", s.T("show-option", "-pqv", "-t", gk, "@agent_prompt_id"), "")
 }
+
+// A worker running an agent team has its teammates in panes beside its own: the boss hears of the worker
+// from its agent pane alone, and of a teammate only its decisions, named by its pane, once.
+func TestBossInboxAgentTeam(t *testing.T) {
+	tmp := t.TempDir()
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir) // Watch runs in this process
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	run := func(pane, st, stdin string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("❌ dev state %s %s: %v", st, stdin, err)
+		}
+		return string(out)
+	}
+	// A busy coordinator: notes wait for its own hooks
+	s.T("new-session", "-d", "-s", "boss", "sleep 600")
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	prompt := `{"hook_event_name":"UserPromptSubmit"}`
+	run(boss, "working", prompt)
+	run(worker, "working", prompt)
+	var mates []string
+	for range 2 {
+		mate := s.T("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=w:1", "sleep 600")
+		run(mate, "working", prompt)
+		mates = append(mates, mate)
+	}
+	for i, p := range append([]string{worker}, mates...) {
+		s.T("set-option", "-p", "-t", p, "@agent_since", strconv.FormatInt(time.Now().Add(-time.Duration(21+10*i)*time.Minute).Unix(), 10))
+	}
+	watch := func() {
+		t.Helper()
+		if err := inbox.Watch(s.tmux, control.RealClock, boss); err != nil {
+			t.Fatal(err)
+		}
+	}
+	watch()
+
+	stop := `{"hook_event_name":"Stop","last_assistant_message":"Done."}`
+	run(mates[0], "idle", stop)
+	run(worker, "idle", stop)
+	run(mates[1], "working", prompt)
+	run(worker, "idle", stop)
+	ask := `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Allow Bash?"}`
+	run(mates[1], "waiting", ask)
+	s.T("set-option", "-p", "-t", mates[1], "@agent_since", strconv.FormatInt(time.Now().Add(-4*time.Minute).Unix(), 10))
+	watch()
+	check(t, "one note per event, the teammate's decision named by its pane", run(boss, "working", prompt),
+		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 3 worker update(s):\n- w stuck: working for 21m\n`+
+			`- w finished: Done.\n- w (`+mates[1]+`) needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
+	check(t, "teammates get no preview note", s.T("show-option", "-pqv", "-t", mates[0], inbox.OptNote), "")
+}

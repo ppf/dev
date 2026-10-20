@@ -19,16 +19,37 @@ const (
 	StuckDecision = 3 * time.Minute
 )
 
-// paneRow is one list-panes -a row for Watch.
+// paneRow is one list-panes row for Watch and WorkerHook.
 type paneRow struct {
 	Session    string `tmux:"session_name"`
+	Window     int    `tmux:"window_index"`
 	Pane       string `tmux:"pane_id"`
+	Sidebar    string `tmux:"@sidebar_pane"`
 	StartedBy  string `tmux:"@dev_started_by"`
 	Command    string `tmux:"pane_current_command"`
 	State      string `tmux:"@agent_state"`
 	StateCmd   string `tmux:"@agent_cmd"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
+}
+
+// agentPanes maps each session in rows to its agent pane (agent.Detect, as dev agent get picks it). Other
+// Claude panes in a session (an agent team's teammates) send only their decisions.
+func agentPanes(rows []paneRow) map[string]string {
+	panes := map[string][]agent.Pane{}
+	sidebars := map[string]string{}
+	for _, r := range rows {
+		panes[r.Session] = append(panes[r.Session], agent.Pane{Session: r.Session, Window: r.Window, ID: r.Pane,
+			Command: r.Command, State: r.State, StateCmd: r.StateCmd})
+		sidebars[r.Session] = r.Sidebar
+	}
+	ids := map[string]string{}
+	for session, ps := range panes {
+		if a, ok := agent.Detect(ps, sidebars[session]); ok {
+			ids[session] = a.Pane.ID
+		}
+	}
+	return ids
 }
 
 // stuck is r's stuck note at now, ok=false when r isn't stuck.
@@ -64,9 +85,10 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if err != nil {
 		return err
 	}
+	agents := agentPanes(rows)
 	var noteErrs []error
 	for _, r := range rows {
-		if !sidebar.Names(r.StartedBy, id, b.Name, true) {
+		if !sidebar.Names(r.StartedBy, id, b.Name, true) || agents[r.Session] != r.Pane {
 			continue
 		}
 		n, ok := r.stuck(clk.Now())
