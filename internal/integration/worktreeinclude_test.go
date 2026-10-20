@@ -18,7 +18,7 @@ var gitEnv = []string{
 }
 
 // The .worktreeinclude cases from ppf/terminal#8, each run through project.sh's DEV_WORKTREE mode and through
-// the dev picker: gitignored files matching .worktreeinclude are copied into a fresh worktree; a failed copy
+// `dev <name> <worktree>`: gitignored files matching .worktreeinclude are copied into a fresh worktree; a failed copy
 // removes the worktree and deletes the branch only if it was just created.
 func TestWorktreeInclude(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_restored 1\n")
@@ -93,15 +93,12 @@ func TestWorktreeInclude(t *testing.T) {
 					out, err = runScript(append(d.scriptEnv(gitEnv...), "DEV_WORKTREE=feat", "PATH="+path), projectScript(t), root, name)
 					status = errStatus(err)
 				} else {
-					steps := []step{
-						{wait: "Select project", keys: []string{"Enter"}},
-						{wait: "Session mode", keys: []string{"feat", "Enter"}},
-					}
+					var steps []step
 					if tt.failCopy {
 						steps = append(steps, step{wait: "Press enter to close", keys: []string{"Enter"}})
 					}
-					env := append([]string{writeProjects(t, [2]string{name, root}), popupGuard, "PATH=" + path}, gitEnv...)
-					out, status = d.runInPane(env, []string{devBin}, steps...)
+					env := append([]string{writeProjects(t, [2]string{name, root}), "PATH=" + path}, gitEnv...)
+					out, status = d.runInPane(env, []string{devBin, name, "feat"}, steps...)
 				}
 				worktree := filepath.Join(root, ".claude/worktrees/feat")
 

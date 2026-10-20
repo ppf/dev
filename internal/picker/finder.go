@@ -30,7 +30,6 @@ type finder struct {
 	rows    []string
 	runes   [][]rune
 	preview func(row int) string
-	cycle   bool
 
 	query         []rune
 	matches       []int // row indices, best match first
@@ -42,8 +41,8 @@ type finder struct {
 	aborted bool
 }
 
-func newFinder(header string, rows []string, cycle bool, preview func(row int) string) finder {
-	f := finder{header: header, rows: rows, cycle: cycle, preview: preview}
+func newFinder(header string, rows []string, preview func(row int) string) finder {
+	f := finder{header: header, rows: rows, preview: preview}
 	for _, row := range rows {
 		f.runes = append(f.runes, []rune(row))
 	}
@@ -99,11 +98,7 @@ func (f *finder) move(delta int) {
 	if n == 0 {
 		return
 	}
-	if f.cycle {
-		f.cursor = (f.cursor + delta + n) % n
-	} else {
-		f.cursor = min(max(f.cursor+delta, 0), n-1)
-	}
+	f.cursor = min(max(f.cursor+delta, 0), n-1)
 }
 
 // filter re-ranks rows against the query and, like fzf, puts the cursor back on the top match.

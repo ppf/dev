@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/picker"
 	"github.com/ppf/dev/internal/tmux"
@@ -89,16 +90,18 @@ func runPicker(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	return open.Run(tmux.New(), open.Options{
-		Path: dir, Name: res.Project.Name, Worktree: res.Worktree, ForceNew: true,
-	}, cmd.OutOrStdout())
+	c := tmux.New()
+	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	return herd.Open(c, res.Project.Name, dir)
 }
 
 // openProject opens project name, or its worktree wt (created when missing) when wt is set; detach
 // creates the session without attaching and sends messages to stderr, keeping stdout for results;
 // agentCmd starts in a new session's Agent pane ("" = claude).
 func openProject(cmd *cobra.Command, name, wt string, detach bool, agentCmd string) error {
-	// Rejected rather than stripped like picker input: a typo must not become a different branch.
+	// Rejected rather than sanitized: a typo must not become a different branch.
 	if wt != "" && worktree.Sanitize(wt) != wt {
 		return fmt.Errorf("invalid worktree name %q: only A-Za-z0-9._/- allowed", wt)
 	}
