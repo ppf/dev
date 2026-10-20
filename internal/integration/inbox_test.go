@@ -68,6 +68,9 @@ func TestBossInbox(t *testing.T) {
 	check(t, "worker hook prints nothing", run(pane["boss-worker"], stop, "state", "idle"), "")
 	want := "[dev boss inbox] 1 worker update(s):\n- boss-worker finished: All done. PR #7 opened\n"
 	waitFor(t, "boss gets the note", func() bool { return logOf("boss") == want })
+	// The pasted prompt's own hooks find the inbox drained
+	check(t, "pasted notes aren't context again", run(pane["boss"], `{"hook_event_name":"UserPromptSubmit"}`, "state", "working"), "")
+	check(t, "pasted notes don't block the Stop", run(pane["boss"], `{"hook_event_name":"Stop"}`, "state", "idle"), "")
 	check(t, "a repeat note isn't sent", run(pane["boss-worker"], stop, "state", "idle"), "")
 
 	run(pane["boss-draft-worker"], stop, "state", "idle")
@@ -266,6 +269,13 @@ func TestBossInboxNextTurn(t *testing.T) {
 	check(t, "both turns and both dialogs as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),
 		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 4 worker update(s):\n- w finished: Done.\n- w finished: Done.\n`+
 			`- w needs a decision: Allow Bash?\n- w needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
+	// Each note reaches the coordinator once, whichever hook takes it
+	check(t, "notes given as context don't block the Stop", run(boss, `{"hook_event_name":"Stop"}`), "")
+	run(worker, `{"hook_event_name":"UserPromptSubmit"}`, "working")
+	run(worker, stop)
+	check(t, "boss Stop blocks with the note", run(boss, `{"hook_event_name":"Stop"}`),
+		`{"decision":"block","reason":"[dev boss inbox] 1 worker update(s):\n- w finished: Done."}`+"\n")
+	check(t, "notes a Stop blocked with aren't context again", run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "working"), "")
 }
 
 // A Grok worker's hooks run plain `dev state` with GROK_HOOK_EVENT set: its subagents' events and the
