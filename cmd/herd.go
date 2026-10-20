@@ -8,6 +8,7 @@ import (
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/herd"
+	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -35,22 +36,26 @@ live previews of the workers it started.`,
 				}
 				return herd.Run(c, pane)
 			}
-			if len(args) == 0 {
-				return herd.Open(c, "", os.Getenv("HOME"))
+			project, dir := "", os.Getenv("HOME")
+			if len(args) == 1 {
+				projects, _, err := loadProjects(cmd)
+				if err != nil {
+					return err
+				}
+				p, ok := config.Find(projects, args[0])
+				if !ok {
+					return errors.New("project " + args[0] + " not found")
+				}
+				if dir, err = p.Dir(); err != nil {
+					return err
+				}
+				project = p.Name
 			}
-			projects, _, err := loadProjects(cmd)
-			if err != nil {
+			// After the first-run restore, so a saved boss is attached rather than replaced
+			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 				return err
 			}
-			p, ok := config.Find(projects, args[0])
-			if !ok {
-				return errors.New("project " + args[0] + " not found")
-			}
-			dir, err := p.Dir()
-			if err != nil {
-				return err
-			}
-			return herd.Open(c, p.Name, dir)
+			return herd.Open(c, project, dir)
 		},
 	}
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")

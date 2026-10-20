@@ -12,13 +12,12 @@ import (
 )
 
 // A saved boss comes back as a boss: marked, its coordinator resumed into its conversation with the
-// coordinator prompt, its previews and sidebar back, so `dev boss` attaches it. A plain session named
+// coordinator prompt, its previews and sidebar back, so the first `dev boss` of a server attaches it. A plain session named
 // like a boss stays plain.
 func TestResurrectBoss(t *testing.T) {
 	home := tmuxHome(t)
-	restore := filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh")
 	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
-	requireFiles(t, restore, save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))
+	requireFiles(t, filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh"), save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))
 	dir, resurrectDir := tempDir(t), tempDir(t)
 	d := newDevServer(t, resurrectConf(resurrectDir))
 	env := d.scriptEnv(writeProjects(t, [2]string{"app", dir}))
@@ -59,8 +58,16 @@ func TestResurrectBoss(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Cold start: the server's first dev is `dev boss app`, which restores before it opens the boss
 	d.kill()
-	d.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)
+	d.T("new-session", "-d", "-s", "boot")
+	d.T("set-option", "-gu", "@dev_restored")
+	d.outer.T("send-keys", "-t", "out", "TMUX= tmux -L "+d.socket+" attach -t boot", "Enter")
+	waitFor(t, "client attached again", func() bool {
+		c, _ := d.Try("list-clients", "-F", "#{client_session}")
+		return c == "boot"
+	})
+	openBoss("restored")
 	sessions := strings.Split(d.T("ls", "-F", "#{session_name}"), "\n")
 	sort.Strings(sessions)
 	check(t, "sessions restored", strings.Join(sessions, " "), "boot boss-app boss-zzz worker")
@@ -85,13 +92,7 @@ func TestResurrectBoss(t *testing.T) {
 	check(t, "sidebar rebuilt", devSidebarStart(display(sidebar, "#{pane_start_command}")), "true")
 	check(t, "worker still the boss's", d.T("show-option", "-qv", "-t", "=worker:", "@dev_started_by"), "boss-app")
 	check(t, "no restore warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
-
-	d.outer.T("send-keys", "-t", "out", "TMUX= tmux -L "+d.socket+" attach -t boot", "Enter")
-	waitFor(t, "client attached again", func() bool {
-		c, _ := d.Try("list-clients", "-F", "#{client_session}")
-		return c == "boot"
-	})
-	openBoss("restored")
+	openBoss("again")
 	check(t, "attached, not recreated", display("=boss-app:1.2", "#{pane_id}"), coordinator)
 
 	d.T("send-keys", "-t", previews, "C-c")
