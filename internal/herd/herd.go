@@ -29,7 +29,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`with the dev-agents skill (dev agent list/start/prompt/wait/read). Delegate, don't do: you only coordinate (start, ` +
 	`prompt and read workers, relay their results, ask the user, and run single-command lookups to route work). Anything ` +
 	`longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Each new ` +
-	`feature or piece of development gets a fresh worker (dev agent start, its own worktree); prompt an existing one of ` +
+	`feature or piece of work gets a fresh worker (dev agent start with a new worktree name); prompt an existing one of ` +
 	`yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with ` +
 	`unrelated or merely related work. When unsure, delegate. The pane on your right previews every worker. ` +
 	`Your workers (child sessions) are ` + "`dev agent list --mine`" + `; the other dev sessions are the user's own, so ` +
