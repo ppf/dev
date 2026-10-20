@@ -176,18 +176,33 @@ func TestAgentCodexHooks(t *testing.T) {
 		"1 ❌ agent is waiting for a decision (PermissionRequest): read it and answer with send-keys\n")
 }
 
-// agentArgs is the argv of the processes the shell of target's pane runs, one per line.
+// agentArgs is the argv of the processes under target's pane (on Linux the shell runs it in another
+// sh), one per line.
 func agentArgs(t *testing.T, d *devServer, target string) string {
 	t.Helper()
-	children, err := exec.Command("pgrep", "-P", d.T("display", "-t", target, "-p", "#{pane_pid}")).Output()
+	ps, err := exec.Command("ps", "-A", "-o", "pid=,ppid=,args=").Output()
 	if err != nil {
-		t.Fatalf("pgrep %s's shell: %v", target, err)
+		t.Fatalf("ps: %v", err)
 	}
-	ps, err := exec.Command("ps", "-o", "args=", "-p", strings.Join(strings.Fields(string(children)), ",")).Output()
-	if err != nil {
-		t.Fatalf("ps %s's processes: %v", target, err)
+	type proc struct{ parent, args string }
+	procs := map[string]proc{}
+	for _, l := range strings.Split(string(ps), "\n") {
+		if f := strings.Fields(l); len(f) > 2 {
+			procs[f[0]] = proc{f[1], strings.Join(f[2:], " ")}
+		}
 	}
-	return string(ps)
+	under := map[string]bool{d.T("display", "-t", target, "-p", "#{pane_pid}"): true}
+	var args []string
+	for grew := true; grew; {
+		grew = false
+		for pid, p := range procs {
+			if !under[pid] && under[p.parent] {
+				under[pid], grew = true, true
+				args = append(args, p.args)
+			}
+		}
+	}
+	return strings.Join(args, "\n")
 }
 
 // dev agent start opens a project detached, returns once the agent registered, and reuses the session.
