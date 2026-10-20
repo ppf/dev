@@ -189,6 +189,7 @@ type Status struct {
 	Prompts    string `tmux:"@agent_prompts"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
+	Session    string `tmux:"@agent_session"`
 }
 
 // Trusted is the state when the hook that wrote it still runs in the pane, else "".
@@ -383,7 +384,8 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 
 // PromptWait prompts a settled agent and waits until the hook counted the prompt (@agent_prompts) and
 // the agent settled again, so a turn shorter than a poll isn't missed and the settled state from before
-// isn't taken for done. No count within stall is ErrStalled; no settled state within timeout is ErrTimeout.
+// isn't taken for done. /clear starts no turn: it waits for the new session's SessionStart (@agent_session)
+// instead. No count (or session) within stall is ErrStalled; no settled state within timeout is ErrTimeout.
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
 	before, err := ReadChecked(c, pane)
 	if err != nil {
@@ -399,11 +401,20 @@ func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout tim
 	if err := before.checkPromptable(); err != nil {
 		return before, err
 	}
+	// Claude Code's aliases of /clear too
+	reset := slices.Contains([]string{"/clear", "/reset", "/new"}, strings.TrimSpace(text))
+	if reset && before.Session == "" {
+		return before, errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")
+	}
 	if err := paste(c, clk, pane, text); err != nil {
 		return before, err
 	}
 	return poll(c, clk, pane, timeout, func(st Status, elapsed time.Duration) (bool, error) {
-		if st.Prompts != before.Prompts {
+		picked := st.Prompts != before.Prompts
+		if reset {
+			picked = st.Session != "" && st.Session != before.Session
+		}
+		if picked {
 			return st.Settled(), nil
 		}
 		if elapsed >= stall {

@@ -2,6 +2,7 @@ package control
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -29,7 +30,7 @@ type Closed struct {
 
 // Close closes worker a for the coordinator in pane, archiving its untracked files. It refuses unless pane's
 // session started a, a is idle (or waiting only because it sat idle), and a's worktree (under .claude/worktrees,
-// used by no other session) has no tracked changes and its HEAD is in origin's default branch.
+// used by no other session) has no tracked changes and its HEAD is in origin's default branch, or gh reports its PR merged at that HEAD.
 func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	done := Closed{Session: a.Session}
 	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
@@ -50,7 +51,12 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err != nil {
 		return done, fmt.Errorf("can't check %s's commits: %w", a.Session, err)
 	}
-	if err := closable(c, a, wt, base); err != nil {
+	// Slow too (gh): before the checks, which then only need its HEAD unchanged
+	head, err := delivered(wt, base)
+	if err != nil {
+		return done, err
+	}
+	if err := closable(c, a, wt, head); err != nil {
 		return done, err
 	}
 	branch, err := worktree.Branch(wt)
@@ -76,7 +82,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 		done.Results, done.Files = dir, files
 	}
 	// Again: the worker may have taken a prompt since
-	if err := closable(c, a, wt, base); err != nil {
+	if err := closable(c, a, wt, head); err != nil {
 		return done, err
 	}
 	if err := kill(c, a.Session, own); err != nil {
@@ -96,8 +102,9 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	return done, nil
 }
 
-// closable refuses a working, deciding or hookless worker, or a shared, dirty or unmerged worktree.
-func closable(c *tmux.Client, a Agent, wt, base string) error {
+// closable refuses a working, deciding or hookless worker, or a shared or dirty worktree, or one whose HEAD
+// moved from head, the one delivered checked.
+func closable(c *tmux.Client, a Agent, wt, head string) error {
 	st, err := ReadChecked(c, a.Pane)
 	if err != nil {
 		return err
@@ -116,8 +123,50 @@ func closable(c *tmux.Client, a Agent, wt, base string) error {
 	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
 		return cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt))
 	}
-	if merged, err := worktree.Merged(wt, base); err != nil || !merged {
-		return cmp.Or(err, fmt.Errorf("%s has commits that aren't in %s", wt, base))
+	if now, err := worktree.Head(wt); err != nil || now != head {
+		return cmp.Or(err, fmt.Errorf("%s got new commits while closing", wt))
+	}
+	return nil
+}
+
+// delivered returns wt's HEAD once it is in base, or gh reports its PR merged at it.
+func delivered(wt, base string) (string, error) {
+	// Read first: a HEAD moving on after it fails closable
+	head, err := worktree.Head(wt)
+	if err != nil {
+		return "", err
+	}
+	merged, err := worktree.Merged(wt, base)
+	if err != nil {
+		return "", err
+	}
+	if !merged {
+		if err := prMerged(wt, base, head); err != nil {
+			return "", fmt.Errorf("%s has commits that aren't in %s, and no PR merged at its HEAD: %w", wt, base, err)
+		}
+	}
+	return head, nil
+}
+
+// prMerged checks that gh reports the PR of wt's branch merged into base's branch at head, as a squash or
+// rebase merge leaves its commits out of base.
+func prMerged(wt, base, head string) error {
+	out, err := sidebar.RunGH(wt, "pr", "view", "--json", "state,headRefOid,baseRefName")
+	if err != nil {
+		return err
+	}
+	var pr struct{ State, HeadRefOid, BaseRefName string }
+	if err := json.Unmarshal(out, &pr); err != nil {
+		return fmt.Errorf("gh pr view: %w", err)
+	}
+	switch {
+	case pr.State != "MERGED":
+		return fmt.Errorf("its PR is %s", strings.ToLower(pr.State))
+	case pr.BaseRefName != strings.TrimPrefix(base, "origin/"):
+		return fmt.Errorf("its PR was merged into %s", pr.BaseRefName)
+	case pr.HeadRefOid != head:
+		// A commit after the merge, or a PR of another branch
+		return fmt.Errorf("its PR was merged at %s, not at its HEAD %s", pr.HeadRefOid, head)
 	}
 	return nil
 }
