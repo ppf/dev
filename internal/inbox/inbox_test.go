@@ -244,3 +244,21 @@ func TestStuck(t *testing.T) {
 		})
 	}
 }
+
+func TestTeammates(t *testing.T) {
+	claude := func(session string, window int, id string) paneRow {
+		return paneRow{Session: session, Window: window, Pane: id, Command: "claude", StateCmd: "claude", Sidebar: "%1"}
+	}
+	rows := []paneRow{
+		{Session: "team", Window: 1, Pane: "%1", Command: "dev", Sidebar: "%1"}, // its sidebar
+		claude("team", 1, "%2"), claude("team", 1, "%3"), claude("team", 1, "%4"),
+		claude("solo", 1, "%5"),
+		claude("elsewhere", 2, "%6"), // no agent pane in window 1: not taken for a teammate
+	}
+	got := teammates(rows)
+	for _, pane := range []string{"%1", "%2", "%3", "%4", "%5", "%6"} {
+		if want := pane == "%1" || pane == "%3" || pane == "%4"; got[pane] != want {
+			t.Errorf("teammates[%s] = %v, want %v", pane, got[pane], want)
+		}
+	}
+}
