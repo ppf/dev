@@ -454,3 +454,35 @@ func TestReplyPasteAndQuit(t *testing.T) {
 		t.Error("ctrl+c while typing doesn't quit")
 	}
 }
+
+func TestMoveClients(t *testing.T) {
+	var ran []string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		if args[0] == "list-clients" {
+			return "/dev/ttys1\tboot\n/dev/ttys2\t\n/dev/ttys3\tapp\n", nil
+		}
+		if args[2] == "/dev/ttys1" {
+			return "", errors.New("gone")
+		}
+		return "", nil
+	})
+	// One failed switch doesn't stop the others, and is reported
+	if err := MoveClients(c, "$3"); err == nil {
+		t.Error("the failed switch isn't reported")
+	}
+	want := []string{
+		"list-clients -t $3 -F #{client_name}\t#{client_last_session}",
+		"switch-client -c /dev/ttys1 -t =boot:",
+		"switch-client -c /dev/ttys3 -t =app:",
+	}
+	if !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
+func TestTmuxQuote(t *testing.T) {
+	if got, want := tmuxQuote(`'/a b/#x"$y\z' '$3'`), `"'/a b/##x\"\$y\\z' '\$3'"`; got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
