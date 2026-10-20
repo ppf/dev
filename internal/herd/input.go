@@ -35,11 +35,27 @@ type replyBox struct {
 	stale int // refreshes since the answer that still show the sent dialog
 }
 
-// open binds the reply box to t.
+// open binds the reply box to t, with the reply typed to t's agent pane before focus moved away.
 func (m *Model) open(t tile) {
 	m.selected = t.sess.Name
 	m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1}
+	if d, ok := m.drafts[t.sess.Name]; ok && d.pane == t.pane {
+		m.box.ed = d.ed
+	}
+	delete(m.drafts, t.sess.Name)
 	m.syncPick()
+}
+
+// blur closes the reply box as esc does once focus moves to another pane, keeping a typed reply (not a
+// dialog's write-in) for its tile.
+func (m *Model) blur() {
+	if b := m.box; !b.other && len(b.ed.text) > 0 {
+		if m.drafts == nil {
+			m.drafts = map[string]replyBox{}
+		}
+		m.drafts[b.session] = b
+	}
+	m.box = replyBox{}
 }
 
 // bound is the tile the reply box is bound to.

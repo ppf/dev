@@ -152,9 +152,9 @@ func TestNewModelView(t *testing.T) {
 // tile gets its pane's note.
 func TestRefreshCompact(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
-	rows += r("w1", "$2", "1", "1", "%w1", "/w1", "", "claude", "idle", "claude", "", "", "", "", "herd", "", "", "", "", "", "finished: done")
-	rows += r("w2", "$3", "1", "1", "%w2", "/w2", "", "claude", "waiting", "claude", "", "", "", "", "herd", "permission_prompt", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
+	rows += r("w1", "$2", "1", "1", "1", "%w1", "/w1", "", "claude", "idle", "claude", "", "", "", "", "herd", "", "", "", "", "", "finished: done")
+	rows += r("w2", "$3", "1", "1", "1", "%w2", "/w2", "", "claude", "waiting", "claude", "", "", "", "", "herd", "permission_prompt", "", "", "", "", "")
 	open := strings.Repeat("─", 40) + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {
