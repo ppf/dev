@@ -296,6 +296,7 @@ func TestImportDefaultSource(t *testing.T) {
 func TestState(t *testing.T) {
 	tests := []struct {
 		name, pane, stdin string
+		grok              bool
 		args              []string
 		wantErr           error // nil = success
 		wantArgErr        bool
@@ -304,7 +305,10 @@ func TestState(t *testing.T) {
 		{name: "no TMUX_PANE is a no-op", args: []string{"working"}, stdin: "not json"},
 		{name: "malformed JSON reported, exit 0", pane: "%1", args: []string{"working"}, stdin: "{",
 			wantStderr: "❌ dev state: agent: hook input: unexpected end of JSON input\n"},
-		{name: "subagent skipped", pane: "%1", args: []string{"working"}, stdin: `{"agent_id":"a1"}`},
+		{name: "subagent only stamps its activity", pane: "%1", args: []string{"working"}, stdin: `{"agent_id":"a1"}`,
+			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
+		{name: "grok subagent only stamps its activity", pane: "%1", grok: true, args: []string{"working"}, stdin: `{"hook_event_name":"PostToolUse","subagentType":"explore"}`,
+			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
 		{name: "records on the pane", pane: "%1", args: []string{"idle"}, stdin: `{}`, wantErr: tmux.ErrNoSocket},
 		{name: "codex ignores missing TMUX_PANE", args: []string{"--codex", "working"}, stdin: `{"cwd":"/"}`,
 			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
@@ -319,6 +323,7 @@ func TestState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("TMUX_PANE", tt.pane)
+			t.Setenv("GROK_HOOK_EVENT", map[bool]string{true: "PostToolUse"}[tt.grok])
 			_, errOut, err := execute(t, tt.stdin, append([]string{"state"}, tt.args...)...)
 			switch {
 			case tt.wantArgErr:

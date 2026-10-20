@@ -207,7 +207,8 @@ type Status struct {
 	Prompts    string `tmux:"@agent_prompts"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
-	PromptAt   string `tmux:"@agent_prompt_at"`
+	Session    string `tmux:"@agent_session"`
+	Active     string `tmux:"@agent_active"`
 }
 
 // Trusted is the state when the hook that wrote it still runs in the pane, else "".
@@ -222,12 +223,6 @@ func (s Status) checkPromptable() error {
 		return nil
 	}
 	return fmt.Errorf("agent is waiting for a decision (%s): read it and answer with send-keys", cmp.Or(s.WaitingFor, "unknown"))
-}
-
-// Idle reports an agent idle, or waiting only because it sat idle: one a prompt starts a turn in.
-func (s Status) Idle() bool {
-	st := s.Trusted()
-	return st == agent.Idle || st == agent.Waiting && s.WaitingFor == agent.IdlePrompt
 }
 
 // Settled reports an agent done with its turn: idle, or waiting for the user.
@@ -291,9 +286,10 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 }
 
 // checkInterrupted records working pane st idle when its screen shows Esc ended its turn. Not within
-// dialogGrace of a prompt: its hook may run before Claude draws it, under the last turn's "Interrupted".
+// dialogGrace of its last hook (agent.OptActive): a new prompt's may run before Claude draws the prompt,
+// under the last turn's "Interrupted".
 func checkInterrupted(c *tmux.Client, pane string, st Status) (Status, error) {
-	if sec, err := strconv.ParseInt(st.PromptAt, 10, 64); err == nil && now().Sub(time.Unix(sec, 0)) < dialogGrace {
+	if sec, err := strconv.ParseInt(st.Active, 10, 64); err == nil && now().Sub(time.Unix(sec, 0)) < dialogGrace {
 		return st, nil
 	}
 	capture, err := c.Run("capture-pane", "-p", "-t", pane)
@@ -514,8 +510,9 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 
 // PromptWait prompts a settled agent and waits until the hook counted the prompt (@agent_prompts) and
 // the agent settled again, so a turn shorter than a poll isn't missed and the settled state from before
-// isn't taken for done. No count within stall is ErrStalled; no settled state within timeout is ErrTimeout.
-// A slash command Claude runs itself counts no prompt: its screen (command.step) says when it ran.
+// isn't taken for done. /clear starts no turn: it waits for the new session's SessionStart (@agent_session)
+// instead. No count (or session) within stall is ErrStalled; no settled state within timeout is ErrTimeout.
+// Another slash command Claude runs itself counts no prompt: its screen (command.step) says when it ran.
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
 	before, err := ReadChecked(c, pane)
 	if err != nil {
@@ -531,16 +528,25 @@ func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout tim
 	if err := before.checkPromptable(); err != nil {
 		return before, err
 	}
+	// Claude Code's aliases of /clear too
+	reset := slices.Contains([]string{"/clear", "/reset", "/new"}, strings.TrimSpace(text))
+	if reset && before.Session == "" {
+		return before, errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")
+	}
 	if err := paste(c, clk, pane, text); err != nil {
 		return before, err
 	}
 	var cmd *command
-	if isCommand(text) && agent.ClaudeCommand(before.Command) {
+	if !reset && isCommand(text) && agent.ClaudeCommand(before.Command) {
 		cmd = &command{text: text}
 	}
 	running := false
 	return poll(c, clk, pane, timeout, func(st Status, elapsed time.Duration) (bool, error) {
-		if st.Prompts != before.Prompts {
+		picked := st.Prompts != before.Prompts
+		if reset {
+			picked = st.Session != "" && st.Session != before.Session
+		}
+		if picked {
 			return st.Settled(), nil
 		}
 		if cmd != nil {

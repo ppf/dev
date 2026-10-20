@@ -56,6 +56,16 @@ type prStored struct {
 	Fetched int64  `json:"fetched"` // unix ms
 }
 
+// StoredPR is the PR in an agent pane's prOption value (@dev_pr) as the views last looked it up in path, the
+// pane's directory; Number 0 for none, a value it can't read, or one looked up elsewhere.
+func StoredPR(value, path string) PR {
+	var s prStored
+	if json.Unmarshal([]byte(value), &s) != nil || s.Path != path {
+		return PR{} // unset or malformed: no PR
+	}
+	return s.PR
+}
+
 // prCache looks PRs up with gh in the background: a tick reads the last result at once (gh takes
 // hundreds of ms) and starts a lookup for a missing or expired key, whose result the next tick shows.
 // Results go to the pane's prOption, so one lookup serves every view, and a newer one found there is
@@ -82,11 +92,11 @@ func newPRCache(c *tmux.Client) *prCache {
 		_, err := c.Run("set-option", "-p", "-t", pane, prOption, value)
 		return err
 	}
-	return &prCache{gh: runGH, branch: branch, store: store, now: time.Now, sem: make(chan struct{}, prLookups), entries: map[prKey]prEntry{}}
+	return &prCache{gh: RunGH, branch: branch, store: store, now: time.Now, sem: make(chan struct{}, prLookups), entries: map[prKey]prEntry{}}
 }
 
-// runGH runs gh args in dir without prompts; stderr is kept for the error, it would land on the TUI.
-func runGH(dir string, args ...string) ([]byte, error) {
+// RunGH runs gh args in dir without prompts, within prTimeout; stderr is kept for the error, it would land on the TUI.
+func RunGH(dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), prTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)

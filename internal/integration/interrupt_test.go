@@ -78,8 +78,8 @@ func TestScreenOnlyChanges(t *testing.T) {
 	waitFor(t, "w1 interrupted by hand", shows("Interrupted"))
 	check(t, "no hook: still working", opt("@agent_state"), "working")
 	// Older than a prompt Claude may not have drawn yet
-	at, _ := strconv.ParseInt(opt("@agent_prompt_at"), 10, 64)
-	d.T("set-option", "-p", "-t", w1, "@agent_prompt_at", strconv.FormatInt(at-3, 10))
+	at, _ := strconv.ParseInt(opt("@agent_active"), 10, 64)
+	d.T("set-option", "-p", "-t", w1, "@agent_active", strconv.FormatInt(at-3, 10))
 	out, errOut, status = devAgent(env, "", "prompt", "w1", "--wait", "--timeout", "10s", "carry on")
 	check(t, "prompt --wait after Esc", status+errOut+" "+out, "0 idle\n")
 	check(t, "w1 got it", strconv.FormatBool(shows("got: carry on")()), "true")

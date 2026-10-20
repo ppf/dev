@@ -168,8 +168,8 @@ func HookSession(input []byte) Session {
 	return s
 }
 
-// Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
-// and @agent_transcript in one chained tmux call, bumping @agent_prompts (its time in @agent_prompt_at, and recording Grok's turn id in
+// Record writes state to @agent_state (and when it changed to @agent_since), the time to @agent_active, the pane's current command to @agent_cmd and s to @agent_session
+// and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
 // notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
 // or end, and bumping @dev_pr_gen on a PostToolUse of a gh command that changes a PR; Clear (or no session) unsets the
@@ -181,7 +181,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset("@agent_since"), unset("@agent_prompt_id"), unset(OptQuestion)}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion)}
 	} else {
 		// @agent_since (unix seconds) only moves when the state changes (or a decision comes), so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
@@ -191,10 +191,10 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 			// Each decision starts its own stretch, so DialogGone never takes a newer dialog for the one it read
 			since = stamp
 		}
-		cmds = [][]string{{"set-option", "-pF", "-t", pane, "@agent_since", since}, set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
+		cmds = [][]string{{"set-option", "-pF", "-t", pane, "@agent_since", since}, set(OptActive, stamp), set("@agent_state", state), {"set-option", "-pF", "-t", pane, "@agent_cmd", "#{pane_current_command}"}}
 		if h.Event == "SessionStart" {
-			// A crashed session's cost would show until the new one's first status line
-			cmds = append(cmds, unset("@agent_cost"))
+			// A crashed session's cost and context would show until the new one's first status line
+			cmds = append(cmds, unset("@agent_cost"), unset(OptContext))
 		}
 		if h.Event == "PostToolUse" && prCommand.MatchString(h.ToolInput.Command) {
 			// The views' shared PR lookup (@dev_pr) is stale: every view looks it up again
@@ -202,8 +202,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		}
 		if h.Event == "UserPromptSubmit" {
 			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
-			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"},
-				set("@agent_prompt_at", stamp))
+			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
 			if h.PromptID != "" {
 				cmds = append(cmds, set("@agent_prompt_id", h.PromptID))
 			}
@@ -230,6 +229,16 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		args = append(args, cmd...)
 	}
 	_, err := c.Run(args...)
+	return err
+}
+
+// OptActive is the pane option holding when (unix seconds) the agent last ran a hook: a finished tool call, its
+// own or a subagent's, or a turn's start or end. A working agent whose hooks and screen both stay still makes no progress.
+const OptActive = "@agent_active"
+
+// Touch stamps the pane's OptActive alone, for a subagent's hook event, which leaves the pane's state alone.
+func Touch(c *tmux.Client, pane string) error {
+	_, err := c.Run("set-option", "-p", "-t", pane, OptActive, strconv.FormatInt(now().Unix(), 10))
 	return err
 }
 
@@ -445,29 +454,54 @@ func isGrok(command string) bool {
 	return command == "grok" || strings.HasPrefix(command, "grok-")
 }
 
-// StatusCost reads cost.total_cost_usd from a Claude status line's stdin; ok=false when it's missing,
-// malformed or negative.
-func StatusCost(input []byte) (usd float64, ok bool) {
-	var v struct {
+// OptContext is the pane option holding the share of Claude's context window in use (whole percent), from its
+// status line.
+const OptContext = "@agent_context"
+
+// Status is what a Claude status line's stdin says of its session: cost.total_cost_usd and
+// context_window.used_percentage, each ok=false when missing, malformed or negative.
+type Status struct {
+	Cost      float64
+	CostOK    bool
+	Context   int
+	ContextOK bool
+}
+
+// ParseStatus reads a Claude status line's stdin, each field on its own: one of another type doesn't hide
+// the other.
+func ParseStatus(input []byte) Status {
+	var cost struct {
 		Cost struct {
 			USD *float64 `json:"total_cost_usd"`
 		} `json:"cost"`
 	}
-	if json.Unmarshal(input, &v) != nil || v.Cost.USD == nil || *v.Cost.USD < 0 {
-		return 0, false
+	var context struct {
+		Context struct {
+			Used *float64 `json:"used_percentage"`
+		} `json:"context_window"`
 	}
-	return *v.Cost.USD, true
+	var st Status
+	if json.Unmarshal(input, &cost) == nil && cost.Cost.USD != nil && *cost.Cost.USD >= 0 {
+		st.Cost, st.CostOK = *cost.Cost.USD, true
+	}
+	if json.Unmarshal(input, &context) == nil && context.Context.Used != nil && *context.Context.Used >= 0 {
+		st.Context, st.ContextOK = int(math.Round(*context.Context.Used)), true
+	}
+	return st
 }
 
-// RecordCost writes usd to the pane's @agent_cost.
-func RecordCost(c *tmux.Client, pane string, usd float64) error {
-	_, err := c.Run("set-option", "-p", "-t", pane, "@agent_cost", strconv.FormatFloat(usd, 'f', -1, 64))
-	return err
-}
-
-// ClearCost unsets the pane's @agent_cost.
-func ClearCost(c *tmux.Client, pane string) error {
-	_, err := c.Run("set-option", "-pu", "-t", pane, "@agent_cost")
+// RecordStatus writes st to the pane's @agent_cost and OptContext in one tmux call, unsetting what it lacks:
+// the last value would show as current.
+func RecordStatus(c *tmux.Client, pane string, st Status) error {
+	cost := []string{"set-option", "-pu", "-t", pane, "@agent_cost"}
+	if st.CostOK {
+		cost = []string{"set-option", "-p", "-t", pane, "@agent_cost", strconv.FormatFloat(st.Cost, 'f', -1, 64)}
+	}
+	context := []string{"set-option", "-pu", "-t", pane, OptContext}
+	if st.ContextOK {
+		context = []string{"set-option", "-p", "-t", pane, OptContext, strconv.Itoa(st.Context)}
+	}
+	_, err := c.Run(append(append(cost, ";"), context...)...)
 	return err
 }
 

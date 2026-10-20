@@ -213,7 +213,7 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 		if err != nil {
 			return false, err
 		}
-		if !st.Idle() {
+		if !resting(st.Trusted(), st.WaitingFor) {
 			return false, nil
 		}
 		screen, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)

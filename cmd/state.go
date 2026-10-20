@@ -46,6 +46,12 @@ func newStateCmd() *cobra.Command {
 			// Grok sets GROK_HOOK_EVENT on every hook, also on the Claude hooks it imports from ~/.claude
 			grok := os.Getenv("GROK_HOOK_EVENT") != ""
 			if !ok || grok && agent.GrokSkip(input) {
+				// A subagent's tool call (or Grok's session end): progress for the boss inbox, though not the pane's state
+				if pane != "" && !codex {
+					if err := agent.Touch(tmux.New(), pane); err != nil {
+						fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					}
+				}
 				return nil
 			}
 			c := tmux.New()

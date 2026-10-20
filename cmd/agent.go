@@ -184,9 +184,10 @@ watched up to 3s: the dialog /effort and /model open mid-conversation is confirm
 dialog is an error.
 
 --wait (Claude only) needs an idle agent and returns once the hook saw the prompt and the agent settled
-again (idle or waiting), printing that state; a slash command Claude runs itself, once its screen shows
-it ran. Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box: read
-the pane), exit 2 on --timeout.`,
+again (idle or waiting), printing that state; another slash command Claude runs itself, once its screen
+shows it ran. Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box:
+read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: --wait returns once the
+agent's new conversation started (its hook recorded a new session).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -343,9 +344,10 @@ func newAgentCloseCmd() *cobra.Command {
 		Short: "Close a finished worker this session started: kill its session, remove its worktree and branch",
 		Long: `Close a worker this session started with dev agent start, once its work is delivered. Refused,
 naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
-no changes to tracked files and its HEAD is in origin's default branch (fetched first). Its untracked,
-not ignored files (e.g. RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it
-move to this session, its session is killed, its worktree removed and its branch force-deleted.`,
+no changes to tracked files and its HEAD is in origin's default branch (fetched first), or gh reports its PR
+merged into that branch at that HEAD (a squash or rebase merge). Its untracked, not ignored files (e.g.
+RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this
+session, its session is killed, its worktree removed and its branch force-deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pane := os.Getenv("TMUX_PANE")

@@ -1,10 +1,10 @@
 // Package inbox is a dev boss's inbox: one-line notes about its workers (finished, failed, needs a
-// decision, stuck), kept in a locked file per boss and delivered to the coordinator Claude in batches.
+// decision, asks, stuck, high context), kept in a locked file per boss and delivered to the coordinator
+// Claude in batches.
 package inbox
 
 import (
 	"cmp"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +31,9 @@ const (
 	Finished = "finished"
 	Failed   = "failed"
 	Decision = "needs a decision"
+	Asks     = "asks" // a turn that ended on a question
 	Stuck    = "stuck"
+	Context  = "high context"
 	Resumed  = "resumed"
 )
 
@@ -59,6 +61,8 @@ func (n Note) Summary() string {
 const (
 	maxText  = 200
 	maxNotes = 20
+	// askLines is how many of a last message's non-blank lines may hold its question: the question and its options.
+	askLines = 5
 )
 
 // hookEvent is the part of a worker's hook input a note needs.
@@ -73,10 +77,14 @@ type hookEvent struct {
 	ToolInput        json.RawMessage `json:"tool_input"`
 }
 
-// Forget clears worker's last note key, so its next turn's note isn't taken for a repeat of the last one.
+// Forget clears worker's last note key, so its next turn's note isn't taken for a repeat of the last one,
+// and the question its last turn ended on: its new prompt answers it.
 func (b Box) Forget(worker string) error {
 	return b.update(func(s *state) error {
 		delete(s.Last, worker)
+		if h, ok := s.Workers[worker]; ok {
+			h.Question, h.AskedAt, h.Reminded = "", 0, 0
+		}
 		return nil
 	})
 }
@@ -89,7 +97,11 @@ func FromHook(worker string, input []byte) (Note, bool) {
 		return Note{}, false
 	}
 	var n Note
+	ask, options := question(e.Last)
 	switch {
+	case e.Name == "Stop" && ask != "":
+		// The question's end, then as many options as fit
+		n = Note{Kind: Asks, Text: clean(cleanTail(ask) + " " + options)}
 	case e.Name == "Stop":
 		n = Note{Kind: Finished, Text: clean(e.Last)}
 	case e.Name == "StopFailure":
@@ -118,14 +130,40 @@ func FromHook(worker string, input []byte) (Note, bool) {
 	return n, true
 }
 
-// StuckNote is worker's note for a state held too long: working, or waiting on a decision. since keys
-// it, so one stretch gives one note.
-func StuckNote(worker, state string, held time.Duration, since string) Note {
-	text := fmt.Sprintf("working for %dm", int(held.Minutes()))
-	if state != "working" {
-		text = fmt.Sprintf("waiting on a decision for %dm, unanswered", int(held.Minutes()))
+// option is a list item line: "- x", "* x", "• x", "1. x", "a) x".
+var option = regexp.MustCompile(`^\s*([-*•]|\d+[.)]|[A-Za-z][.)])\s`)
+
+// question is the question msg ends on: its last line ending in "?" (markdown emphasis aside), not a heading,
+// among its last askLines non-blank lines and followed only by list items, its options; "" when none.
+func question(msg string) (ask, options string) {
+	var lines []string
+	for l := range strings.Lines(msg) {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
 	}
-	return Note{Worker: worker, Kind: Stuck, Text: text, Key: Stuck + "\x00" + state + since}
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-askLines; i-- {
+		l := strings.TrimSpace(lines[i])
+		if strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#") {
+			return lines[i], strings.Join(lines[i+1:], "")
+		}
+		if !option.MatchString(l) {
+			return "", ""
+		}
+	}
+	return "", ""
+}
+
+// span is d in whole minutes: "17m", "1h", "1h 5m".
+func span(d time.Duration) string {
+	m := int(d.Minutes())
+	switch {
+	case m < 60:
+		return fmt.Sprintf("%dm", m)
+	case m%60 == 0:
+		return fmt.Sprintf("%dh", m/60)
+	}
+	return fmt.Sprintf("%dh %dm", m/60, m%60)
 }
 
 // clean collapses whitespace and truncates.
@@ -133,6 +171,15 @@ func clean(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > maxText {
 		s = string(r[:maxText-1]) + "…"
+	}
+	return s
+}
+
+// cleanTail is clean truncating from the start, as a question ends a message.
+func cleanTail(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > maxText {
+		s = "…" + strings.TrimLeft(string(r[len(r)-maxText+1:]), " ")
 	}
 	return s
 }
@@ -159,19 +206,25 @@ func (bt Batch) String() string {
 	return b.String()
 }
 
-// state is an inbox file: the pending notes, each worker's last note key (dedupe), last stuck note and the last paste.
+// state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, and the last paste.
 type state struct {
-	Notes     []Note               `json:"notes"`
-	Last      map[string]string    `json:"last"`
-	Stuck     map[string]stuckMark `json:"stuck,omitempty"`
-	Dropped   int                  `json:"dropped,omitempty"`
-	LastPaste int64                `json:"last_paste,omitempty"`
+	Notes     []Note             `json:"notes"`
+	Last      map[string]string  `json:"last"`
+	Workers   map[string]*health `json:"workers,omitempty"`
+	Dropped   int                `json:"dropped,omitempty"`
+	LastPaste int64              `json:"last_paste,omitempty"`
 }
 
-// stuckMark is a worker's last queued stuck note: its key and a hash of the worker's screen.Snapshot then.
-type stuckMark struct {
-	Key    string `json:"key"`
-	Screen string `json:"screen"`
+// health is what the inbox keeps of a worker between Watch rounds; times are unix seconds.
+type health struct {
+	Screen    string `json:"screen,omitempty"`     // a hash of its screen.Snapshot while it works
+	ScreenAt  int64  `json:"screen_at,omitempty"`  // when Screen last changed
+	Stuck     string `json:"stuck,omitempty"`      // its last stuck note's key
+	Question  string `json:"question,omitempty"`   // what its last turn ended asking, until its next prompt
+	AskedAt   int64  `json:"asked_at,omitempty"`   // when it asked
+	Reminded  int    `json:"reminded,omitempty"`   // reminders of Question queued
+	PRChecked string `json:"pr_checked,omitempty"` // the idle stretch (@agent_since) its PR was checked in
+	Full      bool   `json:"full,omitempty"`       // a high context note went out, until its use drops back
 }
 
 // Box is one boss's inbox file.
@@ -222,8 +275,8 @@ func (b Box) read() (state, error) {
 	if s.Last == nil {
 		s.Last = map[string]string{}
 	}
-	if s.Stuck == nil {
-		s.Stuck = map[string]stuckMark{}
+	if s.Workers == nil {
+		s.Workers = map[string]*health{}
 	}
 	return s, nil
 }
@@ -254,30 +307,26 @@ func (b Box) update(f func(*state) error) error {
 }
 
 // Add queues n unless it repeats its worker's last note; past maxNotes the oldest go. added reports
-// whether it was queued.
-func (b Box) Add(n Note) (added bool, err error) {
+// whether it was queued. An Asks note asked at now is kept for Watch to repeat while unanswered.
+func (b Box) Add(n Note, now time.Time) (added bool, err error) {
 	err = b.update(func(s *state) error {
-		added = s.add(n)
+		if added = s.add(n); added && n.Kind == Asks {
+			h := s.health(n.Worker)
+			h.Question, h.AskedAt, h.Reminded = n.Text, now.Unix(), 0
+		}
 		return nil
 	})
 	return added, err
 }
 
-// AddStuck is Add for a stuck note, screen being its worker's screen.Snapshot. A worker's new prompt lets
-// the same stretch's note through again (Forget), but it's queued only while the screen is what it was at
-// that stretch's last stuck note: a worker whose screen moved on is progressing.
-func (b Box) AddStuck(n Note, screen string) (added bool, err error) {
-	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(screen)))
-	err = b.update(func(s *state) error {
-		if m, ok := s.Stuck[n.Worker]; ok && m.Key == n.Key && m.Screen != sum {
-			return nil
-		}
-		if added = s.add(n); added {
-			s.Stuck[n.Worker] = stuckMark{Key: n.Key, Screen: sum}
-		}
-		return nil
-	})
-	return added, err
+// health is worker's entry, added when missing.
+func (s *state) health(worker string) *health {
+	h, ok := s.Workers[worker]
+	if !ok {
+		h = &health{}
+		s.Workers[worker] = h
+	}
+	return h
 }
 
 func (s *state) add(n Note) bool {
@@ -335,6 +384,17 @@ func (b Box) Restore(bt Batch) error {
 		s.LastPaste = 0
 		return nil
 	})
+}
+
+// workers is each worker's health, read under the lock.
+func (b Box) workers() (map[string]*health, error) {
+	lock, err := b.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Close() }()
+	s, err := b.read()
+	return s.Workers, err
 }
 
 // Pending reports whether notes wait.

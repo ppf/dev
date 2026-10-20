@@ -166,7 +166,7 @@ func resume(c *tmux.Client, clk control.Clock, r paneRow) (ok bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	if !st.Idle() || st.Prompts != r.ResumePrompts || r.AgentSession != r.ResumeSession {
+	if !resting(st.Trusted(), st.WaitingFor) || st.Prompts != r.ResumePrompts || r.AgentSession != r.ResumeSession {
 		return false, unsetResume(c, r.Pane, false)
 	}
 	shot, err := c.Run("capture-pane", "-p", "-e", "-t", r.Pane)

@@ -29,7 +29,7 @@ func (r *resumeRig) client() *tmux.Client {
 			if strings.Contains(args[len(args)-1], OptResumes) {
 				return r.resumes + "\n", nil
 			}
-			return tmux.FormatRow("claude", r.state, "claude", r.prompts, r.waitingFor, "50", ""), nil
+			return tmux.FormatRow("claude", r.state, "claude", r.prompts, r.waitingFor, "50", "", ""), nil
 		case "capture-pane":
 			return r.screen, nil
 		case "load-buffer":

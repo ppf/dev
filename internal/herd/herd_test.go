@@ -349,7 +349,7 @@ func TestRefreshDialogGone(t *testing.T) {
 			case "list-clients":
 				return r("/dev/ttys1", "herd", "5"), nil
 			case "display-message":
-				return r("claude", state, "claude", "1", "permission_prompt", "50", ""), nil
+				return r("claude", state, "claude", "1", "permission_prompt", "50", "", ""), nil
 			case "if-shell":
 				state = "idle"
 			}
@@ -401,7 +401,7 @@ func TestRefreshLastPage(t *testing.T) {
 
 func TestReply(t *testing.T) {
 	var ran []string
-	status := tmux.FormatRow("claude", "idle", "claude", "3", "", "", "")
+	status := tmux.FormatRow("claude", "idle", "claude", "3", "", "", "", "")
 	m := twoTiles()
 	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
 	paneCmd := "claude" // what runs in b's agent pane

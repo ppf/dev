@@ -19,32 +19,25 @@ import (
 func newStatuslineCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "statusline [-- <command> [args...]]",
-		Short: "Claude status line: record the session cost on its tmux pane, then run <command> on the same input",
+		Short: "Claude status line: record the session cost and context use on its tmux pane, then run <command> on the same input",
 		Long: `Claude status line: records cost.total_cost_usd from the status line input on the pane (@agent_cost)
-for the sidebar and dev agent, then runs <command> with the same input and passes its output through.
-Without a command it prints the cost.`,
+for the sidebar and dev agent, and context_window.used_percentage (@agent_context) for the boss inbox, then
+runs <command> with the same input and passes its output through. Without a command it prints the cost.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The status line must still render, so failures are reported and the wrapped command runs
 			input, err := io.ReadAll(cmd.InOrStdin())
 			if err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev statusline: "+err.Error())
 			}
-			usd, ok := agent.StatusCost(input)
+			st := agent.ParseStatus(input)
 			if pane := os.Getenv("TMUX_PANE"); pane != "" {
-				c := tmux.New()
-				if ok {
-					err = agent.RecordCost(c, pane, usd)
-				} else {
-					// No cost in the input: the last one would show as current
-					err = agent.ClearCost(c, pane)
-				}
-				if err != nil {
+				if err := agent.RecordStatus(tmux.New(), pane, st); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev statusline: "+err.Error())
 				}
 			}
 			if len(args) == 0 {
-				if ok {
-					fmt.Fprintln(cmd.OutOrStdout(), sidebar.FormatCost(usd))
+				if st.CostOK {
+					fmt.Fprintln(cmd.OutOrStdout(), sidebar.FormatCost(st.Cost))
 				}
 				return nil
 			}

@@ -83,7 +83,7 @@ func TestRecord(t *testing.T) {
 	t.Cleanup(func() { now = time.Now })
 	session := " ; set-option -p -t %1 @agent_session s ; set-option -p -t %1 @agent_transcript /t/s.jsonl"
 	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
-	recorded := "set-option -pF -t %1 @agent_since #{?#{&&:#{==:#{@agent_state},idle},#{@agent_since}},#{@agent_since},100} ; set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"
+	recorded := "set-option -pF -t %1 @agent_since #{?#{&&:#{==:#{@agent_state},idle},#{@agent_since}},#{@agent_since},100} ; set-option -p -t %1 @agent_active 100 ; set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"
 	tests := []struct {
 		name, state string
 		session     Session
@@ -91,10 +91,10 @@ func TestRecord(t *testing.T) {
 	}{
 		{"state and session", Idle, Session{"s", "/t/s.jsonl"}, recorded + session},
 		{"no session unsets the old one", Idle, Session{}, recorded + noSession},
-		{"a decision starts its own stretch", Waiting, Session{}, "set-option -pF -t %1 @agent_since 100 ; set-option -p -t %1 @agent_state waiting ; " +
+		{"a decision starts its own stretch", Waiting, Session{}, "set-option -pF -t %1 @agent_since 100 ; set-option -p -t %1 @agent_active 100 ; set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt" + noSession},
 		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question" + noSession},
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question" + noSession},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,6 +114,19 @@ func TestRecord(t *testing.T) {
 				t.Errorf("calls = %q, want one: %q", calls, tt.want)
 			}
 		})
+	}
+}
+
+func TestTouch(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	var calls []string
+	c := tmux.NewFake(func(args []string) (string, error) { calls = append(calls, strings.Join(args, " ")); return "", nil })
+	if err := Touch(c, "%1"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "set-option -p -t %1 @agent_active 100"; len(calls) != 1 || calls[0] != want {
+		t.Errorf("calls = %q, want one: %q", calls, want)
 	}
 }
 
@@ -347,17 +360,17 @@ func TestRecordHook(t *testing.T) {
 	}{
 		{"state", Working, Hook{Event: "PostToolUse"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"prompt counted", Working, Hook{Event: "UserPromptSubmit"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command} ; " +
-			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; set-option -p -t %1 @agent_prompt_at 100"},
+			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1}"},
 		{"grok prompt records its id", Working, Hook{Event: "UserPromptSubmit", PromptID: "p1"}, "set-option -p -t %1 @agent_state working ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; " +
-			"set-option -p -t %1 @agent_prompt_at 100 ; set-option -p -t %1 @agent_prompt_id p1"},
+			"set-option -p -t %1 @agent_prompt_id p1"},
 		{"a turn's end clears the question", Idle, Hook{Event: "Stop"}, "set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"waiting records why", Waiting, Hook{Event: "Notification", NotificationType: "permission_prompt"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt"},
 		{"codex approval records the event", Waiting, Hook{Event: "PermissionRequest"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for PermissionRequest"},
-		{"session start drops a crashed session's cost", Idle, Hook{Event: "SessionStart"}, "set-option -p -t %1 @agent_state idle ; " +
-			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost"},
+		{"session start drops a crashed session's cost and context", Idle, Hook{Event: "SessionStart"}, "set-option -p -t %1 @agent_state idle ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context"},
 		{"gh pr create bumps the shared PR's gen", Working, prHook("PostToolUse", "cd /w && gh pr create --fill"), "set-option -p -t %1 @agent_state working ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @dev_pr_gen #{e|+:#{@dev_pr_gen},1}"},
 		{"gh pr merge too", Working, prHook("PostToolUse", "gh  pr merge 35 --squash"), "set-option -p -t %1 @agent_state working ; " +
@@ -373,16 +386,17 @@ func TestRecordHook(t *testing.T) {
 		{"gh pr edit leaves it", Working, prHook("PostToolUse", "gh pr edit --title x"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"gh pr view leaves it", Working, prHook("PostToolUse", "gh pr view --json state"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"a failed gh pr create leaves it", Working, prHook("PostToolUseFailure", "gh pr create"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
-		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got string
 			c := tmux.NewFake(func(args []string) (string, error) {
 				got = strings.Join(args, " ")
-				// TestRecord covers @agent_since
+				// TestRecord covers @agent_since and @agent_active
 				if rest, ok := strings.CutPrefix(got, "set-option -pF -t %1 @agent_since "); ok {
 					_, got, _ = strings.Cut(rest, " ; ")
+					_, got, _ = strings.Cut(got, " ; ")
 				}
 				return "", nil
 			})
