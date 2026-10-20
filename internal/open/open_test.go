@@ -20,14 +20,17 @@ func TestSessionName(t *testing.T) {
 }
 
 func TestAgentCommand(t *testing.T) {
-	got, err := agentCommand("claude", "dev-x")
+	got, err := agentCommand("claude", "dev-x", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(got, `'pty-wrap' '--' 'claude' '--remote-control=dev-x'`) {
 		t.Errorf("claude = %q, want it under pty-wrap, named dev-x in Remote Control", got)
 	}
-	if got, _ := agentCommand("codex", "dev-x"); got != "codex" {
+	if got, _ := agentCommand("claude", "dev-x", true); !strings.HasSuffix(got, `'pty-wrap' '--' 'claude' '--settings' '{"remoteControlAtStartup":false}'`) {
+		t.Errorf("worker's claude = %q, want it under pty-wrap, Remote Control off", got)
+	}
+	if got, _ := agentCommand("codex", "dev-x", false); got != "codex" {
 		t.Errorf("codex = %q, want it as is", got)
 	}
 }

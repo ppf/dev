@@ -263,7 +263,7 @@ func Restore(c *tmux.Client) error {
 		adopted[slot{b.Session, b.Coordinator}] = tried
 	}
 	agents = slices.DeleteFunc(agents, func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
-	if err := resumeAgents(c, agents, liveSessions, shell); err != nil {
+	if err := resumeAgents(c, agents, startedBy, liveSessions, shell); err != nil {
 		errs = append(errs, err)
 	}
 	for _, e := range entries {
@@ -406,7 +406,8 @@ func restartsClaude(procs string) bool {
 // resumeAgents types each saved agent's resume command into its restored pane, in a session the restore
 // created; a pane back in another directory gets a fresh agent, as its conversation is stored by directory.
 // Nothing is restarted while resurrect restarts claude itself: two commands would be typed into one pane.
-func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell string) error {
+// A worker (in startedBy) resumes without Remote Control, as it started.
+func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntry, live []string, shell string) error {
 	if len(agents) == 0 {
 		return nil
 	}
@@ -441,7 +442,8 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		if path != a.Path {
 			id = ""
 		}
-		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript, a.Session)
+		worker := slices.ContainsFunc(startedBy, func(w startedByEntry) bool { return w.Session == a.Session })
+		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript, a.Session, worker)
 		if !ok {
 			warn(c, a.Session+":"+a.Pos+": unknown agent "+a.Kind+", not restarted")
 			continue

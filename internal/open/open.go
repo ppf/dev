@@ -31,6 +31,7 @@ type Options struct {
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
 	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach
 	Agent    string // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
+	Worker   bool   // dev agent start from a tmux pane (marked @dev_started_by): claude starts without Remote Control
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -87,7 +88,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude), session)
+	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude), session, opts.Worker)
 	if err != nil {
 		return err
 	}
@@ -221,13 +222,13 @@ func hasSession(c *tmux.Client, name string) (bool, error) {
 	return err == nil, err
 }
 
-// agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control,
-// under dev pty-wrap so its images get through tmux.
-func agentCommand(kind, session string) (string, error) {
+// agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control
+// unless a worker's, under dev pty-wrap so its images get through tmux.
+func agentCommand(kind, session string, worker bool) (string, error) {
 	if kind != agent.Claude {
 		return kind, nil
 	}
-	argv, err := ptywrap.Argv(agent.ClaudeArgv(session)...)
+	argv, err := ptywrap.Argv(agent.ClaudeArgv(session, worker)...)
 	if err != nil {
 		return "", err
 	}

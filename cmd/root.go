@@ -33,7 +33,7 @@ func newRootCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return openProject(cmd, args[0], wt, false, "")
+		return openProject(cmd, args[0], wt, false, false, "")
 	}
 	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
 		newResurrectCmd(), newCompactCmd(), newAgentCmd(), newStatuslineCmd(), newHerdCmd(), newPtyWrapCmd(), newQuestionCmd())
@@ -100,7 +100,7 @@ func runPicker(cmd *cobra.Command) error {
 // openProject opens project name, or its worktree wt (created when missing) when wt is set; detach
 // creates the session without attaching and sends messages to stderr, keeping stdout for results;
 // agentCmd starts in a new session's Agent pane ("" = claude).
-func openProject(cmd *cobra.Command, name, wt string, detach bool, agentCmd string) error {
+func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agentCmd string) error {
 	// Rejected rather than sanitized: a typo must not become a different branch.
 	if wt != "" && worktree.Sanitize(wt) != wt {
 		return fmt.Errorf("invalid worktree name %q: only A-Za-z0-9._/- allowed", wt)
@@ -130,7 +130,7 @@ func openProject(cmd *cobra.Command, name, wt string, detach bool, agentCmd stri
 		os.Stdout = os.Stderr
 		defer func() { os.Stdout = stdout }()
 	}
-	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach, Agent: agentCmd}, out)
+	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach, Agent: agentCmd, Worker: worker}, out)
 }
 
 // completeArgs completes project names (with descriptions), then that project's worktree names.

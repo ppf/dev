@@ -176,6 +176,20 @@ func TestAgentCodexHooks(t *testing.T) {
 		"1 ❌ agent is waiting for a decision (PermissionRequest): read it and answer with send-keys\n")
 }
 
+// agentArgs is the argv of the processes the shell of target's pane runs, one per line.
+func agentArgs(t *testing.T, d *devServer, target string) string {
+	t.Helper()
+	children, err := exec.Command("pgrep", "-P", d.T("display", "-t", target, "-p", "#{pane_pid}")).Output()
+	if err != nil {
+		t.Fatalf("pgrep %s's shell: %v", target, err)
+	}
+	ps, err := exec.Command("ps", "-o", "args=", "-p", strings.Join(strings.Fields(string(children)), ",")).Output()
+	if err != nil {
+		t.Fatalf("ps %s's processes: %v", target, err)
+	}
+	return string(ps)
+}
+
 // dev agent start opens a project detached, returns once the agent registered, and reuses the session.
 // It skips the first-run restore, whose switch-client would move the user's client.
 func TestAgentStart(t *testing.T) {
@@ -204,6 +218,10 @@ func TestAgentStart(t *testing.T) {
 	first := start()
 	check(t, "agent", first["session"]+" "+first["agent"]+" "+first["state"]+" "+first["path"], "app Claude idle "+dir)
 	check(t, "agent pane is the layout's claude", d.T("display", "-t", first["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
+	// Not from a pane: no @dev_started_by, so not a worker
+	if args := agentArgs(t, d, first["pane"]); !strings.Contains(args, "pty-wrap -- claude --remote-control=app") {
+		t.Errorf("claude started from outside tmux not named app in Remote Control: %q", args)
+	}
 	check(t, "client not switched", d.T("list-clients", "-F", "#{client_session}"), "boot")
 	check(t, "no first-run restore", d.T("show-option", "-gqv", "@dev_restored"), "")
 	second := start()
