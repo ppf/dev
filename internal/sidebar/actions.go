@@ -66,7 +66,7 @@ func kill(c *tmux.Client, client, current, target string) error {
 		return err
 	}
 	if ok {
-		// A worktree another session still uses (the picker allows reusing one) is closed plainly.
+		// A worktree another session still uses is closed plainly.
 		shared, err := WorktreeShared(c, target, wt)
 		if err != nil {
 			return err

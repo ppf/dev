@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 
@@ -100,31 +99,6 @@ func TestTmuxSizeOutsideTmuxDefers(t *testing.T) {
 	// The client is never used: outside tmux the source must not query it.
 	if _, _, ok := tmuxSize(nil, false)(); ok {
 		t.Error("tmux source answered outside tmux")
-	}
-}
-
-func TestUniqueName(t *testing.T) {
-	taken := []string{"app", "app-2", "app-3", "app-10"}
-	var asked []string
-	exists := func(name string) (bool, error) {
-		asked = append(asked, name)
-		return slices.Contains(taken, name), nil
-	}
-	got, err := uniqueName("app", exists)
-	if err != nil || got != "app-4" {
-		t.Fatalf("uniqueName = %q, %v", got, err)
-	}
-	if want := []string{"app", "app-2", "app-3", "app-4"}; !slices.Equal(asked, want) {
-		t.Errorf("asked %q, want %q", asked, want)
-	}
-
-	if got, _ := uniqueName("free", exists); got != "free" {
-		t.Errorf("free name = %q", got)
-	}
-
-	boom := errors.New("boom")
-	if _, err := uniqueName("app", func(string) (bool, error) { return false, boom }); !errors.Is(err, boom) {
-		t.Errorf("err = %v, want boom", err)
 	}
 }
 

@@ -16,10 +16,10 @@ func newHerdCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "boss [project]",
 		Aliases: []string{"herd"},
-		Short:   "Open the coordinator view: a coordinator Claude next to live previews of every agent session",
+		Short:   "Open the coordinator view: a coordinator Claude next to live previews of its workers",
 		Long: `Open or attach the boss session ("boss", or "boss-<project>"): a coordinator Claude started in the
 project's main checkout (default: $HOME) that drives the other sessions with the dev-agents skill, next to
-live previews of every agent session.`,
+live previews of the workers it started.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

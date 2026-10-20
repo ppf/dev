@@ -149,68 +149,56 @@ func TestOpenFirstRunRestore(t *testing.T) {
 	check(t, "dev: warnings printed", outs["dev"], "⚠  Session restore: devt: slot busy\n\033]2;app\007")
 }
 
-// The picker path: Enter on a project that has a session opens name-2, name-3 (force-new); a typed worktree
-// name opens <name>-<worktree with / as -> in that worktree. Bash runs project.sh exactly as select.sh does.
-func TestOpenPicker(t *testing.T) {
-	project := projectScript(t)
-	plain := tempDir(t)
-	type run struct{ sessions, forced, wt, statuses, sidebars, stubs string }
-	got := map[string]run{}
-	for _, impl := range []string{"bash", "dev"} {
-		d := newDevServer(t, "set -g @dev_restored 1\n")
-		repo := newRepo(t, "", "")
-		var r run
-		if impl == "bash" {
-			for _, env := range [][]string{nil, {"DEV_FORCE_NEW=1"}, {"DEV_FORCE_NEW=1"}} {
-				_, err := runScript(d.scriptEnv(env...), project, plain, "app")
-				r.statuses += errStatus(err)
-			}
-			out, err := runScript(d.scriptEnv(append(gitEnv, "DEV_FORCE_NEW=1", "DEV_WORKTREE=feature/x")...), project, repo, "repo")
-			r.statuses += errStatus(err)
-			t.Logf("bash worktree run:\n%s", out)
-		} else {
-			cfg := writeProjects(t, [2]string{"app", plain}, [2]string{"repo", repo})
-			_, err := runScript(d.scriptEnv(cfg), devBin, "app")
-			r.statuses += errStatus(err)
-			env := append([]string{cfg, popupGuard}, gitEnv...)
-			for range 2 {
-				screen, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"Enter"}})
-				r.statuses += status
-				t.Logf("dev picker run:\n%s", screen)
-			}
-			screen, status := d.runInPane(env, []string{devBin},
-				step{wait: "Select project", keys: []string{"repo", "Enter"}},
-				step{wait: "Session mode", keys: []string{"feature/x", "Enter"}})
-			r.statuses += status
-			t.Logf("dev worktree run:\n%s", screen)
-		}
-		d.waitForStubs("app-2")
-		d.waitForStubs("repo-feature-x")
-		r.sessions = d.T("list-sessions", "-F", "#{session_name}")
-		r.forced = d.snapshot("app-2")
-		r.wt = d.snapshot("repo-feature-x", repo, "<repo>")
-		r.sidebars = d.sidebarStart("app-2") + "\n" + d.sidebarStart("repo-feature-x")
-		r.stubs = d.agentStub("app-2") + "\n" + d.agentStub("repo-feature-x")
-		got[impl] = r
+// The picker opens the chosen project's boss: Enter on a project creates boss-<name> (coordinator in its
+// directory) and switches the client to it, Enter again attaches to it, and a git repo gets no worktree step.
+func TestPickerBoss(t *testing.T) {
+	d := newDevServer(t, "set -g @dev_restored 1\n")
+	plain, repo := tempDir(t), newRepo(t, "", "")
+	env := append([]string{writeProjects(t, [2]string{"app", plain}, [2]string{"repo", repo}), popupGuard}, gitEnv...)
+	var statuses string
+	for range 2 {
+		_, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"Enter"}})
+		statuses += status
+		check(t, "client on the boss", d.T("list-clients", "-F", "#{client_session}"), "boss-app")
 	}
-	dev, bash := got["dev"], got["bash"]
-	check(t, "sessions (dev = bash)", dev.sessions, bash.sessions)
-	check(t, "force-new session (dev = bash)", dev.forced, bash.forced)
-	check(t, "worktree session (dev = bash)", dev.wt, bash.wt)
-	check(t, "dev: statuses", dev.statuses, "0000")
-	check(t, "dev: sessions", dev.sessions, "app\napp-2\napp-3\nboot\nrepo-feature-x")
-	check(t, "dev: claude named its session in Remote Control", dev.stubs, "claude --remote-control=app-2\nclaude --remote-control=repo-feature-x")
-	for _, start := range strings.Split(dev.sidebars, "\n") {
-		check(t, "dev: sidebar runs dev sidebar", devSidebarStart(start), "true")
+	check(t, "attached, no duplicate", d.T("list-sessions", "-F", "#{session_name}"), "boot\nboss-app")
+	check(t, "boss option", d.T("show-option", "-qv", "-t", "=boss-app:", "@dev_herd"), "1")
+	// Panes left to right: sidebar, coordinator, previews
+	coordinator := d.T("display", "-t", "=boss-app:1.2", "-p", "#{pane_current_path} #{pane_start_command}")
+	if !strings.HasPrefix(coordinator, plain+" ") || !strings.HasSuffix(coordinator, "--remote-control=boss-app") {
+		t.Errorf("❌ coordinator pane: %q", coordinator)
 	}
-	if want := "path=<repo>/.claude/worktrees/feature/x"; !strings.Contains(dev.wt, want) {
-		t.Errorf("❌ dev worktree session lacks %q:\n%s", want, dev.wt)
-	}
+
+	screen, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"repo", "Enter"}})
+	statuses += status
+	t.Logf("dev repo run:\n%s", screen)
+	check(t, "statuses", statuses, "000")
+	check(t, "repo boss, no worktree", d.T("list-sessions", "-F", "#{session_name}"), "boot\nboss-app\nboss-repo")
+	check(t, "client on the repo boss", d.T("list-clients", "-F", "#{client_session}"), "boss-repo")
+	check(t, "repo coordinator in the main checkout", d.T("display", "-t", "=boss-repo:1.2", "-p", "#{pane_current_path}"), repo)
+}
+
+// The picker restores saved sessions on the first dev of a server too, then opens the chosen boss.
+func TestPickerFirstRunRestore(t *testing.T) {
+	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/restore.sh"))
+	dir := tempDir(t)
+	d := newDevServer(t, "set -g @dev_resurrect_warnings 'devt: slot busy'\n")
+	writeFile(t, filepath.Join(d.tmp, "resurrect/last"),
+		"pane\tapp\t1\t1\t:*\t1\trestored\t:"+dir+"\t1\tsh\t:\nstate\tboot\tboot\n")
+	env := []string{writeProjects(t, [2]string{"app", dir}), popupGuard}
+	screen, status := d.runInPane(env, []string{devBin},
+		step{wait: "Select project", keys: []string{"Enter"}},
+		step{wait: "Press enter to continue", keys: []string{"Enter"}})
+	check(t, "status", status, "0")
+	check(t, "warnings printed", strconv.FormatBool(strings.Contains(screen, "⚠  Session restore: devt: slot busy")), "true")
+	check(t, "sessions", d.T("list-sessions", "-F", "#{session_name}"), "app\nboot\nboss-app")
+	check(t, "@dev_restored set", d.T("show-option", "-gqv", "@dev_restored"), "1")
+	check(t, "client on the boss", d.T("list-clients", "-F", "#{client_session}"), "boss-app")
 }
 
 var headSHA = regexp.MustCompile(`HEAD is now at [0-9a-f]+`)
 
-// `dev <name> <worktree>` against project.sh with DEV_WORKTREE and no force-new: the first run creates the
+// `dev <name> <worktree>` against project.sh with DEV_WORKTREE: the first run creates the
 // worktree and session <name>-<worktree with / as ->, the second attaches to it. A rerun after the session
 // is gone reuses the worktree; a name sanitizing would change is rejected.
 func TestOpenWorktreeArg(t *testing.T) {
@@ -285,21 +273,17 @@ func errStatus(err error) string {
 	return "0"
 }
 
-// Esc in either picker step exits 0 without opening anything.
+// Esc in the picker exits 0 without opening anything.
 func TestPickerEsc(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_restored 1\n")
-	env := append([]string{writeProjects(t, [2]string{"repo", newRepo(t, "", "")}), popupGuard}, gitEnv...)
+	env := []string{writeProjects(t, [2]string{"app", tempDir(t)}), popupGuard}
 	_, status := d.runInPane(env, []string{devBin}, step{wait: "Select project", keys: []string{"Escape"}})
-	check(t, "Esc on projects: status", status, "0")
-	_, status = d.runInPane(env, []string{devBin},
-		step{wait: "Select project", keys: []string{"Enter"}},
-		step{wait: "Session mode", keys: []string{"Escape"}})
-	check(t, "Esc on worktrees: status", status, "0")
+	check(t, "status", status, "0")
 	check(t, "nothing opened", d.T("list-sessions", "-F", "#{session_name}"), "boot")
 }
 
 // dev without arguments inside tmux re-runs itself in an 80%×60% rounded popup on the client, where the
-// picker (not another popup) runs; its choice opens a new session and the popup's exit status comes back.
+// picker (not another popup) runs; its choice opens the project's boss and the popup's exit status comes back.
 func TestPickerPopup(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_restored 1\n")
 	// The popup's command gets the server's environment, not the caller's
@@ -312,7 +296,7 @@ func TestPickerPopup(t *testing.T) {
 	check(t, "popup size on a 200x50 client, border included", popupSize(popup), "160x30")
 	check(t, "status", status, "0")
 	check(t, "pane output (the popup has the terminal)", screen, "")
-	check(t, "session opened, client switched", d.T("list-clients", "-F", "#{client_session}"), "app")
+	check(t, "boss opened, client switched", d.T("list-clients", "-F", "#{client_session}"), "boss-app")
 }
 
 // A failing popup child keeps its error on screen until Enter, and its exit status comes back.
@@ -328,6 +312,23 @@ func TestPickerPopupFailure(t *testing.T) {
 	}
 	check(t, "status", status, "1")
 	check(t, "nothing opened", d.T("list-sessions", "-F", "#{session_name}"), "boot")
+}
+
+// A boss-<project> session the boss didn't create is refused in the popup, its error kept until Enter.
+func TestPickerPopupNotBoss(t *testing.T) {
+	d := newDevServer(t, "set -g @dev_restored 1\n")
+	key, dir, _ := strings.Cut(writeProjects(t, [2]string{"app", tempDir(t)}), "=")
+	d.T("set-environment", "-g", key, dir)
+	d.T("new-session", "-d", "-s", "boss-app")
+	var popup string
+	_, status := d.runInPane(nil, []string{devBin},
+		step{wait: "Select project", keys: []string{"Enter"}, onClient: true},
+		step{wait: "Press enter to close", keys: []string{"Enter"}, onClient: true, screen: &popup})
+	if !strings.Contains(popup, "isn't a boss session") {
+		t.Errorf("❌ popup lacks the refusal:%s", popup)
+	}
+	check(t, "status", status, "1")
+	check(t, "client stays", d.T("list-clients", "-F", "#{client_session}"), "boot")
 }
 
 // popupSize measures the outermost rounded border on screen as WIDTHxHEIGHT.
