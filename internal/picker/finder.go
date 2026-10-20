@@ -39,6 +39,7 @@ type finder struct {
 
 	done    bool
 	aborted bool
+	alt     bool // chosen with ctrl-o rather than enter
 }
 
 func newFinder(header string, rows []string, preview func(row int) string) finder {
@@ -76,6 +77,8 @@ func (f finder) update(msg tea.Msg) finder {
 		switch msg.Type {
 		case tea.KeyEnter:
 			f.done = true
+		case tea.KeyCtrlO:
+			f.done, f.alt = true, true
 		case tea.KeyEsc, tea.KeyCtrlC:
 			f.done, f.aborted = true, true
 		case tea.KeyUp, tea.KeyCtrlP, tea.KeyCtrlK:

@@ -16,6 +16,7 @@ const PopupGuard = "SIDEBAR_SELECT_IN_POPUP"
 type Result struct {
 	Chosen  bool
 	Project config.Project
+	Session bool // ctrl-o: a plain session in the main checkout rather than the project's boss
 }
 
 // Run shows the project list.
@@ -29,7 +30,7 @@ func Run(projects []config.Project) (Result, error) {
 	if f.aborted || pick < 0 {
 		return Result{}, nil
 	}
-	return Result{Chosen: true, Project: projects[pick]}, nil
+	return Result{Chosen: true, Project: projects[pick], Session: f.alt}, nil
 }
 
 // projectFinder lists "name description" rows with the configured path as preview.
@@ -39,5 +40,5 @@ func projectFinder(projects []config.Project) finder {
 		rows[i] = strings.TrimSpace(p.Name + " " + p.Description)
 	}
 	preview := func(row int) string { return "Path: " + projects[row].Path }
-	return newFinder("Select project", rows, preview)
+	return newFinder("Select project  ctrl-o: plain session", rows, preview)
 }

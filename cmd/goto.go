@@ -31,7 +31,7 @@ func newNewCmd() *cobra.Command {
 	var client string
 	cmd := &cobra.Command{
 		Use:   "new",
-		Short: "Open the project picker in a popup to open a project's boss (prefix+0)",
+		Short: "Open the project picker in a popup: a project's boss, or with ctrl-o its plain session (prefix+0)",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return sidebar.OpenPicker(tmux.New(), client)
