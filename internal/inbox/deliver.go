@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -214,7 +213,7 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 		if err != nil {
 			return false, err
 		}
-		if s := st.Trusted(); s != agent.Idle && (s != agent.Waiting || st.WaitingFor != agent.IdlePrompt) {
+		if !resting(st.Trusted(), st.WaitingFor) {
 			return false, nil
 		}
 		screen, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)

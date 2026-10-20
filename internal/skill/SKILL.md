@@ -93,7 +93,7 @@ For a series of items in one area (one PR each, item after item), keep each work
 - **Default: a fresh worker per item.** Once an item's PR is merged, `close` the worker and `start` the next item in a new worktree (`<area>-<item>`). It starts from the current default branch with an empty context and nothing left over, and its `RESULT.md` is archived.
 - **Reset in place** (`dev agent prompt <w> --wait /clear`) only when the worktree is worth keeping between items: installed dependencies, warm build caches, a running dev server, local setup. Begin the next brief with switching to a new branch off the fresh default branch (`git fetch origin && git switch -c <item> origin/<default>`), and remove the last item's `RESULT.md`, or the next `close` archives it with the new item's. Leave the old branch: `close` deletes only the current one, and `git branch -D` would skip close's merge check.
 - **Either way, only between items:** never reset or replace a worker with undelivered work (open PR, review fixes pending, uncommitted changes). After a reset the worker remembers nothing, so the brief is self-contained: goal, constraints, where things are.
-- **Context getting high:** when a long-lived worker's screen shows little context left, or it compacted, reset or replace it at the next item boundary rather than starting another item in it.
+- **Context getting high:** when a `high context` inbox note comes, a long-lived worker's screen shows little context left, or it compacted, reset or replace it at the next item boundary rather than starting another item in it.
 
 ## Interrupt
 
@@ -105,11 +105,17 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 ## Boss inbox
 
-In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `stuck: working for 25m` or `waiting on a decision for 4m, unanswered`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
+In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
 - **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.
-- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. Stuck waiting on CI: run `gh pr checks <n>` yourself and nudge it with the result. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
+- **Asks:** the worker's turn ended on a question to you and it waits (the note has only the question: `read` it for the rest of its last message). Answer it with `prompt` when you can, else ask the user. Unanswered, it comes again 30m, 1h, 2h, … after it asked, while the worker rests.
+- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. The kinds:
+  - `no progress for 15m`: working, but no finished tool call (its own or a subagent's) and no change on its screen for that long: a hung or long silent command, or a stalled turn. A long turn that keeps finishing tool calls doesn't show as stuck.
+  - `no progress for 15m, waiting on its background tasks`: its turn ended but waits on a background shell or subagent that does nothing visible, e.g. a dev server left running or a hung `--watch`. Stuck waiting on CI: run `gh pr checks <n>` yourself and nudge it with the result.
+  - `waiting on a decision for 3m, unanswered`: a permission prompt or question nobody answered.
+  - `idle for 15m, PR #12 has merge conflicts` (and/or `no CI checks`): its open PR can't move on while it sits; tell it to rebase or find out why CI didn't run.
+- **High context:** the worker's context window is that full; auto-compaction will soon lose detail. At its next item boundary, reset or replace it (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)).
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
 

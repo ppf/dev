@@ -56,6 +56,16 @@ type prStored struct {
 	Fetched int64  `json:"fetched"` // unix ms
 }
 
+// StoredPR is the PR in an agent pane's prOption value (@dev_pr) as the views last looked it up in path, the
+// pane's directory; Number 0 for none, a value it can't read, or one looked up elsewhere.
+func StoredPR(value, path string) PR {
+	var s prStored
+	if json.Unmarshal([]byte(value), &s) != nil || s.Path != path {
+		return PR{} // unset or malformed: no PR
+	}
+	return s.PR
+}
+
 // prCache looks PRs up with gh in the background: a tick reads the last result at once (gh takes
 // hundreds of ms) and starts a lookup for a missing or expired key, whose result the next tick shows.
 // Results go to the pane's prOption, so one lookup serves every view, and a newer one found there is

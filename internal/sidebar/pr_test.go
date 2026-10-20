@@ -365,3 +365,15 @@ func TestPRRunGH(t *testing.T) {
 		t.Errorf("error %v, want gh's stderr in it", err)
 	}
 }
+
+func TestStoredPR(t *testing.T) {
+	v := `{"path":"/w","branch":"b","gen":"","pr":{"Number":12,"State":"open","URL":"u","Err":""},"fetched":1}`
+	if got := StoredPR(v, "/w"); got.Number != 12 || got.State != "open" || got.URL != "u" {
+		t.Errorf("StoredPR = %+v, want #12", got)
+	}
+	for _, tt := range []struct{ v, path string }{{v, "/other"}, {"", "/w"}, {"{", "/w"}} {
+		if got := StoredPR(tt.v, tt.path); got.Number != 0 {
+			t.Errorf("StoredPR(%q, %q) = %+v, want none", tt.v, tt.path, got)
+		}
+	}
+}

@@ -49,7 +49,7 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 }
 
 // WorkerHook queues a note for the boss that started pane's session when the hook event is one a boss
-// hears of (finished, failed, needs a decision), then delivers the inbox if the coordinator is ready. Any
+// hears of (finished, failed, needs a decision, asks), then delivers the inbox if the coordinator is ready. Any
 // started worker's agent pane gets the note too (OptNote), also with the inbox off or the boss gone. A
 // teammate pane beside it (an agent team's) sends only its decisions, named "<worker> (%N)".
 // A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
@@ -120,7 +120,7 @@ func deliverNote(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note
 		// Record already moved @agent_since into this wait: two dialogs alike in one turn are two notes
 		n.Key += "\x00" + w.Since
 	}
-	added, err := b.Box.Add(n)
+	added, err := b.Box.Add(n, clk.Now())
 	if !added || err != nil {
 		return err
 	}
