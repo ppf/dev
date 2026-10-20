@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -45,8 +46,9 @@ func (r paneRow) stuck(now time.Time) (Note, bool) {
 }
 
 // Watch runs from the boss session pane is in (its previews): it queues a note for each of the boss's
-// workers that is stuck, then delivers the inbox if the coordinator is ready. Notes that waited for the
-// coordinator to go idle with an empty input box get there this way too.
+// workers that is stuck, also recording it on the worker's pane (OptNote), then delivers the inbox if the
+// coordinator is ready. Notes that waited for the coordinator to go idle with an empty input box get there
+// this way too.
 func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	b, ok, err := Here(c, pane)
 	if !ok || err != nil {
@@ -61,6 +63,7 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if err != nil {
 		return err
 	}
+	var noteErrs []error
 	for _, r := range rows {
 		if !sidebar.Names(r.StartedBy, id, b.Name, true) {
 			continue
@@ -85,10 +88,14 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if _, err := b.Box.Add(n); err != nil {
 			return err
 		}
+		// Each round, so the minutes held stay current
+		if err := setNote(c, r.Pane, n.Summary()); err != nil && !strings.Contains(err.Error(), "can't find pane") {
+			noteErrs = append(noteErrs, err)
+		}
 	}
 	if pending, err := b.Box.Pending(); !pending || err != nil {
-		return err
+		return errors.Join(append(noteErrs, err)...)
 	}
 	_, err = Deliver(c, clk, b)
-	return err
+	return errors.Join(append(noteErrs, err)...)
 }

@@ -91,20 +91,25 @@ func (m Model) View() string {
 	return strings.Join(m.render(), "\n")
 }
 
-// render lays out exactly m.height lines: the tiles, then the bottom rows.
+// render lays out exactly m.height lines: the tiles (or the compact list), then the bottom rows.
 func (m Model) render() []string {
 	w, h := m.width, m.height
 	lines := make([]string, h)
 	bottom := m.bottom()
 	gh := h - len(bottom)
 	tiles := m.snap.tiles
+	if len(tiles) == 0 && gh > 0 {
+		lines[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
+	}
+	copy(lines[gh:], bottom)
+	if m.compact {
+		m.renderList(lines[:gh])
+		return lines
+	}
 	g := layout(len(tiles), w, gh)
 	sel := index(tiles, m.selected)
 	from, to := g.page(sel)
 	to = min(to, len(tiles))
-	if len(tiles) == 0 && gh > 0 {
-		lines[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
-	}
 	// The reply box's tile, framed in its accent: -1 when the box is closed or its tile on another page
 	hot, accent := -1, ""
 	if m.box.session != "" {
@@ -123,16 +128,7 @@ func (m Model) render() []string {
 		hotCol := col(from + k)
 		var row [][]string
 		for i := from + k; i < min(from+k+g.cols, to); i++ {
-			mode := plainTile
-			switch {
-			case i == hot:
-				mode = boundTile
-			case m.box.session != "":
-				mode = dimTile
-			case tiles[i].sess.Name == m.selected:
-				mode = selectedTile
-			}
-			row = append(row, tileLines(tiles[i], g.tileW, g.tileH, mode, accent))
+			row = append(row, tileLines(tiles[i], g.tileW, g.tileH, m.mode(i, hot), accent))
 		}
 		for j := range min(g.tileH, gh-y) {
 			var b strings.Builder
@@ -148,8 +144,83 @@ func (m Model) render() []string {
 			lines[y+g.tileH] = divider(g, to-below, max(hotCol, col(below)), accent)
 		}
 	}
-	copy(lines[gh:], bottom)
 	return lines
+}
+
+// mode is how tile i shows, hot being the reply box's tile (-1 for none).
+func (m Model) mode(i, hot int) tileMode {
+	switch {
+	case i == hot:
+		return boundTile
+	case m.box.session != "":
+		return dimTile
+	case m.snap.tiles[i].sess.Name == m.selected:
+		return selectedTile
+	}
+	return plainTile
+}
+
+// renderList fills lines with the compact view: per worker its tile header, then its latest note.
+func (m Model) renderList(lines []string) {
+	tiles := m.snap.tiles
+	hot, accent := -1, ""
+	if i := slices.IndexFunc(tiles, func(t tile) bool { return t.sess.Name == m.box.session }); i >= 0 {
+		hot, accent = i, sidebar.StateColour(tiles[i].sess.Agent, tiles[i].sess.State)
+	}
+	rows := m.listRows(len(lines))
+	for y := 0; y < len(rows); {
+		i, n := rows[y], 1
+		for y+n < len(rows) && rows[y+n] == i {
+			n++
+		}
+		t := tiles[i]
+		t.body = nil
+		if t.note != "" {
+			t.body = []string{rule + "   " + t.note + reset}
+		}
+		copy(lines[y:], tileLines(t, m.width, n, m.mode(i, hot), accent))
+		y += n
+	}
+}
+
+// rows is the tile's height in the compact list: its header, and its note when it has one.
+func (t tile) rows() int {
+	if t.note == "" {
+		return 1
+	}
+	return 2
+}
+
+// listHeight is the compact list's full height.
+func (m Model) listHeight() int {
+	h := 0
+	for _, t := range m.snap.tiles {
+		h += t.rows()
+	}
+	return h
+}
+
+// listRows is the compact list's tile index per row, at most h rows: each tile takes a row, two with a note,
+// from the first tile that keeps the selected one in view.
+func (m Model) listRows(h int) []int {
+	tiles := m.snap.tiles
+	if len(tiles) == 0 || h < 1 {
+		return nil
+	}
+	size := func(i int) int { return tiles[i].rows() }
+	sel := index(tiles, m.selected)
+	start, used := sel, size(sel)
+	for start > 0 && used+size(start-1) <= h {
+		start--
+		used += size(start)
+	}
+	var rows []int
+	for i := start; i < len(tiles) && len(rows) < h; i++ {
+		for range size(i) {
+			rows = append(rows, i)
+		}
+	}
+	return rows[:min(len(rows), h)]
 }
 
 // paint is accent when hot, else base.
@@ -187,14 +258,19 @@ func (m Model) bottom() []string {
 	pages := ""
 	g := layout(len(tiles), w, m.height-1)
 	sel := index(tiles, m.selected)
-	if g.perPage > 0 && len(tiles) > g.perPage {
+	switch {
+	case m.compact && len(m.listRows(m.height-1)) < m.listHeight():
+		// Where the selection is in a list longer than the pane
+		pages = fmt.Sprintf("%d/%d  ", sel+1, len(tiles))
+	case !m.compact && g.perPage > 0 && len(tiles) > g.perPage:
 		// First, so a narrow row cuts the hint, not the page
 		from, _ := g.page(sel)
 		pages = fmt.Sprintf("%d/%d  ", from/g.perPage+1, (len(tiles)+g.perPage-1)/g.perPage)
 	}
-	hint := "j/k ⏎ switch  i reply  o PR  x kill"
+	// v early: the compact view is narrow
+	hint := "j/k ⏎ switch  v view  i reply  o PR  x kill"
 	if sel < len(tiles) && tiles[sel].sess.State == agent.Waiting {
-		hint = "1-9 answer  i reply  j/k ⏎ switch  x kill"
+		hint = "1-9 answer  v view  i reply  j/k ⏎ switch  x kill"
 	}
 	return []string{sidebar.HintRow(pages+hint, w)}
 }
@@ -389,6 +465,12 @@ func pad(line string, x int) string {
 // tileAt is the index of the tile at column x, row y, or -1.
 func (m Model) tileAt(x, y int) int {
 	gh := m.gridHeight()
+	if m.compact {
+		if rows := m.listRows(gh); y >= 0 && y < len(rows) {
+			return rows[y]
+		}
+		return -1
+	}
 	g := layout(len(m.snap.tiles), m.width, gh)
 	if g.perPage == 0 || y >= gh || x%(g.tileW+1) == g.tileW || y%(g.tileH+1) == g.tileH {
 		return -1

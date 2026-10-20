@@ -80,7 +80,7 @@ func TestRenderGolden(t *testing.T) {
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
 		strings.Repeat(" ", 40),
-		" \x1b[38;2;84;84;109mj/k ⏎ switch  i reply  o PR  x kill" + reset,
+		" \x1b[38;2;84;84;109mj/k ⏎ switch  v view  i reply  o PR  x…" + reset,
 	}
 	got := twoTiles().render()
 	for i := range max(len(got), len(want)) {
@@ -231,10 +231,10 @@ func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "") +
-			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "") +
-			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "") +
+			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -279,8 +279,8 @@ func TestRefreshDialogGone(t *testing.T) {
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "")
 	for _, screen := range []string{gone, open} {
 		var ran []string
 		state := "waiting"
@@ -318,9 +318,9 @@ func TestRefreshDialogGone(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {
