@@ -24,6 +24,18 @@ const (
 	OptStartedBy = "@dev_started_by"
 )
 
+// OptView is the boss session option holding the previews' view: compactView, else the full tiles.
+const OptView = "@dev_boss_view"
+
+const compactView = "compact"
+
+// The previews pane's share of the window's width: the full view's, and the compact view's (at least
+// minTileW columns, at most half the window).
+const (
+	fullPct    = 55
+	compactPct = 30
+)
+
 // OptPane is the pane option holding a boss pane's role, which the resurrect save records.
 const OptPane = "@dev_boss_pane"
 
@@ -130,7 +142,7 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)
 	}
-	previews := run("split-window", "-t", claude, "-h", "-l", "55%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
+	previews := run("split-window", "-t", claude, "-h", "-l", strconv.Itoa(fullPct)+"%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
 	if err == nil {
 		err = bind(c, target, exe, claude, previews)
 	}
@@ -210,6 +222,26 @@ func bind(c *tmux.Client, target, exe, claude, previews string) error {
 		";", "set-option", "-t", target, "detach-on-destroy", "off",
 		";", "set-hook", "-t", target, "pane-exited", "if -F '#{||:#{==:#{hook_pane},"+claude+"},#{==:#{hook_pane},"+previews+"}}' "+
 			"{ run-shell "+move+" ; kill-session -t '"+id+"' }")
+	return err
+}
+
+// setView records the view on pane's session and resizes pane, the previews, to its share of the window.
+func setView(c *tmux.Client, pane string, compact bool) error {
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{window_width}")
+	if err != nil {
+		return err
+	}
+	w, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return fmt.Errorf("window width %q: %w", out, err)
+	}
+	set := []string{"set-option", "-u", "-t", pane, OptView}
+	cols := w * fullPct / 100
+	if compact {
+		set = []string{"set-option", "-t", pane, OptView, compactView}
+		cols = min(max(w*compactPct/100, minTileW), w/2)
+	}
+	_, err = c.Run(append(set, ";", "resize-pane", "-t", pane, "-x", strconv.Itoa(cols))...)
 	return err
 }
 

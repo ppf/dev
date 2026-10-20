@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
@@ -46,8 +47,9 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 }
 
 // WorkerHook queues a note for the boss that started pane's session when the hook event is one a boss
-// hears of (finished, failed, needs a decision), then delivers the inbox if the coordinator is ready.
-// A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss.
+// hears of (finished, failed, needs a decision), then delivers the inbox if the coordinator is ready. Any
+// started worker's pane gets the note too (OptNote), also with the inbox off or the boss gone.
+// A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil {
@@ -58,13 +60,25 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		return nil
 	}
 	b, w, ok, err := BossOf(c, pane)
-	if !ok || err != nil {
+	if err != nil {
 		return err
 	}
-	if e.Name == "UserPromptSubmit" {
+	n, _ := FromHook(w.Session, input)
+	if ok {
+		err = deliverNote(c, clk, b, w, n, e.Name)
+	}
+	if w.StartedBy != "" {
+		// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
+		err = errors.Join(err, setNote(c, pane, n.Summary()))
+	}
+	return err
+}
+
+// deliverNote queues n for b and delivers the inbox; a new prompt (event UserPromptSubmit) only resets the dedupe.
+func deliverNote(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note, event string) error {
+	if event == "UserPromptSubmit" {
 		return b.Box.Forget(w.Session)
 	}
-	n, _ := FromHook(w.Session, input)
 	if n.Kind == Decision {
 		// Record already moved @agent_since into this wait: two dialogs alike in one turn are two notes
 		n.Key += "\x00" + w.Since
@@ -74,5 +88,15 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		return err
 	}
 	_, err = Deliver(c, clk, b)
+	return err
+}
+
+// setNote records summary on pane (OptNote); "" unsets it.
+func setNote(c *tmux.Client, pane, summary string) error {
+	if summary == "" {
+		_, err := c.Run("set-option", "-pu", "-t", pane, OptNote)
+		return err
+	}
+	_, err := c.Run("set-option", "-p", "-t", pane, OptNote, summary)
 	return err
 }

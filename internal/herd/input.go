@@ -97,7 +97,7 @@ func (m Model) waiting(p *pick) bool {
 }
 
 // handleKey: j/k/↓/↑ move (wrapping), ⏎ switch to the worker, i reply to it here, 1-9 answer a waiting
-// worker's dialog, o open its PR, x kill (asks y/n), ctrl+c quit.
+// worker's dialog, o open its PR, x kill (asks y/n), v toggle the compact view, ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -149,6 +149,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.confirm = m.snap.tiles[i].sess.Name
+	case "v":
+		m.compact = !m.compact
+		return m, m.applyView()
 	case "ctrl+c":
 		return m, tea.Quit
 	}
@@ -179,6 +182,12 @@ func (m Model) move(i, dir int) string {
 		return ""
 	}
 	return m.snap.tiles[((i+dir)%n+n)%n].sess.Name
+}
+
+// applyView records the view on the boss session and resizes the pane to it.
+func (m Model) applyView() tea.Cmd {
+	compact := m.compact
+	return m.action(func() error { return setView(m.c, m.pane, compact) })
 }
 
 // switchTo switches the client viewing the herd to session.

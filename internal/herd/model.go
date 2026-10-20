@@ -42,6 +42,7 @@ type row struct {
 	PR           string `tmux:"@dev_pr"`
 	PRGen        string `tmux:"@dev_pr_gen"`
 	Question     string `tmux:"@agent_question"`
+	Note         string `tmux:"@dev_boss_note"`
 }
 
 // tile is one worker session's preview.
@@ -52,6 +53,7 @@ type tile struct {
 	question agent.Question // @agent_question, what its dialog asks
 	body     []string       // the pane's last screen lines; nil when not captured this tick
 	pick     *pick          // the dialog a deciding agent shows; nil when none or not captured
+	note     string         // its latest boss inbox note (inbox.OptNote), which the compact view shows
 }
 
 // snapshot is what one refresh saw.
@@ -78,6 +80,7 @@ type Model struct {
 	answering     string   // the session an answer's keys go to, until its outcome; one at a time
 	history       []string // replies sent, oldest first
 	clk           control.Clock
+	compact       bool // the list view instead of the tiles
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
@@ -101,15 +104,33 @@ type refreshMsg struct {
 
 // Run shows the previews in pane until its pane closes or Ctrl-C.
 func Run(c *tmux.Client, pane string) error {
-	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c), clk: control.RealClock}
-	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
+	if _, err := tea.NewProgram(newModel(c, pane), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		return fmt.Errorf("boss: %w", err)
 	}
 	return nil
 }
 
-// Init starts the first refresh.
-func (m Model) Init() tea.Cmd { return tea.Batch(m.refresh(), m.watchLater()) }
+// newModel is the previews in pane, in the view its boss session keeps (OptView); one it can't read starts
+// full, with the error on the bottom row.
+func newModel(c *tmux.Client, pane string) Model {
+	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c), clk: control.RealClock}
+	view, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptView+"}")
+	if err != nil {
+		// Closing the previews would end the boss
+		m.msg = "❌ view: " + err.Error()
+	}
+	m.compact = strings.TrimSpace(view) == compactView
+	return m
+}
+
+// Init starts the first refresh; a compact view kept from before narrows the pane again.
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.refresh(), m.watchLater()}
+	if m.compact {
+		cmds = append(cmds, m.applyView())
+	}
+	return tea.Batch(cmds...)
+}
 
 // watchLater runs inbox.Watch after watchInterval.
 func (m Model) watchLater() tea.Cmd {
@@ -171,9 +192,10 @@ func (m Model) validSelection() string {
 }
 
 // refresh lists panes and clients (two tmux calls), and while a client shows this window captures the
-// tiles on the selected page (one call each, at most maxTiles).
+// tiles on the selected page (one call each, at most maxTiles); the compact view captures only the deciding
+// ones, for their dialogs.
 func (m Model) refresh() tea.Cmd {
-	width, height, selected := m.width, m.gridHeight(), m.selected
+	width, height, selected, compact := m.width, m.gridHeight(), m.selected, m.compact
 	return func() tea.Msg {
 		rows, err := tmux.Query[row](m.c, "list-panes", "-a")
 		if err != nil {
@@ -191,9 +213,20 @@ func (m Model) refresh() tea.Cmd {
 			return refreshMsg{snap: snap}
 		}
 		g := layout(len(snap.tiles), width, height)
-		from, to := g.page(index(snap.tiles, selected))
-		to = min(to, len(snap.tiles))
-		for i := from; i < to; i++ {
+		var captures []int
+		if compact {
+			for i, t := range snap.tiles {
+				if t.deciding {
+					captures = append(captures, i)
+				}
+			}
+		} else {
+			from, to := g.page(index(snap.tiles, selected))
+			for i := from; i < min(to, len(snap.tiles)); i++ {
+				captures = append(captures, i)
+			}
+		}
+		for _, i := range captures {
 			out, err := m.c.Run("capture-pane", "-p", "-e", "-t", snap.tiles[i].pane)
 			if err != nil {
 				// The pane may have closed since list-panes; its tile goes with the next refresh
@@ -216,7 +249,9 @@ func (m Model) refresh() tea.Cmd {
 					t.sess.State = st.Trusted()
 				}
 			}
-			t.body = tail(previewLines(out, *t), g.tileH-1)
+			if !compact {
+				t.body = tail(previewLines(out, *t), g.tileH-1)
+			}
 		}
 		return refreshMsg{snap: snap}
 	}
@@ -276,6 +311,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			if r.ID == a.Pane.ID {
 				t.deciding = agent.Deciding(a.State, r.WaitingFor)
 				t.question, _ = agent.ParseQuestion(r.Question)
+				t.note = r.Note
 			}
 		}
 		meta[name] = t

@@ -191,6 +191,8 @@ func TestBossInboxNextTurn(t *testing.T) {
 	run(worker, ask, "waiting")
 	time.Sleep(1100 * time.Millisecond) // @agent_since counts seconds
 	run(worker, `{"hook_event_name":"PreToolUse"}`, "working")
+	// The repeat must land in the same second as its dialog: start both at a second's start
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 	run(worker, ask, "waiting")
 	run(worker, ask, "waiting")
 	check(t, "both turns and both dialogs as context", run(boss, `{"hook_event_name":"UserPromptSubmit"}`),

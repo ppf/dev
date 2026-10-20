@@ -22,6 +22,9 @@ import (
 // OptOff is the tmux option that turns the inbox off ("off"), globally or per boss session.
 const OptOff = "@dev_boss_inbox"
 
+// OptNote is the pane option holding a worker's latest note (Note.Summary), which the boss previews show.
+const OptNote = "@dev_boss_note"
+
 // Note kinds.
 const (
 	Finished = "finished"
@@ -40,10 +43,15 @@ type Note struct {
 
 // String is the note's line: "<worker> <kind>: <text>".
 func (n Note) String() string {
+	return n.Worker + " " + n.Summary()
+}
+
+// Summary is the note without its worker: "<kind>: <text>".
+func (n Note) Summary() string {
 	if n.Text == "" {
-		return n.Worker + " " + n.Kind
+		return n.Kind
 	}
-	return n.Worker + " " + n.Kind + ": " + n.Text
+	return n.Kind + ": " + n.Text
 }
 
 const (
