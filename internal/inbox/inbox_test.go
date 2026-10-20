@@ -99,6 +99,55 @@ func TestAddDedupesAndTakes(t *testing.T) {
 	}
 }
 
+// A new prompt (Forget) lets a stretch's stuck note repeat only while the worker's screen hasn't moved on.
+func TestAddStuck(t *testing.T) {
+	b := testBox(t)
+	add := func(n Note, screen string) bool {
+		t.Helper()
+		added, err := b.AddStuck(n, screen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return added
+	}
+	at20, at25 := StuckNote("w", "working", 20*time.Minute, "1"), StuckNote("w", "working", 25*time.Minute, "1")
+	if !add(at20, "tests running") {
+		t.Fatal("first stuck note not queued")
+	}
+	if add(at25, "tests running") {
+		t.Error("repeat without a new prompt")
+	}
+	if err := b.Forget("w"); err != nil {
+		t.Fatal(err)
+	}
+	if add(at25, "tests passed") {
+		t.Error("repeat after the screen moved on")
+	}
+	if add(at25, "tests passed") {
+		t.Error("a moved-on screen became the baseline")
+	}
+	if !add(at25, "tests running") {
+		t.Error("no repeat for an unchanged screen")
+	}
+	if err := b.Forget("w"); err != nil {
+		t.Fatal(err)
+	}
+	if !add(StuckNote("w", "working", 20*time.Minute, "2"), "other") {
+		t.Error("a new stretch's first note not queued")
+	}
+	if !add(StuckNote("v", "working", 20*time.Minute, "1"), "tests passed") {
+		t.Error("another worker's note not queued")
+	}
+	bt, err := b.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[dev boss inbox] 4 worker update(s):\n- w stuck: working for 20m\n- w stuck: working for 25m\n- w stuck: working for 20m\n- v stuck: working for 20m"
+	if bt.String() != want {
+		t.Errorf("batch = %q, want %q", bt, want)
+	}
+}
+
 func TestAddCaps(t *testing.T) {
 	b := testBox(t)
 	for i := range maxNotes + 3 {

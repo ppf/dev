@@ -8,6 +8,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -85,7 +86,14 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 				continue
 			}
 		}
-		if _, err := b.Box.Add(n); err != nil {
+		shot, err := c.Run("capture-pane", "-p", "-t", r.Pane)
+		if err != nil && strings.Contains(err.Error(), "can't find pane") {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := b.Box.AddStuck(n, screen.Snapshot(shot)); err != nil {
 			return err
 		}
 		// Each round, so the minutes held stay current

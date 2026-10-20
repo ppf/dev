@@ -3,6 +3,7 @@
 package screen
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -51,14 +52,20 @@ func ClaudeInput(plain []string) (top, bottom int, ok bool) {
 	return top, bottom, true
 }
 
-// ClaudeState is what Claude's captured screen shows when its own input box is at the bottom, so no
-// dialog is open: agent.Working while it offers "esc to interrupt" (in the status lines under the box, or
-// on the spinner line above it), else agent.Idle. "" without the box: a dialog, or a screen it doesn't know.
-func ClaudeState(capture string) string {
+// plainScreen is a captured screen's Plain lines without the blank ones at its bottom.
+func plainScreen(capture string) []string {
 	plain := Plain(strings.Split(capture, "\n"))
 	for len(plain) > 0 && plain[len(plain)-1] == "" {
 		plain = plain[:len(plain)-1]
 	}
+	return plain
+}
+
+// ClaudeState is what Claude's captured screen shows when its own input box is at the bottom, so no
+// dialog is open: agent.Working while it offers "esc to interrupt" (in the status lines under the box, or
+// on the spinner line above it), else agent.Idle. "" without the box: a dialog, or a screen it doesn't know.
+func ClaudeState(capture string) string {
+	plain := plainScreen(capture)
 	top, bottom, ok := ClaudeInput(plain)
 	if !ok {
 		return ""
@@ -72,6 +79,32 @@ func ClaudeState(capture string) string {
 		return agent.Working
 	}
 	return agent.Idle
+}
+
+var (
+	// spinner is Claude's working line ("✻ Brewing… (5m 6s · ↓ 2.8k tokens)") and the tip under it: its
+	// glyph, verb, counters and tip change on their own.
+	spinner = regexp.MustCompile(`^[·✢✳✶✻✽*]\s+[^…]+…|^⎿\s+Tip:`)
+	// ticking is what changes on its own in other lines: elapsed times ("59s", then "1m 0s"), clocks (not a
+	// file.go:12:34 position), token counts, costs, and a braille spinner's frame (Grok's).
+	ticking = regexp.MustCompile(`^[\x{2800}-\x{28FF}]|\b\d+(\.\d+)?(ms|[hms])(\s+\d+(\.\d+)?(ms|[hms]))*\b|(^|[\s(])\d{1,2}:\d\d(:\d\d)?(\s?[AP]M)?\b|[↑↓]\s*[\d.,]+k?\s+tokens|[⇡⇣][\d.,]+k?|\$\d+(\.\d+)?`)
+)
+
+// Snapshot is a captured screen without what changes while nothing happens: Claude's input box with the
+// status lines under it, its spinner line, and elapsed times, clocks, token counts and costs. Two
+// snapshots differ when the agent's output moves on (a resized pane rewraps it too).
+func Snapshot(capture string) string {
+	plain := plainScreen(capture)
+	if top, _, ok := ClaudeInput(plain); ok {
+		plain = plain[:top]
+	}
+	var b strings.Builder
+	for _, l := range plain {
+		if !spinner.MatchString(l) {
+			b.WriteString(ticking.ReplaceAllString(l, "#") + "\n")
+		}
+	}
+	return b.String()
 }
 
 // AsksChoice reports an input line that is a numbered option or dialog text, not a draft.
