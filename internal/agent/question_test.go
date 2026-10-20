@@ -77,3 +77,38 @@ func TestRecordQuestionRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestQuestionAsk(t *testing.T) {
+	ask := Question{Tool: AskUserQuestion, Questions: []Ask{
+		{Question: "Which test color should I pick?", Options: []Choice{{"Red", "Warm"}, {"Green", ""}, {"Blue", "Cool"}}},
+		{Question: "Which extras?"},
+	}}
+	tests := []struct {
+		q          Question
+		want, seen string
+	}{
+		{ask, "Which test color should I pick? (Red / Green / Blue) +1 more", "Which test color\n should I pick?\n❯ 1. Red"},
+		{Question{Tool: AskUserQuestion, Questions: []Ask{{Question: "Go on?"}}}, "Go on?", "Go on?"},
+		{Question{Tool: "Bash", Command: "rm -rf build", Description: "Delete build/"}, "allow Bash: rm -rf build", "rm -rf\n  build\nDo you want to proceed?"},
+		{Question{Tool: "Write", File: "/tmp/proj/notes.txt"}, "allow Write: /tmp/proj/notes.txt", "Do you want to create notes.txt?"},
+		{Question{Tool: "WebSearch"}, "allow WebSearch", "WebSearch(cats)\nDo you want to proceed?"},
+	}
+	for _, tt := range tests {
+		if got := tt.q.Ask(); got != tt.want {
+			t.Errorf("Ask() = %q, want %q", got, tt.want)
+		}
+		if !tt.q.Shows(tt.seen) {
+			t.Errorf("%q: not shown on %q", tt.want, tt.seen)
+		}
+		if tt.q.Shows("Do you want to proceed?\n❯ 1. Yes") {
+			t.Errorf("%q: shown on another dialog", tt.want)
+		}
+	}
+	// A permission needs its "Do you want": a short command is in many a question's words
+	if q := (Question{Tool: "Bash", Command: "ls"}); q.Shows("Which tools should I install?\n❯ 1. Red") {
+		t.Error("permission shown on a question")
+	}
+	if q := (Question{Tool: AskUserQuestion, Questions: []Ask{{Question: " "}}}); q.Shows("Which color?") {
+		t.Error("blank question shown")
+	}
+}

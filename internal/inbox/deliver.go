@@ -56,6 +56,7 @@ type workerView struct {
 	StartedBy string `tmux:"@dev_started_by"`
 	Session   string `tmux:"session_name"`
 	Since     string `tmux:"@agent_since"`
+	Question  string `tmux:"@agent_question"`
 }
 
 // BossOf is the boss that started pane's session (@dev_started_by), and the worker pane itself.

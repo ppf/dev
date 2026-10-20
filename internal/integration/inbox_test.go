@@ -284,6 +284,74 @@ func TestBossInboxNextTurn(t *testing.T) {
 	check(t, "notes a Stop blocked with aren't context again", run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "working"), "")
 }
 
+// A Claude worker's decision note says what its dialog asks, from the dev question hook's record when its
+// screen shows that dialog, else Claude's own message; the worker's pane note (inbox.OptNote) says it too.
+func TestBossInboxDecisionText(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	run := func(pane, stdin string, argv ...string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, argv...)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil || stderr.Len() > 0 {
+			t.Fatalf("❌ dev %s: %v, stderr %q", strings.Join(argv, " "), err, stderr.String())
+		}
+		return string(out)
+	}
+	// A busy coordinator: its next prompt gets the notes as context
+	s.T("new-session", "-d", "-s", "boss", "sleep 600")
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	run(boss, `{"hook_event_name":"SessionStart"}`, "state", "idle")
+	run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "state", "working")
+	// draw shows a dialog on the worker's screen
+	draw := func(name, screen string) {
+		t.Helper()
+		file := filepath.Join(tmp, name)
+		writeFile(t, file, screen)
+		s.T("respawn-pane", "-k", "-t", worker, "sh", "-c", `cat "$1"; exec sleep 600`, "sh", file)
+		waitFor(t, name+" drawn", func() bool {
+			return strings.Contains(s.T("capture-pane", "-p", "-t", worker), "1. ")
+		})
+	}
+	ask := `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission"}`
+	decide := func(question, want string) {
+		t.Helper()
+		run(worker, `{"hook_event_name":"UserPromptSubmit"}`, "state", "working")
+		if question != "" {
+			run(worker, question, "question")
+		}
+		run(worker, ask, "state", "waiting")
+		check(t, "boss gets: "+want, run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "state", "working"),
+			`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 1 worker update(s):\n- w needs a decision: `+want+
+				`","hookEventName":"UserPromptSubmit"}}`+"\n")
+		check(t, "pane note: "+want, s.T("show-option", "-pqv", "-t", worker, inbox.OptNote), "needs a decision: "+want)
+	}
+	rule := strings.Repeat("─", 40) + "\n"
+	draw("colors", rule+"☐ Color\n\nWhich test color should I pick?\n\n❯ 1. Red\n  2. Green\n  3. Blue\n  4. Type something.\n"+rule+"  5. Chat about this\n")
+	decide(`{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":`+
+		`"Which test color should I pick?","header":"Color","options":[{"label":"Red"},{"label":"Green"},{"label":"Blue"}]}]}}`,
+		"Which test color should I pick? (Red / Green / Blue)")
+	draw("bash", "⏺ Bash(ls)\n"+rule+" Bash command\n\n  rm -rf build\n  Delete build/\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n")
+	bash := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build","description":"Delete build/"}}`
+	decide(bash, "allow Bash: rm -rf build")
+	// The record of a tool auto mode approved meanwhile isn't the dialog on screen, though its call is above it
+	draw("colors-again", "⏺ Bash(rm -rf build)\n  Do you want to proceed? Yes\n"+rule+"☐ Color\n\nWhich test color should I pick?\n\n❯ 1. Red\n  2. Green\n")
+	run(worker, `{"hook_event_name":"UserPromptSubmit"}`, "state", "working")
+	run(worker, bash, "question")
+	run(worker, ask, "state", "waiting")
+	check(t, "boss gets Claude's message", run(boss, `{"hook_event_name":"UserPromptSubmit"}`, "state", "working"),
+		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 1 worker update(s):\n- w needs a decision: Claude needs your permission",`+
+			`"hookEventName":"UserPromptSubmit"}}`+"\n")
+}
+
 // A Grok worker's hooks run plain `dev state` with GROK_HOOK_EVENT set: its subagents' events and the
 // extra Stop at session end are left out, no session is recorded, and its finished turn reaches the boss.
 func TestGrokState(t *testing.T) {

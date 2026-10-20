@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"cmp"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -72,6 +76,58 @@ func HookQuestion(input []byte) (Question, bool) {
 	}
 	return Question{Tool: e.Tool, Command: cut(e.Input.Command), File: cut(e.Input.File), URL: cut(e.Input.URL),
 		Description: cut(e.Input.Description), Questions: e.Input.Questions}, true
+}
+
+// Ask is what q asks in one line: AskUserQuestion's first question with its options' labels and how many
+// follow it, or the tool a permission is for with its command, file or URL.
+func (q Question) Ask() string {
+	if q.Tool == AskUserQuestion && len(q.Questions) > 0 {
+		a := q.Questions[0]
+		s := a.Question
+		if len(a.Options) > 0 {
+			labels := make([]string, len(a.Options))
+			for i, c := range a.Options {
+				labels[i] = c.Label
+			}
+			s += " (" + strings.Join(labels, " / ") + ")"
+		}
+		if more := len(q.Questions) - 1; more > 0 {
+			s += fmt.Sprintf(" +%d more", more)
+		}
+		return s
+	}
+	if d := cmp.Or(q.Command, q.File, q.URL); d != "" {
+		return "allow " + q.Tool + ": " + d
+	}
+	return "allow " + q.Tool
+}
+
+// Shows reports whether screen shows q's dialog: its first question, else a permission's "Do you want" with
+// its file name, command or URL, else its tool's name (up to maxNeedle), ignoring how the screen wraps it.
+func (q Question) Shows(screen string) bool {
+	var s string
+	switch {
+	case q.Tool == AskUserQuestion && len(q.Questions) > 0:
+		s = q.Questions[0].Question
+	case q.File != "":
+		s = filepath.Base(q.File)
+	default:
+		s = cmp.Or(q.Command, q.URL, q.Tool)
+	}
+	screen = squeeze(screen)
+	if q.Tool != AskUserQuestion && !strings.Contains(screen, "Doyouwant") {
+		return false
+	}
+	r := []rune(squeeze(strings.TrimSuffix(s, "…")))
+	return len(r) > 0 && strings.Contains(screen, string(r[:min(len(r), maxNeedle)]))
+}
+
+// maxNeedle bounds how much of a question or command must show: a long one may be cut on screen.
+const maxNeedle = 200
+
+// squeeze drops s's whitespace.
+func squeeze(s string) string {
+	return strings.Join(strings.Fields(s), "")
 }
 
 func cut(s string) string {

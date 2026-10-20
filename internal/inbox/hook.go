@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -69,19 +71,44 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		return err
 	}
 	n, _ := FromHook(w.Session, input)
-	if teammates(rows)[pane] {
+	mate := teammates(rows)[pane]
+	if mate && (!ok || n.Kind != Decision) {
 		// A teammate: only its decisions, named by its pane. Its prompts mustn't reset the worker's dedupe
-		if !ok || n.Kind != Decision {
-			return nil
+		return nil
+	}
+	var askErr error
+	if n.Kind == Decision {
+		// Claude's own message ("Claude needs your permission") doesn't say what it asks; it still goes out
+		// when the dialog can't be read
+		var text string
+		if text, askErr = asked(c, w.Question, pane); text != "" {
+			n.Text, n.Key = text, Decision+"\x00"+text
 		}
+	}
+	if mate {
 		n.Worker += " (" + pane + ")"
-		return deliverNote(c, clk, b, w, n, e.Name)
+		return errors.Join(askErr, deliverNote(c, clk, b, w, n, e.Name))
 	}
 	if ok {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-	return errors.Join(err, setNote(c, pane, n.Summary()))
+	return errors.Join(askErr, err, setNote(c, pane, n.Summary()))
+}
+
+// asked is what pane's dialog asks (agent.Question.Ask), clipped, when its question (@agent_question) is the
+// dialog on its screen (screen.ClaudeDialog): a tool auto mode approved since, or an earlier dialog of the
+// turn, may have left another one; "" when none is.
+func asked(c *tmux.Client, question, pane string) (string, error) {
+	q, ok := agent.ParseQuestion(question)
+	if !ok {
+		return "", nil
+	}
+	out, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil || !q.Shows(screen.ClaudeDialog(out)) {
+		return "", err
+	}
+	return clean(q.Ask()), nil
 }
 
 // deliverNote queues n for b and delivers the inbox; a new prompt (event UserPromptSubmit) only resets the dedupe.
