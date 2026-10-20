@@ -1,5 +1,5 @@
 // Package resurrect keeps what tmux-resurrect doesn't restore — each dev session's @project, its
-// sidebar and the boss that started it, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
+// sidebar and the boss that started it, each boss, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
 // after a restore (dev-resurrect.sh). Each function runs as a resurrect hook; every failure is warned in
 // tmux before it is returned.
 package resurrect
@@ -20,14 +20,15 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project,
-// the position empty while its sidebar is hidden, then an agentPrefix line per live agent pane with a
-// recorded session, and a startedByPrefix line per worker a boss started. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
+// Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project or
+// a boss, the position empty while its sidebar is hidden, then a startedByPrefix line per worker a boss
+// started, a bossPrefix line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
 // last one's .dev instead. A failure keeps the previous file.
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
@@ -54,6 +55,7 @@ func Save(c *tmux.Client, snapshot string) error {
 		AgentCmd   string `tmux:"@agent_cmd"`
 		AgentID    string `tmux:"@agent_session"`
 		Transcript string `tmux:"@agent_transcript"`
+		BossPane   string `tmux:"@dev_boss_pane"`
 	}](c, "list-panes", "-a")
 	if err != nil {
 		return fail(c, "list-panes failed, dev state not saved", err)
@@ -61,21 +63,29 @@ func Save(c *tmux.Client, snapshot string) error {
 	// Keyed by session too: a window linked into another session lists its panes there at another index
 	type sessionPane struct{ session, id string }
 	pos := map[sessionPane]string{}
+	type sessionRole struct{ session, role string }
+	roles := map[sessionRole]string{} // → window.pane
 	for _, p := range panes {
-		pos[sessionPane{p.Session, p.ID}] = p.Window + "." + p.Index
+		at := p.Window + "." + p.Index
+		pos[sessionPane{p.Session, p.ID}] = at
+		if p.BossPane != "" {
+			roles[sessionRole{p.Session, p.BossPane}] = at
+		}
 	}
 	var b strings.Builder
 	for _, s := range sessions {
-		if s.Project == "" {
+		if s.Project == "" && s.Herd == "" {
 			continue
 		}
 		// A stale id means the sidebar is gone, which is the same as hidden
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[sessionPane{s.Name, s.Sidebar}])
 	}
 	bosses := map[string]string{} // id → name
+	herds := map[string]bool{}    // by name
 	for _, s := range sessions {
 		if s.Herd != "" {
 			bosses[s.ID] = s.Name
+			herds[s.Name] = true
 		}
 	}
 	for _, s := range sessions {
@@ -88,10 +98,24 @@ func Save(c *tmux.Client, snapshot string) error {
 			fmt.Fprintf(&b, "%s\t%s\t%s\n", startedByPrefix, s.Name, boss)
 		}
 	}
+	for _, s := range sessions {
+		coordinator, previews := roles[sessionRole{s.Name, herd.RoleCoordinator}], roles[sessionRole{s.Name, herd.RolePreviews}]
+		if s.Herd != "" && coordinator != "" && previews != "" {
+			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", bossPrefix, s.Name, coordinator, previews)
+		}
+	}
+	// A coordinator's line goes under its boss, which restores it, wherever else its window is linked
+	coordinatorOf := map[string]string{} // pane id → boss
+	for _, p := range panes {
+		if p.BossPane == herd.RoleCoordinator && herds[p.Session] {
+			coordinatorOf[p.ID] = p.Session
+		}
+	}
 	saved := map[string]bool{}
 	for _, p := range panes {
 		// Once per pane, under the first session listing a linked window; a crash's leftover isn't live
-		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] {
+		boss, ok := coordinatorOf[p.ID]
+		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] || ok && boss != p.Session {
 			continue
 		}
 		saved[p.ID] = true
@@ -182,7 +206,7 @@ func PreRestore(c *tmux.Client) error {
 	return nil
 }
 
-// Restore restarts the agents, then sets @project, undoes restored zooms and rebuilds the sidebar of each
+// Restore restarts the agents and bosses, then sets @project, undoes restored zooms and rebuilds the sidebar of each
 // session in the last snapshot's .dev file that the restore created, preserving its active window and focus.
 func Restore(c *tmux.Client) error {
 	last, err := helper("last_resurrect_file")
@@ -221,9 +245,24 @@ func Restore(c *tmux.Client) error {
 	shell = filepath.Base(strings.TrimSpace(shell))
 
 	liveSessions := strings.Split(string(liveData), "\n")
-	entries, agents, startedBy := parseState(string(data))
+	entries, agents, startedBy, bosses := parseState(string(data))
 	var errs []error
-	// First: rebuilding a sidebar renumbers its window's panes, and agents are saved by position
+	// First: rebuilding a sidebar renumbers its window's panes, and agents and bosses are saved by position.
+	// A coordinator restarts with its boss, or as a plain agent when its boss can't be restored.
+	type slot struct{ session, pos string }
+	adopted := map[slot]bool{}
+	for _, b := range bosses {
+		if slices.Contains(liveSessions, b.Session) {
+			continue
+		}
+		tried, err := restoreBoss(c, b, agents, shell)
+		if err != nil {
+			warn(c, b.Session+": "+err.Error())
+			errs = append(errs, err)
+		}
+		adopted[slot{b.Session, b.Coordinator}] = tried
+	}
+	agents = slices.DeleteFunc(agents, func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
 	if err := resumeAgents(c, agents, liveSessions, shell); err != nil {
 		errs = append(errs, err)
 	}
@@ -267,9 +306,11 @@ func restoreSession(c *tmux.Client, e entry, shell string) error {
 	if _, err := c.Run("has-session", "-t", "="+e.Session); err != nil {
 		return nil
 	}
-	if _, err := c.Run("set-option", "-t", target, "@project", e.Project); err != nil {
-		warn(c, e.Session+": @project not set")
-		return nil
+	if e.Project != "" {
+		if _, err := c.Run("set-option", "-t", target, "@project", e.Project); err != nil {
+			warn(c, e.Session+": @project not set")
+			return nil
+		}
 	}
 	windows, err := tmux.Query[struct {
 		Index  string `tmux:"window_index"`
@@ -391,14 +432,11 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		if slices.Contains(live, a.Session) {
 			continue
 		}
-		slot := tmux.SessionTarget(a.Session) + a.Pos
-		out, err := display(c, slot, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
-		fields := strings.Split(out, tmux.Sep)
-		if err != nil || len(fields) != 3 || fields[0] != shell {
+		pane, path, ok := bareShell(c, tmux.SessionTarget(a.Session)+a.Pos, shell)
+		if !ok {
 			warn(c, a.Session+":"+a.Pos+" is not the agent's bare shell, agent not restarted")
 			continue
 		}
-		pane, path := fields[1], fields[2]
 		id := a.ID
 		if path != a.Path {
 			id = ""
@@ -423,6 +461,51 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// restoreBoss makes b's session a boss again when its coordinator and previews panes came back as bare
+// shells: the coordinator resumes its saved conversation (agents, by position) when it can, else starts fresh.
+// tried reports whether it went on to replace the shells.
+func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, shell string) (tried bool, err error) {
+	target := tmux.SessionTarget(b.Session)
+	if _, err := c.Run("has-session", "-t", "="+b.Session); err != nil {
+		return false, nil
+	}
+	var panes, paths [2]string
+	for i, pos := range []string{b.Coordinator, b.Previews} {
+		var ok bool
+		if panes[i], paths[i], ok = bareShell(c, target+pos, shell); !ok {
+			warn(c, b.Session+":"+pos+" is not the boss's bare shell, boss not restored")
+			return false, nil
+		}
+	}
+	var resume []string
+	for _, a := range agents {
+		if a.Session != b.Session || a.Pos != b.Coordinator {
+			continue
+		}
+		if a.Kind == agent.Claude && a.Path == paths[0] {
+			resume = agent.ResumeArgs(a.ID, a.Transcript)
+		}
+		if resume == nil {
+			warn(c, b.Session+":"+a.Pos+": conversation "+a.ID+" not resumed (directory changed or transcript gone), fresh coordinator")
+		}
+	}
+	if err := adoptBoss(c, b.Session, panes[0], panes[1], resume); err != nil {
+		return true, &stepError{"boss", err}
+	}
+	return true, nil
+}
+
+// bareShell returns slot's pane id and directory when it runs shell, as resurrect leaves a pane whose
+// process it doesn't restart.
+func bareShell(c *tmux.Client, slot, shell string) (pane, path string, ok bool) {
+	out, err := display(c, slot, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
+	fields := strings.Split(out, tmux.Sep)
+	if err != nil || len(fields) != 3 || fields[0] != shell {
+		return "", "", false
+	}
+	return fields[1], fields[2], true
 }
 
 // stepError is a tmux step of restoreSession that failed. Its text is Restore's warning, so it gives
@@ -467,6 +550,13 @@ const agentPrefix = ":agent"
 // coordinator started session.
 const startedByPrefix = ":started_by"
 
+// bossPrefix starts a "<prefix><TAB>session<TAB>window.pane<TAB>window.pane" line of a .dev file: a boss,
+// its coordinator's and previews' positions.
+const bossPrefix = ":boss"
+
+// bossEntry is one boss line of a .dev file.
+type bossEntry struct{ Session, Coordinator, Previews string }
+
 // startedByEntry is one started-by line of a .dev file.
 type startedByEntry struct{ Session, Boss string }
 
@@ -475,13 +565,20 @@ type agentEntry struct {
 	Session, Pos, Kind, ID, Transcript, Path string
 }
 
-// parseState reads a .dev file's session, agent and started-by lines.
-func parseState(data string) ([]entry, []agentEntry, []startedByEntry) {
+// parseState reads a .dev file's session, agent, started-by and boss lines.
+func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEntry) {
 	var entries []entry
 	var agents []agentEntry
 	var startedBy []startedByEntry
+	var bosses []bossEntry
 	for _, line := range strings.Split(data, "\n") {
 		session, rest, _ := strings.Cut(line, "\t")
+		if session == bossPrefix {
+			if f := strings.Split(rest, "\t"); len(f) == 3 && f[0] != "" && f[1] != "" && f[2] != "" {
+				bosses = append(bosses, bossEntry{f[0], f[1], f[2]})
+			}
+			continue
+		}
 		if session == startedByPrefix {
 			if worker, boss, ok := strings.Cut(rest, "\t"); ok && worker != "" && boss != "" {
 				startedBy = append(startedBy, startedByEntry{worker, boss})
@@ -501,7 +598,7 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry) {
 		project, pos, _ := strings.Cut(rest, "\t")
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
-	return entries, agents, startedBy
+	return entries, agents, startedBy, bosses
 }
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.
@@ -539,10 +636,11 @@ func runHelper(fn string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
-// Restore rebuilds sidebars with the Go ensure, in-process; vars so unit tests stub them.
+// Restore rebuilds sidebars and bosses in-process; vars so unit tests stub them.
 var (
 	ensureSidebar = sidebar.Ensure
 	resolveOrigin = sidebar.ResolveOrigin
+	adoptBoss     = herd.Adopt
 )
 
 // warn shows msg in tmux and appends it to @dev_resurrect_warnings, which the first `dev` prints after

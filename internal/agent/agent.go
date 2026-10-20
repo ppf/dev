@@ -284,12 +284,20 @@ func ResumeCommand(kind, id, transcript, session string) (cmd string, resumed, o
 	if kind != Claude {
 		return "", false, false
 	}
-	if safeID.MatchString(id) {
-		if _, err := os.Stat(transcript); err == nil {
-			return tmux.ShellJoin(ClaudeArgv(session, "--resume", id)...), true, true
-		}
+	args := ResumeArgs(id, transcript)
+	return tmux.ShellJoin(ClaudeArgv(session, args...)...), args != nil, true
+}
+
+// ResumeArgs are claude's args resuming conversation id: nil unless the id is safe to type and its
+// transcript still exists.
+func ResumeArgs(id, transcript string) []string {
+	if !safeID.MatchString(id) {
+		return nil
 	}
-	return tmux.ShellJoin(ClaudeArgv(session)...), false, true
+	if _, err := os.Stat(transcript); err != nil {
+		return nil
+	}
+	return []string{"--resume", id}
 }
 
 type codexPane struct {

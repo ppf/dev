@@ -13,6 +13,25 @@ import (
 	"time"
 )
 
+// resurrectConf points tmux-resurrect's snapshots at resurrectDir and its hooks at `dev resurrect`.
+// Overrides follow source-file, so nothing in ~/.tmux.conf points the hooks or snapshots elsewhere.
+// Restore wants the slot's command to be basename(default-shell), and macOS's /bin/sh runs as bash.
+func resurrectConf(resurrectDir string) string {
+	conf := `source-file ~/.tmux.conf
+set -g default-shell /bin/bash
+set -g default-command '/bin/bash --norc'
+set -g @dev_restored 1
+set -g @resurrect-dir ` + shellQuote(resurrectDir) + `
+set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
+`
+	for hook, arg := range map[string]string{
+		"post-save-layout": "save", "post-save-all": "prune", "pre-restore-all": "pre-restore", "post-restore-all": "restore",
+	} {
+		conf += "set -g @resurrect-hook-" + hook + " " + shellQuote(devBin+" resurrect "+arg) + "\n"
+	}
+	return conf
+}
+
 // TestRestore on dev: the resurrect hooks run `dev resurrect`, the sidebar comes back as a Go sidebar
 // and hiding sidebars goes through `dev sidebar toggle`. Resurrect doesn't restart claude, so dev types
 // each agent's resume command into its restored bare shell: its own conversation while the transcript
@@ -26,21 +45,7 @@ func TestResurrectDev(t *testing.T) {
 	resurrectDir := tempDir(t)
 	cfg := writeProjects(t, [2]string{"devt", dir}, [2]string{"devu", dirU})
 
-	// Overrides follow source-file, so nothing in ~/.tmux.conf points the hooks or snapshots elsewhere.
-	// Restore wants the slot's command to be basename(default-shell), and macOS's /bin/sh runs as bash.
-	conf := `source-file ~/.tmux.conf
-set -g default-shell /bin/bash
-set -g default-command '/bin/bash --norc'
-set -g @dev_restored 1
-set -g @resurrect-dir ` + shellQuote(resurrectDir) + `
-set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
-`
-	for hook, arg := range map[string]string{
-		"post-save-layout": "save", "post-save-all": "prune", "pre-restore-all": "pre-restore", "post-restore-all": "restore",
-	} {
-		conf += "set -g @resurrect-hook-" + hook + " " + shellQuote(devBin+" resurrect "+arg) + "\n"
-	}
-	d := newDevServer(t, conf)
+	d := newDevServer(t, resurrectConf(resurrectDir))
 	display := func(target, format string) string {
 		out, _ := d.Try("display", "-t", target, "-p", format)
 		return out
@@ -83,7 +88,7 @@ set -g @resurrect-processes '"~^([^ ]*/)?lazygit( |$)->sleep 600"'
 	d.T("run-shell", save+" quiet")
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
-	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\n"+
+	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\nplain\t\t\n"+
 		":started_by\tdevt\tplain\n:started_by\tdevu\tboss-x\n"+
 		":agent\tdevt\t1.2\tclaude\ts1\t"+transcript+"\t"+dir+"\n"+
 		":agent\tdevu\t1.2\tclaude\tu1\t"+goneTranscript+"\t"+dirU+"\n")
