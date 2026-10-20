@@ -74,11 +74,13 @@ func TestHerd(t *testing.T) {
 		t.Fatal("❌ closing the boss's sidebar ended the boss session")
 	}
 
+	d.T("switch-client", "-t", "=boss:")
 	d.T("send-keys", "-t", previews, "C-c")
 	waitFor(t, "boss gone with its previews pane", func() bool {
 		_, err := d.Try("has-session", "-t", "=boss:")
 		return err != nil
 	})
+	check(t, "client back on app", d.T("list-clients", "-F", "#{client_session}"), "app")
 
 	// Reopened, the boss has a new session id but the same name: its workers are its own again
 	reopen := exec.Command(devBin, "boss")

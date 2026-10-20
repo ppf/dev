@@ -3,6 +3,7 @@
 package herd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -117,17 +118,46 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	claude := run(append([]string{"new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height), "-s", session,
 		"-c", dir, "-n", "Boss", "-PF", "#{pane_id}"}, coordinator...)...)
 	run("set-option", "-t", target, OptHerd, "1")
+	// For a client MoveClients can't move: the most recently used session, detaching only with the last one
+	run("set-option", "-t", target, "detach-on-destroy", "off")
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)
 	}
 	previews := run("split-window", "-t", claude, "-h", "-l", "55%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
 	id := run("display-message", "-p", "-t", claude, "#{session_id}")
-	// Without the coordinator (or the previews) it is no boss: closing either ends the session; its sidebar
-	// comes and goes like any other. Pane and session ids ($N, %N) need no quoting, unlike a project name.
+	// Without the coordinator (or the previews) it is no boss: closing either ends the session, its clients
+	// moved off first; its sidebar comes and goes like any other. Pane ids (%N) need no quoting in the format,
+	// unlike a project name; the session id ($N) does, from tmux and the shell.
+	move := tmuxQuote(tmux.ShellJoin(exe, "boss", "--move-clients", id))
 	run("set-hook", "-t", target, "pane-exited", "if -F '#{||:#{==:#{hook_pane},"+claude+"},#{==:#{hook_pane},"+previews+"}}' "+
-		"{ kill-session -t '"+id+"' }")
+		"{ run-shell "+move+" ; kill-session -t '"+id+"' }")
 	run("select-pane", "-t", claude)
 	return claude, err
+}
+
+// tmuxQuote double-quotes s as one argument in a tmux command string, for run-shell, which expands formats.
+func tmuxQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "#", "##").Replace(s) + `"`
+}
+
+// MoveClients switches each client on session to the session it was on before, so ending session doesn't
+// detach it; a client without a live one is left to the session's detach-on-destroy.
+func MoveClients(c *tmux.Client, session string) error {
+	out, err := c.Run("list-clients", "-t", session, "-F", "#{client_name}\t#{client_last_session}")
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		client, last, _ := strings.Cut(line, "\t")
+		if last == "" {
+			continue
+		}
+		if _, err := c.Run("switch-client", "-c", client, "-t", tmux.SessionTarget(last)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // MarkStartedBy records on session that the coordinator in pane started it.
