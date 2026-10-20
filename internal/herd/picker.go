@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -70,7 +69,7 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 			}
 			p.tabs = append(p.tabs, "Submit")
 		}
-	case q.Tool != "" && strings.HasPrefix(d.title, "Do you want") && strings.Contains(squeeze(screen), needle(q)):
+	case q.Tool != "" && strings.HasPrefix(d.title, "Do you want") && q.Shows(screen):
 		p.tool, p.detail, p.about = q.Tool, cmp.Or(q.Command, q.File, q.URL), q.Description
 	}
 	if p.other < 0 {
@@ -86,20 +85,6 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 func sameText(a, b string) bool {
 	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
 }
-
-// needle is what a permission dialog for q shows of it, without spaces (the screen wraps it): the file's
-// name, or its command or URL (up to maxNeedle), else the tool's name.
-func needle(q agent.Question) string {
-	s := cmp.Or(q.Command, q.URL, q.Tool)
-	if q.File != "" {
-		s = filepath.Base(q.File)
-	}
-	r := []rune(squeeze(strings.TrimSuffix(s, "…")))
-	return string(r[:min(len(r), maxNeedle)])
-}
-
-// maxNeedle bounds how much of a command must show: a long one may be cut on screen.
-const maxNeedle = 200
 
 // squeeze drops s's whitespace.
 func squeeze(s string) string {

@@ -43,6 +43,32 @@ func TestClaudeStateGolden(t *testing.T) {
 	}
 }
 
+// A dialog leaves out the conversation above it, where the same command shows as a tool call.
+func TestClaudeDialogGolden(t *testing.T) {
+	tests := []struct{ file, first, last string }{
+		{"testdata/claude-permission-open.txt", "Bash command", "Esc to cancel · Tab to amend"},
+		{"testdata/claude-ask-open.txt", "☐ Size", "Enter to select · ↑/↓ to navigate · Esc to cancel"},
+		{"../herd/testdata/claude-ask-q1.txt", "←  ☐ Color  ☐ Extras  ✔ Submit  →", "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"},
+		{"testdata/claude-working.txt", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(filepath.Base(tt.file), func(t *testing.T) {
+			got := ClaudeDialog(golden(t, tt.file))
+			lines := strings.Split(got, "\n")
+			if got != "" && (lines[0] != tt.first || lines[len(lines)-1] != tt.last) || got == "" && tt.first != "" {
+				t.Errorf("ClaudeDialog = %q", got)
+			}
+			if strings.Contains(got, "Run this exact bash command") {
+				t.Errorf("ClaudeDialog has the conversation: %q", got)
+			}
+		})
+	}
+	rule := strings.Repeat("─", MinRule)
+	if got := ClaudeDialog(rule + "\nWhich size?\n  1. Small\n" + rule + "\n❯ 2. Chat about this\n"); !strings.HasPrefix(got, "Which size?") {
+		t.Errorf("cursor on Chat about this: ClaudeDialog = %q", got)
+	}
+}
+
 // No dialog (Claude's questions, permissions and trust prompt, Codex's and Grok's menus) reads
 // as Claude's input box, as a prompt would answer it; nor do Codex's and Grok's other screens.
 func TestClaudeStateDialogs(t *testing.T) {

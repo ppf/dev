@@ -107,6 +107,27 @@ func Snapshot(capture string) string {
 	return b.String()
 }
 
+// ClaudeDialog is the dialog Claude draws in its input box's place: the Plain lines under its top ─ rule,
+// the last rule not followed by a numbered option, maybe under the cursor (one above "Chat about this" is
+// inside a question). ""
+// without one, or with Claude's input box back. Unlike the whole screen it leaves out the conversation,
+// which shows earlier tool calls.
+func ClaudeDialog(capture string) string {
+	plain := plainScreen(capture)
+	if _, _, ok := ClaudeInput(plain); ok {
+		return ""
+	}
+	for i := len(plain) - 1; i >= 0; i-- {
+		if i = lastRule(plain, i, i+1); i < 0 {
+			break
+		}
+		if i+1 < len(plain) && !startsNumbered(strings.TrimSpace(strings.TrimPrefix(plain[i+1], "❯"))) {
+			return strings.Join(plain[i+1:], "\n")
+		}
+	}
+	return ""
+}
+
 // AsksChoice reports an input line that is a numbered option or dialog text, not a draft.
 func AsksChoice(l string) bool {
 	l = strings.TrimSpace(l)
