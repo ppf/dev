@@ -349,8 +349,12 @@ func (m Model) sendReply() (tea.Model, tea.Cmd) {
 		if a, err := control.Resolve(m.c, target); err != nil || a.Pane != pane {
 			return actionMsg{"❌ " + target + ": its agent is gone, reply not sent"}
 		}
-		if err := control.Prompt(m.c, control.RealClock, pane, text); err != nil {
+		queued, err := control.Prompt(m.c, control.RealClock, pane, text)
+		if err != nil {
 			return actionMsg{"❌ " + target + ": " + err.Error()}
+		}
+		if queued {
+			return actionMsg{"Queued for " + target + ": it reads it at its turn's next step"}
 		}
 		return actionMsg{"Sent to " + target}
 	}

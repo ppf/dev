@@ -1,0 +1,44 @@
+\x1b[48;5;237m  \x1b[38;5;231mgive the corrected answer. Otherwise \x1b[39m
+  \x1b[38;5;231mreply in one line: which checks \x1b[39m
+  \x1b[38;5;231mconfirmed it, and anything still an \x1b[39m
+  \x1b[38;5;231massumption.\x1b[39m
+
+  \x1b[38;5;231m- "sleep-a: still running" → no \x1b[39m
+  \x1b[38;5;231mread-only check; status lives in the \x1b[39m
+  \x1b[38;5;231magent runtime, not in a file or \x1b[39m
+  \x1b[38;5;231mcommand.\x1b[39m
+  \x1b[38;5;231m- "sleep-b: still running" → no \x1b[39m
+  \x1b[38;5;231mread-only check; same as above.\x1b[39m
+  \x1b[38;5;231m- "sleep-c: blocked by harness \x1b[39m
+  \x1b[38;5;231m('Blocked: sleep 90 followed by: echo \x1b[39m
+  \x1b[38;5;231mdone')" → rests on a teammate message, \x1b[39m
+  \x1b[38;5;231mnot a tool result I ran; check: none \x1b[39m
+  \x1b[38;5;231mavailable read-only, since the block is\x1b[39m
+  \x1b[38;5;231ma harness event.\x1b[39m
+
+  \x1b[38;5;231mThis is how Claude Code surfaces a \x1b[39m
+  \x1b[38;5;231mprompt a plugin submits between turns —\x1b[39m
+  \x1b[38;5;231mit starts this turn in the user's \x1b[39m
+  \x1b[38;5;231mplace. Address the message above.\x1b[39m
+\x1b[49m
+\x1b[38;5;231m⏺\x1b[39m Checks: ListAgents (read-only) re-run.
+  sleep-a and sleep-b are still listed as
+  teammates; the listing gives no
+  completion status, so their results
+  remain unknown. sleep-c's block is only
+  from a teammate message, with no tool
+  result of mine to confirm it. Still
+  assumptions: sleep-a and sleep-b finish
+  and report normally; sleep-c's block is
+  real.
+
+\x1b[38;5;244m──────────────────────────────────────────
+\x1b[39m❯ \x1b[2mwait for sleep-a and sleep-b\x1b[0m
+\x1b[38;5;244m──────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m/private/tmp/claude-503/-Users-storm-…\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
+
+\x1b[1m  ⏺ main\x1b[0m
+\x1b[38;5;246m  ◯ sleep-a\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m     \x1b[38;5;246m50s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-c\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m     \x1b[38;5;246m49s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-b\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m     \x1b[38;5;246m49s\x1b[39m

@@ -21,6 +21,11 @@ func TestFromHook(t *testing.T) {
 		{"finished", `{"hook_event_name":"Stop","last_assistant_message":"Done.\n\nPR opened"}`, "w finished: Done. PR opened", true},
 		{"finished without a message", `{"hook_event_name":"Stop"}`, "w finished", true},
 		{"failed", `{"hook_event_name":"StopFailure","error":"rate_limit"}`, "w failed: rate_limit", true},
+		{"failed with Claude's message", `{"hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 7:10pm (Europe/Warsaw)"}`,
+			"w failed: rate_limit: You've hit your session limit · resets 7:10pm (Europe/Warsaw)", true},
+		{"failed with details", `{"hook_event_name":"StopFailure","error":"rate_limit","error_details":"429 Too Many Requests"}`, "w failed: rate_limit (429 Too Many Requests)", true},
+		{"failed with a message and details", `{"hook_event_name":"StopFailure","error":"server_error","error_details":"Overloaded","last_assistant_message":"API Error: 529"}`,
+			"w failed: server_error: API Error: 529 (Overloaded)", true},
 		{"failed without an error", `{"hook_event_name":"StopFailure"}`, "w failed: stopped on an error", true},
 		{"permission", `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`,
 			"w needs a decision: Claude needs your permission to use Bash", true},
@@ -52,6 +57,47 @@ func TestFromHook(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResetTime(t *testing.T) {
+	warsaw := mustZone(t, "Europe/Warsaw")
+	now := time.Date(2026, 10, 20, 18, 30, 0, 0, warsaw)
+	tests := []struct {
+		name, msg string
+		want      time.Time
+		ok        bool
+	}{
+		{"today", "You've hit your session limit · resets 7:10pm (Europe/Warsaw)", time.Date(2026, 10, 20, 19, 10, 0, 0, warsaw), true},
+		{"on the hour", "You've hit your session limit · resets 8pm (Europe/Warsaw)", time.Date(2026, 10, 20, 20, 0, 0, 0, warsaw), true},
+		{"tomorrow", "You've hit your session limit · resets 2:05am (Europe/Warsaw)", time.Date(2026, 10, 21, 2, 5, 0, 0, warsaw), true},
+		{"just passed", "You've hit your session limit · resets 6pm (Europe/Warsaw)", time.Date(2026, 10, 20, 18, 0, 0, 0, warsaw), true},
+		{"just passed, before midnight", "resets 11:55pm (Europe/Warsaw)", time.Date(2026, 10, 20, 23, 55, 0, 0, warsaw), true},
+		{"noon", "resets 12pm (Europe/Warsaw)", time.Date(2026, 10, 21, 12, 0, 0, 0, warsaw), true},
+		{"a date", "You've hit your weekly limit · resets Oct 22 at 8pm (Europe/Warsaw)", time.Date(2026, 10, 22, 20, 0, 0, 0, warsaw), true},
+		{"next year's date", "resets Jan 3 at 9am (Europe/Warsaw)", time.Date(2027, 1, 3, 9, 0, 0, 0, warsaw), true},
+		{"another zone", "resets 7:10pm (America/New_York)", time.Date(2026, 10, 20, 19, 10, 0, 0, mustZone(t, "America/New_York")), true},
+		{"no zone: now's", "resets 7:10pm", time.Date(2026, 10, 20, 19, 10, 0, 0, warsaw), true},
+		{"the last one", "resets 1pm (Europe/Warsaw)\nresets 7:10pm (Europe/Warsaw)", time.Date(2026, 10, 20, 19, 10, 0, 0, warsaw), true},
+		{"unknown zone", "resets 7:10pm (Mars/Olympus)", time.Time{}, false},
+		{"no reset", "You've hit your monthly spend limit. Run /usage-credits to manage your limit", time.Time{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ResetTime(tt.msg, now)
+			if ok != tt.ok || !got.Equal(tt.want) {
+				t.Errorf("ResetTime = %v, %v; want %v, %v", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func mustZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	l, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
 }
 
 func TestSpan(t *testing.T) {

@@ -48,6 +48,13 @@ type paneRow struct {
 	Context    string `tmux:"@agent_context"`
 	PR         string `tmux:"@dev_pr"`
 	Path       string `tmux:"pane_current_path"`
+	Prompts    string `tmux:"@agent_prompts"`
+	// A rate-limited worker's scheduled resume (scheduleResume)
+	ResumeAt      string `tmux:"@dev_resume_at"`
+	ResumePrompts string `tmux:"@dev_resume_prompts"`
+	ResumeSession string `tmux:"@dev_resume_session"`
+	AgentSession  string `tmux:"@agent_session"`
+	Resumes       string `tmux:"@dev_resumes"`
 }
 
 // teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
@@ -240,8 +247,8 @@ func (s *state) observePR(now time.Time, worker, since string, pr prCheck) (n No
 	return n, true
 }
 
-// Watch runs from the boss session pane is in (its previews): it checks on the boss's workers (see
-// state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
+// Watch runs from the boss session pane is in (its previews): it resumes the boss's workers whose rate
+// limit reset (resume), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
 // StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find.
@@ -278,6 +285,26 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if mates[r.Pane] || w.trusted == "" {
 			continue
 		}
+		if r.ResumeAt != "" {
+			resumed, err := resume(c, clk, r)
+			if resumed {
+				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt}
+				if _, err := b.Box.Add(n, now); err != nil {
+					return err
+				}
+				errs = append(errs, setNote(c, r.Pane, n.Summary()))
+			}
+			if err != nil && !strings.Contains(err.Error(), "can't find pane") {
+				// The boss was told dev resumes it
+				n := Note{Worker: r.Session, Kind: Failed, Text: clean("resuming it after its rate limit: " + err.Error()), Key: Failed + "\x00resume" + r.ResumeAt}
+				if _, err := b.Box.Add(n, now); err != nil {
+					return err
+				}
+			}
+			if resumed || err != nil {
+				continue
+			}
+		}
 		held := now.Sub(time.Unix(unix(r.Since), 0))
 		switch {
 		case w.trusted == agent.Working:
@@ -287,6 +314,19 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			}
 			if err != nil {
 				return err
+			}
+			if agent.ClaudeCommand(r.Command) && screen.ClaudeInterrupted(shot) {
+				// Esc ended its turn, which fired no hook: the check records it idle, moving @agent_since
+				st, err := control.ReadChecked(c, r.Pane)
+				if err != nil && strings.Contains(err.Error(), "can't find pane") {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if st.Since != r.Since {
+					continue
+				}
 			}
 			w.screen = fmt.Sprintf("%x", sha256.Sum256([]byte(screen.Snapshot(shot))))
 			w.parked = agent.ClaudeCommand(r.Command) && screen.ClaudeState(shot) == agent.Idle

@@ -632,3 +632,80 @@ func TestBossInboxAgentTeam(t *testing.T) {
 	check(t, "the teammate's next alike dialog is a new decision", run(boss, "working", prompt),
 		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 1 worker update(s):\n- w (`+mates[1]+`) needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
 }
+
+// A worker a rate limit stopped is resumed by its boss's Watch once the reset shown passed, unless it was
+// prompted since; its failed note says when, and its resume is a note too.
+func TestBossInboxRateLimitResume(t *testing.T) {
+	tmp := t.TempDir()
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir) // Watch runs in this process
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	run := func(pane, st, stdin string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	// A busy coordinator: notes wait in the inbox
+	s.T("new-session", "-d", "-s", "boss", "sleep 600")
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	prompt := `{"hook_event_name":"UserPromptSubmit"}`
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	run(boss, "working", prompt)
+	script := filepath.Join(tmp, "worker.sh")
+	writeFile(t, script, stubBoss) // an empty input box that logs what it's sent
+	worker := map[string]string{}
+	for _, w := range []string{"w", "busy"} {
+		s.T("new-session", "-d", "-s", w, "bash", script, "", filepath.Join(tmp, w+".log"))
+		s.T("set-option", "-t", "="+w+":", "@dev_started_by", "boss")
+		worker[w] = s.T("display", "-t", "="+w+":", "-p", "#{pane_id}")
+		waitFor(t, w+" box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", worker[w]), "❯") })
+		run(worker[w], "working", prompt)
+	}
+	// Reset half an hour ago: due at once
+	reset := time.Now().Add(-30 * time.Minute)
+	failure := `{"hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets ` + reset.Format("3:04pm") + `"}`
+	for _, w := range []string{"w", "busy"} {
+		run(worker[w], "idle", failure)
+	}
+	check(t, "resume scheduled", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resume_at"), strconv.FormatInt(reset.Truncate(time.Minute).Add(time.Minute).Unix(), 10))
+	check(t, "prompts recorded", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resume_prompts"), "1")
+	run(worker["busy"], "working", prompt) // prompted by hand since
+
+	b, ok, err := inbox.Here(s.tmux, boss)
+	if !ok || err != nil {
+		t.Fatalf("❌ no boss inbox: %v", err)
+	}
+	if err := inbox.Watch(s.tmux, control.RealClock, boss); err != nil {
+		t.Fatal(err)
+	}
+	bt, err := b.Box.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := reset.Truncate(time.Minute).Add(time.Minute).Format("15:04")
+	limit := "failed: rate_limit: You've hit your session limit · resets " + reset.Format("3:04pm") + "; dev resumes it at " + at
+	check(t, "notes", bt.String(), "[dev boss inbox] 3 worker update(s):\n- w "+limit+"\n- busy "+limit+"\n- w resumed: its rate limit reset, dev sent it: continue")
+	waitFor(t, "w sent the resume prompt", func() bool {
+		data, _ := os.ReadFile(filepath.Join(tmp, "w.log"))
+		return strings.Contains(string(data), inbox.ResumePrompt)
+	})
+	check(t, "w's resume done", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resume_at")+"/"+s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resumes"), "/1")
+	check(t, "busy's resume dropped", s.T("show-option", "-pqv", "-t", worker["busy"], "@dev_resume_at"), "")
+	data, _ := os.ReadFile(filepath.Join(tmp, "busy.log"))
+	check(t, "busy not sent anything", string(data), "")
+
+	// A finished turn ends the run of resumes; maxResumes in a row stops them
+	run(worker["w"], "idle", `{"hook_event_name":"Stop","last_assistant_message":"Done."}`)
+	check(t, "Stop clears the count", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resumes"), "")
+	s.T("set-option", "-p", "-t", worker["w"], "@dev_resumes", "3")
+	run(worker["w"], "working", prompt)
+	run(worker["w"], "idle", failure)
+	check(t, "no resume after 3", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_resume_at"), "")
+	check(t, "its note says so", s.T("show-option", "-pqv", "-t", worker["w"], "@dev_boss_note"),
+		"failed: rate_limit: You've hit your session limit · resets "+reset.Format("3:04pm")+"; resumed 3 times in a row, not resuming it again")
+}

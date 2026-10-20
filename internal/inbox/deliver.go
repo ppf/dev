@@ -229,7 +229,7 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 	// The user may have started typing while the inbox was locked
 	ok, err := ready()
 	if ok && err == nil {
-		err = control.Prompt(c, clk, a.Pane, bt.String())
+		_, err = control.Prompt(c, clk, a.Pane, bt.String())
 	}
 	if !ok || err != nil {
 		if rerr := b.Box.Restore(bt); rerr != nil {

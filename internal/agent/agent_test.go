@@ -148,6 +148,24 @@ func TestDialogGone(t *testing.T) {
 	}
 }
 
+func TestInterrupted(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	var calls [][]string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		calls = append(calls, args)
+		return "", nil
+	})
+	if err := Interrupted(c, "%1", "50", "7"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{==:#{@agent_prompts},7}}}",
+		"set-option -p -t %1 @agent_state idle ; set-option -p -t %1 @agent_since 100 ; set-option -pu -t %1 @agent_question"}
+	if len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("calls = %q, want one: %q", calls, want)
+	}
+}
+
 func TestResumeCommand(t *testing.T) {
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(transcript, nil, 0o644); err != nil {
@@ -332,6 +350,8 @@ func prHook(event, command string) Hook {
 }
 
 func TestRecordHook(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
 	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
 	tests := []struct {
 		name, state string

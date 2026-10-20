@@ -248,6 +248,20 @@ func Touch(c *tmux.Client, pane string) error {
 // writes run as one tmux command.
 func DialogGone(c *tmux.Client, pane, state, since string) error {
 	cond := "#{&&:#{==:#{@agent_state}," + Waiting + "},#{==:#{@agent_since}," + since + "}}"
+	return settle(c, pane, cond, state)
+}
+
+// Interrupted records Idle on a working pane whose turn Esc ended (Claude fires no hook for it), unless a
+// hook moved it since: since and prompts are the @agent_since and @agent_prompts read with the working
+// state, as a new prompt keeps it working without moving @agent_since.
+func Interrupted(c *tmux.Client, pane, since, prompts string) error {
+	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
+	return settle(c, pane, cond, Idle)
+}
+
+// settle records state on pane, unsetting @agent_question, when the format cond holds: the check and the
+// writes run as one tmux command.
+func settle(c *tmux.Client, pane, cond, state string) error {
 	set := strings.Join([]string{
 		"set-option -p -t " + pane + " @agent_state " + state,
 		"set-option -p -t " + pane + " @agent_since " + strconv.FormatInt(now().Unix(), 10),

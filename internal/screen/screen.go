@@ -31,11 +31,11 @@ func Plain(lines []string) []string {
 }
 
 // ClaudeInput finds Claude Code's own input box at the bottom of a screen's Plain lines: a ❯ prompt row
-// between two ─ rules (MinRule or longer), and the status lines under it; top and bottom are its rules.
-// ok=false without that box, or with a numbered option or dialog text between the rules (a question waiting
-// for an answer). Claude draws a dialog in the box's place.
+// between two ─ rules (MinRule or longer), and the status lines under it, maybe with its agent panel under
+// them; top and bottom are its rules. ok=false without that box, or with a numbered option or dialog text
+// between the rules (a question waiting for an answer). Claude draws a dialog in the box's place.
 func ClaudeInput(plain []string) (top, bottom int, ok bool) {
-	bottom = lastRule(plain, len(plain)-1, MaxBelowBox+1)
+	bottom = lastRule(plain, len(withoutPanel(plain))-1, MaxBelowBox+1)
 	if bottom < 0 {
 		return 0, 0, false
 	}
@@ -52,6 +52,26 @@ func ClaudeInput(plain []string) (top, bottom int, ok bool) {
 	return top, bottom, true
 }
 
+// panelRow is a row of the agent panel Claude draws under its status lines while it has teammates or
+// background agents ("⏺ main", "◯ sleep-a  Sleep 90 and report  21s"), the selected one marked ❯.
+var panelRow = regexp.MustCompile(`^(❯\s+)?[⏺◯●○◉]\s+\S`)
+
+// withoutPanel is plain without the agent panel at its bottom and the blank lines above it: one row per
+// agent, so it grows past MaxBelowBox.
+func withoutPanel(plain []string) []string {
+	end := len(plain)
+	for end > 0 && panelRow.MatchString(plain[end-1]) {
+		end--
+	}
+	if end == len(plain) {
+		return plain
+	}
+	for end > 0 && plain[end-1] == "" {
+		end--
+	}
+	return plain[:end]
+}
+
 // plainScreen is a captured screen's Plain lines without the blank ones at its bottom.
 func plainScreen(capture string) []string {
 	plain := Plain(strings.Split(capture, "\n"))
@@ -63,22 +83,99 @@ func plainScreen(capture string) []string {
 
 // ClaudeState is what Claude's captured screen shows when its own input box is at the bottom, so no
 // dialog is open: agent.Working while it offers "esc to interrupt" (in the status lines under the box, or
-// on the spinner line above it), else agent.Idle. "" without the box: a dialog, or a screen it doesn't know.
+// on the spinner line above it) or shows its spinner line ("✻ Nucleating… (5s)", no "esc to interrupt"
+// since 2.1.304; maybe with a tip under it), else agent.Idle. "" without the box: a dialog, or a screen it
+// doesn't know.
 func ClaudeState(capture string) string {
 	plain := plainScreen(capture)
 	top, bottom, ok := ClaudeInput(plain)
 	if !ok {
 		return ""
 	}
-	interruptible := func(l string) bool { return strings.Contains(l, "esc to interrupt") }
-	above := top - 1 // the spinner line: the last line above the box that isn't blank
-	for above >= 0 && plain[above] == "" {
-		above--
-	}
-	if slices.ContainsFunc(plain[bottom+1:], interruptible) || above >= 0 && interruptible(plain[above]) {
+	if slices.ContainsFunc(plain[bottom+1:], interruptible) {
 		return agent.Working
 	}
+	raw := strings.Split(capture, "\n")
+	for i, seen := top-1, 0; i >= 0 && seen < 2; i-- {
+		if plain[i] == "" {
+			continue
+		}
+		// The spinner starts its line; a reply's lines (a "* item…" too) are indented
+		if interruptible(plain[i]) || spinner.MatchString(ansi.Strip(raw[i])) && !strings.HasPrefix(plain[i], "⎿") {
+			return agent.Working
+		}
+		seen++
+	}
 	return agent.Idle
+}
+
+func interruptible(l string) bool { return strings.Contains(l, "esc to interrupt") }
+
+// ClaudeInterrupted reports Claude's screen after Esc ended its turn, which fires no hook: its idle input box
+// under "⎿  Interrupted · What should Claude do instead?", maybe with a status line ("◐ medium · /effort")
+// between. A prompt sent since, or a spinner, sits between them instead.
+func ClaudeInterrupted(capture string) bool {
+	if ClaudeState(capture) != agent.Idle {
+		return false
+	}
+	plain := plainScreen(capture)
+	top, _, _ := ClaudeInput(plain)
+	for i, seen := top-1, 0; i >= 0 && seen < 3; i-- {
+		switch l := plain[i]; {
+		case l == "":
+			continue
+		case strings.HasPrefix(l, "⎿") && strings.Contains(l, "Interrupted"):
+			return true
+		case strings.HasPrefix(l, "❯") || spinner.MatchString(l):
+			return false
+		}
+		seen++
+	}
+	return false
+}
+
+// ClaudeQueued reports a prompt queued while Claude works: it reads it at its turn's next step, showing
+// "Press up to edit queued messages" in its empty input box until then.
+func ClaudeQueued(capture string) bool {
+	plain := plainScreen(capture)
+	top, _, ok := ClaudeInput(plain)
+	return ok && strings.Contains(plain[top+1], "edit queued messages")
+}
+
+// ClaudeBox is the text in Claude's input box (its rows between the rules, ❯ dropped, placeholder text
+// included); ok=false without the box.
+func ClaudeBox(capture string) (text string, ok bool) {
+	plain := plainScreen(capture)
+	top, bottom, ok := ClaudeInput(plain)
+	if !ok {
+		return "", false
+	}
+	rows := slices.Clone(plain[top+1 : bottom])
+	rows[0] = strings.TrimSpace(strings.TrimPrefix(rows[0], "❯"))
+	return strings.Join(rows, "\n"), true
+}
+
+// ClaudeCacheDialog reports the dialog /effort and /model open mid-conversation ("Change effort level?",
+// "Switch model?" under a ▔ rule), as the switch re-reads the conversation without its prompt cache; its
+// option 1 switches.
+func ClaudeCacheDialog(capture string) bool {
+	plain := plainScreen(capture)
+	if _, _, ok := ClaudeInput(plain); ok {
+		return false
+	}
+	i := len(plain) - 1
+	for i >= 0 && !strings.HasPrefix(plain[i], strings.Repeat("▔", MinRule)) {
+		i--
+	}
+	if i < 0 {
+		return false
+	}
+	dialog := plain[i+1:]
+	text := strings.Join(strings.Fields(strings.Join(dialog, " ")), " ")
+	return strings.Contains(text, "This conversation is cached") &&
+		slices.ContainsFunc(dialog, func(l string) bool {
+			return strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(l, "❯")), "1. Yes")
+		})
 }
 
 var (

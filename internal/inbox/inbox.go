@@ -34,6 +34,7 @@ const (
 	Asks     = "asks" // a turn that ended on a question
 	Stuck    = "stuck"
 	Context  = "high context"
+	Resumed  = "resumed"
 )
 
 // Note is one line about a worker; Key dedupes it against the worker's previous note.
@@ -71,6 +72,7 @@ type hookEvent struct {
 	Message          string          `json:"message"`
 	Last             string          `json:"last_assistant_message"`
 	Error            string          `json:"error"`
+	ErrorDetails     string          `json:"error_details"`
 	Tool             string          `json:"tool_name"`
 	ToolInput        json.RawMessage `json:"tool_input"`
 }
@@ -103,7 +105,15 @@ func FromHook(worker string, input []byte) (Note, bool) {
 	case e.Name == "Stop":
 		n = Note{Kind: Finished, Text: clean(e.Last)}
 	case e.Name == "StopFailure":
-		n = Note{Kind: Failed, Text: cmp.Or(clean(e.Error), "stopped on an error")}
+		// The error's type, then what Claude showed ("You've hit your session limit · resets 7:10pm (Europe/Warsaw)")
+		text := cmp.Or(e.Error, "stopped on an error")
+		if e.Last != "" {
+			text += ": " + e.Last
+		}
+		if e.ErrorDetails != "" && e.ErrorDetails != e.Last {
+			text += " (" + e.ErrorDetails + ")"
+		}
+		n = Note{Kind: Failed, Text: clean(text)}
 	case e.Name == "Notification" && (e.NotificationType == "permission_prompt" || e.NotificationType == "elicitation_dialog"):
 		n = Note{Kind: Decision, Text: clean(e.Message)}
 	case e.Name == "PermissionRequest": // Codex's; Claude's hooks report permissions as a Notification
