@@ -33,9 +33,9 @@ type paneRow struct {
 	Since      string `tmux:"@agent_since"`
 }
 
-// agentPanes maps each session in rows to its agent pane (agent.Detect, as dev agent get picks it). Other
-// Claude panes in a session (an agent team's teammates) send only their decisions.
-func agentPanes(rows []paneRow) map[string]string {
+// teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
+// get picks it), in sessions that have one: an agent team's teammates, which send only their decisions.
+func teammates(rows []paneRow) map[string]bool {
 	panes := map[string][]agent.Pane{}
 	sidebars := map[string]string{}
 	for _, r := range rows {
@@ -43,13 +43,14 @@ func agentPanes(rows []paneRow) map[string]string {
 			Command: r.Command, State: r.State, StateCmd: r.StateCmd})
 		sidebars[r.Session] = r.Sidebar
 	}
-	ids := map[string]string{}
+	mates := map[string]bool{}
 	for session, ps := range panes {
-		if a, ok := agent.Detect(ps, sidebars[session]); ok {
-			ids[session] = a.Pane.ID
+		a, ok := agent.Detect(ps, sidebars[session])
+		for _, p := range ps {
+			mates[p.ID] = ok && p.ID != a.Pane.ID
 		}
 	}
-	return ids
+	return mates
 }
 
 // stuck is r's stuck note at now, ok=false when r isn't stuck.
@@ -85,10 +86,10 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if err != nil {
 		return err
 	}
-	agents := agentPanes(rows)
+	mates := teammates(rows)
 	var noteErrs []error
 	for _, r := range rows {
-		if !sidebar.Names(r.StartedBy, id, b.Name, true) || agents[r.Session] != r.Pane {
+		if !sidebar.Names(r.StartedBy, id, b.Name, true) || mates[r.Pane] {
 			continue
 		}
 		n, ok := r.stuck(clk.Now())

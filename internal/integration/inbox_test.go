@@ -415,4 +415,10 @@ func TestBossInboxAgentTeam(t *testing.T) {
 		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 3 worker update(s):\n- w stuck: working for 21m\n`+
 			`- w finished: Done.\n- w (`+mates[1]+`) needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
 	check(t, "teammates get no preview note", s.T("show-option", "-pqv", "-t", mates[0], inbox.OptNote), "")
+
+	run(mates[1], "working", prompt)
+	time.Sleep(1100 * time.Millisecond) // @agent_since counts seconds
+	run(mates[1], "waiting", ask)
+	check(t, "the teammate's next alike dialog is a new decision", run(boss, "working", prompt),
+		`{"hookSpecificOutput":{"additionalContext":"[dev boss inbox] 1 worker update(s):\n- w (`+mates[1]+`) needs a decision: Allow Bash?","hookEventName":"UserPromptSubmit"}}`+"\n")
 }
