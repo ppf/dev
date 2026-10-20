@@ -86,14 +86,14 @@ func runPicker(cmd *cobra.Command) error {
 	if err != nil || !res.Chosen {
 		return err
 	}
-	if res.Session {
-		return openProject(cmd, res.Project.Name, "", false, false, "")
-	}
 	dir, err := res.Project.Dir()
 	if err != nil {
 		return err
 	}
 	c := tmux.New()
+	if res.Session {
+		return open.Run(c, open.Options{Path: dir, Name: res.Project.Name}, cmd.OutOrStdout())
+	}
 	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 		return err
 	}

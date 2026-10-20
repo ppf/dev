@@ -40,5 +40,5 @@ func projectFinder(projects []config.Project) finder {
 		rows[i] = strings.TrimSpace(p.Name + " " + p.Description)
 	}
 	preview := func(row int) string { return "Path: " + projects[row].Path }
-	return newFinder("Select project  ctrl-o: plain", rows, preview)
+	return newFinder("Select project  ctrl-o: plain session", rows, preview)
 }

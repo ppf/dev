@@ -141,8 +141,8 @@ func TestFinderNoWrap(t *testing.T) {
 func TestFinderEnter(t *testing.T) {
 	rows := []string{"dev Go rewrite", "web site"}
 	f, quit := feed(t, newFinder("Select project", rows, nil), append(typed("web"), key(tea.KeyEnter))...)
-	if !quit || f.aborted || f.picked() != 1 {
-		t.Errorf("quit=%v aborted=%v picked=%d, want web row", quit, f.aborted, f.picked())
+	if !quit || f.aborted || f.alt || f.picked() != 1 {
+		t.Errorf("quit=%v aborted=%v alt=%v picked=%d, want web row", quit, f.aborted, f.alt, f.picked())
 	}
 
 	f, quit = feed(t, newFinder("Select project", rows, nil), append(typed("zzz"), key(tea.KeyEnter))...)
@@ -170,7 +170,7 @@ func TestProjectView(t *testing.T) {
 	})
 	f, _ = feed(t, f, tea.WindowSizeMsg{Width: 80, Height: 10}, key(tea.KeyDown))
 	lines := strings.Split(f.View(), "\n")
-	if !strings.HasPrefix(lines[0], "> ") || !strings.Contains(lines[1], "2/2") || !strings.Contains(lines[2], "Select project  ctrl-o: plain") {
+	if !strings.HasPrefix(lines[0], "> ") || !strings.Contains(lines[1], "2/2") || !strings.Contains(lines[2], "Select project  ctrl-o: plain session") {
 		t.Errorf("chrome lines = %q", lines[:3])
 	}
 	if !strings.HasPrefix(lines[3], "  dev Go rewrite") || !strings.HasPrefix(lines[4], "> web") {
