@@ -135,6 +135,24 @@ func TestDialogGone(t *testing.T) {
 	}
 }
 
+func TestInterrupted(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	var calls [][]string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		calls = append(calls, args)
+		return "", nil
+	})
+	if err := Interrupted(c, "%1", "50", "7"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{==:#{@agent_prompts},7}}}",
+		"set-option -p -t %1 @agent_state idle ; set-option -p -t %1 @agent_since 100 ; set-option -pu -t %1 @agent_question"}
+	if len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("calls = %q, want one: %q", calls, want)
+	}
+}
+
 func TestResumeCommand(t *testing.T) {
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(transcript, nil, 0o644); err != nil {
@@ -319,6 +337,8 @@ func prHook(event, command string) Hook {
 }
 
 func TestRecordHook(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
 	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
 	tests := []struct {
 		name, state string
@@ -327,10 +347,10 @@ func TestRecordHook(t *testing.T) {
 	}{
 		{"state", Working, Hook{Event: "PostToolUse"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"prompt counted", Working, Hook{Event: "UserPromptSubmit"}, "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command} ; " +
-			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1}"},
+			"set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; set-option -p -t %1 @agent_prompt_at 100"},
 		{"grok prompt records its id", Working, Hook{Event: "UserPromptSubmit", PromptID: "p1"}, "set-option -p -t %1 @agent_state working ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pF -t %1 @agent_prompts #{e|+:#{@agent_prompts},1} ; " +
-			"set-option -p -t %1 @agent_prompt_id p1"},
+			"set-option -p -t %1 @agent_prompt_at 100 ; set-option -p -t %1 @agent_prompt_id p1"},
 		{"a turn's end clears the question", Idle, Hook{Event: "Stop"}, "set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"waiting records why", Waiting, Hook{Event: "Notification", NotificationType: "permission_prompt"}, "set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt"},

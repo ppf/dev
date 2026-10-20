@@ -53,6 +53,7 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 // started worker's agent pane gets the note too (OptNote), also with the inbox off or the boss gone. A
 // teammate pane beside it (an agent team's) sends only its decisions, named "<worker> (%N)".
 // A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
+// A rate limit schedules the worker's resume (scheduleResume), which its failed note tells.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil {
@@ -89,11 +90,23 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		n.Worker += " (" + pane + ")"
 		return errors.Join(askErr, deliverNote(c, clk, b, w, n, e.Name))
 	}
+	var resumeErr error
+	switch {
+	case e.Name == "StopFailure" && ok:
+		// Only a boss's Watch resumes it
+		var resume string
+		if resume, resumeErr = scheduleResume(c, clk.Now(), pane, input); resume != "" {
+			n.Text += "; " + resume
+		}
+	case e.Name == "Stop":
+		// A finished turn ends a run of rate limits
+		resumeErr = unsetResume(c, pane, true)
+	}
 	if ok {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-	return errors.Join(askErr, err, setNote(c, pane, n.Summary()))
+	return errors.Join(askErr, resumeErr, err, setNote(c, pane, n.Summary()))
 }
 
 // asked is what pane's dialog asks (agent.Question.Ask), clipped, when its question (@agent_question) is the

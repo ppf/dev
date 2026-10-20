@@ -43,6 +43,48 @@ func TestList(t *testing.T) {
 	}
 }
 
+// A working Claude whose input box says it holds a queued prompt is listed queued.
+func TestListQueued(t *testing.T) {
+	queued := "✻ Nucleating… (5s)\n" + rule + "\n❯ Press up to edit queued messages\n" + rule + "\n"
+	rows := paneRow("busy", "%1", "2.1.3", "working", "2.1.3", "", "") + paneRow("free", "%2", "2.1.3", "working", "2.1.3", "", "") +
+		paneRow("idle", "%3", "2.1.3", "idle", "2.1.3", "", "")
+	var captured []string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "capture-pane" {
+			captured = append(captured, args[len(args)-1])
+			if args[len(args)-1] == "%1" {
+				return queued, nil
+			}
+			return workingScreen, nil
+		}
+		return rows, nil
+	})
+	got, err := List(c)
+	if err != nil || len(got) != 3 || !got[0].Queued || got[1].Queued || got[2].Queued {
+		t.Errorf("List = %+v, %v; want only busy queued", got, err)
+	}
+	if !slices.Equal(captured, []string{"%1", "%2"}) {
+		t.Errorf("captured %q, want only the working panes", captured)
+	}
+	a, err := Resolve(c, "busy")
+	if err != nil || a.Queued {
+		t.Errorf("Resolve(busy) = %+v, %v; want no capture", a, err)
+	}
+	if err := a.ReadQueued(c); err != nil || !a.Queued {
+		t.Errorf("ReadQueued(busy) = %v, queued %v; want queued", err, a.Queued)
+	}
+	// A pane closed since list-panes isn't queued, and doesn't fail the list
+	gone := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "capture-pane" {
+			return "", &tmux.Error{Err: errors.New("exit status 1"), Stderr: "can't find pane: %1"}
+		}
+		return rows, nil
+	})
+	if got, err := List(gone); err != nil || len(got) != 3 || got[0].Queued {
+		t.Errorf("List(pane gone) = %+v, %v", got, err)
+	}
+}
+
 func TestListEmptyIsNotNil(t *testing.T) {
 	c := tmux.NewFake(func(args []string) (string, error) { return paneRow("shell", "%5", "zsh", "", "", "", ""), nil })
 	got, err := List(c)
@@ -95,10 +137,12 @@ func TestRead(t *testing.T) {
 }
 
 // promptRig fakes a pane whose status follows statuses, one per display-message (the last repeats), and
-// whose screen is screen; it records the other commands and the pasted text.
+// whose screen is screen, or follows screens one per capture-pane (the last repeats); it records the other
+// commands and the pasted text.
 type promptRig struct {
 	statuses []Status
 	screen   string
+	screens  []string
 	cmds     []string
 	pasted   string
 	pasteErr error
@@ -112,9 +156,16 @@ func (r *promptRig) client() *tmux.Client {
 			if len(r.statuses) > 1 {
 				r.statuses = r.statuses[1:]
 			}
-			return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since), nil
+			return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since, st.PromptAt), nil
 		case "capture-pane":
-			return r.screen, nil
+			if len(r.screens) == 0 {
+				return r.screen, nil
+			}
+			screen := r.screens[0]
+			if len(r.screens) > 1 {
+				r.screens = r.screens[1:]
+			}
+			return screen, nil
 		case "load-buffer":
 			b, err := os.ReadFile(args[3])
 			r.pasted = string(b)
@@ -191,20 +242,24 @@ func TestPromptWait(t *testing.T) {
 func TestPrompt(t *testing.T) {
 	// A busy agent queues the prompt, unless its screen shows a dialog its hooks haven't reported yet
 	r := &promptRig{statuses: []Status{status("working", "1")}, screen: workingScreen}
-	if err := Prompt(r.client(), fakeClock(), "%1", "next"); err != nil || r.pasted != "next" {
-		t.Errorf("Prompt(busy) = %v, pasted %q", err, r.pasted)
+	if queued, err := Prompt(r.client(), fakeClock(), "%1", "next"); err != nil || !queued || r.pasted != "next" {
+		t.Errorf("Prompt(busy) = %v, %v, pasted %q; want queued", queued, err, r.pasted)
+	}
+	r = &promptRig{statuses: []Status{status("idle", "1")}}
+	if queued, err := Prompt(r.client(), fakeClock(), "%1", "next"); err != nil || queued {
+		t.Errorf("Prompt(idle) = %v, %v; want sent, not queued", queued, err)
 	}
 	r = &promptRig{statuses: []Status{status("working", "1")}, screen: dialogScreen}
-	if err := Prompt(r.client(), fakeClock(), "%1", "next"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", "next"); err == nil || r.pasted != "" {
 		t.Errorf("Prompt(busy, dialog drawn) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 	r = &promptRig{statuses: []Status{waitingFor("elicitation_dialog", "1")}}
-	if err := Prompt(r.client(), fakeClock(), "%1", "2"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", "2"); err == nil || r.pasted != "" {
 		t.Errorf("Prompt(dialog) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 	// A failed paste deletes the buffer and never presses Enter
 	r = &promptRig{statuses: []Status{status("idle", "1")}, pasteErr: errors.New("no pane")}
-	err := Prompt(r.client(), fakeClock(), "%1", "x")
+	_, err := Prompt(r.client(), fakeClock(), "%1", "x")
 	buffer := "dev-agent-" + strconv.Itoa(os.Getpid())
 	if want := []string{"paste-buffer -p -d -b " + buffer + " -t %1", "delete-buffer -b " + buffer}; err == nil || !slices.Equal(r.cmds, want) {
 		t.Errorf("Prompt(paste fails) = %v, cmds %q; want error, %q", err, r.cmds, want)
@@ -217,7 +272,112 @@ var (
 	idleScreen    = "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ⏸ manual mode on · ? for shortcuts\n\n"
 	workingScreen = "⏺ Next step\n\n" + rule + "\n❯ \n" + rule + "\n  ⏸ manual mode on · esc to interrupt\n"
 	dialogScreen  = rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n"
+	cacheScreen   = strings.Repeat("▔", 40) + "\n   Change effort level?\n   This conversation is cached for the current\n   effort level.\n   ❯ 1. Yes, switch to high\n     2. No, go back\n"
+	commandScreen = "⏺ Done.\n\n" + rule + "\n❯ /effort high\n" + rule + "\n  ⏸ manual mode on · ? for shortcuts\n"
+	doneScreen    = "  ⎿  Set effort level to high\n\n" + rule + "\n❯ \n" + rule + "\n  ⏸ manual mode on · ? for shortcuts\n"
 )
+
+// TestPromptCommand: Claude fires no hook for a slash command it runs itself, and /effort and /model open
+// a dialog mid-conversation, which the prompt confirms once it shows.
+func TestPromptCommand(t *testing.T) {
+	press := "send-keys -t %1 -l 1"
+	pressed := func(r *promptRig) int { return strings.Count(strings.Join(r.cmds, "\n"), press) }
+	tests := []struct {
+		name    string
+		screens []string
+		errText string
+		presses int
+	}{
+		{"cache dialog confirmed once", []string{commandScreen, cacheScreen, cacheScreen, doneScreen}, "", 1},
+		{"no dialog", []string{doneScreen}, "", 0},
+		{"a turn starts (a skill)", []string{workingScreen}, "", 0},
+		{"another dialog", []string{dialogScreen}, "/effort opened a dialog: read it and answer with send-keys", 0},
+		{"left in the input box", []string{commandScreen}, "/effort not seen running within 3s: read the pane", 0},
+		{"left in the input box, wrapped", []string{strings.Replace(commandScreen, "❯ /effort high", "❯ /effort\n  high", 1)}, "/effort not seen running within 3s: read the pane", 0},
+		{"dialog still open after 1", []string{cacheScreen}, "/effort not seen running within 3s: read the pane", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &promptRig{statuses: []Status{status("idle", "1")}, screens: tt.screens}
+			_, err := Prompt(r.client(), fakeClock(), "%1", "/effort high")
+			if tt.errText == "" && err != nil || tt.errText != "" && (err == nil || err.Error() != tt.errText) {
+				t.Errorf("Prompt = %v, want %q", err, tt.errText)
+			}
+			if got := pressed(r); got != tt.presses {
+				t.Errorf("pressed 1 %d times, want %d; cmds %q", got, tt.presses, r.cmds)
+			}
+		})
+	}
+	// Plain text isn't a command: no screen read, no 1
+	r := &promptRig{statuses: []Status{status("idle", "1")}, screen: cacheScreen}
+	if _, err := Prompt(r.client(), fakeClock(), "%1", "/effort high\nand more"); err != nil || pressed(r) != 0 {
+		t.Errorf("Prompt(multi-line) = %v, cmds %q", err, r.cmds)
+	}
+
+	// PromptWait: a command counts no prompt, its screen says it ran
+	idle := []Status{status("idle", "1")}
+	working := slices.Repeat([]string{workingScreen}, 60) // 12s of polls
+	waits := []struct {
+		name    string
+		screens []string
+		err     error
+		presses int
+	}{
+		{"local command after its dialog", []string{commandScreen, cacheScreen, doneScreen}, nil, 1},
+		{"a long command (/compact) outlasts the stall", append(working, doneScreen), nil, 0},
+		{"left in the input box", []string{commandScreen}, ErrStalled, 0},
+	}
+	for _, tt := range waits {
+		t.Run("wait: "+tt.name, func(t *testing.T) {
+			r := &promptRig{statuses: idle, screens: tt.screens}
+			st, err := PromptWait(r.client(), fakeClock(), "%1", "/effort high", 5*time.Second, time.Minute)
+			if !errors.Is(err, tt.err) || tt.err == nil && st.Trusted() != "idle" {
+				t.Errorf("PromptWait = %q, %v; want idle, %v", st.Trusted(), err, tt.err)
+			}
+			if got := pressed(r); got != tt.presses {
+				t.Errorf("pressed 1 %d times, want %d", got, tt.presses)
+			}
+		})
+	}
+	// A command that starts a turn counts a prompt like any other
+	r = &promptRig{statuses: []Status{status("idle", "1"), status("working", "2"), status("idle", "2")}, screen: workingScreen}
+	if st, err := PromptWait(r.client(), fakeClock(), "%1", "/review", 5*time.Second, time.Minute); err != nil || st.Trusted() != "idle" {
+		t.Errorf("PromptWait(skill) = %q, %v; want idle", st.Trusted(), err)
+	}
+}
+
+// TestInterrupted: Esc ending a turn fires no hook, so a working state is checked against the screen.
+func TestInterrupted(t *testing.T) {
+	working := status("working", "3")
+	working.Since = "50"
+	settle := "if-shell -F -t %1 #{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{==:#{@agent_prompts},3}}} set-option -p -t %1 @agent_state idle"
+	settled := func(r *promptRig) bool {
+		return slices.ContainsFunc(r.cmds, func(c string) bool { return strings.HasPrefix(c, settle) })
+	}
+	r := &promptRig{statuses: []Status{working, status("idle", "3")}, screen: idleScreen}
+	if st, err := PromptWait(r.client(), fakeClock(), "%1", "next", 5*time.Second, time.Minute); !errors.Is(err, ErrStalled) || st.Trusted() != "idle" || !settled(r) || r.pasted != "next" {
+		t.Errorf("PromptWait(interrupted) = %q, %v, settled %v, pasted %q; want sent", st.Trusted(), err, settled(r), r.pasted)
+	}
+	r = &promptRig{statuses: []Status{working}, screen: workingScreen}
+	if _, err := PromptWait(r.client(), fakeClock(), "%1", "next", 5*time.Second, time.Minute); err == nil || settled(r) {
+		t.Errorf("PromptWait(working) = %v, settled %v; want refused", err, settled(r))
+	}
+	// A prompt just sent may not be drawn yet over the last turn's "Interrupted"
+	fresh := working
+	fresh.PromptAt = strconv.FormatInt(time.Now().Unix(), 10)
+	r = &promptRig{statuses: []Status{fresh}, screen: idleScreen}
+	if st, err := ReadChecked(r.client(), "%1"); err != nil || st.Trusted() != "working" || settled(r) {
+		t.Errorf("ReadChecked(just prompted) = %q, %v, settled %v; want working", st.Trusted(), err, settled(r))
+	}
+	// wait notices within screenEvery: its first read, five polls, then the screen check
+	r = &promptRig{statuses: append(slices.Repeat([]Status{working}, 7), status("idle", "3")), screens: []string{workingScreen, idleScreen}}
+	clk := fakeClock()
+	start := clk.Now()
+	st, err := Wait(r.client(), clk, "%1", time.Minute, func(s Status) bool { return s.Trusted() == "idle" })
+	if err != nil || st.Trusted() != "idle" || !settled(r) || clk.Now().Sub(start) > 2*screenEvery {
+		t.Errorf("Wait(interrupted later) = %q, %v after %s, settled %v", st.Trusted(), err, clk.Now().Sub(start), settled(r))
+	}
+}
 
 // TestPromptDecisionGone: Claude fires no hook when its dialog is answered No or Esc, so the waiting state
 // is checked against the screen before a prompt is refused.
@@ -249,7 +409,7 @@ func TestPromptDecisionGone(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &promptRig{statuses: tt.statuses, screen: tt.screen}
-			err := Prompt(r.client(), fakeClock(), "%1", "do X instead")
+			_, err := Prompt(r.client(), fakeClock(), "%1", "do X instead")
 			if sent := r.pasted != ""; sent != tt.sent || sent != (err == nil) {
 				t.Errorf("Prompt = %v, pasted %q; want sent %v", err, r.pasted, tt.sent)
 			}
@@ -277,7 +437,7 @@ func TestPromptDecisionGone(t *testing.T) {
 
 func TestPromptEmpty(t *testing.T) {
 	r := &promptRig{statuses: []Status{status("idle", "1")}}
-	if err := Prompt(r.client(), fakeClock(), "%1", " \n"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", " \n"); err == nil || r.pasted != "" {
 		t.Errorf("Prompt(blank) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 }

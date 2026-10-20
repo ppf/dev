@@ -39,6 +39,8 @@ type Agent struct {
 	Pane    string `json:"pane"`
 	Label   string `json:"agent"` // "Claude", "Codex" or "Grok"
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
+	// Queued marks a working Claude holding a prompt it reads at its turn's next step (screen.ClaudeQueued).
+	Queued  bool   `json:"queued,omitempty"`
 	Project string `json:"project"`
 	Branch  string `json:"branch"`
 	Path    string `json:"path"`
@@ -80,11 +82,27 @@ func List(c *tmux.Client) ([]Agent, error) {
 	}
 	for i := range agents {
 		agents[i].Branch = sidebar.Branch(agents[i].Path)
+		if err := agents[i].ReadQueued(c); err != nil {
+			return nil, err
+		}
 	}
 	return agents, nil
 }
 
-// list is List without the branches, which cost a git run per agent.
+// ReadQueued sets Queued: whether a working Claude holds a queued prompt (a capture, so only list and get).
+func (a *Agent) ReadQueued(c *tmux.Client) error {
+	if a.State != agent.Working || a.Label != "Claude" {
+		return nil
+	}
+	capture, err := c.Run("capture-pane", "-p", "-t", a.Pane)
+	if err != nil && strings.Contains(err.Error(), "can't find pane") {
+		return nil // closed since list-panes: nothing queued
+	}
+	a.Queued = err == nil && screen.ClaudeQueued(capture)
+	return err
+}
+
+// list is List without the branches and queued prompts, which cost a git run or a capture per agent.
 func list(c *tmux.Client) ([]Agent, error) {
 	rows, err := tmux.Query[row](c, "list-panes", "-a")
 	if err != nil {
@@ -189,6 +207,7 @@ type Status struct {
 	Prompts    string `tmux:"@agent_prompts"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
+	PromptAt   string `tmux:"@agent_prompt_at"`
 }
 
 // Trusted is the state when the hook that wrote it still runs in the pane, else "".
@@ -203,6 +222,12 @@ func (s Status) checkPromptable() error {
 		return nil
 	}
 	return fmt.Errorf("agent is waiting for a decision (%s): read it and answer with send-keys", cmp.Or(s.WaitingFor, "unknown"))
+}
+
+// Idle reports an agent idle, or waiting only because it sat idle: one a prompt starts a turn in.
+func (s Status) Idle() bool {
+	st := s.Trusted()
+	return st == agent.Idle || st == agent.Waiting && s.WaitingFor == agent.IdlePrompt
 }
 
 // Settled reports an agent done with its turn: idle, or waiting for the user.
@@ -227,15 +252,22 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 	return rows[0], nil
 }
 
-// ReadChecked is ReadStatus, but a decision (agent.Deciding) is checked against pane's screen first: Claude
-// fires no hook when its dialog is answered No or Esc, so the state would stay waiting. Its own input box
-// back at the bottom (screen.ClaudeState) means no dialog is open; the state it shows, idle or working, is
-// recorded and returned.
+// ReadChecked is ReadStatus, but a Claude pane's decision (agent.Deciding) or working state is checked
+// against its screen first, as Claude fires no hook when its dialog is answered No or Esc, or Esc ends its
+// turn. For a decision, its own input box back at the bottom (screen.ClaudeState) means no dialog is open;
+// the state it shows, idle or working, is recorded and returned. A working pane showing its turn
+// interrupted (screen.ClaudeInterrupted) is recorded idle.
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	st, err := ReadStatus(c, pane)
-	// Only permission prompts and questions: no other dialog's screen is known to replace the input box
-	if err != nil || st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt || !agent.ClaudeCommand(st.Command) {
+	if err != nil || !agent.ClaudeCommand(st.Command) {
 		return st, err
+	}
+	if st.Trusted() == agent.Working {
+		return checkInterrupted(c, pane, st)
+	}
+	// Only permission prompts and questions: no other dialog's screen is known to replace the input box
+	if st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt {
+		return st, nil
 	}
 	// Claude draws a dialog seconds before its Notification records it: a fresh decision's dialog may not be
 	// on screen yet
@@ -255,6 +287,22 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 		return st, err
 	}
 	// A hook may have moved the pane on meanwhile
+	return ReadStatus(c, pane)
+}
+
+// checkInterrupted records working pane st idle when its screen shows Esc ended its turn. Not within
+// dialogGrace of a prompt: its hook may run before Claude draws it, under the last turn's "Interrupted".
+func checkInterrupted(c *tmux.Client, pane string, st Status) (Status, error) {
+	if sec, err := strconv.ParseInt(st.PromptAt, 10, 64); err == nil && now().Sub(time.Unix(sec, 0)) < dialogGrace {
+		return st, nil
+	}
+	capture, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil || !screen.ClaudeInterrupted(capture) {
+		return st, err
+	}
+	if err := agent.Interrupted(c, pane, st.Since, st.Prompts); err != nil {
+		return st, err
+	}
 	return ReadStatus(c, pane)
 }
 
@@ -279,7 +327,7 @@ const pollInterval = 200 * time.Millisecond
 // Wait polls pane until done reports true for its status, or timeout passes (ErrTimeout). A pane
 // without a trusted state (Codex or Grok without its hooks) fails at once.
 func Wait(c *tmux.Client, clk Clock, pane string, timeout time.Duration, done func(Status) bool) (Status, error) {
-	st, err := ReadStatus(c, pane)
+	st, err := ReadChecked(c, pane)
 	if err != nil {
 		return st, err
 	}
@@ -293,13 +341,22 @@ func Wait(c *tmux.Client, clk Clock, pane string, timeout time.Duration, done fu
 // until the next SessionStart.
 const lostGrace = 3 * time.Second
 
+// screenEvery is how often poll checks the pane's screen (ReadChecked) instead of only its state.
+const screenEvery = time.Second
+
 // poll reads pane's status until check is done or fails, the state stays untrusted for lostGrace
-// (errGone), or timeout passes (ErrTimeout); check also gets the time since polling started.
+// (errGone), or timeout passes (ErrTimeout); check also gets the time since polling started. Every
+// screenEvery it reads it with ReadChecked, so a turn ended by Esc doesn't stay working.
 func poll(c *tmux.Client, clk Clock, pane string, timeout time.Duration, check func(Status, time.Duration) (bool, error)) (Status, error) {
 	start := clk.Now()
 	var lost time.Time
+	checked := start
 	for {
-		st, err := ReadStatus(c, pane)
+		read := ReadStatus
+		if clk.Now().Sub(checked) >= screenEvery {
+			read, checked = ReadChecked, clk.Now()
+		}
+		st, err := read(c, pane)
 		if err != nil {
 			return st, err
 		}
@@ -327,27 +384,101 @@ func poll(c *tmux.Client, clk Clock, pane string, timeout time.Duration, check f
 const enterDelay = 150 * time.Millisecond
 
 // Prompt pastes text into pane as one bracketed paste, then presses Enter, so multi-line text submits
-// as a single prompt. A busy agent queues it; one waiting on a decision, or a busy Claude whose screen shows
-// no input box (a dialog not reported yet), is refused.
-func Prompt(c *tmux.Client, clk Clock, pane, text string) error {
+// as a single prompt. A busy agent queues it (queued=true); one waiting on a decision, or a busy Claude whose
+// screen shows no input box (a dialog not reported yet), is refused. A slash command sent to an idle Claude
+// is watched for up to commandWait until it ran (see command); not seen running by then is an error.
+func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err error) {
 	st, err := ReadChecked(c, pane)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := st.checkPromptable(); err != nil {
-		return err
+		return false, err
 	}
-	if st.Trusted() == agent.Working && agent.ClaudeCommand(st.Command) {
+	claude := agent.ClaudeCommand(st.Command)
+	queued = st.Trusted() == agent.Working && claude
+	if queued && claude {
 		// Claude records a dialog seconds after drawing it (not at all while someone types in it)
 		capture, err := c.Run("capture-pane", "-p", "-t", pane)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if screen.ClaudeState(capture) == "" {
-			return errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")
+			return false, errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")
 		}
 	}
-	return paste(c, clk, pane, text)
+	if err := paste(c, clk, pane, text); err != nil {
+		return false, err
+	}
+	if st.Trusted() == agent.Working || !claude || !isCommand(text) {
+		return queued, nil
+	}
+	cmd := command{text: text}
+	for start := clk.Now(); clk.Now().Sub(start) < commandWait; clk.Sleep(pollInterval) {
+		if ran, err := cmd.step(c, pane, clk.Now().Sub(start)); ran != "" || err != nil {
+			return false, err
+		}
+	}
+	return false, fmt.Errorf("%s not seen running within %s: read the pane", strings.Fields(text)[0], commandWait)
+}
+
+const (
+	// commandWait bounds how long a plain prompt watches a slash command it sent.
+	commandWait = 3 * time.Second
+	// localGrace is how long after it was sent a slash command must show Claude idle to count as run
+	// locally (/effort): a command that starts a turn (a skill's) shows working by then.
+	localGrace = time.Second
+)
+
+// squash is s without whitespace, so a command wrapped in the input box still matches.
+func squash(s string) string {
+	return strings.Join(strings.Fields(s), "")
+}
+
+// isCommand reports a one-line slash command.
+func isCommand(text string) bool {
+	return strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
+}
+
+// command watches Claude's screen once a slash command (text) was sent: Claude fires no hook for one it
+// runs itself (/effort, /model), and those open a dialog mid-conversation.
+type command struct {
+	text    string
+	pressed bool
+}
+
+// step reads pane's screen: the dialog /effort and /model open mid-conversation (screen.ClaudeCacheDialog)
+// is confirmed with 1, any other dialog is an error once localGrace passed. ran is agent.Working once a turn
+// or long command (/compact) runs, agent.Idle once its input box is back, idle, without the command, and
+// localGrace passed since it was sent, else "".
+func (cmd *command) step(c *tmux.Client, pane string, elapsed time.Duration) (ran string, err error) {
+	capture, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil {
+		return "", err
+	}
+	if screen.ClaudeCacheDialog(capture) {
+		if cmd.pressed {
+			return "", nil
+		}
+		// Only once it shows: a 1 sent before would stay in the input box
+		cmd.pressed = true
+		if err := SendKeys(c, pane, []string{"1"}); err != nil {
+			return "", fmt.Errorf("%s sent, confirming its dialog failed: %w", strings.Fields(cmd.text)[0], err)
+		}
+		return "", nil
+	}
+	box, ok := screen.ClaudeBox(capture)
+	switch {
+	case !ok && elapsed >= localGrace:
+		return "", fmt.Errorf("%s opened a dialog: read it and answer with send-keys", strings.Fields(cmd.text)[0])
+	case !ok || strings.Contains(squash(box), squash(cmd.text)):
+		// Still in the box, maybe wrapped
+		return "", nil
+	}
+	if st := screen.ClaudeState(capture); st == agent.Working || elapsed >= localGrace {
+		return st, nil
+	}
+	return "", nil
 }
 
 func paste(c *tmux.Client, clk Clock, pane, text string) error {
@@ -384,6 +515,7 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 // PromptWait prompts a settled agent and waits until the hook counted the prompt (@agent_prompts) and
 // the agent settled again, so a turn shorter than a poll isn't missed and the settled state from before
 // isn't taken for done. No count within stall is ErrStalled; no settled state within timeout is ErrTimeout.
+// A slash command Claude runs itself counts no prompt: its screen (command.step) says when it ran.
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
 	before, err := ReadChecked(c, pane)
 	if err != nil {
@@ -402,11 +534,23 @@ func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout tim
 	if err := paste(c, clk, pane, text); err != nil {
 		return before, err
 	}
+	var cmd *command
+	if isCommand(text) && agent.ClaudeCommand(before.Command) {
+		cmd = &command{text: text}
+	}
+	running := false
 	return poll(c, clk, pane, timeout, func(st Status, elapsed time.Duration) (bool, error) {
 		if st.Prompts != before.Prompts {
 			return st.Settled(), nil
 		}
-		if elapsed >= stall {
+		if cmd != nil {
+			ran, err := cmd.step(c, pane, elapsed)
+			if err != nil || ran == agent.Idle && st.Settled() {
+				return err == nil, err
+			}
+			running = running || ran != ""
+		}
+		if !running && elapsed >= stall {
 			return false, fmt.Errorf("%w within %s", ErrStalled, stall)
 		}
 		return false, nil
@@ -471,6 +615,21 @@ func SendKeys(c *tmux.Client, pane string, keys []string) error {
 	}
 	for _, a := range args {
 		if _, err := c.Run(a...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// escWait bounds how long AfterEsc watches for Claude to draw its interrupted turn.
+const escWait = 3 * time.Second
+
+// AfterEsc records a working Claude pane idle once its screen shows the turn Esc ended (ReadChecked), as
+// no hook reports it; it gives up after escWait, as Esc may have closed something else.
+func AfterEsc(c *tmux.Client, clk Clock, pane string) error {
+	for start := clk.Now(); clk.Now().Sub(start) < escWait; clk.Sleep(pollInterval) {
+		st, err := ReadChecked(c, pane)
+		if err != nil || st.Trusted() != agent.Working {
 			return err
 		}
 	}

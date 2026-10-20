@@ -21,12 +21,12 @@ A coordinator usually lives in `dev boss`: the user types requests into your pro
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, project, branch, path, cost_usd?, started_by?, boss?}]
+dev agent list --json          # [{session, pane, agent, state, queued?, project, branch, path, cost_usd?, started_by?, boss?}]
 dev agent list --mine --json   # only your workers: the sessions you started with dev agent start
 dev agent get <target> --json
 ```
 
-`state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). Claude panes without the `dev state` hook aren't listed.
+`state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). `queued: true` marks a working Claude holding a prompt it hasn't read yet. Claude panes without the `dev state` hook aren't listed.
 
 Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
@@ -53,10 +53,11 @@ dev agent wait <target> --timeout 100s     # exit 2 = still working; read, then 
 dev agent read <target> --lines 40
 ```
 
-Plain `prompt` (no `--wait`) returns at once without that check; use it only for a Codex pane without hooks, or to queue a follow-up you won't wait on.
+Plain `prompt` (no `--wait`) returns at once (a slash command within 3 s) without that check; use it only for a Codex pane without hooks, or to queue a follow-up you won't wait on. To a working worker it prints `queued: …`: Claude reads the prompt at its turn's next step, and `get --json` shows `queued: true` until then. A following `wait` covers the queued work too.
 
 - Multi-line prompts: pass them on stdin (`dev agent prompt <target> <<'EOF' … EOF`); they submit as one prompt. Text starting with `-` goes after `--` or on stdin, or it's read as a flag.
 - `--wait` needs the worker idle (or `waiting` only because it sat idle). If it is `working`, wait for it.
+- **Slash commands** (`/effort high`, `/model sonnet`) go through `prompt` like any text, `--wait` included. Mid-conversation they open a "Change effort level?"/"Switch model?" dialog: `prompt` confirms it with `1` itself once it shows, and fails if the command isn't seen running within 3 s. Never send `1` ahead or after: it would stay in the input box. A command opening any other dialog is an error: `read` it and answer with `send-keys`.
 - **Awaiting a decision:** `prompt` refuses a worker showing a permission prompt or question, since the text would answer it. `read` the pane, then answer with `send-keys` (`1`, `2`, `enter`, `esc`), or ask the user when the decision is theirs. `waiting` after a prompt usually means exactly this.
 - **Exit 3 (stalled):** the text may still sit in the worker's input box. `dev agent read` it; press `dev agent send-keys <target> enter` if the prompt is there, or clear it before sending another. Don't stack prompts. If every `--wait` stalls, the worker's hook runs an older `dev`: tell the user to update it.
 - **Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in a bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
@@ -91,14 +92,17 @@ It closes only a worker you started, idle (or waiting only because it sat idle),
 dev agent send-keys <target> esc       # stop the current turn
 ```
 
+Esc to a working worker returns once its screen shows the turn interrupted, and records it idle (Claude runs no hook for that), so `prompt --wait` works right after. A worker interrupted by hand is caught the same way at the next `prompt` or `wait`.
+
 Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `left`, `right`, `ctrl+c`, `ctrl+d`, or a single character. Avoid `ctrl+c` twice and `ctrl+d`: they quit Claude.
 
 ## Boss inbox
 
-In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `stuck: working for 25m` or `waiting on a decision for 4m, unanswered`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
+In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `stuck: working for 25m` or `waiting on a decision for 4m, unanswered`, `resumed: …`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
 - **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.
+- **Rate limits:** a `failed: rate_limit: … resets 7:10pm (…); dev resumes it at 19:11` note needs nothing from you: dev sends the worker "continue" after the reset and tells you with a `resumed` note. Don't prompt it meanwhile (that cancels the resume). Only a note with `not resuming it` (no reset time read, or 3 resumes in a row) is yours: tell the user, or resume it yourself once the limit is back. Your own turns may fail on the same limit; carry on with the batch when you're prompted again.
 - **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. Stuck waiting on CI: run `gh pr checks <n>` yourself and nudge it with the result. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.

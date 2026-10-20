@@ -33,6 +33,12 @@ func TestClaudeStateGolden(t *testing.T) {
 		{"claude-plan-after-esc", agent.Idle},
 		{"claude-permission-amend", ""},
 		{"claude-permission-no-feedback", ""},
+		{"claude-teammates", agent.Idle},
+		{"claude-interrupted", agent.Idle},
+		{"claude-effort-confirm", ""},
+		{"claude-model-confirm", ""},
+		{"claude-effort-done", agent.Idle},
+		{"claude-queued", agent.Working}, // 2.1.304's spinner line has no "esc to interrupt"
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -85,6 +91,68 @@ func TestClaudeStateDialogs(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.304's screens: Esc ending a turn (with its teammates' panel under the box), /effort and
+// /model (in a narrow pane) mid-conversation, a prompt queued while working, and teammates' panel.
+func TestClaudeScreensGolden(t *testing.T) {
+	tests := []struct {
+		file                       string
+		interrupted, cache, queued bool
+	}{
+		{file: "claude-interrupted", interrupted: true},
+		{file: "claude-effort-confirm", cache: true},
+		{file: "claude-model-confirm", cache: true},
+		{file: "claude-queued", queued: true},
+		{file: "claude-teammates"},
+		{file: "claude-effort-done"},
+		{file: "claude-working"},
+		{file: "claude-after-esc", interrupted: true}, // Esc at a permission dialog ends the turn too
+		{file: "claude-permission-open"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			capture := golden(t, "testdata/"+tt.file+".txt")
+			if got := ClaudeInterrupted(capture); got != tt.interrupted {
+				t.Errorf("ClaudeInterrupted = %v, want %v", got, tt.interrupted)
+			}
+			if got := ClaudeCacheDialog(capture); got != tt.cache {
+				t.Errorf("ClaudeCacheDialog = %v, want %v", got, tt.cache)
+			}
+			if got := ClaudeQueued(capture); got != tt.queued {
+				t.Errorf("ClaudeQueued = %v, want %v", got, tt.queued)
+			}
+		})
+	}
+	if box, ok := ClaudeBox(golden(t, "testdata/claude-teammates.txt")); !ok || box != "wait for sleep-a and sleep-b" {
+		t.Errorf("ClaudeBox = %q, %v", box, ok)
+	}
+}
+
+func TestClaudeInterrupted(t *testing.T) {
+	rule := strings.Repeat("─", 60)
+	screen := func(above ...string) string {
+		return strings.Join(append(append([]string{"⏺ Writing."}, above...), rule, "❯ ", rule, "  ⏵⏵ auto mode on", ""), "\n")
+	}
+	interrupted := "  ⎿  Interrupted · What should Claude do instead?"
+	tests := []struct {
+		name, capture string
+		want          bool
+	}{
+		{"under the box", screen(interrupted), true},
+		{"a status line between", screen(interrupted, "", "◐ medium · /effort"), true},
+		{"a prompt sent since", screen(interrupted, "❯ carry on", "⏺ ok"), false},
+		{"working again", screen(interrupted, "✻ Thinking… (esc to interrupt)"), false},
+		{"long output since", screen(interrupted, "a", "b", "c"), false},
+		{"no interrupt", screen("⏺ Done."), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClaudeInterrupted(tt.capture); got != tt.want {
+				t.Errorf("ClaudeInterrupted = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClaudeState(t *testing.T) {
 	rule := strings.Repeat("─", 60)
 	box := func(above string, draft ...string) string {
@@ -94,8 +162,13 @@ func TestClaudeState(t *testing.T) {
 		{"empty box", box("✻ Worked for 2s", "❯ "), agent.Idle},
 		{"typed draft", box("✻ Worked for 2s", "❯ rebase onto main", "  and push"), agent.Idle},
 		{"spinner above the box", box("✻ Thinking… (esc to interrupt)", "❯ "), agent.Working},
+		{"spinner without esc to interrupt", box("✳ Tempering… (thinking with low effort)", "❯ "), agent.Working},
+		{"spinner with a tip under it", box("✻ Brewing… (5s)\n  ⎿  Tip: Run /init", "❯ "), agent.Working},
+		{"a finished turn's line", box("✻ Cooked for 2s · done 20:10", "❯ "), agent.Idle},
+		{"a reply's list item", box("  * Retrying the build…", "❯ "), agent.Idle},
 		{"permission options in the box", box("", "❯ 1. Yes", "  2. No"), ""},
 		{"dialog text in the box", box("", "❯ Option A", "", "Do you want to use option A?"), ""},
+		{"agent panel under the status lines", box("✻ Worked for 2s", "❯ ") + "\n  ⏺ main\n  ◯ a  A  1s\n  ◯ b  B  1s\n❯ ◯ c  C  1s\n  ◯ d  D  1s\n", agent.Idle},
 		{"short dashes aren't the box", "text\n──\n❯ x\n──\nstatus", ""},
 		{"no box", "⏺ Done.\n", ""},
 		{"empty", "", ""},

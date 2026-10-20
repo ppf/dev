@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -87,8 +88,12 @@ func newAgentGetCmd() *cobra.Command {
 		Short: "Show one agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, err := control.Resolve(tmux.New(), args[0])
+			c := tmux.New()
+			a, err := control.Resolve(c, args[0])
 			if err != nil {
+				return err
+			}
+			if err := a.ReadQueued(c); err != nil {
 				return err
 			}
 			return printAgent(cmd.OutOrStdout(), asJSON, a)
@@ -173,11 +178,15 @@ func newAgentPromptCmd() *cobra.Command {
 		Short: "Paste a prompt into the agent and submit it (text from the arguments, else stdin)",
 		Long: `Paste a prompt into the agent as one bracketed paste and press Enter, so multi-line text submits
 as a single prompt. Without text arguments the prompt is read from stdin. An agent showing a permission
-prompt or question is refused: the text would answer it (use send-keys).
+prompt or question is refused: the text would answer it (use send-keys). To a working agent it is
+queued (printed): Claude reads it at its turn's next step. A one-line slash command to an idle Claude is
+watched up to 3s: the dialog /effort and /model open mid-conversation is confirmed with 1, any other
+dialog is an error.
 
 --wait (Claude only) needs an idle agent and returns once the hook saw the prompt and the agent settled
-again (idle or waiting), printing that state. Exit 3 when the prompt isn't picked up within
---stall (it may still sit in the input box: read the pane), exit 2 on --timeout.`,
+again (idle or waiting), printing that state; a slash command Claude runs itself, once its screen shows
+it ran. Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box: read
+the pane), exit 2 on --timeout.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -194,7 +203,11 @@ again (idle or waiting), printing that state. Exit 3 when the prompt isn't picke
 				return err
 			}
 			if !wait {
-				return control.Prompt(c, control.RealClock, a.Pane, text)
+				queued, err := control.Prompt(c, control.RealClock, a.Pane, text)
+				if queued {
+					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
+				}
+				return err
 			}
 			st, err := control.PromptWait(c, control.RealClock, a.Pane, text, stall, timeout)
 			if err != nil {
@@ -248,14 +261,26 @@ func newAgentSendKeysCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "send-keys <target> <key>...",
 		Short: "Press keys in the agent's pane: " + strings.Join(control.KeyNames(), ", ") + ", or one character",
-		Args:  cobra.MinimumNArgs(2),
+		Long: `Press keys in the agent's pane: ` + strings.Join(control.KeyNames(), ", ") + `, or one character.
+Esc to a working Claude returns once its screen shows the turn interrupted (up to 3s), recording it idle:
+Claude fires no hook for that.`,
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			c := tmux.New()
 			a, err := resolveOther(c, args[0])
 			if err != nil {
 				return err
 			}
-			return control.SendKeys(c, a.Pane, args[1:])
+			if err := control.SendKeys(c, a.Pane, args[1:]); err != nil {
+				return err
+			}
+			if a.Label == "Claude" && a.State == agent.Working && slices.ContainsFunc(args[1:], func(k string) bool { return strings.EqualFold(k, "esc") }) {
+				if err := control.AfterEsc(c, control.RealClock, a.Pane); err != nil {
+					// Not to be retried: a second Esc opens Claude's rewind
+					return fmt.Errorf("esc sent; recording the interrupted turn failed: %w", err)
+				}
+			}
+			return nil
 		},
 	}
 }

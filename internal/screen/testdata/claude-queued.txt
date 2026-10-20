@@ -1,0 +1,44 @@
+
+\x1b[38;5;114m⏺\x1b[39m Teammate \x1b[1m\x1b[38;5;110m@sleep-a\x1b[0m finished
+  \x1b[38;5;246m✅ Sent `done` to team-lead.\x1b[39m
+
+\x1b[38;5;231m⏺\x1b[39m Nothing new. sleep-a's idle notice
+  confirms it sent \x1b[38;5;153mdone\x1b[39m, which matches the
+  result I already have. Summary stands:
+  sleep-a ✅, sleep-b ✅, sleep-c ❌
+  (blocked by harness, no output).
+
+
+\x1b[38;5;114m⏺\x1b[39m Teammate \x1b[1m\x1b[38;5;178m@sleep-b\x1b[0m finished
+  \x1b[38;5;246mConfirmed: the output file reads `done`
+\x1b[39m  \x1b[38;5;246mwith exit code 0, matching my answer. \x1b[39m
+  \x1b[38;5;246mThe sleep actually ran in the background
+\x1b[39m  \x1b[38;5;246mfor 90 seconds. Nothing is still an \x1b[39m
+  \x1b[38;5;246massumption.\x1b[39m
+
+\x1b[38;5;231m⏺\x1b[39m Nothing new. sleep-b confirms its output
+  file reads \x1b[38;5;153mdone\x1b[39m with exit code 0,
+  matching the earlier result. Summary
+  unchanged: sleep-a ✅, sleep-b ✅,
+  sleep-c ❌ (harness-blocked, no output).
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mRun Bash "sleep 20" then reply done.\x1b[39m
+
+\x1b[38;5;246m\x1b[49m⏺\x1b[39m Sleeping 20 seconds\x1b[38;5;246m · 4s\x1b[39m
+\x1b[38;5;246m  ⎿  $ sleep 20\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ QUEUED: reply with the word banana\x1b[39m
+\x1b[49m  \x1b[38;5;246mctrl+x ctrl+s to send now\x1b[39m
+
+\x1b[38;5;174m✻\x1b[39m \x1b[38;5;174mNucleating… \x1b[38;5;246m(5s · ↓\x1b[39m \x1b[38;5;246m15 tokens)\x1b[39m
+
+\x1b[38;5;244m──────────────────────────────────────────
+\x1b[38;5;246m❯ \x1b[2m\x1b[39mPress up to edit queued messages\x1b[0m
+\x1b[38;5;244m──────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m/private/tmp/claude-503/-Users-storm-…\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
+
+\x1b[1m  ⏺ main\x1b[0m
+\x1b[38;5;246m  ◯ sleep-a\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m  \x1b[38;5;246m2m 58s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-c\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m  \x1b[38;5;246m2m 58s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-b\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m  \x1b[38;5;246m2m 58s\x1b[39m

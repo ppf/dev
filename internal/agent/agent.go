@@ -169,7 +169,7 @@ func HookSession(input []byte) Session {
 }
 
 // Record writes state to @agent_state (and when it changed to @agent_since), the pane's current command to @agent_cmd and s to @agent_session
-// and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
+// and @agent_transcript in one chained tmux call, bumping @agent_prompts (its time in @agent_prompt_at, and recording Grok's turn id in
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
 // notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
 // or end, and bumping @dev_pr_gen on a PostToolUse of a gh command that changes a PR; Clear (or no session) unsets the
@@ -202,7 +202,8 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		}
 		if h.Event == "UserPromptSubmit" {
 			// Counts prompts, so `dev agent prompt --wait` sees a turn that ended between two polls
-			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
+			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"},
+				set("@agent_prompt_at", stamp))
 			if h.PromptID != "" {
 				cmds = append(cmds, set("@agent_prompt_id", h.PromptID))
 			}
@@ -238,6 +239,20 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 // writes run as one tmux command.
 func DialogGone(c *tmux.Client, pane, state, since string) error {
 	cond := "#{&&:#{==:#{@agent_state}," + Waiting + "},#{==:#{@agent_since}," + since + "}}"
+	return settle(c, pane, cond, state)
+}
+
+// Interrupted records Idle on a working pane whose turn Esc ended (Claude fires no hook for it), unless a
+// hook moved it since: since and prompts are the @agent_since and @agent_prompts read with the working
+// state, as a new prompt keeps it working without moving @agent_since.
+func Interrupted(c *tmux.Client, pane, since, prompts string) error {
+	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
+	return settle(c, pane, cond, Idle)
+}
+
+// settle records state on pane, unsetting @agent_question, when the format cond holds: the check and the
+// writes run as one tmux command.
+func settle(c *tmux.Client, pane, cond, state string) error {
 	set := strings.Join([]string{
 		"set-option -p -t " + pane + " @agent_state " + state,
 		"set-option -p -t " + pane + " @agent_since " + strconv.FormatInt(now().Unix(), 10),

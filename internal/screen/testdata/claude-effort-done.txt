@@ -1,0 +1,44 @@
+  It arrives without a sound you can name,
+  a hush that spreads from the sky downward
+  until the ground is a page
+  no one has yet written on.
+
+  Look closely at one flake
+  and it is a small engineering miracle,
+  six arms branching from a single seed,
+  each arm grown in its own weather,
+  no two alike, none of them remembered
+  once they touch the glove on your hand
+  and become, briefly, water again.
+
+  A child stands at the window
+  counting. He gets to forty
+  and loses track, which is the point.
+  Snow is the only thing that makes
+  a whole city stop doing arithmetic.
+
+  Down the block the plow passes
+  like a slow argument with the street,
+  pushing the white into black ridges
+  that will harden by morning into ice
+  and blame. Salt goes down after,
+  gray grit scattered like pepper,
+  and the neighbors nod at each other
+  across their shoveled squares of concrete,
+  two strangers bound by
+\x1b[38;5;246m  ⎿  Interrupted · What should Claude do instead?\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯\x1b[39m \x1b[38;5;231m/effort medium\x1b[39m
+\x1b[38;5;246m\x1b[49m  ⎿  \x1b[39mSet effort level to medium (saved as your default for new sessions): Balanced approach with standard
+     implementation and testing
+                                                                                          \x1b[38;5;246m◐ medium · /effort\x1b[39m
+\x1b[38;5;244m──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m❯ 
+\x1b[38;5;244m──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m/private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-prompt-ux/9b8100e6-555c-4…\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
+
+\x1b[1m  ⏺ main\x1b[0m
+\x1b[38;5;246m  ◯ sleep-a\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m                                                                      \x1b[38;5;246m5m 52s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-c\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m                                                                      \x1b[38;5;246m5m 52s\x1b[39m
+\x1b[38;5;246m  ◯ sleep-b\x1b[39m  \x1b[38;5;246mSleep 90 and report\x1b[39m                                                                      \x1b[38;5;246m5m 52s\x1b[39m

@@ -31,6 +31,13 @@ type paneRow struct {
 	StateCmd   string `tmux:"@agent_cmd"`
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
+	Prompts    string `tmux:"@agent_prompts"`
+	// A rate-limited worker's scheduled resume (scheduleResume)
+	ResumeAt      string `tmux:"@dev_resume_at"`
+	ResumePrompts string `tmux:"@dev_resume_prompts"`
+	ResumeSession string `tmux:"@dev_resume_session"`
+	AgentSession  string `tmux:"@agent_session"`
+	Resumes       string `tmux:"@dev_resumes"`
 }
 
 // teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
@@ -68,10 +75,10 @@ func (r paneRow) stuck(now time.Time) (Note, bool) {
 	return Note{}, false
 }
 
-// Watch runs from the boss session pane is in (its previews): it queues a note for each of the boss's
-// workers that is stuck, also recording it on the worker's pane (OptNote), then delivers the inbox if the
-// coordinator is ready. Notes that waited for the coordinator to go idle with an empty input box get there
-// this way too.
+// Watch runs from the boss session pane is in (its previews): it resumes the boss's workers whose rate
+// limit reset (resume) and queues a note for each of its workers that is stuck or resumed, also recording
+// it on the worker's pane (OptNote), then delivers the inbox if the coordinator is ready. Notes that waited
+// for the coordinator to go idle with an empty input box get there this way too.
 func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	b, ok, err := Here(c, pane)
 	if !ok || err != nil {
@@ -92,22 +99,40 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if !sidebar.Names(r.StartedBy, id, b.Name, true) || mates[r.Pane] {
 			continue
 		}
+		if r.ResumeAt != "" {
+			resumed, err := resume(c, clk, r)
+			if resumed {
+				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt}
+				if _, err := b.Box.Add(n); err != nil {
+					return err
+				}
+				noteErrs = append(noteErrs, setNote(c, r.Pane, n.Summary()))
+			}
+			if err != nil && !strings.Contains(err.Error(), "can't find pane") {
+				// The boss was told dev resumes it
+				n := Note{Worker: r.Session, Kind: Failed, Text: clean("resuming it after its rate limit: " + err.Error()), Key: Failed + "\x00resume" + r.ResumeAt}
+				if _, err := b.Box.Add(n); err != nil {
+					return err
+				}
+			}
+			if resumed || err != nil {
+				continue
+			}
+		}
 		n, ok := r.stuck(clk.Now())
 		if !ok {
 			continue
 		}
-		if agent.Deciding(agent.Trusted(r.State, r.StateCmd, r.Command), r.WaitingFor) {
-			// A dialog answered No or Esc fired no hook: it isn't unanswered
-			st, err := control.ReadChecked(c, r.Pane)
-			if err != nil && strings.Contains(err.Error(), "can't find pane") {
-				continue // closed since list-panes
-			}
-			if err != nil {
-				return err
-			}
-			if !agent.Deciding(st.Trusted(), st.WaitingFor) {
-				continue
-			}
+		// A dialog answered No or Esc, or a turn Esc ended, fired no hook: the check records it, moving @agent_since
+		st, err := control.ReadChecked(c, r.Pane)
+		if err != nil && strings.Contains(err.Error(), "can't find pane") {
+			continue // closed since list-panes
+		}
+		if err != nil {
+			return err
+		}
+		if st.Since != r.Since {
+			continue
 		}
 		shot, err := c.Run("capture-pane", "-p", "-t", r.Pane)
 		if err != nil && strings.Contains(err.Error(), "can't find pane") {
