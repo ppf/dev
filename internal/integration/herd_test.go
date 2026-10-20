@@ -104,5 +104,5 @@ func TestHerd(t *testing.T) {
 	refused := exec.Command(devBin, "herd")
 	refused.Env = env
 	out, err := refused.CombinedOutput()
-	check(t, "foreign boss refused", errStatus(err)+" "+string(out), "1 ❌ session \"boss\" exists and isn't a boss session (a restored boss isn't one either): kill or rename it\n")
+	check(t, "foreign boss refused", errStatus(err)+" "+string(out), "1 ❌ session \"boss\" exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it\n")
 }

@@ -2,6 +2,8 @@ package resurrect
 
 import (
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -78,15 +81,20 @@ func TestSave(t *testing.T) {
 	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "") +
 		tmux.FormatRow("hidden", "proj", "", "$3", "", "") + tmux.FormatRow("stale", "p", "%99", "$4", "", "") +
 		tmux.FormatRow("boss-p", "", "", "$9", "", "1") + tmux.FormatRow("w-name", "p", "", "$10", "boss-p", "") +
-		tmux.FormatRow("w-old", "", "", "$11", "$9", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "")
+		tmux.FormatRow("w-old", "", "", "$11", "$9", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "") +
+		tmux.FormatRow("boss-old", "", "", "$13", "", "1")
 	// devt's window 1 is also linked into linked as window 5, listed after devt. %2 runs Claude with a
-	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet.
-	pane := func(session, id, window, index, command, agentCmd, agentID string) string {
-		return tmux.FormatRow(session, id, window, index, command, "/repo", agentCmd, agentID, "/t/"+agentID+".jsonl")
+	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet. boss-p's
+	// panes carry their roles, plain's previews-marked pane doesn't make it a boss, and boss-old (made
+	// before the roles) has none.
+	pane := func(session, id, window, index, command, agentCmd, agentID, role string) string {
+		return tmux.FormatRow(session, id, window, index, command, "/repo", agentCmd, agentID, "/t/"+agentID+".jsonl", role)
 	}
-	panes := pane("devt", "%1", "1", "1", "dev", "", "") + pane("devt", "%2", "1", "2", "2.1.3", "2.1.3", "s1") +
-		pane("devt", "%3", "1", "3", "zsh", "2.1.3", "s0") + pane("plain", "%4", "1", "1", "2.1.3", "2.1.3", "") +
-		pane("linked", "%1", "5", "1", "dev", "", "") + pane("linked", "%2", "5", "2", "2.1.3", "2.1.3", "s1")
+	panes := pane("devt", "%1", "1", "1", "dev", "", "", "") + pane("devt", "%2", "1", "2", "2.1.3", "2.1.3", "s1", "") +
+		pane("devt", "%3", "1", "3", "zsh", "2.1.3", "s0", "") + pane("plain", "%4", "1", "1", "2.1.3", "2.1.3", "", "previews") +
+		pane("linked", "%1", "5", "1", "dev", "", "", "") + pane("linked", "%2", "5", "2", "2.1.3", "2.1.3", "s1", "") +
+		pane("boss-p", "%7", "1", "2", "2.1.3", "2.1.3", "b1", "coordinator") + pane("boss-p", "%8", "1", "3", "dev", "", "", "previews") +
+		pane("boss-old", "%9", "1", "1", "2.1.3", "2.1.3", "", "")
 	tests := []struct {
 		name      string
 		replies   map[string]any
@@ -95,10 +103,11 @@ func TestSave(t *testing.T) {
 		wantWarn  string
 	}{
 		{
-			name:    "one line per session with a project",
+			name:    "one line per session with a project or a boss",
 			replies: map[string]any{"list-sessions": sessions, "list-panes -a": panes},
-			want: "devt\tdevt\t1.1\nhidden\tproj\t\nstale\tp\t\nw-name\tp\t\n" +
-				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n",
+			want: "devt\tdevt\t1.1\nhidden\tproj\t\nstale\tp\t\nboss-p\t\t\nw-name\tp\t\nboss-old\t\t\n" +
+				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:boss\tboss-p\t1.2\t1.3\n" +
+				":agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n:agent\tboss-p\t1.2\tclaude\tb1\t/t/b1.jsonl\t/repo\n",
 		},
 		{
 			name:     "list-sessions failure keeps the old file",
@@ -619,6 +628,132 @@ func TestRestoreAgents(t *testing.T) {
 	}
 }
 
+func TestRestoreBoss(t *testing.T) {
+	transcript := filepath.Join(t.TempDir(), "b1.jsonl")
+	writeFile(t, transcript, "{}\n")
+	boss := ":boss\tboss-p\t1.2\t1.3\n"
+	coordinator := func(transcript, path string) string {
+		return strings.Join([]string{agentPrefix, "boss-p", "1.2", "claude", "b1", transcript, path}, "\t") + "\n"
+	}
+	slotQuery := func(pos string) string {
+		return "display-message -t =boss-p:" + pos + " -p #{pane_current_command}" + tmux.Sep + "#{pane_id}" + tmux.Sep + "#{pane_current_path}"
+	}
+	slots := map[string]any{
+		"has-session -t =boss-p": "",
+		slotQuery("1.2"):         "zsh" + tmux.Sep + "%7" + tmux.Sep + "/repo\n",
+		slotQuery("1.3"):         "zsh" + tmux.Sep + "%8" + tmux.Sep + "/repo\n",
+	}
+	with := func(overrides map[string]any) map[string]any {
+		m := maps.Clone(slots)
+		maps.Copy(m, overrides)
+		return m
+	}
+	queried := []string{"has-session -t =boss-p", slotQuery("1.2"), slotQuery("1.3")}
+	procs := "show-option -gqv @resurrect-default-processes ; show-option -gqv @resurrect-processes"
+	devtSlot := "display-message -t =devt:1.2 -p #{pane_current_command}" + tmux.Sep + "#{pane_id}" + tmux.Sep + "#{pane_current_path}"
+	argv, err := ptywrap.Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(pane, cmd string) string {
+		return "send-keys -t " + pane + " -l " + tmux.ShellJoin(argv...) + " " + cmd + " ; send-keys -t " + pane + " Enter"
+	}
+	devtResume := `'claude' '--resume' 'b1' '--remote-control=devt'`
+	fresh := warned("boss-p:1.2: conversation b1 not resumed (directory changed or transcript gone), fresh coordinator")
+	tests := []struct {
+		name     string
+		state    string
+		replies  map[string]any
+		adoptErr error
+		want     []string // after the default-shell query
+		wantErr  bool
+	}{
+		{
+			name:  "the coordinator resumes its conversation with the boss, not as a plain agent; an agent at its position elsewhere does",
+			state: boss + coordinator(transcript, "/repo") + strings.Replace(coordinator(transcript, "/repo"), "boss-p", "devt", 1),
+			replies: with(map[string]any{
+				procs:                  "\n",
+				devtSlot:               "zsh" + tmux.Sep + "%2" + tmux.Sep + "/repo\n",
+				send("%2", devtResume): "",
+			}),
+			want: append(queried, "adopt boss-p %7 %8 [--resume b1]", procs, devtSlot, send("%2", devtResume)),
+		},
+		{
+			name:    "a coordinator without a recorded conversation starts fresh",
+			state:   boss,
+			replies: slots,
+			want:    append(queried, "adopt boss-p %7 %8 []"),
+		},
+		{
+			name:    "its transcript gone",
+			state:   boss + coordinator(transcript+".gone", "/repo"),
+			replies: slots,
+			want:    slices.Concat(queried, fresh, []string{"adopt boss-p %7 %8 []"}),
+		},
+		{
+			name:    "its pane back in another directory",
+			state:   boss + coordinator(transcript, "/elsewhere"),
+			replies: slots,
+			want:    slices.Concat(queried, fresh, []string{"adopt boss-p %7 %8 []"}),
+		},
+		{
+			name:  "the previews slot not a bare shell: the coordinator resumes as a plain agent",
+			state: boss + coordinator(transcript, "/repo"),
+			replies: with(map[string]any{slotQuery("1.3"): "dev" + tmux.Sep + "%8" + tmux.Sep + "/repo\n", procs: "\n",
+				send("%7", `'claude' '--resume' 'b1' '--remote-control=boss-p'`): ""}),
+			want: slices.Concat(queried, warned("boss-p:1.3 is not the boss's bare shell, boss not restored"),
+				[]string{procs, slotQuery("1.2"), send("%7", `'claude' '--resume' 'b1' '--remote-control=boss-p'`)}),
+		},
+		{
+			name:    "a boss live before the restore is left alone",
+			state:   ":boss\tlive\t1.2\t1.3\n",
+			replies: slots,
+		},
+		{
+			name:    "a boss resurrect didn't bring back",
+			state:   boss,
+			replies: with(map[string]any{"has-session -t =boss-p": errors.New("no session")}),
+			want:    []string{"has-session -t =boss-p"},
+		},
+		{
+			name:     "a failure is warned and returned, the sessions are still restored",
+			state:    "devt\tp\t\n" + boss,
+			replies:  with(map[string]any{"has-session -t =devt": "", "set-option -t =devt: @project p": "", "list-windows -t =devt:": ""}),
+			adoptErr: &tmux.Error{Stderr: "can't find pane: %7", Err: errors.New("exit status 1")},
+			want: slices.Concat(queried, []string{"adopt boss-p %7 %8 []"}, warned("boss-p: boss failed: can't find pane: %7"),
+				[]string{"has-session -t =devt", "set-option -t =devt: @project p", "list-windows -t =devt:"}),
+			wantErr: true,
+		},
+		{
+			name:    "a boss with no project keeps none",
+			state:   "boss-p\t\t\n" + boss,
+			replies: with(map[string]any{"list-windows -t =boss-p:": ""}),
+			want:    append(queried, "adopt boss-p %7 %8 []", "has-session -t =boss-p", "list-windows -t =boss-p:"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restoreFixture(t, tt.state)
+			replies := map[string]any{"show-option -gv default-shell": "/bin/zsh\n"}
+			maps.Copy(replies, tt.replies)
+			f := &fakeServer{replies: replies}
+			stubEnsure(t, f, nil)
+			adoptBoss = func(_ *tmux.Client, session, claude, previews string, resume []string) error {
+				f.calls = append(f.calls, fmt.Sprintf("adopt %s %s %s %v", session, claude, previews, resume))
+				return tt.adoptErr
+			}
+			t.Cleanup(func() { adoptBoss = herd.Adopt })
+			if err := Restore(f.client()); (err != nil) != tt.wantErr {
+				t.Fatalf("Restore error = %v", err)
+			}
+			want := append([]string{"show-option -gv default-shell"}, tt.want...)
+			if !slices.Equal(f.calls, want) {
+				t.Errorf("calls:\n%s\nwant:\n%s", strings.Join(f.calls, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
 // A tmux failure bash didn't check is warned and returned, and the next session is still restored.
 func TestRestoreUncheckedFailure(t *testing.T) {
 	live := restoreFixture(t, "devt\tp\t\nother\tq\t\n")
@@ -696,22 +831,26 @@ func TestParseState(t *testing.T) {
 		want       []entry
 		wantAgents []agentEntry
 		wantBy     []startedByEntry
+		wantBosses []bossEntry
 	}{
-		{"empty", "", nil, nil, nil},
-		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil},
-		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil},
-		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil},
-		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil},
+		{"empty", "", nil, nil, nil, nil},
+		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil, nil},
+		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil, nil},
+		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil, nil},
+		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil, nil},
 		{"agent lines", "devt\tp\t1.1\n:agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n", []entry{{"devt", "p", "1.1"}},
-			[]agentEntry{devtAgent}, nil},
-		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil},
-		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n", nil, nil, []startedByEntry{{"w", "boss-p"}}},
+			[]agentEntry{devtAgent}, nil, nil},
+		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil},
+		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n", nil, nil, []startedByEntry{{"w", "boss-p"}}, nil},
+		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, agents, by := parseState(tt.data)
-			if !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(agents, tt.wantAgents) || !reflect.DeepEqual(by, tt.wantBy) {
-				t.Errorf("parseState(%q) = %v, %v, %v; want %v, %v, %v", tt.data, got, agents, by, tt.want, tt.wantAgents, tt.wantBy)
+			got, agents, by, bosses := parseState(tt.data)
+			if !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(agents, tt.wantAgents) || !reflect.DeepEqual(by, tt.wantBy) ||
+				!reflect.DeepEqual(bosses, tt.wantBosses) {
+				t.Errorf("parseState(%q) = %v, %v, %v, %v; want %v, %v, %v, %v", tt.data, got, agents, by, bosses,
+					tt.want, tt.wantAgents, tt.wantBy, tt.wantBosses)
 			}
 		})
 	}
