@@ -59,6 +59,11 @@ Plain `prompt` (no `--wait`) returns at once without that check; use it only for
 - `--wait` needs the worker idle (or `waiting` only because it sat idle). If it is `working`, wait for it.
 - **Awaiting a decision:** `prompt` refuses a worker showing a permission prompt or question, since the text would answer it. `read` the pane, then answer with `send-keys` (`1`, `2`, `enter`, `esc`), or ask the user when the decision is theirs. `waiting` after a prompt usually means exactly this.
 - **Exit 3 (stalled):** the text may still sit in the worker's input box. `dev agent read` it; press `dev agent send-keys <target> enter` if the prompt is there, or clear it before sending another. Don't stack prompts. If every `--wait` stalls, the worker's hook runs an older `dev`: tell the user to update it.
+- **Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in a bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
+
+  ```bash
+  for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sleep 30; done; gh pr checks <n>
+  ```
 
 ## Read results
 
@@ -94,7 +99,7 @@ In `dev boss`, you hear of your workers without polling: a prompt or extra conte
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
 - **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.
-- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
+- **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. Stuck waiting on CI: run `gh pr checks <n>` yourself and nudge it with the result. A worker waiting on its background subagents or shells counts as working, so one left running a dev server shows as stuck while its turn is done.
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
 
