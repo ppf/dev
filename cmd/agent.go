@@ -283,11 +283,14 @@ screen before the first prompt). An existing session is reused; one running anot
 			}
 			c, session := tmux.New(), open.SessionName(args[0], wt)
 			_, missing := c.Run("has-session", "-t", tmux.SessionTarget(session))
-			if err := openProject(cmd, args[0], wt, true, agentCmd); err != nil {
+			// A herd's x only kills workers its coordinator started, never a reused session; workers start
+			// without Remote Control
+			pane := os.Getenv("TMUX_PANE")
+			worker := missing != nil && pane != ""
+			if err := openProject(cmd, args[0], wt, true, worker, agentCmd); err != nil {
 				return err
 			}
-			// A herd's x only kills workers its coordinator started, never a reused session
-			if pane := os.Getenv("TMUX_PANE"); missing != nil && pane != "" {
+			if worker {
 				if err := herd.MarkStartedBy(c, session, pane); err != nil {
 					return err
 				}

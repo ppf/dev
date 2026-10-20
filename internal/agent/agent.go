@@ -272,20 +272,26 @@ const (
 
 // ClaudeArgv is claude's argv with args, its Remote Control session named session. Not --name: that pins
 // the pane title to the name, leaving the sidebar and previews no task title. Joined with =, as the name
-// is optional: a name starting with - would be taken for a flag.
-func ClaudeArgv(session string, args ...string) []string {
-	return append(append([]string{Claude}, args...), "--remote-control="+session)
+// is optional: a name starting with - would be taken for a flag. A worker (a new session dev agent start
+// opens from a pane) starts without Remote Control, session unused, even under remoteControlAtStartup:
+// --settings outranks the user's settings.
+func ClaudeArgv(session string, worker bool, args ...string) []string {
+	argv := append([]string{Claude}, args...)
+	if worker {
+		return append(argv, "--settings", `{"remoteControlAtStartup":false}`)
+	}
+	return append(argv, "--remote-control="+session)
 }
 
-// ResumeCommand is the shell command that restarts an agent of kind in session: resumed, its conversation
-// id when the id is safe to type and the conversation's transcript still exists, else a fresh agent.
-// ok=false for an unknown kind.
-func ResumeCommand(kind, id, transcript, session string) (cmd string, resumed, ok bool) {
+// ResumeCommand is the shell command that restarts an agent of kind in session, without Remote Control
+// for a worker (see ClaudeArgv): resumed, its conversation id when the id is safe to type and the
+// conversation's transcript still exists, else a fresh agent. ok=false for an unknown kind.
+func ResumeCommand(kind, id, transcript, session string, worker bool) (cmd string, resumed, ok bool) {
 	if kind != Claude {
 		return "", false, false
 	}
 	args := ResumeArgs(id, transcript)
-	return tmux.ShellJoin(ClaudeArgv(session, args...)...), args != nil, true
+	return tmux.ShellJoin(ClaudeArgv(session, worker, args...)...), args != nil, true
 }
 
 // ResumeArgs are claude's args resuming conversation id: nil unless the id is safe to type and its

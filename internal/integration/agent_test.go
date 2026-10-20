@@ -176,6 +176,35 @@ func TestAgentCodexHooks(t *testing.T) {
 		"1 ❌ agent is waiting for a decision (PermissionRequest): read it and answer with send-keys\n")
 }
 
+// agentArgs is the argv of the processes under target's pane (on Linux the shell runs it in another
+// sh), one per line.
+func agentArgs(t *testing.T, d *devServer, target string) string {
+	t.Helper()
+	ps, err := exec.Command("ps", "-A", "-o", "pid=,ppid=,args=").Output()
+	if err != nil {
+		t.Fatalf("ps: %v", err)
+	}
+	type proc struct{ parent, args string }
+	procs := map[string]proc{}
+	for _, l := range strings.Split(string(ps), "\n") {
+		if f := strings.Fields(l); len(f) > 2 {
+			procs[f[0]] = proc{f[1], strings.Join(f[2:], " ")}
+		}
+	}
+	under := map[string]bool{d.T("display", "-t", target, "-p", "#{pane_pid}"): true}
+	var args []string
+	for grew := true; grew; {
+		grew = false
+		for pid, p := range procs {
+			if !under[pid] && under[p.parent] {
+				under[pid], grew = true, true
+				args = append(args, p.args)
+			}
+		}
+	}
+	return strings.Join(args, "\n")
+}
+
 // dev agent start opens a project detached, returns once the agent registered, and reuses the session.
 // It skips the first-run restore, whose switch-client would move the user's client.
 func TestAgentStart(t *testing.T) {
@@ -204,6 +233,10 @@ func TestAgentStart(t *testing.T) {
 	first := start()
 	check(t, "agent", first["session"]+" "+first["agent"]+" "+first["state"]+" "+first["path"], "app Claude idle "+dir)
 	check(t, "agent pane is the layout's claude", d.T("display", "-t", first["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
+	// Not from a pane: no @dev_started_by, so not a worker
+	if args := agentArgs(t, d, first["pane"]); !strings.Contains(args, "pty-wrap -- claude --remote-control=app") {
+		t.Errorf("claude started from outside tmux not named app in Remote Control: %q", args)
+	}
 	check(t, "client not switched", d.T("list-clients", "-F", "#{client_session}"), "boot")
 	check(t, "no first-run restore", d.T("show-option", "-gqv", "@dev_restored"), "")
 	second := start()

@@ -204,7 +204,7 @@ func Adopt(c *tmux.Client, session, claude, previews string, resume []string) er
 
 // coordinatorArgv is the coordinator Claude's argv with args.
 func coordinatorArgv(session string, args ...string) []string {
-	return agent.ClaudeArgv(session, append(args, "--append-system-prompt", coordinatorPrompt)...)
+	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", coordinatorPrompt)...)
 }
 
 // bind marks claude and previews with their roles and ends target's session when either closes, its clients

@@ -527,6 +527,15 @@ func TestRestoreAgents(t *testing.T) {
 				fresh("devu", "s9"), []string{send("%5", freshU)}),
 		},
 		{
+			name: "a worker resumes without Remote Control, another session with it",
+			state: line("devt", "claude", "s1", transcript, "/repo") + line("devu", "claude", "s1", transcript, "/repo") +
+				":started_by\tdevt\tboss-p\n",
+			replies: with(map[string]any{send("%2", `'claude' '--resume' 's1' '--settings' '{"remoteControlAtStartup":false}'`): "",
+				send("%5", resumeU): "", "has-session -t =devt": "", "set-option -t =devt: @dev_started_by boss-p": ""}),
+			want: []string{procs, slotQuery("devt"), send("%2", `'claude' '--resume' 's1' '--settings' '{"remoteControlAtStartup":false}'`),
+				slotQuery("devu"), send("%5", resumeU), "has-session -t =devt", "set-option -t =devt: @dev_started_by boss-p"},
+		},
+		{
 			name:    "a pane back in another directory gets a fresh agent",
 			state:   line("devt", "claude", "s1", transcript, "/elsewhere"),
 			replies: slots,
