@@ -369,9 +369,11 @@ func TestBossInboxAgentTeam(t *testing.T) {
 		cmd := exec.Command(devBin, "state", st)
 		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
 		cmd.Stdin = strings.NewReader(stdin)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("❌ dev state %s %s: %v", st, stdin, err)
+		if err != nil || stderr.Len() > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, stderr %q", st, stdin, err, stderr.String())
 		}
 		return string(out)
 	}
@@ -383,6 +385,7 @@ func TestBossInboxAgentTeam(t *testing.T) {
 	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
 	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
 	prompt := `{"hook_event_name":"UserPromptSubmit"}`
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
 	run(boss, "working", prompt)
 	run(worker, "working", prompt)
 	var mates []string
