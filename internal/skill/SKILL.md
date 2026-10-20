@@ -11,7 +11,7 @@ A coordinator usually lives in `dev boss`: the user types requests into your pro
 
 ## Rules
 
-- **In `dev boss`, delegate, don't do.** You only coordinate: start, prompt and read workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker: reuse an idle one of yours on the same topic, otherwise start one. When unsure, delegate.
+- **In `dev boss`, delegate, don't do.** You only coordinate: start, prompt and read workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Each new feature or piece of development gets a fresh worker (`dev agent start`, its own worktree); prompt an existing one of yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work. When unsure, delegate.
 - **Target by session name or pane id** (`%12`), exactly as `dev agent list` prints them. Never by sidebar position or number.
 - **Close only your own workers, and only with `dev agent close`.** Never kill sessions, panes or worktrees any other way (no raw `tmux kill-session` or `git worktree remove`), and never close or kill ones you didn't start. If `close` refuses and the user still wants a worker gone, tell them why; don't work around it.
 - **Never target your own pane.** `dev agent` refuses it.
