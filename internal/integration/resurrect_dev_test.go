@@ -106,7 +106,8 @@ func TestResurrectDev(t *testing.T) {
 	sessions := strings.Split(d.T("ls", "-F", "#{session_name}"), "\n")
 	sort.Strings(sessions)
 	check(t, "sessions restored", strings.Join(sessions, " "), "boot devt devu plain")
-	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1 --remote-control=devt\n" + display("=devu:1.2", "#{pane_id}") + " claude --remote-control=devu\n"
+	noRC := ` --settings {"remoteControlAtStartup":false}`
+	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1" + noRC + "\n" + display("=devu:1.2", "#{pane_id}") + " claude" + noRC + "\n"
 	claudes := func() []string {
 		log, _ := os.ReadFile(d.stubLog)
 		var lines []string
@@ -118,7 +119,7 @@ func TestResurrectDev(t *testing.T) {
 		return lines
 	}
 	waitFor(t, "agents restarted", func() bool { return len(claudes()) == 2 })
-	check(t, "each agent pane resumes its conversation, else a fresh claude, named its session in Remote Control", strings.Join(claudes(), ""), agents)
+	check(t, "each agent pane resumes its conversation, else a fresh claude, a worker without Remote Control", strings.Join(claudes(), ""), agents)
 	sidebar := sidebarOption()
 	start := display(sidebar, "#{pane_start_command}")
 	t.Logf("rebuilt sidebar %s: %s", sidebar, start)

@@ -140,20 +140,24 @@ func TestResumeCommand(t *testing.T) {
 	if err := os.WriteFile(transcript, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	noRC := `'--settings' '{"remoteControlAtStartup":false}'`
 	tests := []struct {
 		name, kind, id, transcript string
+		worker                     bool
 		want                       string
 		resumed, ok                bool
 	}{
-		{"resumes its conversation", Claude, "s", transcript, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
-		{"transcript gone", Claude, "s", transcript + ".gone", `'claude' '--remote-control=dev-x'`, false, true},
-		{"no id", Claude, "", transcript, `'claude' '--remote-control=dev-x'`, false, true},
-		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, `'claude' '--remote-control=dev-x'`, false, true},
-		{"unknown kind", "codex", "s", transcript, "", false, false},
+		{"resumes its conversation", Claude, "s", transcript, false, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
+		{"transcript gone", Claude, "s", transcript + ".gone", false, `'claude' '--remote-control=dev-x'`, false, true},
+		{"no id", Claude, "", transcript, false, `'claude' '--remote-control=dev-x'`, false, true},
+		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, false, `'claude' '--remote-control=dev-x'`, false, true},
+		{"a worker resumes without Remote Control", Claude, "s", transcript, true, `'claude' '--resume' 's' ` + noRC, true, true},
+		{"a fresh worker too", Claude, "", transcript, true, `'claude' ` + noRC, false, true},
+		{"unknown kind", "codex", "s", transcript, false, "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript, "dev-x")
+			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript, "dev-x", tt.worker)
 			if got != tt.want || resumed != tt.resumed || ok != tt.ok {
 				t.Errorf("ResumeCommand = %q, %v, %v; want %q, %v, %v", got, resumed, ok, tt.want, tt.resumed, tt.ok)
 			}

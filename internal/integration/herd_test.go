@@ -50,6 +50,9 @@ func TestHerd(t *testing.T) {
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
 	check(t, "started by the boss, by name", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"), "boss")
+	if args := agentArgs(t, d, "=app:1.2"); !strings.Contains(args, `pty-wrap -- claude --settings {"remoteControlAtStartup":false}`) {
+		t.Errorf("worker's claude not started without Remote Control: %q", args)
+	}
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")
 
