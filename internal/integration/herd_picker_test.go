@@ -37,14 +37,14 @@ while IFS= read -r line; do
 done`, "agent"), "agent")
 }
 
-// The boss previews' reply box answers a worker's permission dialog: it shows as a picker with the hook's
-// command, its tile framed in the box's accent; a digit sends that key, the answer is verified, and the
-// question is cleared once the worker moves on.
-func TestHerdPicker(t *testing.T) {
-	d := newDevServer(t, "set -g @dev_notify off\n")
+// herdServer is a dev server with extraConf, a boss "herd" whose coordinator is a stub beside the previews
+// pane, and its worker w1, a dialogStub registered idle.
+func herdServer(t *testing.T, extraConf string) (d *devServer, w1, coord, previews string) {
+	t.Helper()
+	d = newDevServer(t, "set -g @dev_notify off\n"+extraConf)
 	stub := dialogStub(t, t.TempDir())
 	d.T("new-session", "-d", "-s", "w1", stub)
-	w1 := d.T("display", "-t", "=w1:", "-p", "#{pane_id}")
+	w1 = d.T("display", "-t", "=w1:", "-p", "#{pane_id}")
 	env := d.scriptEnv()
 	waitFor(t, "stub registered", func() bool {
 		out, _, _ := devAgent(env, "", "list")
@@ -57,15 +57,24 @@ func TestHerdPicker(t *testing.T) {
 	d.T("new-session", "-d", "-s", "herd", "bash", script, "", filepath.Join(tmp, "boss.log"))
 	d.T("set-option", "-t", "=herd:", "@dev_herd", "1")
 	d.T("set-option", "-t", "=w1:", "@dev_started_by", d.T("display", "-t", "=herd:", "-p", "#{session_id}"))
-	coord := d.T("display", "-t", "=herd:", "-p", "#{pane_id}")
+	coord = d.T("display", "-t", "=herd:", "-p", "#{pane_id}")
 	cmd := exec.Command(devBin, "state", "idle")
 	cmd.Env = d.scriptEnv("TMUX_PANE=" + coord)
 	cmd.Stdin = strings.NewReader(`{"hook_event_name":"SessionStart"}`)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("❌ coordinator state: %v %s", err, out)
 	}
-	previews := d.T("split-window", "-t", coord, "-h", "-PF", "#{pane_id}", devBin+" boss --previews")
+	previews = d.T("split-window", "-t", coord, "-h", "-PF", "#{pane_id}", devBin+" boss --previews")
 	d.T("switch-client", "-t", "=herd:")
+	return d, w1, coord, previews
+}
+
+// The boss previews' reply box answers a worker's permission dialog: it shows as a picker with the hook's
+// command, its tile framed in the box's accent; a digit sends that key, the answer is verified, and the
+// question is cleared once the worker moves on.
+func TestHerdPicker(t *testing.T) {
+	d, w1, _, previews := herdServer(t, "")
+	env := d.scriptEnv()
 
 	_, errOut, status := devAgent(env, "", "prompt", "w1", "ask")
 	check(t, "prompt", status+errOut, "0")
@@ -109,4 +118,33 @@ func waitPane(t *testing.T, d *devServer, pane, desc string, cond func(screen st
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("❌ timeout waiting for: %s; screen:\n%s", desc, screen)
+}
+
+// A click on a tile opens its reply box, framed in the tile's accent; focus moving to the coordinator closes
+// it back to the hint row, and focus coming back doesn't reopen it.
+func TestHerdReplyBlur(t *testing.T) {
+	d, _, coord, previews := herdServer(t, "set -g mouse on\n")
+	d.T("select-pane", "-t", coord)
+	waitPane(t, d, previews, "w1's tile", func(screen string) bool { return strings.Contains(screen, "w1 Claude · idle") })
+	const accent = "48;2;152;187;108" // idle green as a background
+	actClick(d, previews, 2, 0)
+	waitPane(t, d, previews, "the reply box", func(screen string) bool { return strings.Contains(screen, "esc cancel") })
+	check(t, "the click focused the previews", d.T("display", "-t", previews, "-p", "#{pane_active}"), "1")
+	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, accent) {
+		t.Errorf("❌ w1's tile header isn't on its accent:\n%s", styled)
+	}
+
+	d.T("select-pane", "-t", coord)
+	waitPane(t, d, previews, "the box closed", func(screen string) bool {
+		return !strings.Contains(screen, "esc cancel") && strings.Contains(screen, "i reply")
+	})
+	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); strings.Contains(styled, accent) {
+		t.Errorf("❌ w1's tile header still on its accent:\n%s", styled)
+	}
+
+	d.T("select-pane", "-t", previews)
+	time.Sleep(2500 * time.Millisecond)
+	if screen := d.T("capture-pane", "-p", "-t", previews); strings.Contains(screen, "esc cancel") {
+		t.Errorf("❌ focus back reopened the box:\n%s", screen)
+	}
 }

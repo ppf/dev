@@ -190,6 +190,55 @@ func TestSelectionAndClicks(t *testing.T) {
 	}
 }
 
+// Focus moving to another pane closes the reply box, keeping a typed reply for when its tile's box opens
+// again; focus coming back doesn't reopen it. A refresh listed before the click that focused the pane leaves
+// the box the click opened, and the box stays while its answer goes out or is still on screen.
+func TestBlurClosesBox(t *testing.T) {
+	m := twoTiles()
+	m.height = 14
+	refresh := func(m Model, focused bool, inputs int) Model {
+		snap := m.snap
+		snap.focused = focused
+		next, _ := m.Update(refreshMsg{snap: snap, inputs: inputs})
+		return next.(Model)
+	}
+	click := func(m Model) Model {
+		next, _ := m.Update(tea.MouseMsg{X: 3, Y: 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+		return next.(Model)
+	}
+	m = click(m)
+	if m = refresh(m, false, m.inputs-1); m.box.session != "a" {
+		t.Fatal("a refresh listed before the click closed its box")
+	}
+	// Away before any refresh saw the pane focused
+	m.box.ed.set("half")
+	if m = refresh(m, false, m.inputs); m.box.session != "" || m.selected != "a" {
+		t.Fatalf("blur: box %q selected %q", m.box.session, m.selected)
+	}
+	if got := ansi.Strip(strings.Join(m.render(), "\n")); strings.Contains(got, "esc cancel") {
+		t.Errorf("blur leaves the box drawn:\n%s", got)
+	}
+	if m = refresh(m, true, m.inputs); m.box.session != "" {
+		t.Error("focus back reopens the box")
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if m = next.(Model); m.box.session != "a" || m.box.ed.String() != "half" {
+		t.Errorf("i after blur: box %q draft %q", m.box.session, m.box.ed.String())
+	}
+	m.answering = "a"
+	if m = refresh(m, false, m.inputs); m.box.session != "a" {
+		t.Error("blur closed the box while its answer goes out")
+	}
+	m.answering, m.box.sent = "b", "key"
+	if m = refresh(m, false, m.inputs); m.box.session != "a" {
+		t.Error("blur closed the box while its answer is on screen")
+	}
+	m.box.sent = ""
+	if m = refresh(m, false, m.inputs); m.box.session != "" {
+		t.Error("another worker's answer keeps the box open")
+	}
+}
+
 func TestKill(t *testing.T) {
 	var ran []string
 	m := twoTiles()
@@ -231,10 +280,10 @@ func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "") +
-			r("herd", "$1", "1", active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "") +
-			r("plain", "$3", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "") +
+			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -255,7 +304,7 @@ func TestRefresh(t *testing.T) {
 			t.Fatal(msg.err)
 		}
 		s := msg.snap
-		if len(s.tiles) != 1 || s.tiles[0].sess.Name != "w1" || s.self != "$1" || s.client != "/dev/ttys1" {
+		if len(s.tiles) != 1 || s.tiles[0].sess.Name != "w1" || s.self != "$1" || s.client != "/dev/ttys1" || s.focused != (active == "1") {
 			t.Fatalf("active=%s snapshot %+v", active, s)
 		}
 		if active == "1" {
@@ -270,6 +319,14 @@ func TestRefresh(t *testing.T) {
 			t.Errorf("hidden window: ran %q, prs %d", ran, look.prs)
 		}
 	}
+	// Focus is own pane's, not its window's
+	for _, active := range []bool{true, false} {
+		rows := []row{{Session: "herd", SessionID: "$1", WindowActive: true, Active: !active, ID: "%1"},
+			{Session: "herd", SessionID: "$1", WindowActive: true, Active: active, ID: "%2"}}
+		if s, err := buildSnapshot(rows, nil, "%2", &fakeLookups{}); err != nil || s.focused != active {
+			t.Errorf("pane_active %v: focused %v, %v", active, s.focused, err)
+		}
+	}
 }
 
 // A deciding tile whose screen shows Claude's input box back (its dialog answered No or Esc, no hook) is
@@ -279,8 +336,8 @@ func TestRefreshDialogGone(t *testing.T) {
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "")
 	for _, screen := range []string{gone, open} {
 		var ran []string
 		state := "waiting"
@@ -318,9 +375,9 @@ func TestRefreshDialogGone(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {

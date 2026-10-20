@@ -26,6 +26,7 @@ type row struct {
 	SessionID    string `tmux:"session_id"`
 	Window       int    `tmux:"window_index"`
 	WindowActive bool   `tmux:"window_active"`
+	Active       bool   `tmux:"pane_active"`
 	ID           string `tmux:"pane_id"`
 	Path         string `tmux:"pane_current_path"`
 	Title        string `tmux:"pane_title"`
@@ -62,6 +63,7 @@ type snapshot struct {
 	self    string // own session's id
 	name    string // own session's name
 	visible bool   // a client shows own window
+	focused bool   // own pane is its window's active pane
 	client  string // tty of the client viewing own session; "" lets tmux pick
 }
 
@@ -77,8 +79,11 @@ type Model struct {
 	confirm       string // session waiting for y to be killed
 	msg           string // one-off message on the bottom row, until the next key
 	box           replyBox
-	answering     string   // the session an answer's keys go to, until its outcome; one at a time
-	history       []string // replies sent, oldest first
+	drafts        map[string]replyBox // by session: a reply typed when focus moved away, back when its box opens again
+	focused       bool                // own pane is its window's active pane, as of the last input or refresh
+	inputs        int                 // keys and clicks seen, so a refresh listed before one doesn't undo its focus
+	answering     string              // the session an answer's keys go to, until its outcome; one at a time
+	history       []string            // replies sent, oldest first
 	clk           control.Clock
 	compact       bool // the list view instead of the tiles
 }
@@ -98,8 +103,9 @@ type watchMsg struct{ err error }
 const watchInterval = 15 * time.Second
 
 type refreshMsg struct {
-	snap snapshot
-	err  error
+	snap   snapshot
+	inputs int // m.inputs when the refresh started
+	err    error
 }
 
 // Run shows the previews in pane until its pane closes or Ctrl-C.
@@ -149,6 +155,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		} else {
 			m.snap, m.err = msg.snap, nil
+			if msg.inputs == m.inputs {
+				m.focused = msg.snap.focused
+			}
+			// An answer going out or still on screen keeps its picker, so it isn't answered twice
+			if !m.focused && m.box.session != "" && m.answering != m.box.session && m.box.sent == "" {
+				m.blur()
+			}
 			m.selected = m.validSelection()
 			m.syncPick()
 		}
@@ -157,8 +170,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		m.focused, m.inputs = true, m.inputs+1
 		return m.handleKey(msg)
 	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			// tmux focuses a clicked pane before passing the click on
+			m.focused, m.inputs = true, m.inputs+1
+		}
 		return m.handleMouse(msg)
 	case actionMsg:
 		m.msg = msg.msg
@@ -195,7 +213,7 @@ func (m Model) validSelection() string {
 // tiles on the selected page (one call each, at most maxTiles); the compact view captures only the deciding
 // ones, for their dialogs.
 func (m Model) refresh() tea.Cmd {
-	width, height, selected, compact := m.width, m.gridHeight(), m.selected, m.compact
+	width, height, selected, compact, inputs := m.width, m.gridHeight(), m.selected, m.compact, m.inputs
 	return func() tea.Msg {
 		rows, err := tmux.Query[row](m.c, "list-panes", "-a")
 		if err != nil {
@@ -210,7 +228,7 @@ func (m Model) refresh() tea.Cmd {
 			return refreshMsg{err: err}
 		}
 		if !snap.visible {
-			return refreshMsg{snap: snap}
+			return refreshMsg{snap: snap, inputs: inputs}
 		}
 		g := layout(len(snap.tiles), width, height)
 		var captures []int
@@ -253,7 +271,7 @@ func (m Model) refresh() tea.Cmd {
 				t.body = tail(previewLines(out, *t), g.tileH-1)
 			}
 		}
-		return refreshMsg{snap: snap}
+		return refreshMsg{snap: snap, inputs: inputs}
 	}
 }
 
@@ -266,7 +284,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 	panes := map[string][]row{}
 	for _, r := range rows {
 		if r.ID == pane {
-			s.self, s.name, own = r.SessionID, r.Session, true
+			s.self, s.name, s.focused, own = r.SessionID, r.Session, r.Active, true
 			_, viewed := sidebar.ActiveClient(clients, r.Session)
 			s.visible = viewed && r.WindowActive
 		}
