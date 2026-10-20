@@ -15,16 +15,23 @@ import (
 
 // agentStub writes a fake Claude: it registers like the SessionStart hook, then echoes each input line as
 // "got: <line>" and runs the UserPromptSubmit and Stop hooks around it (a "slow" line takes 3s, an "ask"
-// line ends waiting on a permission prompt instead). With STUB_DEAF set it echoes but runs no hooks, like
-// an agent that never picked the prompt up.
+// line ends waiting on a permission prompt instead; "/clear" ends session s<n> and starts s<n+1>, with no
+// turn). With STUB_DEAF set it echoes but runs no hooks, like an agent that never picked the prompt up.
 func agentStub(t *testing.T, dir, name string) string {
 	t.Helper()
 	dev := shellQuote(devBin)
-	return filepath.Join(writeStubs(t, dir, `hook() { printf '{"hook_event_name":"%s","notification_type":"%s"}' "$2" "$3" | `+dev+` state "$1"; }
+	return filepath.Join(writeStubs(t, dir, `n=0
+hook() { printf '{"hook_event_name":"%s","notification_type":"%s","session_id":"s%s"}' "$2" "$3" "$n" | `+dev+` state "$1"; }
 hook idle SessionStart
 while IFS= read -r line; do
 	echo "got: $line"
 	[ -n "$STUB_DEAF" ] && continue
+	if [ "$line" = /clear ]; then
+		hook clear SessionEnd
+		n=$((n + 1))
+		hook idle SessionStart
+		continue
+	fi
 	hook working UserPromptSubmit
 	case "$line" in
 	slow*) sleep 3 ;;
@@ -89,6 +96,14 @@ func TestAgentControl(t *testing.T) {
 			out, _, _ := devAgent(env, "", "read", "w1", "--lines", "5")
 			return strings.Contains(out, "got: line one\n") && strings.HasSuffix(out, "got: line two\n")
 		})
+	})
+
+	t.Run("prompt --wait /clear", func(t *testing.T) {
+		out, errOut, status := devAgent(env, "", "prompt", "w1", "--wait", "--timeout", "30s", "/clear")
+		check(t, "prompt --wait /clear", status+" "+out+errOut, "0 idle\n")
+		check(t, "new session", s.T("show-option", "-pqv", "-t", w1, "@agent_session"), "s1")
+		_, errOut, status = devAgent(env, "", "prompt", "deaf", "--wait", "--stall", "1s", "/clear")
+		check(t, "/clear never confirmed", status+" "+errOut, "3 ❌ stalled: the agent never picked up the prompt within 1s\n")
 	})
 
 	t.Run("busy, timeout, wait", func(t *testing.T) {

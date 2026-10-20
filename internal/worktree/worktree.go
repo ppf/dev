@@ -161,6 +161,11 @@ func Merged(wt, ref string) (bool, error) {
 	return err == nil, err
 }
 
+// Head is the commit checked out in wt.
+func Head(wt string) (string, error) {
+	return gitOutput(wt, "rev-parse", "HEAD")
+}
+
 // Branch is the branch checked out in wt, "" for a detached HEAD.
 func Branch(wt string) (string, error) {
 	return gitOutput(wt, "branch", "--show-current")
