@@ -85,14 +85,15 @@ func TestSave(t *testing.T) {
 		tmux.FormatRow("boss-old", "", "", "$13", "", "1")
 	// devt's window 1 is also linked into linked as window 5, listed after devt. %2 runs Claude with a
 	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet. boss-p's
-	// panes carry their roles, plain's previews-marked pane doesn't make it a boss, and boss-old (made
-	// before the roles) has none.
+	// panes carry their roles (its window 1 also linked into linked as window 6, listed first), plain's
+	// previews-marked pane doesn't make it a boss, and boss-old (made before the roles) has none.
 	pane := func(session, id, window, index, command, agentCmd, agentID, role string) string {
 		return tmux.FormatRow(session, id, window, index, command, "/repo", agentCmd, agentID, "/t/"+agentID+".jsonl", role)
 	}
 	panes := pane("devt", "%1", "1", "1", "dev", "", "", "") + pane("devt", "%2", "1", "2", "2.1.3", "2.1.3", "s1", "") +
 		pane("devt", "%3", "1", "3", "zsh", "2.1.3", "s0", "") + pane("plain", "%4", "1", "1", "2.1.3", "2.1.3", "", "previews") +
 		pane("linked", "%1", "5", "1", "dev", "", "", "") + pane("linked", "%2", "5", "2", "2.1.3", "2.1.3", "s1", "") +
+		pane("linked", "%7", "6", "1", "2.1.3", "2.1.3", "b1", "coordinator") +
 		pane("boss-p", "%7", "1", "2", "2.1.3", "2.1.3", "b1", "coordinator") + pane("boss-p", "%8", "1", "3", "dev", "", "", "previews") +
 		pane("boss-old", "%9", "1", "1", "2.1.3", "2.1.3", "", "")
 	tests := []struct {

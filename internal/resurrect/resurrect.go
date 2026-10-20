@@ -81,9 +81,11 @@ func Save(c *tmux.Client, snapshot string) error {
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", s.Name, s.Project, pos[sessionPane{s.Name, s.Sidebar}])
 	}
 	bosses := map[string]string{} // id → name
+	herds := map[string]bool{}    // by name
 	for _, s := range sessions {
 		if s.Herd != "" {
 			bosses[s.ID] = s.Name
+			herds[s.Name] = true
 		}
 	}
 	for _, s := range sessions {
@@ -102,10 +104,18 @@ func Save(c *tmux.Client, snapshot string) error {
 			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", bossPrefix, s.Name, coordinator, previews)
 		}
 	}
+	// A coordinator's line goes under its boss, which restores it, wherever else its window is linked
+	coordinatorOf := map[string]string{} // pane id → boss
+	for _, p := range panes {
+		if p.BossPane == herd.RoleCoordinator && herds[p.Session] {
+			coordinatorOf[p.ID] = p.Session
+		}
+	}
 	saved := map[string]bool{}
 	for _, p := range panes {
 		// Once per pane, under the first session listing a linked window; a crash's leftover isn't live
-		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] {
+		boss, ok := coordinatorOf[p.ID]
+		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] || ok && boss != p.Session {
 			continue
 		}
 		saved[p.ID] = true
@@ -252,8 +262,8 @@ func Restore(c *tmux.Client) error {
 		}
 		adopted[slot{b.Session, b.Coordinator}] = tried
 	}
-	plain := slices.DeleteFunc(slices.Clone(agents), func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
-	if err := resumeAgents(c, plain, liveSessions, shell); err != nil {
+	agents = slices.DeleteFunc(agents, func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
+	if err := resumeAgents(c, agents, liveSessions, shell); err != nil {
 		errs = append(errs, err)
 	}
 	for _, e := range entries {
@@ -422,14 +432,11 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, live []string, shell stri
 		if slices.Contains(live, a.Session) {
 			continue
 		}
-		slot := tmux.SessionTarget(a.Session) + a.Pos
-		out, err := display(c, slot, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
-		fields := strings.Split(out, tmux.Sep)
-		if err != nil || len(fields) != 3 || fields[0] != shell {
+		pane, path, ok := bareShell(c, tmux.SessionTarget(a.Session)+a.Pos, shell)
+		if !ok {
 			warn(c, a.Session+":"+a.Pos+" is not the agent's bare shell, agent not restarted")
 			continue
 		}
-		pane, path := fields[1], fields[2]
 		id := a.ID
 		if path != a.Path {
 			id = ""
@@ -466,13 +473,11 @@ func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, shell string)
 	}
 	var panes, paths [2]string
 	for i, pos := range []string{b.Coordinator, b.Previews} {
-		out, err := display(c, target+pos, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
-		fields := strings.Split(out, tmux.Sep)
-		if err != nil || len(fields) != 3 || fields[0] != shell {
+		var ok bool
+		if panes[i], paths[i], ok = bareShell(c, target+pos, shell); !ok {
 			warn(c, b.Session+":"+pos+" is not the boss's bare shell, boss not restored")
 			return false, nil
 		}
-		panes[i], paths[i] = fields[1], fields[2]
 	}
 	var resume []string
 	for _, a := range agents {
@@ -490,6 +495,17 @@ func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, shell string)
 		return true, &stepError{"boss", err}
 	}
 	return true, nil
+}
+
+// bareShell returns slot's pane id and directory when it runs shell, as resurrect leaves a pane whose
+// process it doesn't restart.
+func bareShell(c *tmux.Client, slot, shell string) (pane, path string, ok bool) {
+	out, err := display(c, slot, "#{pane_current_command}"+tmux.Sep+"#{pane_id}"+tmux.Sep+"#{pane_current_path}")
+	fields := strings.Split(out, tmux.Sep)
+	if err != nil || len(fields) != 3 || fields[0] != shell {
+		return "", "", false
+	}
+	return fields[1], fields[2], true
 }
 
 // stepError is a tmux step of restoreSession that failed. Its text is Restore's warning, so it gives
