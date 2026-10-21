@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -200,13 +201,14 @@ func undimmed(line string) string {
 	return b.String()
 }
 
-// Deliver pastes boss's pending notes into its coordinator pane as one prompt, only while the
-// coordinator is idle with an empty input box, at most once per pasteGap. A batch that can't be pasted
-// goes back to the inbox. delivered reports a paste.
-func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err error) {
+// Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when it
+// has one (send), else pasted into its pane, only while the coordinator is idle with an empty input box, at most
+// once per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
+// flightTimeout into a rest goes back too (Expire), for the paste.
+func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
-		return false, err
+		return err
 	}
 	ready := func() (bool, error) {
 		st, err := control.ReadChecked(c, a.Pane)
@@ -219,12 +221,23 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 		screen, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)
 		return err == nil && InputEmpty(screen), err
 	}
+	st, err := control.ReadChecked(c, a.Pane)
+	if err != nil {
+		return err
+	}
+	if _, err := b.Box.Expire(clk.Now(), resting(st.Trusted(), st.WaitingFor)); err != nil {
+		return err
+	}
+	done, sendErr := send(c, clk, b, a)
+	if done {
+		return nil
+	}
 	if ok, err := ready(); !ok || err != nil {
-		return false, err
+		return errors.Join(sendErr, err)
 	}
 	bt, err := b.Box.TakeForPaste(clk.Now())
 	if err != nil || len(bt.Notes) == 0 {
-		return false, err
+		return errors.Join(sendErr, err)
 	}
 	// The user may have started typing while the inbox was locked
 	ok, err := ready()
@@ -232,12 +245,9 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) (delivered bool, err err
 		_, err = control.Prompt(c, clk, a.Pane, bt.String())
 	}
 	if !ok || err != nil {
-		if rerr := b.Box.Restore(bt); rerr != nil {
-			return false, rerr
-		}
-		return false, err
+		err = errors.Join(err, b.Box.Restore(bt))
 	}
-	return true, nil
+	return errors.Join(sendErr, err)
 }
 
 // Here is the boss session pane is in, ok=false outside a boss or with its inbox off.

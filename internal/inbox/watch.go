@@ -379,8 +379,7 @@ func deliverPending(c *tmux.Client, clk control.Clock, b Boss) error {
 	if pending, err := b.Box.Pending(); !pending || err != nil {
 		return err
 	}
-	_, err := Deliver(c, clk, b)
-	return err
+	return Deliver(c, clk, b)
 }
 
 // checkPRs checks the open PRs of due, idle workers' panes, and queues and delivers their notes; a result

@@ -108,7 +108,7 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 ## Boss inbox
 
-In `dev boss`, you hear of your workers without polling: a prompt or extra context starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`). It arrives when you stop, when the user types, or as a prompt while you're idle with an empty input box. On each batch:
+In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it), or as a prompt while you're idle with an empty input box. On each batch:
 
 - **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
 - **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.

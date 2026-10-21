@@ -70,6 +70,7 @@ func newStateCmd() *cobra.Command {
 			var session agent.Session
 			if !codex && !grok {
 				session = agent.HookSession(input)
+				hook.Socket = os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET")
 			}
 			if codex {
 				if pane, ok, err = agent.CodexPane(c, input); err != nil {
