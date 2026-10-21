@@ -79,8 +79,12 @@ func send(c *tmux.Client, clk control.Clock, b Boss, a control.Agent) (done bool
 		return false, err
 	}
 	bt, paste, err := b.Box.TakeForSend(clk.Now())
-	if err != nil || len(bt.Notes) == 0 {
-		return !paste && err == nil, err
+	if err != nil || paste {
+		return false, err
+	}
+	if len(bt.Notes) == 0 {
+		// A batch in flight, or nothing pending
+		return true, nil
 	}
 	if err := Send(sock, bt.Message()); err != nil {
 		return false, errors.Join(fmt.Errorf("inbox: send to %s: %w", sock, err), b.Box.Unsend())
