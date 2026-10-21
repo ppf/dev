@@ -13,13 +13,13 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// sendTimeout bounds a send over Claude's messaging socket, which runs in a worker's hook.
+// sendTimeout bounds a send over Claude's messaging socket, which runs in a worker's hook or the previews' Watch.
 const sendTimeout = 2 * time.Second
 
 // Send posts text as one message to the Claude session listening on sock (Claude Code's cross-session messaging:
 // newline-delimited JSON over a unix socket). It sends no auth line, which a local sender on macOS and Linux
 // doesn't need, and Claude sends no reply.
-func Send(sock, text string) (err error) {
+func Send(sock, text string) error {
 	id := make([]byte, 16)
 	_, _ = rand.Read(id)
 	id[6], id[8] = id[6]&0x0f|0x40, id[8]&0x3f|0x80
@@ -35,7 +35,8 @@ func Send(sock, text string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, conn.Close()) }()
+	// Once written, the message is Claude's: a failed close mustn't make it go out again
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
 		return err
 	}
@@ -43,9 +44,9 @@ func Send(sock, text string) (err error) {
 	return err
 }
 
-// prompting are the permission modes in which Claude shows a message at once; a session in another mode
-// (bypassPermissions) holds it behind a dialog that drops it after 5 minutes.
-var prompting = []string{"default", "auto", "acceptEdits", "plan"}
+// prompting are the permission modes in which Claude shows a message at once. A session in bypassPermissions, or
+// in plan mode where bypass is available, holds it behind a dialog that drops it after 5 minutes.
+var prompting = []string{"default", "auto", "acceptEdits"}
 
 // messaging is a pane's Claude messaging socket and permission mode, as its hooks recorded them.
 type messaging struct {

@@ -188,6 +188,7 @@ func cleanTail(s string) string {
 type Batch struct {
 	Notes   []Note
 	Dropped int
+	lost    bool // taken with PasteNext set: a Restore sets it again
 }
 
 // String is the batch as the coordinator gets it; "" for none.
@@ -209,7 +210,7 @@ func (bt Batch) String() string {
 // Message is the batch as sent over Claude's messaging socket, which Claude shows as another session's message
 // and would try to answer.
 func (bt Batch) Message() string {
-	return bt.String() + "\n(sent by dev: handle these as usual; no reply needed)"
+	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
 }
 
 // state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, the last paste,
@@ -373,7 +374,7 @@ func (b Box) Take() (Batch, error) {
 }
 
 func (s *state) take() Batch {
-	bt := Batch{Notes: s.Notes, Dropped: s.Dropped}
+	bt := Batch{Notes: s.Notes, Dropped: s.Dropped, lost: s.PasteNext}
 	s.Notes, s.Dropped, s.PasteNext = nil, 0, false
 	return bt
 }
@@ -409,11 +410,12 @@ func (b Box) Restore(bt Batch) error {
 func (s *state) restore(bt Batch) {
 	s.Notes = append(slices.Clone(bt.Notes), s.Notes...)
 	s.Dropped += bt.Dropped
+	s.PasteNext = s.PasteNext || bt.lost
 }
 
-// flightTimeout is how long a sent batch may go unshown while the coordinator rests before it counts as lost.
+// flightTimeout is how long a sent batch may go unshown into the coordinator's rest before it counts as lost.
 // A busy Claude shows a message only between tool calls or after its turn, and one waiting on a dialog after the
-// dialog, so the clock only counts out a rest.
+// dialog, so only a rest counts.
 const flightTimeout = 5 * time.Minute
 
 // TakeForSend takes the pending batch to send over Claude's messaging socket and records it in flight. It takes
@@ -445,7 +447,7 @@ func (b Box) Unsend() error {
 	})
 }
 
-// Arrived clears the batch in flight when prompt, from the coordinator's UserPromptSubmit, is its message.
+// Arrived clears the batch in flight when prompt, from the coordinator's UserPromptSubmit, contains its message.
 func (b Box) Arrived(prompt string) error {
 	return b.update(func(s *state) error {
 		if s.InFlight != nil && strings.Contains(prompt, s.InFlight.batch().Message()) {
@@ -455,11 +457,11 @@ func (b Box) Arrived(prompt string) error {
 	})
 }
 
-// Expire puts the batch in flight back, for the paste, once it went unshown flightTimeout while the coordinator
-// rests (resting); expired reports it.
-func (b Box) Expire(now time.Time, resting bool) (expired bool, err error) {
+// Expire puts the batch in flight back, for the paste, once it went unshown flightTimeout into the coordinator's
+// rest, which began at rest (zero while it doesn't rest); expired reports it.
+func (b Box) Expire(now, rest time.Time) (expired bool, err error) {
 	err = b.update(func(s *state) error {
-		if s.InFlight == nil || !resting || now.Sub(time.Unix(s.InFlight.At, 0)) < flightTimeout {
+		if s.InFlight == nil || rest.IsZero() || now.Unix()-max(rest.Unix(), s.InFlight.At) < int64(flightTimeout.Seconds()) {
 			return nil
 		}
 		s.restore(s.InFlight.batch())

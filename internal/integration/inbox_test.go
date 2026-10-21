@@ -812,15 +812,15 @@ func TestBossInboxSocket(t *testing.T) {
 
 	// Working, with a draft: sent anyway
 	finish("two")
-	msg := batch("two") + "\n(sent by dev: handle these as usual; no reply needed)"
+	msg := batch("two") + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
 	check(t, "sent to a working coordinator", received(), msg)
 	finish("three")
 	check(t, "one batch in flight at a time", received(), "")
 	out = run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(msg)+`,"permission_mode":"default"}`, sock)
 	check(t, "its arrival takes the next note as context", out, `{"hookSpecificOutput":{"additionalContext":"`+strings.ReplaceAll(batch("three"), "\n", `\n`)+`","hookEventName":"UserPromptSubmit"}}`+"\n")
 	finish("four")
-	check(t, "sent again once shown", received(), batch("four")+"\n(sent by dev: handle these as usual; no reply needed)")
-	run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(batch("four")+"\n(sent by dev: handle these as usual; no reply needed)")+`,"permission_mode":"default"}`, sock)
+	check(t, "sent again once shown", received(), batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)")
+	run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)")+`,"permission_mode":"default"}`, sock)
 
 	// Bypass mode would hold the message behind a dialog
 	run(boss, "idle", `{"hook_event_name":"Stop","permission_mode":"bypassPermissions"}`, sock)
@@ -840,4 +840,94 @@ func TestBossInboxSocket(t *testing.T) {
 	check(t, "failed send: its Stop gets the note", out, `{"decision":"block","reason":"`+strings.ReplaceAll(batch("six"), "\n", `\n`)+`"}`+"\n")
 	data, _ := os.ReadFile(log)
 	check(t, "never pasted", string(data), "")
+}
+
+// A batch sent over the socket that the coordinator doesn't show 5 minutes into its rest is reported and pasted;
+// the batch after it goes over the socket again.
+func TestBossInboxSocketLost(t *testing.T) {
+	tmp := t.TempDir()
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir) // Watch runs in this process
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss.log")
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+
+	dir, err := os.MkdirTemp("", "dvs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "s")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	received := make(chan struct{}, 10)
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = bufio.NewReader(conn).ReadString('\n')
+			_ = conn.Close()
+			received <- struct{}{}
+		}
+	}()
+	sent := func() bool {
+		select {
+		case <-received:
+			return true
+		case <-time.After(time.Second):
+			return false
+		}
+	}
+	run := func(pane, st, stdin string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE="+pane, "CLAUDE_CODE_MESSAGING_SOCKET="+sock)
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	boxLog := func() string { data, _ := os.ReadFile(log); return string(data) }
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	run(boss, "idle", `{"hook_event_name":"Stop","permission_mode":"default"}`)
+	waitFor(t, "stub box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", boss), "Try") })
+
+	start := time.Now()
+	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"x"}`)
+	if !sent() {
+		t.Fatal("❌ not sent over the socket")
+	}
+	watch := func(after time.Duration) error {
+		clk := control.Clock{Now: func() time.Time { return start.Add(after) }, Sleep: time.Sleep}
+		return inbox.Watch(s.tmux, clk, boss)
+	}
+	if err := watch(4 * time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	check(t, "in flight: no paste", boxLog(), "")
+	if err := watch(5*time.Minute + 2*time.Second); err == nil || !strings.Contains(err.Error(), "went unshown 5m0s into a rest") {
+		t.Errorf("lost batch not reported: %v", err)
+	}
+	waitFor(t, "lost batch pasted", func() bool { return boxLog() == "[dev boss inbox] 1 worker update(s):\n- w finished: x\n" })
+	if sent() {
+		t.Error("lost batch sent again")
+	}
+
+	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"y"}`)
+	if !sent() {
+		t.Error("the next batch isn't sent over the socket")
+	}
 }

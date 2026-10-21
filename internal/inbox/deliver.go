@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/sidebar"
@@ -201,10 +202,10 @@ func undimmed(line string) string {
 	return b.String()
 }
 
-// Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when it
-// has one (send), else pasted into its pane, only while the coordinator is idle with an empty input box, at most
-// once per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
-// flightTimeout into a rest goes back too (Expire), for the paste.
+// Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when send
+// takes them, else pasted into its pane, only while the coordinator is idle with an empty input box, at most once
+// per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
+// flightTimeout into a rest goes back too (Expire), for the paste, and is reported.
 func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
@@ -225,10 +226,18 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	if err != nil {
 		return err
 	}
-	if _, err := b.Box.Expire(clk.Now(), resting(st.Trusted(), st.WaitingFor)); err != nil {
+	var rest time.Time
+	if resting(st.Trusted(), st.WaitingFor) {
+		rest = time.Unix(unix(st.Since), 0)
+	}
+	expired, err := b.Box.Expire(clk.Now(), rest)
+	if err != nil {
 		return err
 	}
 	done, sendErr := send(c, clk, b, a)
+	if expired {
+		sendErr = errors.Join(fmt.Errorf("inbox: the batch sent over Claude's messaging socket went unshown %s into a rest: pasting it", flightTimeout), sendErr)
+	}
 	if done {
 		return nil
 	}

@@ -234,7 +234,8 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		case h.PermissionMode != "":
 			cmds = append(cmds, set(OptMode, h.PermissionMode))
 		case h.Event == "SessionStart":
-			// SessionStart and Notification carry no mode: a new session's is unknown until its first prompt
+			// SessionStart carries no mode: a new session's is unknown until its first prompt (a Notification, also
+			// without one, keeps the last)
 			cmds = append(cmds, unset(OptMode))
 		}
 	}
