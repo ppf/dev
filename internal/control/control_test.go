@@ -608,13 +608,16 @@ func TestBossPane(t *testing.T) {
 			return "", nil
 		case target == "=boss:":
 			return "%1\t1\n", nil
+		case target == "=dying:":
+			return "\t\n", nil
 		}
 		return "%2\t\n", nil
 	})
 	for session, want := range map[string]string{
-		"boss": "%1",
-		"user": "user is not a boss session (dev boss)",
-		"gone": `no session "gone"`,
+		"boss":  "%1",
+		"user":  "user is not a boss session (dev boss)",
+		"gone":  `no session "gone": tmux has-session -t =gone:: can't find session: gone`,
+		"dying": `no session "dying"`,
 	} {
 		got, err := BossPane(c, session)
 		if err != nil {

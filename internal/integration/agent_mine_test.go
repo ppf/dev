@@ -53,6 +53,7 @@ func TestAgentListMine(t *testing.T) {
 	// Outside tmux, --boss names the coordinator, which must be a boss session
 	s.T("set-option", "-t", "=coord:", "@dev_herd", "1")
 	check(t, "--mine --boss outside tmux", sessions(run("", "", "agent", "list", "--mine", "--boss", "coord", "--json")), "worker<coord")
+	check(t, "--boss over this session", sessions(run(pane["user"], "", "agent", "list", "--mine", "--boss", "coord", "--json")), "worker<coord")
 	for boss, want := range map[string]string{"user": "user is not a boss session (dev boss)", "gone": `no session "gone"`} {
 		_, errOut, status := devAgent(s.scriptEnv(), "", "list", "--mine", "--boss", boss)
 		if status == "0" || !strings.Contains(errOut, want) {

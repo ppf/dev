@@ -84,7 +84,7 @@ func newAgentListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON array")
-	cmd.Flags().BoolVar(&mine, "mine", false, "only the workers this session started with dev agent start (its child sessions)")
+	cmd.Flags().BoolVar(&mine, "mine", false, "only the workers this session (or --boss's) started with dev agent start (its child sessions)")
 	addBossFlag(cmd, &boss)
 	return cmd
 }
@@ -368,13 +368,13 @@ func newAgentCloseCmd() *cobra.Command {
 	var boss string
 	cmd := &cobra.Command{
 		Use:   "close <target>",
-		Short: "Close a finished worker this session started: kill its session, remove its worktree and branch",
-		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered. Refused,
-naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
+		Short: "Close a finished worker this session (or --boss's) started: kill its session, remove its worktree and branch",
+		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered.
+Refused, naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
 no changes to tracked files and its HEAD is in origin's default branch (fetched first), or gh reports its PR
 merged into that branch at that HEAD (a squash or rebase merge). Its untracked, not ignored files (e.g.
-RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this
-session, its session is killed, its worktree removed and its branch force-deleted.`,
+RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this (or
+--boss's) session, its session is killed, its worktree removed and its branch force-deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()

@@ -56,7 +56,13 @@ func TestHerd(t *testing.T) {
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")
 
-	// From outside tmux, --boss names the boss: the worker is the same as one its coordinator started
+	// From outside tmux, --boss names the boss: refused before opening anything unless it is one, its worker
+	// is the same as one its coordinator started
+	_, errOut, status = devAgent(env, "", "start", "web", "--boss", "boot", "--timeout", "30s")
+	check(t, "start --boss of a plain session", status+" "+errOut, "1 ❌ boot is not a boss session (dev boss)\n")
+	if _, err := d.Try("has-session", "-t", "=web:"); err == nil {
+		t.Error("❌ refused start --boss opened web")
+	}
 	_, errOut, status = devAgent(env, "", "start", "web", "--boss", "boss", "--timeout", "30s")
 	check(t, "start --boss outside tmux", status+errOut, "0")
 	check(t, "started by the named boss", d.T("show-option", "-qv", "-t", "=web:", "@dev_started_by"), "boss")
