@@ -20,7 +20,7 @@ func TestHerd(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentStub(t, stubs, "claude")
-	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
+	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}, [2]string{"web", tempDir(t)}))
 
 	herd := exec.Command(devBin, "boss")
 	herd.Env = env
@@ -56,10 +56,34 @@ func TestHerd(t *testing.T) {
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")
 
-	waitFor(t, "app tile with its screen", func() bool {
+	// From outside tmux, --boss names the boss: refused before opening anything unless it is one, its worker
+	// is the same as one its coordinator started
+	_, errOut, status = devAgent(env, "", "start", "web", "--boss", "boot", "--timeout", "30s")
+	check(t, "start --boss of a plain session", status+" "+errOut, "1 ❌ boot is not a boss session (dev boss)\n")
+	if _, err := d.Try("has-session", "-t", "=web:"); err == nil {
+		t.Error("❌ refused start --boss opened web")
+	}
+	_, errOut, status = devAgent(env, "", "start", "web", "--boss", "boss", "--timeout", "30s")
+	check(t, "start --boss outside tmux", status+errOut, "0")
+	check(t, "started by the named boss", d.T("show-option", "-qv", "-t", "=web:", "@dev_started_by"), "boss")
+	if args := agentArgs(t, d, "=web:1.2"); !strings.Contains(args, `pty-wrap -- claude --settings {"remoteControlAtStartup":false}`) {
+		t.Errorf("--boss worker's claude not started without Remote Control: %q", args)
+	}
+	mine, errOut, status := devAgent(env, "", "list", "--mine", "--boss", "boss")
+	var sessions []string
+	for _, l := range strings.Split(strings.TrimSpace(mine), "\n") {
+		sessions = append(sessions, strings.Fields(l + " -")[0])
+	}
+	check(t, "--mine --boss outside tmux", status+errOut+" "+strings.Join(sessions, " "), "0 app web")
+
+	waitFor(t, "app and web tiles", func() bool {
 		screen := d.T("capture-pane", "-p", "-t", previews)
-		return strings.Contains(screen, "● app Claude · idle") && strings.Contains(screen, "got: hello")
+		return strings.Contains(screen, "● app Claude · idle") && strings.Contains(screen, "got: hello") && strings.Contains(screen, "● web Claude")
 	})
+	waitFor(t, "web nested under the boss in its sidebar", func() bool {
+		return strings.Contains(d.T("capture-pane", "-p", "-t", sidebarPane), "└ ● web")
+	})
+	d.T("kill-session", "-t", "=web:")
 	screen := d.T("capture-pane", "-p", "-t", previews)
 	if strings.Contains(screen, "● herd") {
 		t.Errorf("the herd session shows as a tile:\n%s", screen)
@@ -95,7 +119,7 @@ func TestHerd(t *testing.T) {
 	if len(panes) != 3 {
 		t.Fatalf("reopened boss panes: %q", panes)
 	}
-	mine, errOut, status := devAgent(append(env, "TMUX_PANE="+panes[1]), "", "list", "--mine")
+	mine, errOut, status = devAgent(append(env, "TMUX_PANE="+panes[1]), "", "list", "--mine")
 	check(t, "--mine in the reopened boss", status+errOut+" "+strings.Fields(mine + " -")[0], "0 app")
 	waitFor(t, "app nested under the reopened boss in its sidebar", func() bool {
 		return strings.Contains(d.T("capture-pane", "-p", "-t", panes[0]), "└ ● app")

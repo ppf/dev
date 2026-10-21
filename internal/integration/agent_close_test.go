@@ -208,4 +208,17 @@ func TestAgentClose(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(results, "RESULT.md")); err != nil || string(b) != "# result" {
 		t.Errorf("❌ first results = %q, %v; want them kept", b, err)
 	}
+
+	// Outside tmux, --boss names the coordinator, once it's a boss session
+	worker("remote", true, "idle", idle)
+	if out, err := devCmd("", "", "agent", "close", "remote", "--boss", "coord"); err == nil || !strings.Contains(out, "coord is not a boss session") {
+		t.Errorf("❌ close --boss of a plain session = %v, %q; want it refused", err, out)
+	}
+	d.T("set-option", "-t", "=coord:", "@dev_herd", "1")
+	if out, err := devCmd("", "", "agent", "close", "remote", "--boss", "coord"); err != nil {
+		t.Errorf("❌ close --boss coord: %v\n%s", err, out)
+	}
+	if _, err := d.Try("has-session", "-t", "=remote:"); err == nil {
+		t.Error("❌ session remote still there")
+	}
 }

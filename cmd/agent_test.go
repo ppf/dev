@@ -41,6 +41,7 @@ func TestAgentArgs(t *testing.T) {
 		{[]string{"agent", "start", "app", ""}, "empty worktree name"},
 		{[]string{"agent", "start", "app", "--agent", "gemini"}, `unknown --agent "gemini", want claude, codex or grok`},
 		{[]string{"agent", "wait", "app", "--until", "done"}, `unknown --until "done", want idle, waiting or settled`},
+		{[]string{"agent", "list", "--boss", "herd"}, "--boss needs --mine"},
 	} {
 		if _, _, err := execute(t, "", tt.args...); err == nil || err.Error() != tt.err {
 			t.Errorf("dev %q = %v, want %q", tt.args, err, tt.err)

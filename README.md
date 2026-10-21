@@ -112,6 +112,8 @@ dev agent close <target> [--json]              # close a finished worker: sessio
 dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 ```
 
+`start`, `list --mine` and `close` act for the session they run in (`TMUX_PANE`). A coordinator outside tmux (e.g. a Claude desktop-app session) passes `--boss <session>`, naming a `dev boss` session to act as: its workers are the same as the ones its coordinator starts (nested under it in the sidebar, previewed, no Remote Control, notes to its inbox), and `close` runs the same checks. Any other session is refused.
+
 Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (the prompt was never picked up). State comes from the `dev state` hooks, so `wait` and `prompt --wait` refuse a Codex pane without them. `prompt` refuses an agent showing a permission prompt or question (`@agent_waiting_for`, the Notification type), and `prompt --wait` counts prompts through the `UserPromptSubmit` hook (`@agent_prompts`), so the hook must run this version of `dev`. `/clear` (and its aliases `/reset`, `/new`) starts no turn, so `prompt --wait /clear` waits instead for the `SessionStart` of the new conversation (a new `@agent_session`, which Codex and Grok panes don't record, so they refuse it). `agent` is a subcommand, so no project can be named `agent`.
 
 Some changes run no Claude hook, so `dev agent` reads them off the screen:
