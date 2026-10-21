@@ -143,6 +143,26 @@ func list(c *tmux.Client) ([]Agent, error) {
 	return agents, nil
 }
 
+// BossPane is a pane of boss session session (its active one, maybe not the coordinator's): callers only read its session.
+func BossPane(c *tmux.Client, session string) (string, error) {
+	// display-message prints empty formats for a missing session, without failing
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err != nil {
+		return "", fmt.Errorf("no session %q: %w", session, err)
+	}
+	out, err := c.Run("display-message", "-p", "-t", tmux.SessionTarget(session), "#{pane_id}\t#{"+sidebar.OptHerd+"}")
+	if err != nil {
+		return "", err
+	}
+	pane, herd, _ := strings.Cut(strings.TrimSuffix(out, "\n"), "\t")
+	if pane == "" { // gone since has-session
+		return "", fmt.Errorf("no session %q", session)
+	}
+	if herd == "" {
+		return "", fmt.Errorf("%s is not a boss session (dev boss)", session)
+	}
+	return pane, nil
+}
+
 // StartedBy keeps the agents whose session was started (dev agent start) from pane's session.
 func StartedBy(c *tmux.Client, agents []Agent, pane string) ([]Agent, error) {
 	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")

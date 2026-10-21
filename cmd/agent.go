@@ -54,20 +54,27 @@ Run "dev agent skill" for the coordinator skill.`,
 
 func newAgentListCmd() *cobra.Command {
 	var asJSON, mine bool
+	var boss string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List every session's agent: session, pane, agent, state, branch, path, cost",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if boss != "" && !mine {
+				return errors.New("--boss needs --mine")
+			}
 			c := tmux.New()
 			agents, err := control.List(c)
 			if err != nil {
 				return err
 			}
 			if mine {
-				pane := os.Getenv("TMUX_PANE")
+				pane, err := callerPane(c, boss)
+				if err != nil {
+					return err
+				}
 				if pane == "" {
-					return errors.New("--mine lists the workers of the session it runs in: run it inside tmux")
+					return errors.New("--mine lists the workers of the session it runs in: run it inside tmux, or pass --boss <session>")
 				}
 				if agents, err = control.StartedBy(c, agents, pane); err != nil {
 					return err
@@ -77,7 +84,8 @@ func newAgentListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON array")
-	cmd.Flags().BoolVar(&mine, "mine", false, "only the workers this session started with dev agent start (its child sessions)")
+	cmd.Flags().BoolVar(&mine, "mine", false, "only the workers this session (or --boss's) started with dev agent start (its child sessions)")
+	addBossFlag(cmd, &boss)
 	return cmd
 }
 
@@ -158,6 +166,19 @@ func newAgentReadCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&lines, "lines", 50, "number of lines")
 	return cmd
+}
+
+// addBossFlag adds --boss, naming the boss session a coordinator outside tmux acts as.
+func addBossFlag(cmd *cobra.Command, boss *string) {
+	cmd.Flags().StringVar(boss, "boss", "", "act as this boss session, not the one it runs in (for a coordinator outside tmux)")
+}
+
+// callerPane is the pane of the session dev agent acts as: --boss's session, else its own ("" outside tmux).
+func callerPane(c *tmux.Client, boss string) (string, error) {
+	if boss == "" {
+		return os.Getenv("TMUX_PANE"), nil
+	}
+	return control.BossPane(c, boss)
 }
 
 // resolveOther resolves target and refuses this process's own pane: a coordinator waiting on itself
@@ -288,7 +309,7 @@ Claude fires no hook for that.`,
 
 func newAgentStartCmd() *cobra.Command {
 	var asJSON bool
-	var agentCmd string
+	var agentCmd, boss string
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "start <project> [worktree]",
@@ -296,7 +317,8 @@ func newAgentStartCmd() *cobra.Command {
 		Long: `Open a project's session, or its worktree's (created when missing), without attaching to it, and
 wait until its agent's first hook registers it (a Codex or Grok pane counts once its CLI runs, so read its
 screen before the first prompt). An existing session is reused; one running another agent than an explicit
---agent is an error. Prints the agent like get.`,
+--agent is an error. A new session started from a tmux pane, or with --boss, is that session's worker.
+Prints the agent like get.`,
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -308,10 +330,13 @@ screen before the first prompt). An existing session is reused; one running anot
 				return err
 			}
 			c, session := tmux.New(), open.SessionName(args[0], wt)
+			pane, err := callerPane(c, boss)
+			if err != nil {
+				return err
+			}
 			_, missing := c.Run("has-session", "-t", tmux.SessionTarget(session))
 			// A herd's x only kills workers its coordinator started, never a reused session; workers start
 			// without Remote Control
-			pane := os.Getenv("TMUX_PANE")
 			worker := missing != nil && pane != ""
 			if err := openProject(cmd, args[0], wt, true, worker, agentCmd); err != nil {
 				return err
@@ -334,27 +359,32 @@ screen before the first prompt). An existing session is reused; one running anot
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
 	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex or grok")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
+	addBossFlag(cmd, &boss)
 	return cmd
 }
 
 func newAgentCloseCmd() *cobra.Command {
 	var asJSON bool
+	var boss string
 	cmd := &cobra.Command{
 		Use:   "close <target>",
-		Short: "Close a finished worker this session started: kill its session, remove its worktree and branch",
-		Long: `Close a worker this session started with dev agent start, once its work is delivered. Refused,
-naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
+		Short: "Close a finished worker this session (or --boss's) started: kill its session, remove its worktree and branch",
+		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered.
+Refused, naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
 no changes to tracked files and its HEAD is in origin's default branch (fetched first), or gh reports its PR
 merged into that branch at that HEAD (a squash or rebase merge). Its untracked, not ignored files (e.g.
-RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this
-session, its session is killed, its worktree removed and its branch force-deleted.`,
+RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this (or
+--boss's) session, its session is killed, its worktree removed and its branch force-deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pane := os.Getenv("TMUX_PANE")
-			if pane == "" {
-				return errors.New("close only closes workers of the session it runs in: run it inside tmux")
-			}
 			c := tmux.New()
+			pane, err := callerPane(c, boss)
+			if err != nil {
+				return err
+			}
+			if pane == "" {
+				return errors.New("close only closes workers of the session it runs in: run it inside tmux, or pass --boss <session>")
+			}
 			a, err := resolveOther(c, args[0])
 			if err != nil {
 				return err
@@ -383,6 +413,7 @@ session, its session is killed, its worktree removed and its branch force-delete
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
+	addBossFlag(cmd, &boss)
 	return cmd
 }
 

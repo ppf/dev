@@ -28,6 +28,8 @@ dev agent get <target> --json
 
 `state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). `queued: true` marks a working Claude holding a prompt it hasn't read yet. Claude panes without the `dev state` hook aren't listed.
 
+Outside tmux (e.g. the Claude desktop app), pass `--boss <session>` (a `dev boss` session) to `start`, `list --mine` and `close`: you act as that boss.
+
 Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
 ## Start a worker
