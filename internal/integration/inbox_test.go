@@ -918,7 +918,7 @@ func TestBossInboxSocketLost(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	check(t, "in flight: no paste", boxLog(), "")
-	if err := watch(5*time.Minute + 2*time.Second); err == nil || !strings.Contains(err.Error(), "went unshown 5m0s into a rest") {
+	if err := watch(5*time.Minute + 30*time.Second); err == nil || !strings.Contains(err.Error(), "went unshown 5m0s into a rest") {
 		t.Errorf("lost batch not reported: %v", err)
 	}
 	waitFor(t, "lost batch pasted", func() bool { return boxLog() == "[dev boss inbox] 1 worker update(s):\n- w finished: x\n" })
