@@ -595,6 +595,37 @@ func TestListStartedByAndHerd(t *testing.T) {
 	}
 }
 
+func TestBossPane(t *testing.T) {
+	c := tmux.NewFake(func(args []string) (string, error) {
+		target := args[len(args)-1]
+		if args[0] == "display-message" {
+			target = args[len(args)-2]
+		}
+		switch {
+		case target == "=gone:":
+			return "", errors.New("can't find session: gone")
+		case args[0] == "has-session":
+			return "", nil
+		case target == "=boss:":
+			return "%1\t1\n", nil
+		}
+		return "%2\t\n", nil
+	})
+	for session, want := range map[string]string{
+		"boss": "%1",
+		"user": "user is not a boss session (dev boss)",
+		"gone": `no session "gone"`,
+	} {
+		got, err := BossPane(c, session)
+		if err != nil {
+			got = err.Error()
+		}
+		if got != want {
+			t.Errorf("BossPane(%s) = %q, want %q", session, got, want)
+		}
+	}
+}
+
 func TestListCostOff(t *testing.T) {
 	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
