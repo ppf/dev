@@ -188,6 +188,7 @@ func cleanTail(s string) string {
 type Batch struct {
 	Notes   []Note
 	Dropped int
+	lost    bool // taken with PasteNext set: a Restore sets it again
 }
 
 // String is the batch as the coordinator gets it; "" for none.
@@ -206,13 +207,34 @@ func (bt Batch) String() string {
 	return b.String()
 }
 
-// state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, and the last paste.
+// Message is the batch as sent over Claude's messaging socket, which Claude shows as another session's message
+// and would try to answer.
+func (bt Batch) Message() string {
+	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
+}
+
+// state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, the last paste,
+// and the batch sent over Claude's messaging socket that the coordinator hasn't shown yet.
 type state struct {
 	Notes     []Note             `json:"notes"`
 	Last      map[string]string  `json:"last"`
 	Workers   map[string]*health `json:"workers,omitempty"`
 	Dropped   int                `json:"dropped,omitempty"`
 	LastPaste int64              `json:"last_paste,omitempty"`
+	InFlight  *flight            `json:"in_flight,omitempty"`
+	// PasteNext: a sent batch went unseen; Claude drops a repeated message, so the next batch is pasted
+	PasteNext bool `json:"paste_next,omitempty"`
+}
+
+// flight is a batch sent over Claude's messaging socket at At (unix seconds).
+type flight struct {
+	Notes   []Note `json:"notes"`
+	Dropped int    `json:"dropped,omitempty"`
+	At      int64  `json:"at"`
+}
+
+func (f *flight) batch() Batch {
+	return Batch{Notes: f.Notes, Dropped: f.Dropped}
 }
 
 // health is what the inbox keeps of a worker between Watch rounds; times are unix seconds.
@@ -352,8 +374,8 @@ func (b Box) Take() (Batch, error) {
 }
 
 func (s *state) take() Batch {
-	bt := Batch{Notes: s.Notes, Dropped: s.Dropped}
-	s.Notes, s.Dropped = nil, 0
+	bt := Batch{Notes: s.Notes, Dropped: s.Dropped, lost: s.PasteNext}
+	s.Notes, s.Dropped, s.PasteNext = nil, 0, false
 	return bt
 }
 
@@ -379,11 +401,74 @@ func (b Box) TakeForPaste(now time.Time) (Batch, error) {
 // Restore puts an undelivered batch back in front of the notes queued since.
 func (b Box) Restore(bt Batch) error {
 	return b.update(func(s *state) error {
-		s.Notes = append(slices.Clone(bt.Notes), s.Notes...)
-		s.Dropped += bt.Dropped
+		s.restore(bt)
 		s.LastPaste = 0
 		return nil
 	})
+}
+
+func (s *state) restore(bt Batch) {
+	s.Notes = append(slices.Clone(bt.Notes), s.Notes...)
+	s.Dropped += bt.Dropped
+	s.PasteNext = s.PasteNext || bt.lost
+}
+
+// flightTimeout is how long a sent batch may go unshown into the coordinator's rest before it counts as lost.
+// A busy Claude shows a message only between tool calls or after its turn, and one waiting on a dialog after the
+// dialog, so only a rest counts.
+const flightTimeout = 5 * time.Minute
+
+// TakeForSend takes the pending batch to send over Claude's messaging socket and records it in flight. It takes
+// nothing while a batch is in flight; paste reports pending notes left to the paste after a lost batch (PasteNext).
+func (b Box) TakeForSend(now time.Time) (bt Batch, paste bool, err error) {
+	err = b.update(func(s *state) error {
+		if s.InFlight != nil || len(s.Notes) == 0 {
+			return nil
+		}
+		if s.PasteNext {
+			paste = true
+			return nil
+		}
+		bt = s.take()
+		s.InFlight = &flight{Notes: bt.Notes, Dropped: bt.Dropped, At: now.Unix()}
+		return nil
+	})
+	return bt, paste, err
+}
+
+// Unsend puts the batch in flight, which couldn't be sent, back in front of the notes queued since.
+func (b Box) Unsend() error {
+	return b.update(func(s *state) error {
+		if s.InFlight != nil {
+			s.restore(s.InFlight.batch())
+			s.InFlight = nil
+		}
+		return nil
+	})
+}
+
+// Arrived clears the batch in flight when prompt, from the coordinator's UserPromptSubmit, contains its message.
+func (b Box) Arrived(prompt string) error {
+	return b.update(func(s *state) error {
+		if s.InFlight != nil && strings.Contains(prompt, s.InFlight.batch().Message()) {
+			s.InFlight = nil
+		}
+		return nil
+	})
+}
+
+// Expire puts the batch in flight back, for the paste, once it went unshown flightTimeout into the coordinator's
+// rest, which began at rest (zero while it doesn't rest); expired reports it.
+func (b Box) Expire(now, rest time.Time) (expired bool, err error) {
+	err = b.update(func(s *state) error {
+		if s.InFlight == nil || rest.IsZero() || now.Unix()-max(rest.Unix(), s.InFlight.At) < int64(flightTimeout.Seconds()) {
+			return nil
+		}
+		s.restore(s.InFlight.batch())
+		s.InFlight, s.PasteNext, expired = nil, true, true
+		return nil
+	})
+	return expired, err
 }
 
 // workers is each worker's health, read under the lock.
@@ -397,7 +482,7 @@ func (b Box) workers() (map[string]*health, error) {
 	return s.Workers, err
 }
 
-// Pending reports whether notes wait.
+// Pending reports whether notes wait, or a sent batch waits to be shown.
 func (b Box) Pending() (bool, error) {
 	lock, err := b.lock()
 	if err != nil {
@@ -405,5 +490,5 @@ func (b Box) Pending() (bool, error) {
 	}
 	defer func() { _ = lock.Close() }()
 	s, err := b.read()
-	return len(s.Notes) > 0, err
+	return len(s.Notes) > 0 || s.InFlight != nil, err
 }

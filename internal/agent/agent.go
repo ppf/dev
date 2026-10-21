@@ -133,10 +133,20 @@ type Hook struct {
 	Event            string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type"`
 	PromptID         string `json:"promptId"` // Grok's turn id
+	PermissionMode   string `json:"permission_mode"`
 	ToolInput        struct {
 		Command string `json:"command"` // a shell tool's command
 	} `json:"tool_input"`
+	// Socket is Claude's cross-session messaging socket, from the hook's environment (CLAUDE_CODE_MESSAGING_SOCKET).
+	Socket string `json:"-"`
 }
+
+// OptSocket and OptMode are the pane options holding Claude's messaging socket (Hook.Socket) and permission
+// mode, for the boss inbox.
+const (
+	OptSocket = "@agent_socket"
+	OptMode   = "@agent_mode"
+)
 
 // prCommand is a gh command that opens a PR or changes its state, global flags (-R owner/repo) included.
 var prCommand = regexp.MustCompile(`\bgh(\s+-\S+(\s+[^-\s]\S*)?)*\s+pr\s+(create|merge|close|reopen|ready)\b`)
@@ -172,8 +182,8 @@ func HookSession(input []byte) Session {
 // and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
 // notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
-// or end, and bumping @dev_pr_gen on a PostToolUse of a gh command that changes a PR; Clear (or no session) unsets the
-// session options.
+// or end, recording h's socket (OptSocket) and permission mode (OptMode), and bumping @dev_pr_gen on a PostToolUse
+// of a gh command that changes a PR; Clear (or no session) unsets the session options.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
@@ -181,7 +191,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
 		s = Session{}
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion)}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion), unset(OptSocket), unset(OptMode)}
 	} else {
 		// @agent_since (unix seconds) only moves when the state changes (or a decision comes), so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar
@@ -214,6 +224,19 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		if slices.Contains(turnBounds, h.Event) {
 			// Not on a PostToolUse: a tool run alongside may end while the dialog is still open
 			cmds = append(cmds, unset(OptQuestion))
+		}
+		if h.Socket == "" {
+			cmds = append(cmds, unset(OptSocket))
+		} else {
+			cmds = append(cmds, set(OptSocket, h.Socket))
+		}
+		switch {
+		case h.PermissionMode != "":
+			cmds = append(cmds, set(OptMode, h.PermissionMode))
+		case h.Event == "SessionStart":
+			// SessionStart carries no mode: a new session's is unknown until its first prompt (a Notification, also
+			// without one, keeps the last)
+			cmds = append(cmds, unset(OptMode))
 		}
 	}
 	if s.ID == "" {
