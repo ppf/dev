@@ -419,11 +419,20 @@ RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clie
 
 func newAgentSkillCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "skill",
-		Short: "Print the coordinator skill (SKILL.md) that teaches an agent to drive others with dev agent",
-		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprint(cmd.OutOrStdout(), skill.Text)
+		Use:   "skill [dev-agents|desktop-boss]",
+		Short: "Print a coordinator skill (SKILL.md): dev-agents (default) drives others with dev agent, desktop-boss with the desktop app's tools",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := skill.Default
+			if len(args) == 1 {
+				name = args[0]
+			}
+			text, err := skill.Text(name)
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(cmd.OutOrStdout(), text)
+			return nil
 		},
 	}
 }

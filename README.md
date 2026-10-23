@@ -110,6 +110,7 @@ dev agent read <target> [--lines 50]           # the pane's screen (plus scrollb
 dev agent send-keys <target> esc|enter|ctrl+c|1|…
 dev agent close <target> [--json]              # close a finished worker: session, worktree, branch
 dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
+dev agent skill desktop-boss > ~/.claude/skills/desktop-boss/SKILL.md   # its desktop-app twin (start_session, SendMessage)
 ```
 
 `start`, `list --mine` and `close` act for the session they run in (`TMUX_PANE`). A coordinator outside tmux (e.g. a Claude desktop-app session) passes `--boss <session>`, naming a `dev boss` session to act as: its workers are the same as the ones its coordinator starts (nested under it in the sidebar, previewed, no Remote Control, notes to its inbox), and `close` runs the same checks. Any other session is refused.
