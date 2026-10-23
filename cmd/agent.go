@@ -45,7 +45,7 @@ func newAgentCmd() *cobra.Command {
 		Short: "Drive agent sessions from a coordinator agent (targets: session name or pane id)",
 		Long: `Drive agent sessions from a coordinator agent. A target is a session name (exact) or an agent
 pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (prompt not picked up).
-Run "dev agent skill" for the coordinator skill.`,
+Run "dev agent skill [dev-agents|desktop-boss]" for a coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(),
 		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd())

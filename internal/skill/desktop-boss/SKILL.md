@@ -15,7 +15,7 @@ Below, *message* a worker means `SendMessage`, *check* it means `get_session` or
 
 <!-- boss-core:rules -->
 - **Delegate, don't do.** You only coordinate: start, message and check workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. When unsure, delegate.
-- **A fresh worker per piece of work.** Each new feature or task gets a new worker. Message an existing worker only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work.
+- **A fresh worker per piece of work.** Each new feature or task gets a fresh worker. Message an existing worker only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work.
 <!-- /boss-core:rules -->
 - **A fresh worker is a new session** (see [Start a worker](#start-a-worker)).
 - **Workers only through the app's tools:** `start_session`, `SendMessage`, `list_sessions`, `get_session`, `list_events`, `stop_session`, `set_remote_control`, `archive_session`. Never create, switch or remove their worktrees or branches with git yourself.
@@ -36,11 +36,9 @@ Starting several at once: check the account's usage (`get_usage`: 5-hour and wee
 
 A brief is self-contained: the task, the files or area, constraints, and what done looks like (e.g. "PR opened in the repo's usual style, tests green" or "findings in `RESULT-docs-api.md` in your worktree": a file name new to this worker). End every brief with: *"Put the result (PR link, or the result file's path) in the first sentence of your wrap_up recap and again at the start of your final message: I see only the first 400 characters, recap first. Blocked on a question for me? End your turn on it, the question in your recap's first sentence: a message you send me mid-turn reaches me only after your turn ends."* For long results, have the worker write a file and reply with its path, then read that file.
 
-Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command will wake you. End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running."*, followed by the CI wait below, its loop included: any brief may end in waiting for CI.
+Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running."*
 
 <!-- boss-core:ci-wait -->
-**Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
-
 ```bash
 for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sleep 30; done; gh pr checks <n>
 ```

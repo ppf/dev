@@ -3,6 +3,7 @@ package skill
 import (
 	"fmt"
 	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -45,6 +46,14 @@ func blocks(text string) (map[string]string, error) {
 }
 
 func TestSkillFrontmatter(t *testing.T) {
+	files, _ := filepath.Glob("*/SKILL.md")
+	var embedded []string
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		embedded = append(embedded, name+"/SKILL.md")
+	}
+	if !slices.Equal(files, embedded) {
+		t.Errorf("skills on disk %q, embedded %q", files, embedded)
+	}
 	for name, text := range byName {
 		if !strings.HasPrefix(text, "---\nname: "+name+"\n") {
 			t.Errorf("%s/SKILL.md: frontmatter doesn't start with name: %s", name, name)
@@ -84,10 +93,18 @@ func TestSkillCoreBlocks(t *testing.T) {
 	}
 }
 
+func TestBlocks(t *testing.T) {
+	got, err := blocks("x\n<!-- boss-core:a -->\nfoo\nbar\n<!-- /boss-core:a -->\ny\n<!-- boss-core:b -->\n<!-- /boss-core:b -->")
+	if want := map[string]string{"a": "foo\nbar", "b": ""}; err != nil || !maps.Equal(got, want) {
+		t.Errorf("blocks = %q, %v, want %q", got, err, want)
+	}
+}
+
 func TestBlocksErrors(t *testing.T) {
 	for _, tt := range []struct{ text, err string }{
 		{"<!-- boss-core:a -->\nx", "block a has no end"},
 		{"<!-- /boss-core:a -->", "line 1: block a ends without its start"},
+		{"<!-- boss-core:a -->\n<!-- /boss-core:b -->", "line 2: block b ends without its start"},
 		{"<!-- boss-core:a -->\n<!-- boss-core:b -->", "line 2: block b starts inside block a"},
 		{"<!-- boss-core:a -->\n<!-- /boss-core:a -->\n<!-- boss-core:a -->\n<!-- /boss-core:a -->", "line 3: block a starts twice"},
 		{"  <!-- boss-core:a -->", `line 1: stray marker "  <!-- boss-core:a -->"`},
