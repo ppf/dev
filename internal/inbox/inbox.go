@@ -43,10 +43,18 @@ type Note struct {
 	Kind   string `json:"kind"`
 	Text   string `json:"text"`
 	Key    string `json:"key"`
+	// Outside marks a worker a coordinator outside tmux started (dev agent start --boss).
+	Outside bool `json:"outside,omitempty"`
 }
 
-// String is the note's line: "<worker> <kind>: <text>".
+// leaveIt ends an Outside note's line.
+const leaveIt = "started by a coordinator outside tmux: leave it to that coordinator"
+
+// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside.
 func (n Note) String() string {
+	if n.Outside {
+		return n.Worker + " " + n.Summary() + "; " + leaveIt
+	}
 	return n.Worker + " " + n.Summary()
 }
 

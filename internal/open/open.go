@@ -31,7 +31,8 @@ type Options struct {
 	Worktree string // worktree name under .claude/worktrees; empty = main checkout
 	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach
 	Agent    string // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
-	Worker   bool   // dev agent start from a tmux pane (marked @dev_started_by): claude starts without Remote Control
+	Worker   bool   // dev agent start from a tmux pane or with --boss (marked @dev_started_by): claude starts without Remote Control
+	Boss     string // dev agent start --boss: the boss session whose window sizes a new session
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -74,7 +75,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 		path = wtPath
 	}
 
-	width, height := terminalSize(sizeSources(c, inTmux, os.Getenv)...)
+	width, height := terminalSize(sizeSources(c, inTmux, opts.Boss, os.Getenv)...)
 
 	// Detached: tmux-resurrect's restore switches clients, which would pull the user's client away
 	if !opts.Detach {
@@ -114,9 +115,11 @@ func SessionName(name, wt string) string {
 	return name + "-" + strings.ReplaceAll(wt, "/", "-")
 }
 
-// sizeSources is project.sh's order: tmux client, stty on /dev/tty, COLUMNS/LINES, tput.
-func sizeSources(c *tmux.Client, inTmux bool, getenv func(string) string) []sizeSource {
-	return []sizeSource{tmuxSize(c, inTmux), ttySize, envSize(getenv), tputSize}
+// sizeSources is boss's window, which a --boss worker is watched from, then project.sh's order (tmux client,
+// stty on /dev/tty, COLUMNS/LINES, tput) with the widest attached client after the tty, for a caller with
+// neither (a desktop app's Bash tool).
+func sizeSources(c *tmux.Client, inTmux bool, boss string, getenv func(string) string) []sizeSource {
+	return []sizeSource{bossSize(c, boss), tmuxSize(c, inTmux), ttySize, widestClient(c), envSize(getenv), tputSize}
 }
 
 // sizeSource reports a terminal size; ok=true ends the chain even when the values are unusable.
@@ -143,7 +146,7 @@ func parseDim(s string, def int) int {
 	return n
 }
 
-// tmuxSize asks for the current client's size; inside tmux it is the only source consulted.
+// tmuxSize asks for the current client's size; inside tmux it ends the chain.
 func tmuxSize(c *tmux.Client, inTmux bool) sizeSource {
 	return func() (string, string, bool) {
 		if !inTmux {
@@ -153,6 +156,36 @@ func tmuxSize(c *tmux.Client, inTmux bool) sizeSource {
 		res, _ := c.Run("display-message", "-p", "#{client_width}"+tmux.Sep+"#{client_height}")
 		w, h, _ := strings.Cut(strings.TrimSpace(res), tmux.Sep)
 		return w, h, true
+	}
+}
+
+// bossSize is boss's window; "" or a missing session doesn't answer.
+func bossSize(c *tmux.Client, boss string) sizeSource {
+	return func() (string, string, bool) {
+		if boss == "" {
+			return "", "", false
+		}
+		res, err := c.Run("display-message", "-p", "-t", tmux.SessionTarget(boss), "#{window_width}"+tmux.Sep+"#{window_height}")
+		w, h, _ := strings.Cut(strings.TrimSpace(res), tmux.Sep)
+		return w, h, err == nil && w != ""
+	}
+}
+
+// widestClient is the widest attached client of any session; no server or no client doesn't answer.
+func widestClient(c *tmux.Client) sizeSource {
+	return func() (string, string, bool) {
+		res, err := c.Run("list-clients", "-F", "#{client_width}"+tmux.Sep+"#{client_height}")
+		if err != nil {
+			return "", "", false
+		}
+		var width, height string
+		for line := range strings.Lines(res) {
+			w, h, _ := strings.Cut(strings.TrimSpace(line), tmux.Sep)
+			if parseDim(w, 0) > parseDim(width, 0) {
+				width, height = w, h
+			}
+		}
+		return width, height, width != ""
 	}
 }
 
@@ -293,9 +326,10 @@ func Pause(out io.Writer, prompt string) {
 	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 }
 
-// ClientSize is the size a new session gets: the current client's inside tmux, else the terminal's.
+// ClientSize is the size a new session gets: the current client's inside tmux, else the terminal's or the
+// widest attached client's.
 func ClientSize(c *tmux.Client) (width, height int) {
-	return terminalSize(sizeSources(c, os.Getenv("TMUX") != "", os.Getenv)...)
+	return terminalSize(sizeSources(c, os.Getenv("TMUX") != "", "", os.Getenv)...)
 }
 
 // Attach switches the current client to session inside tmux, else attaches this terminal to it.

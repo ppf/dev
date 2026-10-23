@@ -135,6 +135,38 @@ func TestBossInboxBackgrounded(t *testing.T) {
 	waitFor(t, "boss gets only the finished note", func() bool { return boxLog() == "[dev boss inbox] 1 worker update(s):\n- w finished: Done.\n" })
 }
 
+// A worker a coordinator outside tmux started (--boss) tells its boss's coordinator to leave it alone.
+func TestBossInboxOutsideWorker(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss.log")
+	s.T("new-session", "-d", "-s", "boss", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss:", "@dev_herd", "1")
+	boss := s.T("display", "-t", "=boss:", "-p", "#{pane_id}")
+	s.T("new-session", "-d", "-s", "w", "sleep 600")
+	s.T("set-option", "-t", "=w:", "@dev_started_by", "boss")
+	s.T("set-option", "-t", "=w:", "@dev_started_outside", "1")
+	worker := s.T("display", "-t", "=w:", "-p", "#{pane_id}")
+	run := func(pane, st, stdin string) {
+		t.Helper()
+		cmd := exec.Command(devBin, "state", st)
+		cmd.Env = s.scriptEnv("TMUX_PANE=" + pane)
+		cmd.Stdin = strings.NewReader(stdin)
+		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("❌ dev state %s %s: %v, output %q", st, stdin, err, out)
+		}
+	}
+	run(boss, "idle", `{"hook_event_name":"SessionStart"}`)
+	waitFor(t, "stub box drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", boss), "Try") })
+	run(worker, "working", `{"hook_event_name":"UserPromptSubmit"}`)
+	run(worker, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Done."}`)
+	want := "[dev boss inbox] 1 worker update(s):\n- w finished: Done.; started by a coordinator outside tmux: leave it to that coordinator\n"
+	waitFor(t, "boss told to leave it", func() bool { data, _ := os.ReadFile(log); return string(data) == want })
+	check(t, "worker's own note without it", s.T("show-option", "-pqv", "-t", worker, "@dev_boss_note"), "finished: Done.")
+}
+
 // A working worker is stuck once neither its hooks nor its screen (timers and spinner aside) moved for
 // StuckWorking, once per stretch; one whose turn only waits on background tasks says so. A subagent's tool
 // call is progress too.

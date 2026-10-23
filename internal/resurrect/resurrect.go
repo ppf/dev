@@ -41,6 +41,7 @@ func Save(c *tmux.Client, snapshot string) error {
 		ID        string `tmux:"session_id"`
 		StartedBy string `tmux:"@dev_started_by"`
 		Herd      string `tmux:"@dev_herd"`
+		Outside   string `tmux:"@dev_started_outside"`
 	}](c, "list-sessions")
 	if err != nil {
 		return fail(c, "list-sessions failed, dev state not saved", err)
@@ -94,9 +95,14 @@ func Save(c *tmux.Client, snapshot string) error {
 		if sidebar.IsSessionID(boss) {
 			boss = bosses[boss]
 		}
-		if boss != "" {
-			fmt.Fprintf(&b, "%s\t%s\t%s\n", startedByPrefix, s.Name, boss)
+		if boss == "" {
+			continue
 		}
+		fmt.Fprintf(&b, "%s\t%s\t%s", startedByPrefix, s.Name, boss)
+		if s.Outside != "" {
+			fmt.Fprint(&b, "\t"+outsideMark)
+		}
+		fmt.Fprintln(&b)
 	}
 	for _, s := range sessions {
 		coordinator, previews := roles[sessionRole{s.Name, herd.RoleCoordinator}], roles[sessionRole{s.Name, herd.RolePreviews}]
@@ -283,7 +289,11 @@ func Restore(c *tmux.Client) error {
 		if _, err := c.Run("has-session", "-t", "="+w.Session); err != nil {
 			continue
 		}
-		if _, err := c.Run("set-option", "-t", tmux.SessionTarget(w.Session), "@dev_started_by", w.Boss); err != nil {
+		set := []string{"set-option", "-t", tmux.SessionTarget(w.Session), herd.OptStartedBy, w.Boss}
+		if w.Outside {
+			set = append(set, ";", "set-option", "-t", tmux.SessionTarget(w.Session), herd.OptStartedOutside, "1")
+		}
+		if _, err := c.Run(set...); err != nil {
 			warn(c, w.Session+": @dev_started_by not set")
 			errs = append(errs, err)
 		}
@@ -548,9 +558,12 @@ type entry struct {
 // that doesn't exist and skip it.
 const agentPrefix = ":agent"
 
-// startedByPrefix starts a "<prefix><TAB>session<TAB>boss" line of a .dev file: the boss (by name) whose
-// coordinator started session.
+// startedByPrefix starts a "<prefix><TAB>session<TAB>boss[<TAB>outside]" line of a .dev file: the boss (by
+// name) whose coordinator started session, or a coordinator outside tmux acting as it (outsideMark).
 const startedByPrefix = ":started_by"
+
+// outsideMark ends a started-by line of a worker marked herd.OptStartedOutside.
+const outsideMark = "outside"
 
 // bossPrefix starts a "<prefix><TAB>session<TAB>window.pane<TAB>window.pane" line of a .dev file: a boss,
 // its coordinator's and previews' positions.
@@ -560,7 +573,10 @@ const bossPrefix = ":boss"
 type bossEntry struct{ Session, Coordinator, Previews string }
 
 // startedByEntry is one started-by line of a .dev file.
-type startedByEntry struct{ Session, Boss string }
+type startedByEntry struct {
+	Session, Boss string
+	Outside       bool
+}
 
 // agentEntry is one agent line of a .dev file.
 type agentEntry struct {
@@ -582,8 +598,8 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 			continue
 		}
 		if session == startedByPrefix {
-			if worker, boss, ok := strings.Cut(rest, "\t"); ok && worker != "" && boss != "" {
-				startedBy = append(startedBy, startedByEntry{worker, boss})
+			if f := strings.Split(rest, "\t"); len(f) >= 2 && f[0] != "" && f[1] != "" {
+				startedBy = append(startedBy, startedByEntry{f[0], f[1], len(f) > 2 && f[2] == outsideMark})
 			}
 			continue
 		}

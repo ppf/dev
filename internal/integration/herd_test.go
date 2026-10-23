@@ -66,6 +66,18 @@ func TestHerd(t *testing.T) {
 	_, errOut, status = devAgent(env, "", "start", "web", "--boss", "boss", "--timeout", "30s")
 	check(t, "start --boss outside tmux", status+errOut, "0")
 	check(t, "started by the named boss", d.T("show-option", "-qv", "-t", "=web:", "@dev_started_by"), "boss")
+	check(t, "marked started outside tmux", d.T("show-option", "-qv", "-t", "=web:", "@dev_started_outside")+
+		"|"+d.T("show-option", "-qv", "-t", "=app:", "@dev_started_outside"), "1|")
+	// No tty here: sized like the boss's window, not 80x24
+	size := "#{window_width}x#{window_height}"
+	if got, want := d.T("display", "-t", "=web:1", "-p", size), d.T("display", "-t", "=boss:1", "-p", size); got != want || got == "80x24" {
+		t.Errorf("--boss worker's window %s, want the boss's %s", got, want)
+	}
+	_, errOut, status = devAgent(append(env, "TMUX_PANE="+coordinator), "", "close", "web")
+	check(t, "boss's own coordinator can't close a --boss worker", status+" "+errOut,
+		"1 ❌ web was started by a coordinator outside tmux (--boss): leave it to that coordinator\n")
+	_, errOut, status = devAgent(append(env, "TMUX_PANE="+coordinator), "", "close", "web", "--boss", "boss")
+	check(t, "not even with --boss", status+" "+errOut, "1 ❌ web was started by a coordinator outside tmux (--boss): leave it to that coordinator\n")
 	if args := agentArgs(t, d, "=web:1.2"); !strings.Contains(args, `pty-wrap -- claude --settings {"remoteControlAtStartup":false}`) {
 		t.Errorf("--boss worker's claude not started without Remote Control: %q", args)
 	}

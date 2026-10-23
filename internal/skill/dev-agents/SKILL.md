@@ -22,6 +22,7 @@ The first two rules are for `dev boss`; the rest hold everywhere.
 - **A fresh worker** is `dev agent start` with a new worktree name, or a reset one (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)).
 - **Target by session name or pane id** (`%12`), exactly as `dev agent list` prints them. Never by sidebar position or number.
 - **Close only your own workers, and only with `dev agent close`.** Never kill sessions, panes or worktrees any other way (no raw `tmux kill-session` or `git worktree remove`), and never close or kill ones you didn't start. If `close` refuses and the user still wants a worker gone, tell them why; don't work around it.
+- **Leave `--boss` workers to their coordinator.** A worker with `outside: true` (`list --json`), whose notes end in "started by a coordinator outside tmux: leave it to that coordinator", was started for your boss by a coordinator outside tmux (`--boss`). Don't message, answer or close it unless the user asks; `close` refuses it.
 - **Never target your own pane.** `dev agent` refuses it.
 - **Keep every call under your Bash tool timeout** (2 minutes by default, 10 at most). The `wait` and `prompt --wait` defaults (5m) exceed it: pass `--timeout` below it, or run long waits with `run_in_background`.
 - Exit status: `0` ok, `1` error (bad target, no agent, agent busy or awaiting a decision, agent exited), `2` timeout, `3` stalled (the prompt wasn't picked up).
@@ -29,16 +30,16 @@ The first two rules are for `dev boss`; the rest hold everywhere.
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, queued?, project, branch, path, cost_usd?, started_by?, boss?}]
+dev agent list --json          # [{session, pane, agent, state, queued?, project, branch, path, cost_usd?, started_by?, boss?, outside?}]
 dev agent list --mine --json   # only your workers: the sessions you started with dev agent start
 dev agent get <target> --json
 ```
 
 `state` is `working`, `waiting` (a permission prompt or question, or idle for a while), `idle`, or `""` (a Codex pane without the `dev state --codex` hooks). `queued: true` marks a working Claude holding a prompt it hasn't read yet. Claude panes without the `dev state` hook aren't listed.
 
-Outside tmux (e.g. the Claude desktop app), pass `--boss <session>` (a `dev boss` session) to `start`, `list --mine` and `close`: you act as that boss.
+Outside tmux (e.g. the Claude desktop app), pass `--boss <session>` (a `dev boss` session) to `start`, `list --mine` and `close`: you act as that boss. The workers you start are yours, not its coordinator's: they're marked `outside: true`, its inbox notes about them tell it to leave them to you, and its `close` refuses them. Their notes go to its inbox, not to you: `wait` on them yourself.
 
-Your workers ("child sessions") are the ones `--mine` lists; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
+Your workers ("child sessions") are the ones `--mine` lists, less any `outside: true` ones; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
 ## Start a worker
 
@@ -67,7 +68,7 @@ Plain `prompt` (no `--wait`) returns at once (a slash command within 3 s) withou
 
 - Multi-line prompts: pass them on stdin (`dev agent prompt <target> <<'EOF' … EOF`); they submit as one prompt. Text starting with `-` goes after `--` or on stdin, or it's read as a flag.
 - `--wait` needs the worker idle (or `waiting` only because it sat idle). If it is `working`, wait for it.
-- **Slash commands** (`/effort high`, `/model sonnet`) go through `prompt` like any text, `--wait` included. Mid-conversation they open a "Change effort level?"/"Switch model?" dialog: `prompt` confirms it with `1` itself once it shows, and fails if the command isn't seen running within 3 s. Never send `1` ahead or after: it would stay in the input box. A command opening any other dialog is an error: `read` it and answer with `send-keys`.
+- **Slash commands** (`/effort high`, `/model sonnet`) go through `prompt` like any text, `--wait` included. Mid-conversation they open a "Change effort level?"/"Switch model?" dialog: `prompt` confirms it with `1` itself once it shows, and fails if the command isn't seen running within 3 s. Never send `1` ahead or after: it would stay in the input box. A command opening any other dialog is an error: `read` it and answer with `send-keys`. `/effort X` (like `/model`) also saves as the user's default for that model in `~/.claude/settings.json`, beyond the worker: send it only when the user asks.
 - **Awaiting a decision:** `prompt` refuses a worker showing a permission prompt or question, since the text would answer it. `read` the pane, then answer with `send-keys` (`1`, `2`, `enter`, `esc`), or ask the user when the decision is theirs. `waiting` after a prompt usually means exactly this.
 - **Reset a worker's context:** `dev agent prompt <target> --wait /clear` returns once its new conversation started (exit 0, `idle`); `/clear` starts no turn, so this waits for the new session instead. Exit 3: it wasn't confirmed, `read` the pane. Codex and Grok panes refuse it with `--wait`.
 - **Exit 3 (stalled):** the text may still sit in the worker's input box. `dev agent read` it; press `dev agent send-keys <target> enter` if the prompt is there, or clear it before sending another. Don't stack prompts. If every `--wait` stalls, the worker's hook runs an older `dev`: tell the user to update it.

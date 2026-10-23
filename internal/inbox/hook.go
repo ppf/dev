@@ -136,6 +136,7 @@ func deliverNote(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note
 	if event == "UserPromptSubmit" {
 		return b.Box.Forget(w.Session)
 	}
+	n.Outside = w.Outside != ""
 	if n.Kind == Decision {
 		// Record already moved @agent_since into this wait: two dialogs alike in one turn are two notes
 		n.Key += "\x00" + w.Since

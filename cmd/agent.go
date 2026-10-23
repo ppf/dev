@@ -181,6 +181,11 @@ func callerPane(c *tmux.Client, boss string) (string, error) {
 	return control.BossPane(c, boss)
 }
 
+// outsideBoss reports a --boss coordinator outside tmux, whose workers the boss's own coordinator leaves alone.
+func outsideBoss(boss string) bool {
+	return boss != "" && os.Getenv("TMUX_PANE") == ""
+}
+
 // resolveOther resolves target and refuses this process's own pane: a coordinator waiting on itself
 // would never see its turn end.
 func resolveOther(c *tmux.Client, target string) (control.Agent, error) {
@@ -338,11 +343,11 @@ Prints the agent like get.`,
 			// A herd's x only kills workers its coordinator started, never a reused session; workers start
 			// without Remote Control
 			worker := missing != nil && pane != ""
-			if err := openProject(cmd, args[0], wt, true, worker, agentCmd); err != nil {
+			if err := openProject(cmd, args[0], wt, true, worker, agentCmd, boss); err != nil {
 				return err
 			}
 			if worker {
-				if err := herd.MarkStartedBy(c, session, pane); err != nil {
+				if err := herd.MarkStartedBy(c, session, pane, outsideBoss(boss)); err != nil {
 					return err
 				}
 			}
@@ -372,9 +377,10 @@ func newAgentCloseCmd() *cobra.Command {
 		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered.
 Refused, naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
 no changes to tracked files and its HEAD is in origin's default branch (fetched first), or gh reports its PR
-merged into that branch at that HEAD (a squash or rebase merge). Its untracked, not ignored files (e.g.
-RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this (or
---boss's) session, its session is killed, its worktree removed and its branch force-deleted.`,
+merged into that branch at that HEAD (a squash or rebase merge). A worker started with --boss outside tmux is
+refused unless closed that way. Its untracked, not ignored files (e.g. RESULT.md) are copied to
+$XDG_STATE_HOME/dev/results/<session>/ first. Then clients watching it move to this (or --boss's) session, its
+session is killed, its worktree removed and its branch force-deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
@@ -388,6 +394,9 @@ RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first. Then clie
 			a, err := resolveOther(c, args[0])
 			if err != nil {
 				return err
+			}
+			if a.Outside && !outsideBoss(boss) {
+				return fmt.Errorf("%s was started by a coordinator outside tmux (--boss): leave it to that coordinator", a.Session)
 			}
 			done, closeErr := control.Close(c, pane, a)
 			// Once files are archived, print where even if a later step failed

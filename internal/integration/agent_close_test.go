@@ -209,8 +209,12 @@ func TestAgentClose(t *testing.T) {
 		t.Errorf("❌ first results = %q, %v; want them kept", b, err)
 	}
 
-	// Outside tmux, --boss names the coordinator, once it's a boss session
+	// Outside tmux, --boss names the coordinator, once it's a boss session; a worker it started is only its own
 	worker("remote", true, "idle", idle)
+	d.T("set-option", "-t", "=remote:", "@dev_started_outside", "1")
+	if out, err := devCmd(coord, "", "agent", "close", "remote"); err == nil || !strings.Contains(out, "leave it to that coordinator") {
+		t.Errorf("❌ close of a --boss worker without --boss = %v, %q; want it refused", err, out)
+	}
 	if out, err := devCmd("", "", "agent", "close", "remote", "--boss", "coord"); err == nil || !strings.Contains(out, "coord is not a boss session") {
 		t.Errorf("❌ close --boss of a plain session = %v, %q; want it refused", err, out)
 	}

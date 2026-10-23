@@ -39,6 +39,7 @@ type paneRow struct {
 	Pane       string `tmux:"pane_id"`
 	Sidebar    string `tmux:"@sidebar_pane"`
 	StartedBy  string `tmux:"@dev_started_by"`
+	Outside    string `tmux:"@dev_started_outside"`
 	Command    string `tmux:"pane_current_command"`
 	State      string `tmux:"@agent_state"`
 	StateCmd   string `tmux:"@agent_cmd"`
@@ -168,7 +169,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 	for _, w := range sights {
 		h := s.health(w.Session)
 		stuck := func(text, key string) {
-			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key}
+			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key, Outside: w.Outside != ""}
 			holding = append(holding, n)
 			if h.Stuck != n.Key && s.add(n) {
 				h.Stuck = n.Key
@@ -200,7 +201,8 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 				for asked >= AskAgain<<h.Reminded {
 					h.Reminded++
 				}
-				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + " (unanswered for " + span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded)})
+				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + " (unanswered for " + span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded),
+					Outside: w.Outside != ""})
 			}
 		}
 		if h.Screen != "" && w.trusted != agent.Working {
@@ -213,15 +215,15 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 		case !h.Full:
 			h.Full = true
 			// Keyed by the time: a climb back to the same share is a new note
-			queue(Note{Worker: w.Session, Kind: Context, Text: strconv.Itoa(used) + "% used", Key: strconv.FormatInt(now.Unix(), 10)})
+			queue(Note{Worker: w.Session, Kind: Context, Text: strconv.Itoa(used) + "% used", Key: strconv.FormatInt(now.Unix(), 10), Outside: w.Outside != ""})
 		}
 	}
 	return holding
 }
 
 // observePR records worker's PR check for its idle stretch since (once conclusive) and queues its note: a
-// stuck note when the PR has merge conflicts or no CI. ok reports a note.
-func (s *state) observePR(now time.Time, worker, since string, pr prCheck) (n Note, ok bool) {
+// stuck note when the PR has merge conflicts or no CI, Outside when outside. ok reports a note.
+func (s *state) observePR(now time.Time, worker, since string, outside bool, pr prCheck) (n Note, ok bool) {
 	if !pr.done {
 		// A conflict found after an early no-CI note would share its key
 		return Note{}, false
@@ -240,7 +242,7 @@ func (s *state) observePR(now time.Time, worker, since string, pr prCheck) (n No
 	}
 	idle := now.Sub(time.Unix(unix(since), 0))
 	n = Note{Worker: worker, Kind: Stuck, Text: fmt.Sprintf("idle for %s, PR #%d has %s", span(idle), pr.number, strings.Join(issues, " and ")),
-		Key: Stuck + "\x00pr" + since}
+		Key: Stuck + "\x00pr" + since, Outside: outside}
 	if h.Stuck != n.Key && s.add(n) {
 		h.Stuck = n.Key
 	}
@@ -288,7 +290,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if r.ResumeAt != "" {
 			resumed, err := resume(c, clk, r)
 			if resumed {
-				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt}
+				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt,
+					Outside: r.Outside != ""}
 				if _, err := b.Box.Add(n, now); err != nil {
 					return err
 				}
@@ -296,7 +299,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			}
 			if err != nil && !strings.Contains(err.Error(), "can't find pane") {
 				// The boss was told dev resumes it
-				n := Note{Worker: r.Session, Kind: Failed, Text: clean("resuming it after its rate limit: " + err.Error()), Key: Failed + "\x00resume" + r.ResumeAt}
+				n := Note{Worker: r.Session, Kind: Failed, Text: clean("resuming it after its rate limit: " + err.Error()), Key: Failed + "\x00resume" + r.ResumeAt,
+					Outside: r.Outside != ""}
 				if _, err := b.Box.Add(n, now); err != nil {
 					return err
 				}
@@ -411,7 +415,7 @@ func checkPRs(c *tmux.Client, clk control.Clock, b Boss, due []paneRow) error {
 		var n Note
 		var ok bool
 		if err := b.Box.update(func(s *state) error {
-			n, ok = s.observePR(clk.Now(), r.Session, r.Since, pr)
+			n, ok = s.observePR(clk.Now(), r.Session, r.Since, r.Outside != "", pr)
 			return nil
 		}); err != nil {
 			return errors.Join(append(errs, err)...)
