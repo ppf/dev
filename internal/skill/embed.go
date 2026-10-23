@@ -5,5 +5,5 @@ import _ "embed"
 
 // Text is SKILL.md: how a Claude session drives other agent sessions with dev agent.
 //
-//go:embed SKILL.md
+//go:embed dev-agents/SKILL.md
 var Text string
