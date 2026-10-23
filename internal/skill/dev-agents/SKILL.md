@@ -133,7 +133,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
 
 <!-- boss-core:reports -->
 - **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines.
-- **Ask the user only for real decisions:** anything destructive or external (merging, pushing, posting), unclear goals, and permission prompts (never answer one yourself). Batch the questions into one message.
+- **Ask the user only for real decisions:** anything destructive or external (merging, pushing, posting), unclear goals, and permission prompts (never answer one yourself). Batch the questions into one message. Before relaying a "blocked" or "waiting on you" note, check the PR's or item's current state: it may be done already.
 <!-- /boss-core:reports -->
 - **Starting a follow-up worker** can also be such a step.
 - **Dialogs** count as permission prompts: never answer one yourself. Closing a finished worker with `dev agent close` isn't a real decision.
