@@ -36,7 +36,7 @@ Starting several at once: check the account's usage (`get_usage`: 5-hour and wee
 
 A brief is self-contained: the task, the files or area, constraints, and what done looks like (e.g. "PR opened in the repo's usual style, tests green" or "findings in `RESULT-docs-api.md` in your worktree": a file name new to this worker). End every brief with: *"Put the result (PR link, or the result file's path) in the first sentence of your wrap_up recap and again at the start of your final message: I see only the first 400 characters, recap first. Blocked on a question for me? End your turn on it, the question in your recap's first sentence: a message you send me mid-turn reaches me only after your turn ends."* For long results, have the worker write a file and reply with its path, then read that file.
 
-Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command or the app's Auto-fix on your PR will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running. Under Auto-fix, don't poll: end the turn with `WAITING (Auto-fix: PR #<n>)`."*
+Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command or the app's Auto-fix on your PR will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running. When Auto-fix is on for your PR, don't poll: end the turn with `WAITING (Auto-fix: PR #<n>)`."*
 
 <!-- boss-core:ci-wait -->
 ```bash
@@ -65,8 +65,8 @@ On each note:
 <!-- /boss-core:reports -->
 - **Permission prompts** show in the worker's own session: link it (`[its title](#local_<id>)`) and ask the user to answer there. Same for an action auto mode blocked (e.g. `gh pr merge`): never pass on the user's approval (it's refused as a bypass): the user types it there or does it by hand. Once, in a roll-up, suggest a project permission rule allowing it; the user decides, never edit settings yourself.
 - **A question from a worker** (a turn that ended on one, or a message to you): answer with `SendMessage` when you can, else ask the user. A note that ends on a question is that question: ignore the late duplicate message if you already answered.
-- **Waiting:** `get_session` `isRunning=false` can't tell a worker that will wake from an idle one. A note ending `WAITING (background: …, ~N min)` needs nothing: nudge only on `IDLE`, or once the stated time has passed with no new note. Nor does one naming running background agents (reviewers, a simplifier) or a running background command: a worker's turn ends at each round of them.
-- **Auto-fix** wakes a worker only on a CI failure, so after green CI nobody merges. On a `WAITING (Auto-fix: …)` note, run the bounded `gh pr checks` loop above yourself with `run_in_background`; on green, merge if the brief allowed merging, or message the worker to.
+- **Waiting:** `get_session` `isRunning=false` can't tell a worker that will wake from an idle one. A note ending `WAITING (background: …, ~N min)` needs nothing: nudge only on `IDLE`, or once the stated time has passed with no new note. A note naming running background agents (reviewers, a simplifier) or a running background command also needs nothing: the worker's turn ends at each round and it resumes by itself.
+- **Auto-fix** wakes a worker only on a CI failure, so after green CI nobody merges. On a `WAITING (Auto-fix: …)` note, run the bounded `gh pr checks` loop above yourself with `run_in_background` (exit `8`: run it again; `1`: message the worker the failure); on green, merge if the user allowed it in the brief, or message the worker to.
 - **Failed or stuck:** a worker that stopped on an error or a rate limit, or that has run unusually long with no note: check it (`get_session`), tell the user, and nudge it with `SendMessage` once the cause is fixed.
 <!-- boss-core:rollup -->
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
@@ -91,7 +91,7 @@ The app refuses one that is still working, pinned, or open on screen: tell the u
 
 ## A stream of tasks in one area
 
-Over Remote Control a stream stalls: `start_session` refuses even on a `<side-sessions-event>` turn (it starts only from a message typed in the desktop app), so the next batch can't start by itself. At the end of each batch, post the ready queue as one line the user can send from the desktop app ("start next batch: …").
+Over Remote Control a stream stalls: the `<side-sessions-event>` exception above doesn't hold (`start_session` starts only from a message typed in the desktop app), so the next batch can't start by itself. At the end of each batch, post the ready queue as one line the user can send from the desktop app ("start next batch: …").
 
 <!-- boss-core:stream -->
 For a series of items in one area (one PR each, item after item), keep each worker's context short: a worker that runs for hours reaches a full context, and auto-compaction loses detail.
