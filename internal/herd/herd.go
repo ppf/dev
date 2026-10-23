@@ -22,6 +22,9 @@ const (
 	OptHerd = sidebar.OptHerd
 	// OptStartedBy is the session whose coordinator started a worker, see sidebar.Starter.
 	OptStartedBy = "@dev_started_by"
+	// OptStartedOutside marks a worker a coordinator outside tmux started (dev agent start --boss): its boss's
+	// own coordinator leaves it alone.
+	OptStartedOutside = "@dev_started_outside"
 )
 
 // OptView is the boss session option holding the previews' view: compactView, else the full tiles.
@@ -247,14 +250,20 @@ func setView(c *tmux.Client, pane string, compact bool) error {
 	return err
 }
 
-// MarkStartedBy records on session that the coordinator in pane started it.
-func MarkStartedBy(c *tmux.Client, session, pane string) error {
+// MarkStartedBy records on session that the coordinator in pane started it, or, when outside, a coordinator
+// outside tmux acting as pane's session (--boss).
+func MarkStartedBy(c *tmux.Client, session, pane string, outside bool) error {
 	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}\t#{session_name}\t#{"+OptHerd+"}")
 	if err != nil {
 		return err
 	}
 	id, rest, _ := strings.Cut(strings.TrimSuffix(out, "\n"), "\t")
 	name, herd, _ := strings.Cut(rest, "\t")
-	_, err = c.Run("set-option", "-t", tmux.SessionTarget(session), OptStartedBy, sidebar.Starter(id, name, herd != ""))
+	target := tmux.SessionTarget(session)
+	set := []string{"set-option", "-t", target, OptStartedBy, sidebar.Starter(id, name, herd != "")}
+	if outside {
+		set = append(set, ";", "set-option", "-t", target, OptStartedOutside, "1")
+	}
+	_, err = c.Run(set...)
 	return err
 }

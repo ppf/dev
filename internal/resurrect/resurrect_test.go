@@ -77,12 +77,13 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestSave(t *testing.T) {
-	// boss-p's workers: w-name names it, w-old holds its id as older versions wrote; w-gone's starter is gone
-	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "") +
-		tmux.FormatRow("hidden", "proj", "", "$3", "", "") + tmux.FormatRow("stale", "p", "%99", "$4", "", "") +
-		tmux.FormatRow("boss-p", "", "", "$9", "", "1") + tmux.FormatRow("w-name", "p", "", "$10", "boss-p", "") +
-		tmux.FormatRow("w-old", "", "", "$11", "$9", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "") +
-		tmux.FormatRow("boss-old", "", "", "$13", "", "1")
+	// boss-p's workers: w-name names it, w-old holds its id as older versions wrote, w-out a coordinator outside
+	// tmux started for it; w-gone's starter is gone
+	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "", "") +
+		tmux.FormatRow("hidden", "proj", "", "$3", "", "", "") + tmux.FormatRow("stale", "p", "%99", "$4", "", "", "") +
+		tmux.FormatRow("boss-p", "", "", "$9", "", "1", "") + tmux.FormatRow("w-name", "p", "", "$10", "boss-p", "", "") +
+		tmux.FormatRow("w-old", "", "", "$11", "$9", "", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "", "") +
+		tmux.FormatRow("boss-old", "", "", "$13", "", "1", "") + tmux.FormatRow("w-out", "", "", "$14", "boss-p", "", "1")
 	// devt's window 1 is also linked into linked as window 5, listed after devt. %2 runs Claude with a
 	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet. boss-p's
 	// panes carry their roles (its window 1 also linked into linked as window 6, listed first), plain's
@@ -107,7 +108,7 @@ func TestSave(t *testing.T) {
 			name:    "one line per session with a project or a boss",
 			replies: map[string]any{"list-sessions": sessions, "list-panes -a": panes},
 			want: "devt\tdevt\t1.1\nhidden\tproj\t\nstale\tp\t\nboss-p\t\t\nw-name\tp\t\nboss-old\t\t\n" +
-				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:boss\tboss-p\t1.2\t1.3\n" +
+				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:started_by\tw-out\tboss-p\toutside\n:boss\tboss-p\t1.2\t1.3\n" +
 				":agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n:agent\tboss-p\t1.2\tclaude\tb1\t/t/b1.jsonl\t/repo\n",
 		},
 		{
@@ -165,7 +166,7 @@ func TestSave(t *testing.T) {
 
 // save.sh deletes a new snapshot identical to the last one, so its state replaces the last one's.
 func TestSaveIdenticalSnapshot(t *testing.T) {
-	replies := map[string]any{"list-sessions": tmux.FormatRow("devt", "devt", "", "$1", "", ""), "list-panes -a": ""}
+	replies := map[string]any{"list-sessions": tmux.FormatRow("devt", "devt", "", "$1", "", "", ""), "list-panes -a": ""}
 	tests := []struct {
 		name, last, link string
 		wantDev          string // the file that gets the state
@@ -382,6 +383,12 @@ func TestRestore(t *testing.T) {
 			replies: with(map[string]any{"set-option -t =devt: @dev_started_by boss-p": "",
 				"has-session -t =gone": errors.New("no session")}),
 			want: concat(setup, []string{"has-session -t =devt", "set-option -t =devt: @dev_started_by boss-p", "has-session -t =gone"}),
+		},
+		{
+			name:    "marks a restored worker a coordinator outside tmux started",
+			state:   "devt\tp\t\n:started_by\tdevt\tboss-p\toutside\n",
+			replies: with(map[string]any{"set-option -t =devt: @dev_started_by boss-p ; set-option -t =devt: @dev_started_outside 1": ""}),
+			want:    concat(setup, []string{"has-session -t =devt", "set-option -t =devt: @dev_started_by boss-p ; set-option -t =devt: @dev_started_outside 1"}),
 		},
 		{
 			name:  "skips sessions live before the restore",
@@ -851,7 +858,8 @@ func TestParseState(t *testing.T) {
 		{"agent lines", "devt\tp\t1.1\n:agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n", []entry{{"devt", "p", "1.1"}},
 			[]agentEntry{devtAgent}, nil, nil},
 		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil},
-		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n", nil, nil, []startedByEntry{{"w", "boss-p"}}, nil},
+		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n:started_by\to\tboss-p\toutside\n", nil, nil,
+			[]startedByEntry{{"w", "boss-p", false}, {"o", "boss-p", true}}, nil},
 		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}},
 	}
 	for _, tt := range tests {

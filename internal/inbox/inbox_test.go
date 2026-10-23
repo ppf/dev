@@ -371,7 +371,7 @@ func TestObservePR(t *testing.T) {
 	since := o.ago(StuckIdlePR)
 	add := func(pr prCheck) string {
 		t.Helper()
-		if n, ok := o.s.observePR(o.now, "w", since, pr); ok != (n.Worker != "") {
+		if n, ok := o.s.observePR(o.now, "w", since, false, pr); ok != (n.Worker != "") {
 			t.Errorf("observePR = %+v, %v", n, ok)
 		}
 		return o.s.take().String()
@@ -420,6 +420,17 @@ func TestObserveContext(t *testing.T) {
 	w.Context = "85"
 	if got, _ := o.round(time.Second, w); got != "[dev boss inbox] 1 worker update(s):\n- w high context: 85% used" {
 		t.Errorf("full again = %q", got)
+	}
+}
+
+// Watch's notes on a worker a coordinator outside tmux started tell the boss to leave it, as its hook notes do.
+func TestObserveOutside(t *testing.T) {
+	o := newObserver(t)
+	w := worker("working", "", o.ago(0))
+	w.Context, w.Outside = "85", "1"
+	want := "[dev boss inbox] 1 worker update(s):\n- w high context: 85% used; " + leaveIt
+	if got, _ := o.round(0, w); got != want {
+		t.Errorf("outside = %q, want %q", got, want)
 	}
 }
 
