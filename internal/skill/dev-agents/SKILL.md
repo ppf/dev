@@ -9,9 +9,15 @@ You are a coordinator. Other Claude Code agents run in their own tmux sessions, 
 
 A coordinator usually lives in `dev boss`: the user types requests into your prompt while the pane beside you previews every worker, so they see the workers you start without you pasting their screens.
 
+Below, *message* a worker means `dev agent prompt`, *check* it means `dev agent read` or `get`, and *clean it up* means `dev agent close`.
+
 ## Rules
 
-- **In `dev boss`, delegate, don't do.** You only coordinate: start, prompt and read workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Each new feature or piece of work gets a fresh worker (`dev agent start` with a new worktree name), or a reset one (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)); prompt an existing one of yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work. When unsure, delegate.
+<!-- boss-core:rules -->
+- **Delegate, don't do.** You only coordinate: start, message and check workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. When unsure, delegate.
+- **A fresh worker per piece of work.** Each new feature or task gets a new worker. Message an existing worker only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work.
+<!-- /boss-core:rules -->
+- **The two rules above hold in `dev boss`.** A fresh worker is `dev agent start` with a new worktree name, or a reset one (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)).
 - **Target by session name or pane id** (`%12`), exactly as `dev agent list` prints them. Never by sidebar position or number.
 - **Close only your own workers, and only with `dev agent close`.** Never kill sessions, panes or worktrees any other way (no raw `tmux kill-session` or `git worktree remove`), and never close or kill ones you didn't start. If `close` refuses and the user still wants a worker gone, tell them why; don't work around it.
 - **Never target your own pane.** `dev agent` refuses it.
@@ -63,11 +69,14 @@ Plain `prompt` (no `--wait`) returns at once (a slash command within 3 s) withou
 - **Awaiting a decision:** `prompt` refuses a worker showing a permission prompt or question, since the text would answer it. `read` the pane, then answer with `send-keys` (`1`, `2`, `enter`, `esc`), or ask the user when the decision is theirs. `waiting` after a prompt usually means exactly this.
 - **Reset a worker's context:** `dev agent prompt <target> --wait /clear` returns once its new conversation started (exit 0, `idle`); `/clear` starts no turn, so this waits for the new session instead. Exit 3: it wasn't confirmed, `read` the pane. Codex and Grok panes refuse it with `--wait`.
 - **Exit 3 (stalled):** the text may still sit in the worker's input box. `dev agent read` it; press `dev agent send-keys <target> enter` if the prompt is there, or clear it before sending another. Don't stack prompts. If every `--wait` stalls, the worker's hook runs an older `dev`: tell the user to update it.
-- **Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in a bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
 
-  ```bash
-  for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sleep 30; done; gh pr checks <n>
-  ```
+<!-- boss-core:ci-wait -->
+**Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
+
+```bash
+for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sleep 30; done; gh pr checks <n>
+```
+<!-- /boss-core:ci-wait -->
 
 ## Read results
 
@@ -91,12 +100,19 @@ It closes only a worker you started, idle (or waiting only because it sat idle),
 
 ## A stream of tasks in one area
 
+<!-- boss-core:stream -->
 For a series of items in one area (one PR each, item after item), keep each worker's context short: a worker that runs for hours reaches a full context, and auto-compaction loses detail.
 
-- **Default: a fresh worker per item.** Once an item's PR is merged, `close` the worker and `start` the next item in a new worktree (`<area>-<item>`). It starts from the current default branch with an empty context and nothing left over, and its `RESULT.md` is archived.
-- **Reset in place** (`dev agent prompt <w> --wait /clear`) only when the worktree is worth keeping between items: installed dependencies, warm build caches, a running dev server, local setup. Begin the next brief with switching to a new branch off the fresh default branch (`git fetch origin && git switch -c <item> origin/<default>`), and remove the last item's `RESULT.md`, or the next `close` archives it with the new item's. Leave the old branch: `close` deletes only the current one, and `git branch -D` would skip close's merge check.
-- **Either way, only between items:** never reset or replace a worker with undelivered work (open PR, review fixes pending, uncommitted changes). After a reset the worker remembers nothing, so the brief is self-contained: goal, constraints, where things are.
-- **Context getting high:** when a `high context` inbox note comes, a long-lived worker's screen shows little context left, or it compacted, reset or replace it at the next item boundary rather than starting another item in it.
+- **Default: a fresh worker per item.** Once an item's PR is merged, clean up its worker and start the next item in a fresh worker: it starts from the current default branch with an empty context.
+- **Only between items:** never hand a new item to a worker with undelivered work (open PR, review fixes pending, uncommitted changes), and never replace one that has it.
+- **Context filling up:** replace a long-running worker whose context is filling up at the next item boundary rather than starting another item in it.
+<!-- /boss-core:stream -->
+
+Here:
+
+- **A fresh worker per item** means `close` the worker and `start` the next item in a new worktree (`<area>-<item>`): nothing is left over, and its `RESULT.md` is archived.
+- **Reset in place** (`dev agent prompt <w> --wait /clear`) only when the worktree is worth keeping between items: installed dependencies, warm build caches, a running dev server, local setup. Like replacing, only between items: never reset a worker with undelivered work. Begin the next brief with switching to a new branch off the fresh default branch (`git fetch origin && git switch -c <item> origin/<default>`), and remove the last item's `RESULT.md`, or the next `close` archives it with the new item's. Leave the old branch: `close` deletes only the current one, and `git branch -D` would skip close's merge check. After a reset the worker remembers nothing, so the brief is self-contained: goal, constraints, where things are.
+- **Context filling up** shows as a `high context` inbox note, little context left on a long-lived worker's screen, or a compaction: reset or replace it at the next item boundary.
 
 ## Interrupt
 
@@ -112,8 +128,12 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it), or as a prompt while you're idle with an empty input box. On each batch:
 
-- **Act unasked when the next step is clear and safe:** prompt the worker with it, start a follow-up worker, or hand finished work to review or a PR. Report what you did in one or two lines.
-- **Ask the user only for real decisions:** permission prompts and dialogs (never answer one yourself), anything destructive or external (merging, pushing, posting), unclear goals. Batch the questions into one message. Closing a finished worker with `dev agent close` isn't one of them.
+<!-- boss-core:reports -->
+- **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines.
+- **Ask the user only for real decisions:** anything destructive or external (merging, pushing, posting), unclear goals, and permission prompts (never answer one yourself). Batch the questions into one message.
+<!-- /boss-core:reports -->
+- **Starting a follow-up worker** is such a clear and safe next step too.
+- **Dialogs** count as permission prompts: never answer one yourself. Closing a finished worker with `dev agent close` isn't a real decision.
 - **Rate limits:** a `failed: rate_limit: … resets 7:10pm (…); dev resumes it at 19:11` note needs nothing from you: dev sends the worker "continue" after the reset and tells you with a `resumed` note. Don't prompt it meanwhile (that cancels the resume). Only a note with `not resuming it` (no reset time read, or 3 resumes in a row) is yours: tell the user, or resume it yourself once the limit is back. Your own turns may fail on the same limit; carry on with the batch when you're prompted again.
 - **Asks:** the worker's turn ended on a question to you and it waits (the note has only the question: `read` it for the rest of its last message). Answer it with `prompt` when you can, else ask the user. Unanswered, it comes again 30m, 1h, 2h, … after it asked, while the worker rests.
 - **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. The kinds:
@@ -122,8 +142,10 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
   - `waiting on a decision for 3m, unanswered`: a permission prompt or question nobody answered.
   - `idle for 15m, PR #12 has merge conflicts` (and/or `no CI checks`): its open PR can't move on while it sits; tell it to rebase or find out why CI didn't run.
 - **High context:** the worker's context window is that full; auto-compaction will soon lose detail. At its next item boundary, reset or replace it (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)).
+<!-- boss-core:rollup -->
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
+<!-- /boss-core:rollup -->
 
 ## Codex panes
 
