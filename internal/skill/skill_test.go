@@ -69,8 +69,8 @@ func TestSkillCoreBlocks(t *testing.T) {
 		t.Fatal("no boss-core blocks found")
 	}
 	skills := slices.Sorted(maps.Keys(byName))
+	first := skills[0]
 	for name := range names {
-		first := skills[0]
 		for _, skill := range skills {
 			text, ok := parsed[skill][name]
 			if !ok {
