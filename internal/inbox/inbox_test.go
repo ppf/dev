@@ -224,6 +224,7 @@ func TestInputEmpty(t *testing.T) {
 	}{
 		{"placeholder", "output\n" + rule + "❯\u00a0\x1b[2mTry \"create a util\"\x1b[0m\n" + rule + foot, true},
 		{"blank", "output\n" + rule + "❯\u00a0\n" + rule + foot, true},
+		{"named session", "output\n\x1b[38;5;244m──────────────────────────────────────── nightly-scan ─\n\x1b[39m❯\u00a0\n" + rule + foot, true},
 		{"old box", "╭────────────────────────╮\n│ > \x1b[2mTry it\x1b[22m │\n╰────────────────────────╯\n", false},
 		{"draft", "output\n" + rule + "❯\u00a0fix the login\n" + rule + foot, false},
 		{"true-colour draft", "output\n" + rule + "❯\u00a0\x1b[38;2;100;100;100mfix the login\x1b[39m\n" + rule + foot, false},

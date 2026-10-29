@@ -1,0 +1,10 @@
+⏺ Added the nightly cron next to the reissue one; the YAML parses.
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mSautéed for 1m 45s · done 10:32\x1b[39m
+
+\x1b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────── nightly-scan ─
+\x1b[39m❯ \x1b[2mpost the PR in the channel\x1b[0m
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m~/repo\x1b[38;5;150m main\x1b[38;5;140m Opus 5.5 \x1b[38;5;223m(h…\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
+

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -115,18 +116,18 @@ var promptRow = regexp.MustCompile(`^[│|]?\s*[❯>][ \x{00a0}]?(.*)$`)
 // sgr is one ANSI SGR escape.
 var sgr = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 
-// InputEmpty reports whether Claude's input box in screen (capture-pane -p -e) is empty: the last
+// InputEmpty reports whether Claude's input box in capture (capture-pane -p -e) is empty: the last
 // prompt row between two horizontal rules holds nothing but dim placeholder text, and no draft line
 // follows it. Anything it doesn't recognise counts as not empty, so a paste never joins a draft.
-func InputEmpty(screen string) bool {
-	lines := strings.Split(strings.TrimRight(screen, "\n"), "\n")
+func InputEmpty(capture string) bool {
+	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
 	for i := len(lines) - 1; i > 0; i-- {
 		if !isRule(lines[i]) {
 			continue
 		}
 		// lines[i] is the box's bottom rule: find its top rule
 		for j := i - 1; j >= 0; j-- {
-			if !isRule(lines[j]) {
+			if !isRule(lines[j]) && !screen.IsTopRule(strings.TrimSpace(plain(lines[j]))) {
 				continue
 			}
 			if j+1 >= i {
