@@ -39,6 +39,7 @@ func TestClaudeStateGolden(t *testing.T) {
 		{"claude-model-confirm", ""},
 		{"claude-effort-done", agent.Idle},
 		{"claude-queued", agent.Working}, // 2.1.304's spinner line has no "esc to interrupt"
+		{"claude-session-named", agent.Idle},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -107,6 +108,7 @@ func TestClaudeScreensGolden(t *testing.T) {
 		{file: "claude-working"},
 		{file: "claude-after-esc", interrupted: true}, // Esc at a permission dialog ends the turn too
 		{file: "claude-permission-open"},
+		{file: "claude-session-named"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -124,6 +126,9 @@ func TestClaudeScreensGolden(t *testing.T) {
 	}
 	if box, ok := ClaudeBox(golden(t, "testdata/claude-teammates.txt")); !ok || box != "wait for sleep-a and sleep-b" {
 		t.Errorf("ClaudeBox = %q, %v", box, ok)
+	}
+	if box, ok := ClaudeBox(golden(t, "testdata/claude-session-named.txt")); !ok || box != "post the PR in the channel" {
+		t.Errorf("named session: ClaudeBox = %q, %v", box, ok)
 	}
 }
 
@@ -158,6 +163,10 @@ func TestClaudeState(t *testing.T) {
 	box := func(above string, draft ...string) string {
 		return strings.Join(append(append([]string{"⏺ Done.", "", above, "", rule}, draft...), rule, "  ⏸ manual mode on · ? for shortcuts", "", ""), "\n")
 	}
+	// Claude Code draws a named session's name into the box's top rule
+	namedTop := strings.Repeat("─", 40) + " nightly-scan ─"
+	named := func(capture string) string { return strings.Replace(capture, rule, namedTop, 1) }
+	panel := "\n  ⏺ main\n  ◯ pr-review-toolkit:code-revi…  Searching Ticket.php  48s · ↓ 96.1k tokens\n  ◯ pr-review-toolkit:pr-test-a…  Searching callers  48s · ↓ 86.1k tokens\n"
 	tests := []struct{ name, capture, want string }{
 		{"empty box", box("✻ Worked for 2s", "❯ "), agent.Idle},
 		{"typed draft", box("✻ Worked for 2s", "❯ rebase onto main", "  and push"), agent.Idle},
@@ -169,7 +178,16 @@ func TestClaudeState(t *testing.T) {
 		{"permission options in the box", box("", "❯ 1. Yes", "  2. No"), ""},
 		{"dialog text in the box", box("", "❯ Option A", "", "Do you want to use option A?"), ""},
 		{"agent panel under the status lines", box("✻ Worked for 2s", "❯ ") + "\n  ⏺ main\n  ◯ a  A  1s\n  ◯ b  B  1s\n❯ ◯ c  C  1s\n  ◯ d  D  1s\n", agent.Idle},
+		{"background agents' panel, working", box("✻ Searching… (48s)", "❯ Also run the e2e after reviews") + panel, agent.Working},
+		{"session name in the top rule", named(box("✻ Worked for 2s", "❯ ")), agent.Idle},
+		{"session name in a narrow pane's top rule", strings.Replace(box("✻ Worked for 2s", "❯ "), rule, "── a-long-session-name ─", 1), agent.Idle},
+		{"session name and agent panel, working", named(box("✻ Searching… (48s)", "❯ Also run the e2e after reviews")) + panel, agent.Working},
+		{"session name and agent panel, empty box", named(box("✻ Worked for 2s", "❯ ")) + panel, agent.Idle},
+		{"session name over permission options", named(box("", "❯ 1. Yes", "  2. No")), ""},
+		{"session name over dialog text", named(box("", "❯ Option A", "", "Do you want to use option A?")), ""},
+		{"a named rule isn't the bottom rule", strings.Join([]string{"⏺ Done.", "", rule, "❯ ", namedTop, "  ⏸ manual mode on"}, "\n"), ""},
 		{"short dashes aren't the box", "text\n──\n❯ x\n──\nstatus", ""},
+		{"a short named rule isn't the box's top", "text\n─ x ─\n❯ x\n" + rule + "\nstatus", ""},
 		{"no box", "⏺ Done.\n", ""},
 		{"empty", "", ""},
 	}

@@ -31,15 +31,16 @@ func Plain(lines []string) []string {
 }
 
 // ClaudeInput finds Claude Code's own input box at the bottom of a screen's Plain lines: a ❯ prompt row
-// between two ─ rules (MinRule or longer), and the status lines under it, maybe with its agent panel under
-// them; top and bottom are its rules. ok=false without that box, or with a numbered option or dialog text
-// between the rules (a question waiting for an answer). Claude draws a dialog in the box's place.
+// between two ─ rules (MinRule or longer, the top one maybe with a named session's name in it), and the
+// status lines under it, maybe with its agent panel under them; top and bottom are its rules. ok=false
+// without that box, or with a numbered option or dialog text between the rules (a question waiting for an
+// answer). Claude draws a dialog in the box's place.
 func ClaudeInput(plain []string) (top, bottom int, ok bool) {
-	bottom = lastRule(plain, len(withoutPanel(plain))-1, MaxBelowBox+1)
+	bottom = lastRule(plain, len(withoutPanel(plain))-1, MaxBelowBox+1, isRule)
 	if bottom < 0 {
 		return 0, 0, false
 	}
-	top = lastRule(plain, bottom-1, MaxBoxLines+1)
+	top = lastRule(plain, bottom-1, MaxBoxLines+1, IsTopRule)
 	if top < 0 || top == bottom-1 || !strings.HasPrefix(plain[top+1], "❯") {
 		return 0, 0, false
 	}
@@ -215,7 +216,7 @@ func ClaudeDialog(capture string) string {
 		return ""
 	}
 	for i := len(plain) - 1; i >= 0; i-- {
-		if i = lastRule(plain, i, i+1); i < 0 {
+		if i = lastRule(plain, i, i+1, isRule); i < 0 {
 			break
 		}
 		if i+1 < len(plain) && !startsNumbered(strings.TrimSpace(strings.TrimPrefix(plain[i+1], "❯"))) {
@@ -231,14 +232,25 @@ func AsksChoice(l string) bool {
 	return startsNumbered(l) || strings.Contains(l, "Do you want")
 }
 
-// lastRule is the index of the last ─ rule at or above from, looking at most n lines up; -1 when none.
-func lastRule(plain []string, from, n int) int {
+// lastRule is the index of the last rule at or above from, looking at most n lines up; -1 when none.
+func lastRule(plain []string, from, n int, rule func(string) bool) int {
 	for i := from; i >= 0 && i > from-n; i-- {
-		if len([]rune(plain[i])) >= MinRule && strings.Trim(plain[i], "─") == "" {
+		if rule(plain[i]) {
 			return i
 		}
 	}
 	return -1
+}
+
+// isRule is a ─ rule of MinRule or longer.
+func isRule(l string) bool { return len([]rune(l)) >= MinRule && strings.Trim(l, "─") == "" }
+
+// namedRule is the input box's top rule once Claude Code names the session: "──── nightly-scan ─".
+var namedRule = regexp.MustCompile(`^─+ \S.* ─+$`)
+
+// IsTopRule is the input box's top rule (a Plain line), named or not.
+func IsTopRule(l string) bool {
+	return isRule(l) || (len([]rune(l)) >= MinRule && namedRule.MatchString(l))
 }
 
 // startsNumbered reports a choice like "1. Yes".
