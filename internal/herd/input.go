@@ -7,6 +7,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -124,10 +125,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		target := m.confirm
 		m.confirm = ""
 		if key == "y" {
-			return m, m.action(func() error {
-				_, err := m.c.Run("kill-session", "-t", tmux.SessionTarget(target))
-				return err
-			})
+			// For good, like the sidebar's ×: the next restore leaves it out
+			return m, m.action(func() error { return sidebar.KillSession(m.c, target) })
 		}
 		return m, nil
 	}

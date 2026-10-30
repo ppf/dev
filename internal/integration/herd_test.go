@@ -145,3 +145,49 @@ func TestHerd(t *testing.T) {
 	out, err := refused.CombinedOutput()
 	check(t, "foreign boss refused", errStatus(err)+" "+string(out), "1 ❌ session \"boss\" exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it\n")
 }
+
+// x, y in the previews closes a worker for good: the next snapshot leaves it out, so a restore after a
+// reboot brings back the boss and its other worker, not that one.
+func TestHerdKillForgets(t *testing.T) {
+	scripts := filepath.Join(bashHome, ".tmux/plugins/tmux-resurrect/scripts")
+	restore := filepath.Join(scripts, "restore.sh")
+	requireFiles(t, filepath.Join(scripts, "save.sh"), restore)
+	d := newDevServer(t, "set -g @dev_notify off\n")
+	stubs := filepath.SplitList(d.path)[0]
+	if err := os.Remove(filepath.Join(stubs, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	agentStub(t, stubs, "claude")
+	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}, [2]string{"web", tempDir(t)}))
+	boss := exec.Command(devBin, "boss")
+	boss.Env = env
+	if out, err := boss.CombinedOutput(); err != nil {
+		t.Fatalf("dev boss: %v: %s", err, out)
+	}
+	panes := strings.Fields(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id}"))
+	if len(panes) != 3 {
+		t.Fatalf("boss panes: %q", panes)
+	}
+	coordinator, previews := panes[1], panes[2]
+	for _, worker := range []string{"app", "web"} {
+		_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", worker, "--timeout", "30s")
+		check(t, "start "+worker, status+errOut, "0")
+	}
+	waitFor(t, "app and web tiles", func() bool {
+		screen := d.T("capture-pane", "-p", "-t", previews)
+		return strings.Contains(screen, "● app Claude") && strings.Contains(screen, "● web Claude")
+	})
+	d.T("run-shell", devBin+" resurrect snapshot")
+	check(t, "saved", d.saved(), "app boot boss web")
+
+	for _, key := range []string{"j", "x"} {
+		d.T("send-keys", "-t", previews, key)
+	}
+	waitScreen(t, d.server, previews, "Kill web? y/n")
+	d.T("send-keys", "-t", previews, "y")
+	actWait(d, "x, y on web: saved without it", d.saved, "app boot boss")
+
+	d.kill()
+	d.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)
+	check(t, "restored without web", strings.ReplaceAll(d.T("list-sessions", "-F", "#{session_name}"), "\n", " "), "app boot boss")
+}
