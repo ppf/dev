@@ -657,7 +657,8 @@ const snapshotTimeout = time.Minute
 
 // Snapshot runs tmux-resurrect's save.sh after dev closed a session for good, one at a time, each in its own
 // second: save.sh names a snapshot by its second, so two saves at once in one second would write one file. A
-// save that isn't dev's waits in its Save hook for this lock. snapshotTimeout keeps a hung save from holding the last session's server up.
+// save that isn't dev's waits in its Save hook for this lock. snapshotTimeout keeps a hung save from holding
+// the last session's server up.
 func Snapshot(c *tmux.Client) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
