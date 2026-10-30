@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,18 +38,31 @@ func TestSaveSameSecond(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(d.tmp, "resurrect", last+".dev")); err != nil || statErr != nil {
 			t.Errorf("%s: last's .dev: %v %v", name, err, statErr)
 		}
+		// Overlapping dumps would repeat lines: the later save writes after the earlier one's
+		data, _ = os.ReadFile(filepath.Join(d.tmp, "resurrect", last))
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if seen := slices.Compact(slices.Sorted(slices.Values(lines))); len(seen) != len(lines) {
+			t.Errorf("%s: repeated lines in %s:\n%s", name, last, data)
+		}
 		check(t, name+": no warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
 	}
 
-	// The snapshot saves at the next second's start; the plain save follows in that second, its hook waiting
-	// for the snapshot's lock if it's still saving
+	// The snapshot saves at the next second's start; the plain save follows in that second once the snapshot's
+	// file is written (its hook logged), its own hook waiting for the snapshot's lock
 	d.T("kill-session", "-t", "=a:")
 	if err := os.Remove(log); err != nil {
 		t.Fatal(err)
 	}
-	next := time.Now().Truncate(time.Second).Add(time.Second)
 	d.T("run-shell", "-b", snapshot)
-	time.Sleep(time.Until(next.Add(100 * time.Millisecond)))
+	// Polled closely (not waitFor's half second), so the plain save starts in the snapshot's second
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(log); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("snapshot's file not written")
+		}
+	}
 	d.T("run-shell", save+" quiet")
 	waitFor(t, "snapshot done", func() bool { return exec.Command("pgrep", "-f", snapshot).Run() != nil })
 	check(t, "a save in a dev snapshot's second: saved", d.saved(), "b boot c")
