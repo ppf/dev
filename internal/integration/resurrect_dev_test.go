@@ -132,9 +132,9 @@ func TestResurrectDev(t *testing.T) {
 	check(t, "restore warns only about devu's lost conversation", d.T("show", "-gqv", "@dev_resurrect_warnings"),
 		"devu:1.2: conversation u1 not resumed (directory changed or transcript gone), fresh agent; ")
 	d.T("set-option", "-gu", "@dev_resurrect_warnings")
-	// The dir must exist (pre-restore creates it), proving the hooks used the temp state dir
+	// The dir must exist (pre-restore creates it), proving the hooks used the temp state dir; the saves' lock stays
 	live, err := os.ReadDir(filepath.Join(d.tmp, "state/dev"))
-	check(t, "live list cleaned up", dirListing(live, err), "")
+	check(t, "live list cleaned up", dirListing(live, err), "snapshot.lock")
 
 	// Manual restore with sidebars hidden must not kill or change any live pane (resurrect itself may
 	// add back panes that existed at save time, e.g. the hidden sidebar's slot)

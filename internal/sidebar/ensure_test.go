@@ -47,13 +47,18 @@ func ensContent(session string) string {
 	return "list-panes -t =" + session + ": -F #{pane_id}\x1f#{@sidebar_pane}\x1f"
 }
 
+// ensDir is the anchor's directory query; ensSplit expects /app from it.
+func ensDir(anchor string) string {
+	return "display-message -t " + anchor + " -p #{pane_current_path}\x1f"
+}
+
 func ensSplit(t *testing.T, anchor string) string {
 	t.Helper()
 	cmd, err := PaneCommand()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return "split-window -t " + anchor + " -hb -l 40 -PF #{pane_id} " + cmd
+	return "split-window -t " + anchor + " -hb -l 40 -c /app -PF #{pane_id} " + cmd
 }
 
 func ensCheck(t *testing.T, got, want []string) {
@@ -123,11 +128,12 @@ func TestEnsure(t *testing.T) {
 				ensStored("app"):  "%9\n",
 				ensPanes:          "%1\n%2\n%7\n",
 				ensContent("app"): tmux.FormatRow("%1", "") + tmux.FormatRow("%2", ""),
+				ensDir("%1"):      tmux.FormatRow("/app"),
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-					ensContent("app"), ensWidth, ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
+					ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"), "set-option -t =app: @sidebar_pane %5",
 					"display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -135,10 +141,11 @@ func TestEnsure(t *testing.T) {
 			name: "created from the same session focuses it", target: "app", from: Origin{"app", "%1"},
 			out: map[string]string{
 				ensContent("app"): tmux.FormatRow("%1", ""),
+				ensDir("%1"):      tmux.FormatRow("/app"),
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"}
 			},
 		},
@@ -146,11 +153,12 @@ func TestEnsure(t *testing.T) {
 			name: "origin pane gone keeps focus", target: "app", from: fromOther,
 			out: map[string]string{
 				ensContent("app"): tmux.FormatRow("%1", ""),
+				ensDir("%1"):      tmux.FormatRow("/app"),
 				ensSplit(t, "%1"): "%5\n",
 			},
 			fail: []string{"display-message -t %7 -p "},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p "}
 			},
 		},
@@ -158,10 +166,11 @@ func TestEnsure(t *testing.T) {
 			name: "no origin pane", target: "app", from: Origin{},
 			out: map[string]string{
 				ensContent("app"): tmux.FormatRow("%1", ""),
+				ensDir("%1"):      tmux.FormatRow("/app"),
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1"),
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5"}
 			},
 		},
@@ -180,11 +189,12 @@ func TestEnsure(t *testing.T) {
 				ensPanes:          "%1\n%3\n",
 				ensInfo("%3"):     tmux.FormatRow(bashStart, "@1", "1"),
 				ensContent("app"): tmux.FormatRow("%1", ""),
+				ensDir("%1"):      tmux.FormatRow("/app"),
 				ensSplit(t, "%1"): "%5\n",
 			},
 			want: func(t *testing.T) []string {
 				return []string{ensHidden, ensStored("app"), ensPanes, ensInfo("%3"), "kill-pane -t %3",
-					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensContent("app"), ensWidth, ensSplit(t, "%1"),
+					"resize-pane -Z -t @1", "set-option -t =app: -u @sidebar_pane", ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"),
 					"set-option -t =app: @sidebar_pane %5", "display-message -t %7 -p ", "select-pane -t %7"}
 			},
 		},
@@ -226,10 +236,10 @@ func TestEnsure(t *testing.T) {
 		},
 		{
 			name: "failing split is returned", target: "app", from: fromOther, wantErr: true,
-			out:  map[string]string{ensContent("app"): tmux.FormatRow("%1", "")},
+			out:  map[string]string{ensContent("app"): tmux.FormatRow("%1", ""), ensDir("%1"): tmux.FormatRow("/app")},
 			fail: []string{ensSplit(t, "%1")},
 			want: func(t *testing.T) []string {
-				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensSplit(t, "%1")}
+				return []string{ensHidden, ensStored("app"), ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1")}
 			},
 		},
 	}
@@ -269,13 +279,14 @@ func TestToggleShow(t *testing.T) {
 		ensStored("app"):  "%3\n", // stale: hidden sidebars were killed
 		ensPanes:          "%1\n",
 		ensContent("app"): tmux.FormatRow("%1", ""),
+		ensDir("%1"):      tmux.FormatRow("/app"),
 		ensSplit(t, "%1"): "%5\n",
 	}, "set-option -gu @sidebar_hidden")
 	if err := Toggle(c, Origin{"app", "%1"}); err != nil {
 		t.Fatal(err)
 	}
 	ensCheck(t, log(), []string{ensStored("app"), ensPanes, "set-option -t =app: -u @sidebar_pane",
-		"set-option -gu @sidebar_hidden", ensContent("app"), ensWidth, ensSplit(t, "%1"),
+		"set-option -gu @sidebar_hidden", ensContent("app"), ensWidth, ensDir("%1"), ensSplit(t, "%1"),
 		"set-option -t =app: @sidebar_pane %5", "select-pane -t %5", "set-option -gq @sidebar_selected_session app"})
 
 	c, log = ensTmux(nil)
