@@ -175,3 +175,20 @@ func TestEnsureReplacesBashSidebar(t *testing.T) {
 	check(t, "dev sidebar alive, first and 40 wide", d.T("display", "-t", cur, "-p", "#{pane_dead} #{pane_index} #{pane_width}"), "0 1 40")
 	check(t, "focus stays in boot", d.T("display", "-t", "=boot:", "-p", "#{pane_id}"), s.boot)
 }
+
+// ensure from another directory (this test's) creates the sidebar in its anchor pane's directory, so a worker
+// restarting other sessions' sidebars doesn't leave them in its worktree; not in #{session_path}, which a
+// restore takes from the old sidebar's.
+func TestEnsureSidebarInAnchorDir(t *testing.T) {
+	s := ensNewSide(t, false)
+	dir, stale := tempDir(t), tempDir(t)
+	s.d.T("new-session", "-d", "-s", "gamma", "-c", stale, "-x", "200", "-y", "50", "cd "+shellQuote(dir)+" && exec /bin/sh")
+	waitFor(t, "gamma's pane in "+dir, func() bool {
+		return s.d.T("display", "-t", "=gamma:", "-p", "#{pane_current_path}") == dir
+	})
+
+	s.run(t, s.boot, "ensure", "gamma")
+	sidebar := s.sidebar("gamma")
+	waitFor(t, "sidebar in "+dir, func() bool { return s.d.T("display", "-t", sidebar, "-p", "#{pane_current_path}") == dir })
+	check(t, "sidebar alive", s.d.T("display", "-t", sidebar, "-p", "#{pane_dead}"), "0")
+}

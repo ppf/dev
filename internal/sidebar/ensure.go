@@ -177,7 +177,15 @@ func ensureSidebar(c *tmux.Client, target string, from Origin, toggle bool) erro
 	if err != nil {
 		return err
 	}
-	out, err := c.Run("split-window", "-t", anchor, "-hb", "-l", strconv.Itoa(width), "-PF", "#{pane_id}", cmd)
+	// In the anchor's directory, not the caller's (ensure run from another session's worktree would pin it there)
+	// nor #{session_path}: resurrect restores that from the session's first saved pane, the old sidebar
+	dir, err := displayRow[struct {
+		Path string `tmux:"pane_current_path"`
+	}](c, anchor, "#{pane_current_path}")
+	if err != nil {
+		return err
+	}
+	out, err := c.Run("split-window", "-t", anchor, "-hb", "-l", strconv.Itoa(width), "-c", dir.Path, "-PF", "#{pane_id}", cmd)
 	if err != nil {
 		return err
 	}
