@@ -6,6 +6,7 @@ package resurrect
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -58,7 +60,8 @@ func Save(c *tmux.Client, snapshot string) error {
 		Transcript string `tmux:"@agent_transcript"`
 		BossPane   string `tmux:"@dev_boss_pane"`
 	}](c, "list-panes", "-a")
-	if err != nil {
+	// With no session left (the sidebar closed the last one) list-panes -a fails, and there's nothing to save
+	if err != nil && len(sessions) > 0 {
 		return fail(c, "list-panes failed, dev state not saved", err)
 	}
 	// Keyed by session too: a window linked into another session lists its panes there at another index
@@ -617,6 +620,48 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
 	return entries, agents, startedBy, bosses
+}
+
+const snapshotTimeout = time.Minute
+
+// Snapshot runs tmux-resurrect's save.sh after dev closed a session for good, one at a time, each in its own
+// second: save.sh names a snapshot by its second, so a save in the second last points to deletes that file and
+// leaves last dangling. snapshotTimeout keeps a hung save from holding the last session's server up.
+func Snapshot(c *tmux.Client) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fail(c, "home unknown, snapshot not saved", err)
+	}
+	save := filepath.Join(home, ".tmux", "plugins", "tmux-resurrect", "scripts", "save.sh")
+	if _, err := os.Stat(save); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	dir, err := config.StateDir()
+	if err != nil {
+		return fail(c, "state dir unknown, snapshot not saved", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fail(c, "cannot create "+dir+", snapshot not saved", err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "snapshot.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fail(c, "cannot open the snapshot lock, snapshot not saved", err)
+	}
+	// Closing it releases the lock, also when this process dies
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fail(c, "cannot lock the snapshot lock, snapshot not saved", err)
+	}
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, save, "quiet")
+	// A child still holding the output (a hung hook) would keep CombinedOutput waiting past the timeout
+	cmd.WaitDelay = 5 * time.Second
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fail(c, "save.sh failed: "+strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.

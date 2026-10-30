@@ -44,8 +44,8 @@ func OpenPicker(c *tmux.Client, client string) error {
 	return err
 }
 
-// kill closes target for client: refuses the last session; a worktree no other session uses is asked
-// about in the 70×8 close-worktree popup, which owns the rest (kill_session_by_name).
+// kill closes target for client; a worktree no other session uses is asked about in the 70×8
+// close-worktree popup, which owns the rest (kill_session_by_name).
 func kill(c *tmux.Client, client, current, target string) error {
 	if target == "" {
 		return nil
@@ -56,10 +56,6 @@ func kill(c *tmux.Client, client, current, target string) error {
 	}
 	if !slices.Contains(order, target) {
 		return setSelected(c, current)
-	}
-	if len(order) <= 1 {
-		showMessage(c, client, "Refusing to kill the last tmux session")
-		return nil
 	}
 	mainRoot, wt, ok, err := sessionWorktree(c, target)
 	if err != nil {
@@ -87,12 +83,16 @@ func kill(c *tmux.Client, client, current, target string) error {
 }
 
 // killNow kills target, first switching client to the first other session in Order when target is
-// current, and moves the selection (kill_session_now). killed=false means target is still there (no
-// replacement to switch to), so nothing that needs it gone, like removing its worktree, may follow.
+// current, and moves the selection (kill_session_now). killed=false means target is still there, so its
+// worktree mustn't be removed; for the last session, killed=true while the kill may still be queued.
 func killNow(c *tmux.Client, client, current, target string) (killed bool, err error) {
 	order, err := LoadOrder(c)
 	if err != nil {
 		return false, err
+	}
+	if isLast(order, target) {
+		// No session left: nothing to switch to or select
+		return true, killSession(c, target, order)
 	}
 	replacement := current
 	if target == current {
@@ -110,10 +110,12 @@ func killNow(c *tmux.Client, client, current, target string) (killed bool, err e
 			return false, err
 		}
 	}
-	// Like bash's `|| true`: has-session below decides whether it is gone.
-	_, _ = c.Run("kill-session", "-t", tmux.SessionTarget(target))
+	// has-session below decides whether it is gone; killErr matters only if not
+	killErr := killSession(c, target, order)
 	_, err = c.Run("has-session", "-t", tmux.SessionTarget(target))
-	killed = err != nil
+	if killed = err != nil; !killed && killErr != nil {
+		return false, killErr
+	}
 
 	if replacement != "" {
 		if _, err := c.Run("has-session", "-t", tmux.SessionTarget(replacement)); err == nil {
@@ -125,6 +127,45 @@ func killNow(c *tmux.Client, client, current, target string) (killed bool, err e
 		return killed, err
 	}
 	return killed, setSelected(c, order[0])
+}
+
+func isLast(order []string, target string) bool {
+	return len(order) == 1 && order[0] == target
+}
+
+// KillSession closes session for good: `dev resurrect snapshot` saves once it is gone, so the next restore
+// leaves it out. With exit-empty on (tmux's default), the last session dies in a server job that holds the
+// server up (exit-empty off) for that save, which records no sessions, then turns it back on: the server exits.
+func KillSession(c *tmux.Client, session string) error {
+	order, err := LoadOrder(c)
+	if err != nil {
+		return err
+	}
+	return killSession(c, session, order)
+}
+
+func killSession(c *tmux.Client, session string, order []string) error {
+	target := tmux.SessionTarget(session)
+	snapshot, err := selfCommand("resurrect", "snapshot")
+	if err != nil {
+		return err
+	}
+	// run-shell expands formats: a # in a name or path stays literal as ##
+	escape := strings.NewReplacer("#", "##").Replace
+	if isLast(order, session) {
+		exitEmpty, err := c.Run("show-option", "-gv", "exit-empty")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(exitEmpty) == "on" {
+			_, err = c.Run("set-option", "-g", "exit-empty", "off", ";", "run-shell", "-b",
+				escape(tmux.ShellJoin("tmux", "kill-session", "-t", target)+"; "+snapshot+"; tmux set-option -g exit-empty on"))
+			return err
+		}
+	}
+	// One command: the save is queued even when the kill takes this process with it (the sidebar's session)
+	_, err = c.Run("kill-session", "-t", target, ";", "run-shell", "-b", escape(snapshot))
+	return err
 }
 
 // sessionWorktree returns the main checkout and worktree of session's first content pane when it

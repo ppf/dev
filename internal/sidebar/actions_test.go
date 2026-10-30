@@ -15,13 +15,14 @@ import (
 // actWorld is a fake tmux server: sessions in list-sessions order and pane rows (session_name, pane_id,
 // @sidebar_pane, pane_current_path). Sidebars are hidden, so switchTo's ensure step does nothing.
 type actWorld struct {
-	sessions []string
-	panes    []map[string]string
-	undying  bool // kill-session leaves the session in place
-	popupErr error
-	bosses   []string // sessions marked as a boss
-	failCmd  string   // this command fails
-	calls    [][]string
+	sessions  []string
+	panes     []map[string]string
+	undying   bool // kill-session leaves the session in place
+	exitEmpty string
+	popupErr  error
+	bosses    []string // sessions marked as a boss
+	failCmd   string   // this command fails
+	calls     [][]string
 }
 
 func (w *actWorld) client() *tmux.Client { return tmux.NewFake(w.run) }
@@ -63,6 +64,9 @@ func (w *actWorld) run(args []string) (string, error) {
 			}
 		}
 	case "show-option", "show-options":
+		if slices.Contains(args, "exit-empty") {
+			return w.exitEmpty + "\n", nil
+		}
 		if slices.Contains(args, optHidden) || slices.Contains(args, OptHerd) && slices.ContainsFunc(w.bosses,
 			func(b string) bool { return tmux.SessionTarget(b) == target }) {
 			return "1\n", nil
@@ -200,12 +204,13 @@ func TestActionKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainKill := []string{
+	killB := killCalls(t, "=b:")
+	plainKill := slices.Concat([]string{
 		"list-sessions -F …",
 		"list-panes -t =b: -F …", "display-message -t %2 -p #{pane_current_path}",
-		"list-sessions -F …", "kill-session -t =b:", "has-session -t =b:", "has-session -t =a:",
+		"list-sessions -F …"}, killB, []string{"has-session -t =b:", "has-session -t =a:",
 		"set-option -gq @sidebar_selected_session a",
-	}
+	})
 	for _, tt := range []struct {
 		name     string
 		sessions []string
@@ -215,9 +220,10 @@ func TestActionKill(t *testing.T) {
 		want     []string
 	}{
 		{"no target", []string{"a", "b"}, "", "/", "/", nil},
-		{"last session", []string{"b"}, "b", "/", "/", []string{
-			"list-sessions -F …", "display-message -c /dev/tty1 Refusing to kill the last tmux session",
-		}},
+		{"last session", []string{"b"}, "b", "/", "/", append([]string{
+			"list-sessions -F …",
+			"list-panes -t =b: -F …", "display-message -t %2 -p #{pane_current_path}",
+			"list-sessions -F …", "show-option -gv exit-empty"}, killB...)},
 		{"gone: select current", []string{"a", "c"}, "b", "/", "/", []string{
 			"list-sessions -F …", "set-option -gq @sidebar_selected_session a",
 		}},
@@ -298,8 +304,8 @@ func TestActionKillNow(t *testing.T) {
 			"kill-session -t =b:", "has-session -t =b:", "has-session -t =a:",
 			"set-option -gq @sidebar_selected_session a",
 		}},
-		{"current, no replacement", []string{"a"}, "a", "a", false, false, []string{
-			"list-sessions -F …", "display-message -c /dev/tty1 No replacement session available",
+		{"last session: nothing to switch to or select", []string{"a"}, "a", "a", false, true, []string{
+			"list-sessions -F …", "show-option -gv exit-empty", "kill-session -t =a:",
 		}},
 		{"other: current stays selected", []string{"a", "b"}, "a", "b", false, true, []string{
 			"list-sessions -F …", "kill-session -t =b:", "has-session -t =b:", "has-session -t =a:",
@@ -320,8 +326,84 @@ func TestActionKillNow(t *testing.T) {
 			if err != nil || killed != tt.killed {
 				t.Errorf("killNow = %t, %v; want %t", killed, err, tt.killed)
 			}
-			if got := w.log(); !slices.Equal(got, tt.want) {
-				t.Errorf("calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
+			var want []string
+			for _, call := range tt.want {
+				if target, ok := strings.CutPrefix(call, "kill-session -t "); ok {
+					want = append(want, killCalls(t, target)...)
+					continue
+				}
+				want = append(want, call)
+			}
+			if got := w.log(); !slices.Equal(got, want) {
+				t.Errorf("calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
+// A kill that fails leaving the session is reported; one gone anyway is not (bash's `|| true`).
+func TestActionKillNowFails(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		undying bool
+		wantErr bool
+	}{
+		{"session stays", true, true},
+		{"session gone anyway", false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := &actWorld{sessions: []string{"a", "b"}, failCmd: "kill-session", undying: tt.undying}
+			if !tt.undying {
+				w.sessions = []string{"a"}
+			}
+			killed, err := killNow(w.client(), "/dev/tty1", "a", "b")
+			if killed == tt.wantErr || (err != nil) != tt.wantErr {
+				t.Errorf("killNow = %t, %v; want killed %t, error %t", killed, err, !tt.wantErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+// killCalls is killSession's call when the server outlives target (another session left, or exit-empty off).
+func killCalls(t *testing.T, target string) []string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{"kill-session -t " + target + " ; run-shell -b " + tmux.ShellJoin(exe, "resurrect", "snapshot")}
+}
+
+func TestKillSession(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := tmux.ShellJoin(exe, "resurrect", "snapshot")
+	for _, tt := range []struct {
+		name      string
+		sessions  []string
+		exitEmpty string
+		want      []string
+	}{
+		{"another session left: snapshot once it's gone", []string{"a", "b"}, "on", []string{
+			"kill-session -t =b: ; run-shell -b " + snapshot}},
+		{"last session: the server waits for the snapshot", []string{"b"}, "on", []string{"show-option -gv exit-empty",
+			"set-option -g exit-empty off ; run-shell -b 'tmux' 'kill-session' '-t' '=b:'; " + snapshot + "; tmux set-option -g exit-empty on"}},
+		{"a # in the name stays literal in run-shell", []string{"b#1"}, "on", []string{"show-option -gv exit-empty",
+			"set-option -g exit-empty off ; run-shell -b 'tmux' 'kill-session' '-t' '=b##1:'; " + snapshot + "; tmux set-option -g exit-empty on"}},
+		{"last session, exit-empty off: the server stays anyway", []string{"b"}, "off", []string{"show-option -gv exit-empty",
+			"kill-session -t =b: ; run-shell -b " + snapshot}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := &actWorld{sessions: tt.sessions, exitEmpty: tt.exitEmpty}
+			// The last listed session is the one closed
+			if err := KillSession(w.client(), tt.sessions[len(tt.sessions)-1]); err != nil {
+				t.Fatal(err)
+			}
+			want := append([]string{"list-sessions -F …"}, tt.want...)
+			if got := w.log(); !slices.Equal(got, want) {
+				t.Errorf("calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		})
 	}
