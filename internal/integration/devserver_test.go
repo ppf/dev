@@ -122,7 +122,7 @@ type snapPane struct {
 }
 
 // snapshot describes a session as the parity tests compare it: name, options, viewing clients, windows
-// and every pane's geometry, command, start command (but the sidebar's), path and the stub command line
+// and every pane's geometry, command, start command and path (but the sidebar's) and the stub command line
 // it ran. Each replace pair is applied to paths (e.g. a per-run repo dir).
 func (d *devServer) snapshot(session string, replace ...string) string {
 	d.t.Helper()
@@ -149,9 +149,9 @@ func (d *devServer) snapshot(session string, replace ...string) string {
 			cmd, stub = "sleep", strings.TrimSuffix(stub, "--remote-control="+name)
 		}
 		if p.ID == sidebar {
-			// The bash sidebar's current command changes as it polls tmux, and its start command runs
-			// sidebar.sh where dev's runs `dev sidebar` (see sidebarStart)
-			cmd, p.Start = "<sidebar>", "<sidebar>"
+			// The bash sidebar's current command changes as it polls tmux, its start command runs sidebar.sh
+			// where dev's runs `dev sidebar` (see sidebarStart), and it starts in the caller's directory
+			cmd, p.Start, p.Path = "<sidebar>", "<sidebar>", "<sidebar>"
 		}
 		fmt.Fprintf(&b, "pane %d.%d active=%t %dx%d+%d+%d cmd=%s start=%q path=%s stub=%q\n",
 			p.Window, p.Index, p.Active, p.Width, p.Height, p.Left, p.Top, cmd, p.Start, r.Replace(p.Path), stub)

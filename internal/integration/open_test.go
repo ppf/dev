@@ -39,6 +39,7 @@ type opened struct {
 	out2, status2     string
 	sessions, clients string
 	sidebar           string // the sidebar pane's start command
+	sidebarPath       string // and its directory
 	agent             string // the agent pane's current command
 	stub              string // the stub command line the agent pane ran
 }
@@ -74,6 +75,8 @@ func TestOpenParity(t *testing.T) {
 		r.sessions = d.T("list-sessions", "-F", "#{session_name}")
 		r.clients = d.T("list-clients", "-F", "#{client_session}")
 		r.sidebar = d.sidebarStart("app")
+		sidebarPane := d.T("show-option", "-qv", "-t", "=app:", "@sidebar_pane")
+		r.sidebarPath = d.T("display", "-t", sidebarPane, "-p", "#{pane_current_path}")
 		got[name] = r
 		t.Logf("%s snapshot:\n%s", name, r.first)
 	}
@@ -95,6 +98,8 @@ func TestOpenParity(t *testing.T) {
 	// The deliberate difference: the same pane runs dev's sidebar instead of sidebar.sh
 	check(t, "bash: sidebar runs sidebar.sh", strconv.FormatBool(strings.Contains(bash.sidebar, "exec "+filepath.Join(tmuxHome(t), "sessions/sidebar.sh"))), "true")
 	check(t, "dev: sidebar runs dev sidebar", devSidebarStart(dev.sidebar), "true")
+	// project.sh's sidebar starts in the caller's directory, dev's in the project's
+	check(t, "dev: sidebar in the project's directory", dev.sidebarPath, dir)
 	// And claude runs under dev pty-wrap
 	check(t, "bash: claude runs as is", bash.agent, "sleep")
 	check(t, "dev: claude runs under dev pty-wrap", dev.agent, filepath.Base(devBin))
