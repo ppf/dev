@@ -31,10 +31,22 @@ import (
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project or
 // a boss, the position empty while its sidebar is hidden, then a startedByPrefix line per worker a boss
 // started, a bossPrefix line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
-// last one's .dev instead. A failure keeps the previous file.
+// last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save in the
+// second of an earlier one from leaving last dangling (see unlinkSelf).
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
 		return fail(c, "snapshot '"+snapshot+"' missing, dev state not saved", err)
+	}
+	// Inside Snapshot's save.sh the lock is Snapshot's already: taking it again would wait for Snapshot
+	if os.Getenv(snapshotGuard) == "" {
+		lock, err := lockSnapshots()
+		if err != nil {
+			return fail(c, "cannot take the snapshot lock, dev state not saved", err)
+		}
+		defer func() { _ = lock.Close() }()
+	}
+	if err := unlinkSelf(snapshot); err != nil {
+		return fail(c, "cannot unlink last, which is "+snapshot+" itself", err)
 	}
 	sessions, err := tmux.Query[struct {
 		Name      string `tmux:"session_name"`
@@ -145,13 +157,9 @@ func Save(c *tmux.Client, snapshot string) error {
 // devPath is where snapshot's state goes: next to it, or next to the last snapshot when save.sh will
 // delete snapshot as identical to that one (it compares them right after this hook).
 func devPath(snapshot string) string {
-	last := filepath.Join(filepath.Dir(snapshot), "last")
-	target, err := os.Readlink(last)
-	if err != nil {
+	target, ok := lastTarget(snapshot)
+	if !ok {
 		return snapshot + ".dev"
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(last), target)
 	}
 	a, errA := os.ReadFile(snapshot)
 	b, errB := os.ReadFile(target)
@@ -160,6 +168,29 @@ func devPath(snapshot string) string {
 		return snapshot + ".dev"
 	}
 	return target + ".dev"
+}
+
+// lastTarget returns the file the last link next to snapshot points to, if there is one.
+func lastTarget(snapshot string) (string, bool) {
+	last := filepath.Join(filepath.Dir(snapshot), "last")
+	target, err := os.Readlink(last)
+	if err != nil {
+		return "", false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(last), target)
+	}
+	return target, true
+}
+
+// unlinkSelf removes the last link when it points to snapshot: save.sh names a snapshot by its second, so a save
+// in the second of an earlier one rewrites that file, finds it identical to last (itself) and deletes it. Without
+// last it differs, as on a first save, so save.sh links last to it again.
+func unlinkSelf(snapshot string) error {
+	if target, ok := lastTarget(snapshot); !ok || target != filepath.Clean(snapshot) {
+		return nil
+	}
+	return os.Remove(filepath.Join(filepath.Dir(snapshot), "last"))
 }
 
 // Prune deletes .dev files whose snapshot is gone (save.sh deletes one identical to the last).
@@ -625,8 +656,8 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 const snapshotTimeout = time.Minute
 
 // Snapshot runs tmux-resurrect's save.sh after dev closed a session for good, one at a time, each in its own
-// second: save.sh names a snapshot by its second, so a save in the second last points to deletes that file and
-// leaves last dangling. snapshotTimeout keeps a hung save from holding the last session's server up.
+// second: save.sh names a snapshot by its second, so two saves at once in one second would write one file. A
+// save that isn't dev's waits in its Save hook for this lock. snapshotTimeout keeps a hung save from holding the last session's server up.
 func Snapshot(c *tmux.Client) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -636,32 +667,45 @@ func Snapshot(c *tmux.Client) error {
 	if _, err := os.Stat(save); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	dir, err := config.StateDir()
+	lock, err := lockSnapshots()
 	if err != nil {
-		return fail(c, "state dir unknown, snapshot not saved", err)
+		return fail(c, "cannot take the snapshot lock, snapshot not saved", err)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fail(c, "cannot create "+dir+", snapshot not saved", err)
-	}
-	lock, err := os.OpenFile(filepath.Join(dir, "snapshot.lock"), os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return fail(c, "cannot open the snapshot lock, snapshot not saved", err)
-	}
-	// Closing it releases the lock, also when this process dies
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return fail(c, "cannot lock the snapshot lock, snapshot not saved", err)
-	}
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, save, "quiet")
+	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
 	// A child still holding the output (a hung hook) would keep CombinedOutput waiting past the timeout
 	cmd.WaitDelay = 5 * time.Second
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fail(c, "save.sh failed: "+strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// snapshotGuard is set (=1) in the save.sh Snapshot runs, whose Save hook holds Snapshot's lock through it.
+const snapshotGuard = "DEV_SNAPSHOT"
+
+// lockSnapshots waits for $XDG_STATE_HOME/dev/snapshot.lock. Closing the file releases it, also when this process dies.
+func lockSnapshots() (*os.File, error) {
+	dir, err := config.StateDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "snapshot.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return lock, nil
 }
 
 // livePath is $XDG_STATE_HOME/dev/live-before-restore, XDG_STATE_HOME defaulting to ~/.local/state.

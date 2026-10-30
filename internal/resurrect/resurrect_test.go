@@ -77,6 +77,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestSave(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	// boss-p's workers: w-name names it, w-old holds its id as older versions wrote, w-out a coordinator outside
 	// tmux started for it; w-gone's starter is gone
 	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "", "") +
@@ -171,16 +172,19 @@ func TestSave(t *testing.T) {
 
 // save.sh deletes a new snapshot identical to the last one, so its state replaces the last one's.
 func TestSaveIdenticalSnapshot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	replies := map[string]any{"list-sessions": tmux.FormatRow("devt", "devt", "", "$1", "", "", ""), "list-panes -a": ""}
 	tests := []struct {
 		name, last, link string
 		wantDev          string // the file that gets the state
+		unlinked         bool   // last removed, so save.sh links it to the snapshot again
 	}{
-		{"identical to last", "pane\n", "old.txt", "old.txt.dev"},
-		{"identical to last, absolute link", "pane\n", "<dir>/old.txt", "old.txt.dev"},
-		{"differs from last", "other\n", "old.txt", "new.txt.dev"},
-		{"last is the snapshot", "", "new.txt", "new.txt.dev"},
-		{"last link dangling", "", "gone.txt", "new.txt.dev"},
+		{"identical to last", "pane\n", "old.txt", "old.txt.dev", false},
+		{"identical to last, absolute link", "pane\n", "<dir>/old.txt", "old.txt.dev", false},
+		{"differs from last", "other\n", "old.txt", "new.txt.dev", false},
+		{"last is the snapshot: a second save in its second", "", "new.txt", "new.txt.dev", true},
+		{"last is the snapshot, absolute link", "", "<dir>/new.txt", "new.txt.dev", true},
+		{"last link dangling", "", "gone.txt", "new.txt.dev", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -206,7 +210,45 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 			if got := readFile(t, filepath.Join(dir, tt.wantDev)); got != "devt\tdevt\t\n" {
 				t.Errorf("state = %q", got)
 			}
+			_, err := os.Lstat(filepath.Join(dir, "last"))
+			if got := errors.Is(err, os.ErrNotExist); got != tt.unlinked {
+				t.Errorf("last unlinked = %v (%v), want %v", got, err, tt.unlinked)
+			}
 		})
+	}
+}
+
+// A save that isn't dev's waits in its hook for a dev snapshot's lock; the one inside that snapshot doesn't.
+func TestSaveWaitsForSnapshotLock(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	replies := map[string]any{"list-sessions": "", "list-panes -a": errors.New("no current target")}
+	lock, err := lockSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	save := func() <-chan error {
+		snap := filepath.Join(t.TempDir(), "snap.txt")
+		writeFile(t, snap, "pane\n")
+		done := make(chan error, 1)
+		go func() { done <- Save((&fakeServer{replies: replies}).client(), snap) }()
+		return done
+	}
+	plain := save()
+	select {
+	case err := <-plain:
+		t.Fatalf("Save finished while the lock was held: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	t.Setenv(snapshotGuard, "1")
+	if err := <-save(); err != nil {
+		t.Fatalf("Save inside a snapshot: %v", err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-plain; err != nil {
+		t.Fatalf("Save after the lock: %v", err)
 	}
 }
 
