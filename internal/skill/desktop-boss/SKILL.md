@@ -30,7 +30,7 @@ Write a bold title line and one sentence on what it will do, then call `start_se
 - `prompt`: the brief. `background`: the goal and decisions so far, for someone who hasn't seen this conversation (80+ chars)
 - `model`: a cheaper model for read-only or mechanical work; omit otherwise
 
-The user wants Remote Control off for workers: they inherit it from you, flooding the user's phone with notifications. At each new worker's first turn-end note (never at start: it needs a session that has run a turn), turn it off with `set_remote_control` (`enabled: false`; the app may ask the user to approve).
+Never change a worker's Remote Control: it follows the app configuration (on by default). Use `set_remote_control` only when the user asks.
 
 Starting several at once: check the account's usage (`get_usage`: 5-hour and weekly %) and, when it's high, tell the user before starting; then `mark_chapter` with a short batch title.
 
