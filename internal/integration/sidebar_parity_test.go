@@ -34,8 +34,6 @@ func parSides(t *testing.T, sessions ...string) []*parSide {
 	var sides []*parSide
 	for _, bash := range []bool{true, false} {
 		s := &parSide{name: "dev", d: actServer(t, sessions...), bash: bash, action: action, toggle: toggle}
-		// Long enough to read a refusal off the client's status line
-		s.d.T("set-option", "-g", "display-time", "10000")
 		if bash {
 			s.name = "bash"
 			if out, err := runScript(s.d.scriptEnv(), keys); err != nil {
@@ -107,12 +105,6 @@ func parStep(t *testing.T, sides []*parSide, name, want string, do func(s *parSi
 	check(t, name+" (dev = bash)", ensState(sides[1].d), ensState(sides[0].d))
 }
 
-// parMessage waits for msg on the client's status line.
-func parMessage(s *parSide, msg string) {
-	s.d.t.Helper()
-	waitScreen(s.d.t, s.d.outer, "out", msg)
-}
-
 // parClickFocus checks the one difference a click on a sidebar's × or + makes: on dev, tmux's default
 // MouseDown1Pane binding focuses the sidebar before it sees the click, where bash's root binding ran the
 // action without focusing. It then focuses the content pane again, as bash left it.
@@ -178,14 +170,7 @@ func TestSidebarKeysParity(t *testing.T) {
 		actSelect(s.d, sidebar[s.name], "alpha")
 		s.press("x")
 	})
-
-	parStep(t, sides, "x on the last session", "selected=boot client=boot focus=sidebar sessions=boot", func(s *parSide) {
-		s.d.T("kill-session", "-t", "=renamed:")
-		own := s.ensure("boot")
-		actSelect(s.d, own, "boot")
-		s.press("x")
-		parMessage(s, "Refusing to kill the last tmux session")
-	})
+	// x on the last session differs on purpose: bash refuses it, dev closes it (TestCloseForgets)
 }
 
 // Clicks on bash and dev: a session row switches, the current session's row focuses its content, ×

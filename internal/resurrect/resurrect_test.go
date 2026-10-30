@@ -124,6 +124,11 @@ func TestSave(t *testing.T) {
 			wantWarn: "list-panes failed, dev state not saved",
 		},
 		{
+			name:    "no sessions: list-panes fails, an empty state",
+			replies: map[string]any{"list-sessions": "", "list-panes -a": errors.New("no current target")},
+			want:    "",
+		},
+		{
 			name:      "write failure keeps the old file",
 			replies:   map[string]any{"list-sessions": sessions, "list-panes -a": panes},
 			blockTemp: true,
@@ -889,5 +894,13 @@ func TestLivePath(t *testing.T) {
 func TestRunHelperRefusedUnderTest(t *testing.T) {
 	if _, err := runHelper("resurrect_dir"); err == nil {
 		t.Fatal("runHelper ran bash under test")
+	}
+}
+
+func TestSnapshotWithoutResurrect(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := &fakeServer{}
+	if err := Snapshot(f.client()); err != nil || len(f.calls) > 0 {
+		t.Errorf("Snapshot = %v, calls %q; want nothing done", err, f.calls)
 	}
 }

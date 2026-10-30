@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 // a decision (until its screen shows the dialog gone), or whose worktree has uncommitted or unmerged work,
 // leaving it untouched. A finished worker is closed: its untracked files land in
 // $XDG_STATE_HOME/dev/results/<session>/, the attached client moves to the coordinator, and the session,
-// worktree and branch are gone.
+// worktree and branch are gone, and so is the session from the next tmux-resurrect snapshot.
 func TestAgentClose(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_notify off\n")
 	root := newRepo(t, "", "")
@@ -167,6 +168,11 @@ func TestAgentClose(t *testing.T) {
 	writeFile(t, filepath.Join(done, "RESULT.md"), "# result")
 	writeFile(t, filepath.Join(done, "notes", "a.txt"), "a")
 	actSwitch(d, "done")
+	save := filepath.Join(bashHome, ".tmux/plugins/tmux-resurrect/scripts/save.sh")
+	requireFiles(t, save)
+	// Through dev's lock: a plain save.sh in the second of the earlier closes' snapshots would delete last
+	d.T("run-shell", devBin+" resurrect snapshot")
+	check(t, "saved before the close", boolStr(slices.Contains(strings.Fields(d.saved()), "done")), "1")
 
 	out, err := devCmd(coord, "", "agent", "close", "done", "--json")
 	if err != nil {
@@ -191,6 +197,9 @@ func TestAgentClose(t *testing.T) {
 		t.Error("❌ session done still there")
 	}
 	check(t, "client moved to the coordinator", actClientSession(d), "coord")
+	actWait(d, "saved without done", func() string {
+		return boolStr(!slices.Contains(strings.Fields(d.saved()), "done"))
+	}, "1")
 	check(t, "worktree removed", boolStr(strings.Contains(git(t, root, "worktree", "list"), done)), "0")
 	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/done"); err == nil {
 		t.Error("❌ branch done still there")

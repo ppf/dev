@@ -17,7 +17,7 @@ func newResurrectCmd() *cobra.Command {
 		Short: "tmux-resurrect hooks: save and rebuild dev session state",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			return errors.New("usage: dev resurrect save <snapshot>|prune|pre-restore|restore")
+			return errors.New("usage: dev resurrect save <snapshot>|prune|pre-restore|restore|snapshot")
 		},
 	}
 	hook := func(use, short string, args cobra.PositionalArgs, run func(c *tmux.Client, args []string) error) *cobra.Command {
@@ -39,6 +39,8 @@ func newResurrectCmd() *cobra.Command {
 			func(c *tmux.Client, _ []string) error { return resurrect.PreRestore(c) }),
 		hook("restore", "post-restore-all: rebuild @project and sidebars", cobra.NoArgs,
 			func(c *tmux.Client, _ []string) error { return resurrect.Restore(c) }),
+		hook("snapshot", "after dev closes a session: save a snapshot without it", cobra.NoArgs,
+			func(c *tmux.Client, _ []string) error { return resurrect.Snapshot(c) }),
 	)
 	return cmd
 }

@@ -148,12 +148,7 @@ func TestInputKeys(t *testing.T) {
 			"switch-client -c /dev/tty1 -T root",
 			"display-popup -c /dev/tty1 -E -w 80% -h 60% -b rounded -e SIDEBAR_SELECT_IN_POPUP=1 -- '" + exe + "'",
 		}},
-		{"x", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}, "c", []string{
-			"list-sessions -F …",
-			"list-panes -t =c: -F …", "display-message -t %4 -p #{pane_current_path}",
-			"list-sessions -F …", "kill-session -t =c:", "has-session -t =c:", "has-session -t =a:",
-			"set-option -gq @sidebar_selected_session a",
-		}},
+		{"x", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}, "c", inputKillC(t)},
 		{"r", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}, "b", []string{
 			"show-option -qv -t =b: @dev_herd",
 			"command-prompt -t /dev/tty1 -I b -p Rename session: rename-session -t '=b:' -- '%%'",
@@ -229,12 +224,7 @@ func TestInputMouse(t *testing.T) {
 			"switch-client -c /dev/tty1 -T root",
 			"display-popup -c /dev/tty1 -E -w 80% -h 60% -b rounded -e SIDEBAR_SELECT_IN_POPUP=1 -- '" + exe + "'",
 		}, false},
-		{"× on c's name row", click(26, rows[2].line), "", []string{
-			"list-sessions -F …",
-			"list-panes -t =c: -F …", "display-message -t %4 -p #{pane_current_path}",
-			"list-sessions -F …", "kill-session -t =c:", "has-session -t =c:", "has-session -t =a:",
-			"set-option -gq @sidebar_selected_session a",
-		}, false},
+		{"× on c's name row", click(26, rows[2].line), "", inputKillC(t), false},
 		{"header", click(2, 0), "", nil, false},
 		{"current session", click(2, rows[0].line), "a",
 			append([]string{"set-option -gq @sidebar_selected_session a"}, focus...), false},
@@ -324,4 +314,15 @@ func TestInputOpenPR(t *testing.T) {
 	if len(g.log()) != 0 || !slices.Contains(w.log(), "switch-client -c /dev/tty1 -t =b:") {
 		t.Errorf("click past the tag: gh %q, tmux %q; want a switch to b", g.log(), w.log())
 	}
+}
+
+// inputKillC is the calls of closing c (no worktree) from a's sidebar.
+func inputKillC(t *testing.T) []string {
+	return slices.Concat([]string{
+		"list-sessions -F …",
+		"list-panes -t =c: -F …", "display-message -t %4 -p #{pane_current_path}",
+		"list-sessions -F …",
+	}, killCalls(t, "=c:"), []string{
+		"has-session -t =c:", "has-session -t =a:", "set-option -gq @sidebar_selected_session a",
+	})
 }

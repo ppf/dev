@@ -46,21 +46,37 @@ func CloseWorktree(c *tmux.Client, a CloseArgs, out io.Writer, readKey func() (b
 	}
 	switch key {
 	case 'y', 'Y':
+		order, err := LoadOrder(c)
+		if err != nil {
+			return err
+		}
+		// The last session's kill takes this popup with it, so its worktree goes first, panes still in it;
+		// a failed removal keeps the session
+		last := isLast(order, a.Target)
+		if last && !removeWorktree(c, a, name) {
+			return nil
+		}
 		killed, err := killNow(c, a.Client, a.Current, a.Target)
-		if err != nil || !killed {
+		if err != nil || !killed || last {
 			return err
 		}
 		// Only now: panes inside the worktree would block its removal
-		if err := worktree.Remove(a.MainRoot, a.Worktree); err != nil {
-			showMessage(c, a.Client, "❌ worktree remove failed: "+err.Error())
-			return nil
-		}
-		showMessage(c, a.Client, "Removed worktree "+name)
+		removeWorktree(c, a, name)
 	case 'n', 'N':
 		_, err := killNow(c, a.Client, a.Current, a.Target)
 		return err
 	}
 	return nil
+}
+
+// removeWorktree removes a.Worktree and reports the outcome on a.Client; false means it failed.
+func removeWorktree(c *tmux.Client, a CloseArgs, name string) bool {
+	if err := worktree.Remove(a.MainRoot, a.Worktree); err != nil {
+		showMessage(c, a.Client, "❌ worktree remove failed: "+err.Error())
+		return false
+	}
+	showMessage(c, a.Client, "Removed worktree "+name)
+	return true
 }
 
 // ReadKey reads one key press from terminal f without echo (bash read -r -s -n1).

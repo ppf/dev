@@ -75,8 +75,9 @@ func TestClosePrompt(t *testing.T) {
 }
 
 func TestCloseKill(t *testing.T) {
-	sessions := "list-sessions -F #{session_name}\x1f#{@project}\x1f"
-	twoSessions := map[string]string{sessions: tmux.FormatRow("app", "") + tmux.FormatRow("app-x", "")}
+	sessions := "list-sessions -F #{session_name}\x1f#{@project}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f"
+	row := func(name string) string { return tmux.FormatRow(name, "", "", "", "") }
+	twoSessions := map[string]string{sessions: row("app") + row("app-x")}
 	gone := "has-session -t =app-x:"
 
 	tests := []struct {
@@ -86,6 +87,7 @@ func TestCloseKill(t *testing.T) {
 		out         map[string]string
 		fail        []string
 		badWorktree bool
+		kept        bool // not killed
 		removed     bool
 		message     string // last command, "" = no message
 	}{
@@ -93,9 +95,11 @@ func TestCloseKill(t *testing.T) {
 			removed: true, message: "display-message -c /dev/a Removed worktree feat"},
 		{name: "Y too", key: 'Y', current: "app", out: twoSessions, fail: []string{gone},
 			removed: true, message: "display-message -c /dev/a Removed worktree feat"},
-		{name: "y without a replacement keeps everything", key: 'y', current: "app-x",
-			out:     map[string]string{sessions: tmux.FormatRow("app-x", "")},
-			message: "display-message -c /dev/a No replacement session available"},
+		{name: "y on the last session removes the worktree before the kill", key: 'y', current: "app-x",
+			out: map[string]string{sessions: row("app-x")}, removed: true},
+		{name: "y on the last session with a failing remove keeps it", key: 'y', current: "app-x",
+			out: map[string]string{sessions: row("app-x")}, badWorktree: true, kept: true,
+			message: "display-message -c /dev/a ❌ worktree remove failed: "},
 		{name: "y with the session surviving kill keeps the worktree", key: 'y', current: "app", out: twoSessions},
 		{name: "y with a failing remove", key: 'y', current: "app", out: twoSessions, fail: []string{gone},
 			badWorktree: true, message: "display-message -c /dev/a ❌ worktree remove failed: "},
@@ -114,8 +118,10 @@ func TestCloseKill(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := log()
-			if tt.current != "app-x" && !slices.Contains(calls, "kill-session -t =app-x:") {
-				t.Errorf("app-x not killed: %q", calls)
+			if killed := slices.ContainsFunc(calls, func(call string) bool {
+				return strings.HasPrefix(call, "kill-session -t =app-x: ")
+			}); killed == tt.kept {
+				t.Errorf("app-x killed = %t, want %t: %q", killed, !tt.kept, calls)
 			}
 			if _, err := os.Stat(wt); (err != nil) != tt.removed {
 				t.Errorf("worktree removed = %v, want %v", err != nil, tt.removed)

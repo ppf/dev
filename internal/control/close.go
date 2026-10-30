@@ -188,7 +188,8 @@ func newDir(parent, name string) (string, error) {
 	}
 }
 
-// kill switches the clients attached to session over to to, so they aren't detached with it, then kills it.
+// kill switches the clients attached to session over to to, so they aren't detached with it, then kills it
+// for good (sidebar.KillSession).
 func kill(c *tmux.Client, session, to string) error {
 	clients, err := c.Run("list-clients", "-t", tmux.SessionTarget(session), "-F", "#{client_name}")
 	if err != nil {
@@ -199,7 +200,7 @@ func kill(c *tmux.Client, session, to string) error {
 			return err
 		}
 	}
-	if _, err := c.Run("kill-session", "-t", tmux.SessionTarget(session)); err != nil {
+	if err := sidebar.KillSession(c, session); err != nil {
 		return err
 	}
 	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err == nil {
