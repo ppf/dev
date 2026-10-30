@@ -170,7 +170,8 @@ func TestAgentClose(t *testing.T) {
 	actSwitch(d, "done")
 	save := filepath.Join(bashHome, ".tmux/plugins/tmux-resurrect/scripts/save.sh")
 	requireFiles(t, save)
-	d.T("run-shell", save+" quiet")
+	// Through dev's lock: a plain save.sh in the second of the earlier closes' snapshots would delete last
+	d.T("run-shell", devBin+" resurrect snapshot")
 	check(t, "saved before the close", boolStr(slices.Contains(strings.Fields(d.saved()), "done")), "1")
 
 	out, err := devCmd(coord, "", "agent", "close", "done", "--json")

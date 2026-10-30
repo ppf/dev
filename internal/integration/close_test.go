@@ -37,7 +37,9 @@ func TestCloseForgets(t *testing.T) {
 		// What `dev` runs first on a new server (open.RestoreOnce)
 		d.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)
 	}
-	d.T("run-shell", save+" quiet")
+	// Through dev's lock, like every save here: a plain save.sh in the second of a close's snapshot would delete last
+	snapshot := devBin + " resurrect snapshot"
+	d.T("run-shell", snapshot)
 	check(t, "saved", saved(), "a b boot c d e f")
 
 	actSwitch(d, "a")
@@ -51,7 +53,6 @@ func TestCloseForgets(t *testing.T) {
 
 	// Two closes at once: their snapshots take turns, each in a second of its own, as the second save in
 	// the second of the first's would find its file identical to last's (the same file) and delete it
-	snapshot := devBin + " resurrect snapshot"
 	d.T("kill-session", "-t", "=e:", ";", "run-shell", "-b", snapshot, ";", "kill-session", "-t", "=f:", ";", "run-shell", "-b", snapshot)
 	// Not polling saved(): the first save shows the right sessions until a second one in its second deletes it
 	waitFor(t, "both snapshots done", func() bool { return exec.Command("pgrep", "-f", snapshot).Run() != nil })
@@ -67,7 +68,7 @@ func TestCloseForgets(t *testing.T) {
 	waitFor(t, "client gone", func() bool { c, _ := d.Try("list-clients"); return c == "" })
 	time.Sleep(2 * time.Second)
 	check(t, "detached: sessions", sessions(), "boot d")
-	d.T("run-shell", save+" quiet")
+	d.T("run-shell", snapshot)
 	check(t, "detached: saved", saved(), "boot d")
 
 	d.kill()
