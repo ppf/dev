@@ -302,7 +302,7 @@ func createLayout(c *tmux.Client, session, project, path, agentCmd string, width
 	run("select-pane", "-t", nvim)
 
 	run("select-window", "-t", target+"1")
-	sidebarPane := run("split-window", "-t", claude, "-hb", "-l", "40", "-PF", "#{pane_id}", sidebarCmd)
+	sidebarPane := run("split-window", "-t", claude, "-hb", "-l", "40", "-c", path, "-PF", "#{pane_id}", sidebarCmd)
 	run("set-option", "-t", target, "@sidebar_pane", sidebarPane)
 	run("select-pane", "-t", claude)
 	return err
