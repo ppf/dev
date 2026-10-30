@@ -184,6 +184,7 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 		{"differs from last", "other\n", "old.txt", "new.txt.dev", false},
 		{"last is the snapshot: a second save in its second", "", "new.txt", "new.txt.dev", true},
 		{"last is the snapshot, absolute link", "", "<dir>/new.txt", "new.txt.dev", true},
+		{"last is the snapshot, uncleaned link", "", "./new.txt", "new.txt.dev", true},
 		{"last link dangling", "", "gone.txt", "new.txt.dev", false},
 	}
 	for _, tt := range tests {
@@ -218,7 +219,8 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 	}
 }
 
-// A save that isn't dev's waits in its hook for a dev snapshot's lock; the one inside that snapshot doesn't.
+// A save that isn't dev's waits in its hook for a dev snapshot's lock, then sees the last link the snapshot made;
+// the one inside that snapshot doesn't wait.
 func TestSaveWaitsForSnapshotLock(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	replies := map[string]any{"list-sessions": "", "list-panes -a": errors.New("no current target")}
@@ -227,28 +229,36 @@ func TestSaveWaitsForSnapshotLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lock.Close() }()
-	save := func() <-chan error {
+	save := func() (string, <-chan error) {
 		snap := filepath.Join(t.TempDir(), "snap.txt")
 		writeFile(t, snap, "pane\n")
 		done := make(chan error, 1)
 		go func() { done <- Save((&fakeServer{replies: replies}).client(), snap) }()
-		return done
+		return snap, done
 	}
-	plain := save()
+	snap, plain := save()
 	select {
 	case err := <-plain:
 		t.Fatalf("Save finished while the lock was held: %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
+	// The snapshot's save.sh links last to the file both saves write
+	last := filepath.Join(filepath.Dir(snap), "last")
+	if err := os.Symlink("snap.txt", last); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(snapshotGuard, "1")
-	if err := <-save(); err != nil {
-		t.Fatalf("Save inside a snapshot: %v", err)
+	if _, inside := save(); <-inside != nil {
+		t.Fatal("Save inside a snapshot failed")
 	}
 	if err := lock.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-plain; err != nil {
 		t.Fatalf("Save after the lock: %v", err)
+	}
+	if _, err := os.Lstat(last); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("last the snapshot linked not unlinked: %v", err)
 	}
 }
 
