@@ -187,13 +187,12 @@ func lastTarget(snapshot string) (string, bool) {
 	return filepath.Clean(target), true
 }
 
-// settle readies snapshot for save.sh's compare with last, right after this hook. save.sh names a snapshot by its
-// second, so a save in the second of an earlier one rewrites that file, finds it identical to last (itself) and
-// deletes it: settle removes such a last, so snapshot differs, as on a first save, and save.sh links last to it
-// again. A save that waited for a dev snapshot is superseded by it when last now points to a later snapshot, or
-// when that snapshot's save.sh deleted this second's file as identical to last: snapshot becomes a hard link of
-// last's file, so save.sh deletes it as identical rather than putting last back on an older layout, and the dev
-// state is that snapshot's.
+// settle readies snapshot for save.sh's compare with last, right after this hook. save.sh names snapshots by the
+// second, so a save in an earlier one's second rewrites its file, finds it identical to last (itself) and deletes
+// it: settle removes such a last, so save.sh links it again as on a first save. A save that waited for a dev
+// snapshot is superseded when last points to a later snapshot, or that snapshot's save.sh deleted this second's
+// file as identical: snapshot becomes a hard link of last's file, so save.sh deletes it rather than putting last
+// back on an older layout, and the dev state stays that snapshot's.
 func settle(snapshot string) (superseded bool, err error) {
 	target, ok := lastTarget(snapshot)
 	if !ok {
