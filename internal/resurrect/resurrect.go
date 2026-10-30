@@ -648,7 +648,7 @@ func Snapshot(c *tmux.Client) error {
 		return fail(c, "cannot open the snapshot lock, snapshot not saved", err)
 	}
 	// Closing it releases the lock, also when this process dies
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return fail(c, "cannot lock the snapshot lock, snapshot not saved", err)
 	}
