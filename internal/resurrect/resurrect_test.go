@@ -179,21 +179,21 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 		wantDev          string // the file that gets the state
 		unlinked         bool   // last removed, so save.sh links it to the snapshot again
 	}{
-		{"identical to last", "pane\n", "old.txt", "old.txt.dev", false},
-		{"identical to last, absolute link", "pane\n", "<dir>/old.txt", "old.txt.dev", false},
-		{"differs from last", "other\n", "old.txt", "new.txt.dev", false},
-		{"last is the snapshot: a second save in its second", "", "new.txt", "new.txt.dev", true},
-		{"last is the snapshot, absolute link", "", "<dir>/new.txt", "new.txt.dev", true},
-		{"last is the snapshot, uncleaned link", "", "./new.txt", "new.txt.dev", true},
-		{"last link dangling", "", "gone.txt", "new.txt.dev", false},
+		{"identical to last", "pane\n", "t_0100.txt", "t_0100.txt.dev", false},
+		{"identical to last, absolute link", "pane\n", "<dir>/t_0100.txt", "t_0100.txt.dev", false},
+		{"differs from last", "other\n", "t_0100.txt", "t_0101.txt.dev", false},
+		{"last is the snapshot: a second save in its second", "", "t_0101.txt", "t_0101.txt.dev", true},
+		{"last is the snapshot, absolute link", "", "<dir>/t_0101.txt", "t_0101.txt.dev", true},
+		{"last is the snapshot, uncleaned link", "", "./t_0101.txt", "t_0101.txt.dev", true},
+		{"last link dangling", "", "t_0059.txt", "t_0101.txt.dev", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			snap := filepath.Join(dir, "new.txt")
+			snap := filepath.Join(dir, "t_0101.txt")
 			writeFile(t, snap, "pane\n")
 			if tt.last != "" {
-				writeFile(t, filepath.Join(dir, "old.txt"), tt.last)
+				writeFile(t, filepath.Join(dir, "t_0100.txt"), tt.last)
 			}
 			if err := os.Symlink(strings.ReplaceAll(tt.link, "<dir>", dir), filepath.Join(dir, "last")); err != nil {
 				t.Fatal(err)
@@ -202,7 +202,7 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 			if err := Save(f.client(), snap); err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"old.txt.dev", "new.txt.dev"} {
+			for _, name := range []string{"t_0100.txt.dev", "t_0101.txt.dev"} {
 				_, err := os.Stat(filepath.Join(dir, name))
 				if got := err == nil; got != (name == tt.wantDev) {
 					t.Errorf("%s written = %v", name, got)
@@ -219,26 +219,20 @@ func TestSaveIdenticalSnapshot(t *testing.T) {
 	}
 }
 
-// A save that isn't dev's waits in its hook for a dev snapshot's lock, then sees the last link the snapshot made;
-// the one inside that snapshot doesn't wait.
+// A save that isn't dev's waits in its hook for a dev snapshot's lock, then sees the last link the snapshot made.
 func TestSaveWaitsForSnapshotLock(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	replies := map[string]any{"list-sessions": "", "list-panes -a": errors.New("no current target")}
 	lock, err := lockSnapshots()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = lock.Close() }()
-	save := func() (string, <-chan error) {
-		snap := filepath.Join(t.TempDir(), "snap.txt")
-		writeFile(t, snap, "pane\n")
-		done := make(chan error, 1)
-		go func() { done <- Save((&fakeServer{replies: replies}).client(), snap) }()
-		return snap, done
-	}
-	snap, plain := save()
+	snap := filepath.Join(t.TempDir(), "snap.txt")
+	writeFile(t, snap, "pane\n")
+	done := make(chan error, 1)
+	go func() { done <- Save((&fakeServer{replies: emptyServer}).client(), snap) }()
 	select {
-	case err := <-plain:
+	case err := <-done:
 		t.Fatalf("Save finished while the lock was held: %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
@@ -247,20 +241,98 @@ func TestSaveWaitsForSnapshotLock(t *testing.T) {
 	if err := os.Symlink("snap.txt", last); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(snapshotGuard, "1")
-	if _, inside := save(); <-inside != nil {
-		t.Fatal("Save inside a snapshot failed")
-	}
 	if err := lock.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-plain; err != nil {
+	if err := <-done; err != nil {
 		t.Fatalf("Save after the lock: %v", err)
 	}
 	if _, err := os.Lstat(last); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("last the snapshot linked not unlinked: %v", err)
 	}
 }
+
+// The save.sh a dev snapshot runs saves under the snapshot's lock.
+func TestSaveInsideSnapshot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv(snapshotGuard, "1")
+	lock, err := lockSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Close() }()
+	snap := filepath.Join(t.TempDir(), "snap.txt")
+	writeFile(t, snap, "pane\n")
+	if err := Save((&fakeServer{replies: emptyServer}).client(), snap); err != nil {
+		t.Fatalf("Save inside a snapshot: %v", err)
+	}
+}
+
+// A save that waited for a dev snapshot leaves last on it: its file becomes a hard link of the snapshot's, which
+// save.sh deletes as identical, and the snapshot's .dev stands.
+func TestSettleSuperseded(t *testing.T) {
+	tests := []struct {
+		name, link string
+		gone       bool // the snapshot's save.sh deleted this save's file as identical to last
+		superseded bool
+	}{
+		{"last on a later snapshot", "t_0102.txt", false, true},
+		{"this second's file deleted", "t_0100.txt", true, true},
+		{"last on an earlier snapshot", "t_0100.txt", false, false},
+		{"last on a later snapshot that is gone", "t_0103.txt", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			snap := filepath.Join(dir, "t_0101.txt")
+			if !tt.gone {
+				writeFile(t, snap, "older\n")
+			}
+			writeFile(t, filepath.Join(dir, "t_0100.txt"), "earlier\n")
+			writeFile(t, filepath.Join(dir, "t_0102.txt"), "later\n")
+			if err := os.Symlink(tt.link, filepath.Join(dir, "last")); err != nil {
+				t.Fatal(err)
+			}
+			superseded, err := settle(snap)
+			if err != nil || superseded != tt.superseded {
+				t.Fatalf("settle = %v, %v; want %v", superseded, err, tt.superseded)
+			}
+			if target, _ := os.Readlink(filepath.Join(dir, "last")); target != tt.link {
+				t.Errorf("last = %q, want %q", target, tt.link)
+			}
+			a, errA := os.Stat(snap)
+			b, errB := os.Stat(filepath.Join(dir, tt.link))
+			if linked := errA == nil && errB == nil && os.SameFile(a, b); linked != tt.superseded {
+				t.Errorf("snapshot a link of last's file = %v, want %v", linked, tt.superseded)
+			}
+		})
+	}
+}
+
+// Superseded, Save leaves the dev state to the later snapshot's .dev.
+func TestSaveSuperseded(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "t_0101.txt")
+	writeFile(t, snap, "older\n")
+	writeFile(t, filepath.Join(dir, "t_0102.txt"), "later\n")
+	writeFile(t, filepath.Join(dir, "t_0102.txt.dev"), "later state\n")
+	if err := os.Symlink("t_0102.txt", filepath.Join(dir, "last")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save((&fakeServer{replies: emptyServer}).client(), snap); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(dir, "t_0102.txt.dev")); got != "later state\n" {
+		t.Errorf("later .dev = %q", got)
+	}
+	if _, err := os.Stat(snap + ".dev"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("%s.dev written: %v", snap, err)
+	}
+}
+
+// emptyServer is a server with no sessions left, whose Save state is empty.
+var emptyServer = map[string]any{"list-sessions": "", "list-panes -a": errors.New("no current target")}
 
 func TestSaveMissingSnapshot(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "gone.txt")

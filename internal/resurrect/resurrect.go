@@ -31,8 +31,8 @@ import (
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project or
 // a boss, the position empty while its sidebar is hidden, then a startedByPrefix line per worker a boss
 // started, a bossPrefix line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
-// last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save in the
-// second of an earlier one from leaving last dangling (see unlinkSelf).
+// last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save from
+// leaving last dangling or on an older snapshot (see settle).
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
 		return fail(c, "snapshot '"+snapshot+"' missing, dev state not saved", err)
@@ -41,12 +41,16 @@ func Save(c *tmux.Client, snapshot string) error {
 	if os.Getenv(snapshotGuard) == "" {
 		lock, err := lockSnapshots()
 		if err != nil {
-			return fail(c, err.Error()+", dev state not saved", err)
+			return fail(c, err.Error()+", dev state not saved", nil)
 		}
 		defer func() { _ = lock.Close() }()
 	}
-	if err := unlinkSelf(snapshot); err != nil {
-		return fail(c, "cannot unlink last, which is "+snapshot+" itself, dev state not saved", err)
+	superseded, err := settle(snapshot)
+	if err != nil {
+		return fail(c, "cannot settle "+snapshot+" with last, dev state not saved", err)
+	}
+	if superseded {
+		return nil
 	}
 	sessions, err := tmux.Query[struct {
 		Name      string `tmux:"session_name"`
@@ -183,18 +187,41 @@ func lastTarget(snapshot string) (string, bool) {
 	return filepath.Clean(target), true
 }
 
-// unlinkSelf removes the last link when it points to snapshot: save.sh names a snapshot by its second, so a save
-// in the second of an earlier one rewrites that file, finds it identical to last (itself) and deletes it. Without
-// last it differs, as on a first save, so save.sh links last to it again.
-func unlinkSelf(snapshot string) error {
-	if target, ok := lastTarget(snapshot); !ok || target != filepath.Clean(snapshot) {
-		return nil
+// settle readies snapshot for save.sh's compare with last, right after this hook. save.sh names a snapshot by its
+// second, so a save in the second of an earlier one rewrites that file, finds it identical to last (itself) and
+// deletes it: settle removes such a last, so snapshot differs, as on a first save, and save.sh links last to it
+// again. A save that waited for a dev snapshot is superseded by it when last now points to a later snapshot, or
+// when that snapshot's save.sh deleted this second's file as identical to last: snapshot becomes a hard link of
+// last's file, so save.sh deletes it as identical rather than putting last back on an older layout, and the dev
+// state is that snapshot's.
+func settle(snapshot string) (superseded bool, err error) {
+	target, ok := lastTarget(snapshot)
+	if !ok {
+		return false, nil
 	}
-	// Gone already: another save's ln -fs replaced it after the check
-	if err := os.Remove(filepath.Join(filepath.Dir(snapshot), "last")); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+	snapshot = filepath.Clean(snapshot)
+	if target == snapshot {
+		// Gone already: another save's ln -fs replaced it after the check
+		if err := os.Remove(filepath.Join(filepath.Dir(snapshot), "last")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, err
+		}
+		return false, nil
 	}
-	return nil
+	_, err = os.Stat(snapshot)
+	gone := errors.Is(err, fs.ErrNotExist)
+	if err != nil && !gone {
+		return false, err
+	}
+	// A dangling last is left for save.sh to link to snapshot
+	if _, err := os.Stat(target); err != nil || !gone && filepath.Base(target) <= filepath.Base(snapshot) {
+		return false, nil
+	}
+	if !gone {
+		if err := os.Remove(snapshot); err != nil {
+			return false, err
+		}
+	}
+	return true, os.Link(target, snapshot)
 }
 
 // Prune deletes .dev files whose snapshot is gone (save.sh deletes one identical to the last).
@@ -675,7 +702,7 @@ func Snapshot(c *tmux.Client) error {
 	}
 	lock, err := lockSnapshots()
 	if err != nil {
-		return fail(c, err.Error()+", snapshot not saved", err)
+		return fail(c, err.Error()+", snapshot not saved", nil)
 	}
 	defer func() { _ = lock.Close() }()
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
