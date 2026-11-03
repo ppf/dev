@@ -97,22 +97,32 @@ func newPRCache(c *tmux.Client) *prCache {
 
 // RunGH runs gh args in dir without prompts, within prTimeout; stderr is kept for the error, it would land on the TUI.
 func RunGH(dir string, args ...string) ([]byte, error) {
+	return runCLI("gh", []string{"GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1"}, dir, args...)
+}
+
+// RunGLab is RunGH for GitLab's glab.
+func RunGLab(dir string, args ...string) ([]byte, error) {
+	return runCLI("glab", nil, dir, args...)
+}
+
+func runCLI(name string, env []string, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), prTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
+	cmd.Env = append(os.Environ(), env...)
 	// gh --web hands its stdout to the browser launcher, which may keep it open
 	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
+	call := name + " " + strings.Join(args, " ")
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("gh %s: timed out after %s", strings.Join(args, " "), prTimeout)
+		return nil, fmt.Errorf("%s: timed out after %s", call, prTimeout)
 	}
 	if err != nil {
 		if e, ok := errors.AsType[*exec.ExitError](err); ok && len(e.Stderr) > 0 {
-			return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), strings.Join(strings.Fields(string(e.Stderr)), " "))
+			return nil, fmt.Errorf("%s: %s", call, strings.Join(strings.Fields(string(e.Stderr)), " "))
 		}
-		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("%s: %w", call, err)
 	}
 	return out, nil
 }
