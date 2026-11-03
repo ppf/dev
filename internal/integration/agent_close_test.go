@@ -112,45 +112,56 @@ func TestAgentClose(t *testing.T) {
 		t.Errorf("❌ close deciding after No: %v\n%s", err, out)
 	}
 
-	// Squash-merged PRs: none of the worker's commits are in origin's main. gh answers with the PR in
-	// <worktree name>.json, else fails
+	// PRs open or squash-merged: none of the worker's commits are in origin's main. origin's URL names a
+	// GitHub repository, rewritten to the local one; gh answers with the PRs in <worktree name>.json when they
+	// name the commit asked about, else fails as for an unpushed commit
+	git(t, root, "config", "url."+filepath.Join(filepath.Dir(root), "origin.git")+".insteadOf", "git@github.com:me/repo.git")
+	git(t, root, "remote", "set-url", "origin", "git@github.com:me/repo.git")
 	prs := t.TempDir()
-	writeStubs(t, filepath.Join(d.tmp, "stubs"), `cat "`+prs+`/$(basename "$PWD").json" 2>/dev/null || { echo "no pull requests found" >&2; exit 1; }`, "gh")
-	squash := func(name, state, base string) (wt, head string) {
+	writeStubs(t, filepath.Join(d.tmp, "stubs"), `f="`+prs+`/$(basename "$PWD").json"; grep -qs "$(echo "$4" | cut -d/ -f5)" "$f" && cat "$f" || { echo "No commit found" >&2; exit 1; }`, "gh")
+	// pr gives worker name a commit and a PR at it: state open or closed, merged (squashed into main) into base
+	pr := func(name, state string, merged bool, base string) (wt, head string) {
 		t.Helper()
 		wt = worker(name, true, "idle", idle)
 		writeFile(t, filepath.Join(wt, name+".txt"), name)
 		git(t, wt, "add", name+".txt")
 		git(t, wt, "commit", "-qm", name)
 		head = strings.TrimSpace(git(t, wt, "rev-parse", "HEAD"))
-		git(t, root, "merge", "-q", "--squash", name)
-		git(t, root, "commit", "-qm", "squash "+name)
-		git(t, root, "push", "-q", "origin", "main")
-		writeFile(t, filepath.Join(prs, name+".json"), fmt.Sprintf(`{"state":%q,"headRefOid":%q,"baseRefName":%q}`, state, head, base))
+		mergedAt := "null"
+		if merged {
+			git(t, root, "merge", "-q", "--squash", name)
+			git(t, root, "commit", "-qm", "squash "+name)
+			git(t, root, "push", "-q", "origin", "main")
+			mergedAt = `"2026-11-03T00:00:00Z"`
+		}
+		writeFile(t, filepath.Join(prs, name+".json"), fmt.Sprintf(`[{"number":1,"state":%q,"merged_at":%s,"head":{"sha":%q,"repo":{"full_name":"me/repo"}},"base":{"ref":%q,"repo":{"full_name":"me/repo"}}}]`, state, mergedAt, head, base))
 		return wt, head
 	}
-	squash("squashed", "MERGED", "main")
-	if out, err := devCmd(coord, "", "agent", "close", "squashed"); err != nil {
-		t.Errorf("❌ close squashed: %v\n%s", err, out)
+	pr("squashed", "closed", true, "main")
+	pr("open", "open", false, "main")
+	for _, name := range []string{"squashed", "open"} {
+		if out, err := devCmd(coord, "", "agent", "close", name); err != nil {
+			t.Errorf("❌ close %s: %v\n%s", name, err, out)
+		}
 	}
-	later, merged := squash("later", "MERGED", "main")
+	later, _ := pr("later", "open", false, "main")
 	writeFile(t, filepath.Join(later, "more.txt"), "more")
 	git(t, later, "add", "more.txt")
 	git(t, later, "commit", "-qm", "more")
-	squash("open", "OPEN", "main")
-	squash("elsewhere", "MERGED", "release")
-	squash("nopr", "MERGED", "main")
+	pr("closed", "closed", false, "main")
+	pr("elsewhere", "closed", true, "release")
+	_, nopr := pr("nopr", "closed", true, "main")
 	if err := os.Remove(filepath.Join(prs, "nopr.json")); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"later":     "its PR was merged at " + merged + ", not at its HEAD " + strings.TrimSpace(git(t, later, "rev-parse", "HEAD")),
-		"open":      "its PR is open",
-		"elsewhere": "its PR was merged into release",
-		"nopr":      "gh pr view --json state,headRefOid,baseRefName: no pull requests found",
+		"later":     "gh api --hostname github.com repos/me/repo/commits/" + strings.TrimSpace(git(t, later, "rev-parse", "HEAD")) + "/pulls: No commit found",
+		"closed":    "PR #1 is closed",
+		"elsewhere": "PR #1 was merged into release",
+		"nopr":      "gh api --hostname github.com repos/me/repo/commits/" + nopr + "/pulls: No commit found",
 	} {
 		out, err := devCmd(coord, "", "agent", "close", name)
-		if want = "has commits that aren't in origin/main, and no PR merged at its HEAD: " + want; err == nil || !strings.Contains(out, want) {
+		if want = "has commits that aren't in origin/main, and no PR/MR open or merged at its HEAD: " + want; err == nil || !strings.Contains(out, want) {
 			t.Errorf("❌ close %s = %v, %q; want an error with %q", name, err, out, want)
 		}
 		if _, err := d.Try("has-session", "-t", "="+name+":"); err != nil {

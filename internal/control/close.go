@@ -3,7 +3,9 @@ package control
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -26,7 +28,8 @@ type Closed struct {
 
 // Close closes worker a for the coordinator in pane, archiving its untracked files. It refuses unless pane's
 // session started a, a is idle (or waiting only because it sat idle), and a's worktree (under .claude/worktrees,
-// used by no other session) has no tracked changes and its HEAD is in origin's default branch, or gh reports its PR merged at that HEAD.
+// used by no other session) has no tracked changes and its HEAD is in origin's default branch, or is the head of a
+// PR/MR that is open (into any branch), or merged into that branch.
 func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	done := Closed{Session: a.Session}
 	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
@@ -47,7 +50,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err != nil {
 		return done, fmt.Errorf("can't check %s's commits: %w", a.Session, err)
 	}
-	// Slow too (gh): before the checks, which then only need its HEAD unchanged
+	// Slow too (gh/glab): before the checks, which then only need its HEAD unchanged
 	head, err := delivered(wt, base)
 	if err != nil {
 		return done, err
@@ -133,7 +136,7 @@ func closable(c *tmux.Client, a Agent, wt, head string) error {
 	return nil
 }
 
-// delivered returns wt's HEAD once it is in base, or gh reports its PR merged at it.
+// delivered returns wt's HEAD once it is in base, or is the head of an open or merged PR/MR (prDelivered).
 func delivered(wt, base string) (string, error) {
 	// Read first: a HEAD moving on after it fails closable
 	head, err := worktree.Head(wt)
@@ -145,34 +148,150 @@ func delivered(wt, base string) (string, error) {
 		return "", err
 	}
 	if !merged {
-		if err := prMerged(wt, base, head); err != nil {
-			return "", fmt.Errorf("%s has commits that aren't in %s, and no PR merged at its HEAD: %w", wt, base, err)
+		if err := prDelivered(wt, base, head); err != nil {
+			return "", fmt.Errorf("%s has commits that aren't in %s, and no PR/MR open or merged at its HEAD: %w", wt, base, err)
 		}
 	}
 	return head, nil
 }
 
-// prMerged checks that gh reports the PR of wt's branch merged into base's branch at head, as a squash or
-// rebase merge leaves its commits out of base.
-func prMerged(wt, base, head string) error {
-	out, err := sidebar.RunGH(wt, "pr", "view", "--json", "state,headRefOid,baseRefName")
+// change is a PR or MR of a commit.
+type change struct {
+	Number     int
+	State      string // open, merged, closed or locked
+	Head, Base string // head commit, base branch
+}
+
+// prDelivered checks that a PR (gh) or MR (glab) with head as its head commit is open, or merged into base's
+// branch, as a squash or rebase merge leaves its commits out of base. Looked up by commit in origin's
+// repository, so a PR from a fork to its upstream counts.
+func prDelivered(wt, base, head string) error {
+	kind, changes, err := changesOf(wt, head)
 	if err != nil {
 		return err
 	}
-	var pr struct{ State, HeadRefOid, BaseRefName string }
-	if err := json.Unmarshal(out, &pr); err != nil {
-		return fmt.Errorf("gh pr view: %w", err)
+	branch := strings.TrimPrefix(base, "origin/")
+	var why []string
+	for _, c := range changes {
+		switch {
+		case c.Head != head:
+			// HEAD behind the PR's head; an unpushed commit after it fails the lookup instead
+			why = append(why, fmt.Sprintf("%s #%d is at %s, not at its HEAD %s", kind, c.Number, c.Head, head))
+		case c.State == "open":
+			return nil
+		case c.State == "merged" && c.Base == branch:
+			return nil
+		case c.State == "merged":
+			why = append(why, fmt.Sprintf("%s #%d was merged into %s", kind, c.Number, c.Base))
+		default:
+			why = append(why, fmt.Sprintf("%s #%d is %s", kind, c.Number, c.State))
+		}
 	}
+	if len(why) == 0 {
+		return fmt.Errorf("no %s has it", kind)
+	}
+	return errors.New(strings.Join(why, "; "))
+}
+
+// changesOf lists the PRs (gh, for github.com or a host gh is signed in to) or else MRs (glab) of origin's
+// repository that contain commit head, returning "PR" or "MR" with them.
+func changesOf(wt, head string) (string, []change, error) {
+	remote, err := worktree.OriginURL(wt)
+	if err != nil {
+		return "", nil, err
+	}
+	host, repo, err := remoteRepo(remote)
+	if err != nil {
+		return "", nil, err
+	}
+	var changes []change
+	if strings.EqualFold(host, "github.com") || ghHost(host) {
+		out, err := sidebar.RunGH(wt, "api", "--hostname", host, "repos/"+repo+"/commits/"+head+"/pulls")
+		if err != nil {
+			return "", nil, err
+		}
+		var prs []struct {
+			Number   int
+			State    string  // open or closed
+			MergedAt *string `json:"merged_at"`
+			Head     struct {
+				SHA  string
+				Repo *ghRepo // nil once the head fork is deleted
+			}
+			Base struct {
+				Ref  string
+				Repo ghRepo
+			}
+		}
+		if err := json.Unmarshal(out, &prs); err != nil {
+			return "", nil, fmt.Errorf("gh api: %w", err)
+		}
+		for _, pr := range prs {
+			// The commit's PRs in other forks of the network, e.g. one merged into another fork's main
+			if !strings.EqualFold(pr.Base.Repo.FullName, repo) && (pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, repo)) {
+				continue
+			}
+			if pr.MergedAt != nil {
+				pr.State = "merged"
+			}
+			changes = append(changes, change{pr.Number, pr.State, pr.Head.SHA, pr.Base.Ref})
+		}
+		return "PR", changes, nil
+	}
+	out, err := sidebar.RunGLab(wt, "api", "--hostname", host, "projects/"+url.PathEscape(repo)+"/repository/commits/"+head+"/merge_requests")
+	if err != nil {
+		return "", nil, err
+	}
+	var mrs []struct {
+		IID          int
+		State        string // opened, merged, closed or locked
+		SHA          string
+		TargetBranch string `json:"target_branch"`
+	}
+	if err := json.Unmarshal(out, &mrs); err != nil {
+		return "", nil, fmt.Errorf("glab api: %w", err)
+	}
+	for _, mr := range mrs {
+		if mr.State == "opened" {
+			mr.State = "open"
+		}
+		changes = append(changes, change{mr.IID, mr.State, mr.SHA, mr.TargetBranch})
+	}
+	return "MR", changes, nil
+}
+
+type ghRepo struct {
+	FullName string `json:"full_name"`
+}
+
+// ghHost reports whether gh is signed in to host, e.g. a GitHub Enterprise one.
+func ghHost(host string) bool {
+	_, err := sidebar.RunGH("", "auth", "status", "--hostname", host)
+	return err == nil
+}
+
+// remoteRepo splits a remote URL (https://, ssh:// or scp-like git@host:path) into its host and repository path.
+func remoteRepo(remote string) (host, repo string, err error) {
+	u, err := url.Parse(remote)
 	switch {
-	case pr.State != "MERGED":
-		return fmt.Errorf("its PR is %s", strings.ToLower(pr.State))
-	case pr.BaseRefName != strings.TrimPrefix(base, "origin/"):
-		return fmt.Errorf("its PR was merged into %s", pr.BaseRefName)
-	case pr.HeadRefOid != head:
-		// A commit after the merge, or a PR of another branch
-		return fmt.Errorf("its PR was merged at %s, not at its HEAD %s", pr.HeadRefOid, head)
+	case err == nil && u.Host != "":
+		host, repo = u.Hostname(), u.Path
+		if u.Scheme == "http" || u.Scheme == "https" {
+			// An API port; an ssh:// one isn't
+			host = u.Host
+		}
+	case err == nil && u.Opaque == "":
+		// A path or file:// URL
+	default:
+		if user, path, ok := strings.Cut(remote, ":"); ok && !strings.Contains(user, "/") {
+			host, repo = user[strings.LastIndex(user, "@")+1:], path
+		}
 	}
-	return nil
+	repo = strings.TrimSuffix(strings.Trim(repo, "/"), ".git")
+	if host == "" || !strings.Contains(repo, "/") {
+		return "", "", fmt.Errorf("origin %s isn't a GitHub or GitLab repository", remote)
+	}
+	return host, repo, nil
 }
 
 // kill switches the clients attached to session over to to, so they aren't detached with it, then closes it

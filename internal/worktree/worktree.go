@@ -166,6 +166,11 @@ func Head(wt string) (string, error) {
 	return gitOutput(wt, "rev-parse", "HEAD")
 }
 
+// OriginURL is the URL configured for wt's origin remote, without insteadOf rewrites.
+func OriginURL(wt string) (string, error) {
+	return gitOutput(wt, "config", "--get", "remote.origin.url")
+}
+
 // Branch is the branch checked out in wt, "" for a detached HEAD.
 func Branch(wt string) (string, error) {
 	return gitOutput(wt, "branch", "--show-current")
