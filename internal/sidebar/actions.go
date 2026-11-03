@@ -2,6 +2,8 @@ package sidebar
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -44,8 +46,8 @@ func OpenPicker(c *tmux.Client, client string) error {
 	return err
 }
 
-// kill closes target for client; a worktree no other session uses is asked about in the 70×8
-// close-worktree popup, which owns the rest (kill_session_by_name).
+// kill closes target for client for good, the sidebar's x/× and an agent's exit (Exited); a worktree no other
+// session uses is asked about in the 70×8 close-worktree popup, which owns the rest (kill_session_by_name).
 func kill(c *tmux.Client, client, current, target string) error {
 	if target == "" {
 		return nil
@@ -61,16 +63,20 @@ func kill(c *tmux.Client, client, current, target string) error {
 	if err != nil {
 		return err
 	}
+	var e Ended
 	if ok {
 		// A worktree another session still uses is closed plainly.
 		shared, err := WorktreeShared(c, target, wt)
 		if err != nil {
 			return err
 		}
-		ok = !shared
+		if shared {
+			ok = false
+			e.Worktree, e.Note = wt, "worktree kept: another session uses it"
+		}
 	}
 	if !ok {
-		_, err := killNow(c, client, current, target)
+		_, _, err := killNow(c, client, current, target, e)
 		return err
 	}
 	cmd, err := CloseArgs{Client: client, Current: current, Target: target, MainRoot: mainRoot, Worktree: wt}.command()
@@ -82,24 +88,37 @@ func kill(c *tmux.Client, client, current, target string) error {
 	return err
 }
 
-// killNow kills target, first switching client to the first other session in Order when target is
-// current, and moves the selection (kill_session_now). killed=false means target is still there, so its
-// worktree mustn't be removed; for the last session, killed=true while the kill may still be queued.
-func killNow(c *tmux.Client, client, current, target string) (killed bool, err error) {
+// killNow archives e as target's record, then kills target, first switching client to the first other
+// session in Order when target is current, and moves the selection (kill_session_now). killed=false means
+// target is still there, so its worktree mustn't be removed, and has no record; for the last session,
+// killed=true while the kill may still be queued. record is the record's directory; a record it can't write
+// leaves target open.
+func killNow(c *tmux.Client, client, current, target string, e Ended) (killed bool, record string, err error) {
 	order, err := LoadOrder(c)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
+	// Before the kill, which may take this process with it, and while its panes still say what it ran
+	record, err = archive(c, target, e)
+	if err != nil {
+		return false, "", fmt.Errorf("archiving %s: %w", target, err)
+	}
+	defer func() {
+		if !killed {
+			err, record = errors.Join(err, os.RemoveAll(record)), ""
+		}
+	}()
 	if isLast(order, target) {
 		// No session left: nothing to switch to or select
-		return true, killSession(c, target, order)
+		err = killSession(c, target, order)
+		return err == nil, record, err
 	}
 	replacement := current
 	if target == current {
 		i := slices.IndexFunc(order, func(name string) bool { return name != target })
 		if i < 0 {
 			showMessage(c, client, "No replacement session available")
-			return false, nil
+			return false, record, nil
 		}
 		replacement = order[i]
 		// Like bash's `|| true`: kill-session below still runs and has-session reports the outcome.
@@ -107,26 +126,26 @@ func killNow(c *tmux.Client, client, current, target string) (killed bool, err e
 		resetKeyTable(c, client)
 		// Now, because killing the sidebar's own session kills this process with it.
 		if err := setSelected(c, replacement); err != nil {
-			return false, err
+			return false, record, err
 		}
 	}
 	// has-session below decides whether it is gone; killErr matters only if not
 	killErr := killSession(c, target, order)
 	_, err = c.Run("has-session", "-t", tmux.SessionTarget(target))
 	if killed = err != nil; !killed && killErr != nil {
-		return false, killErr
+		return false, record, killErr
 	}
 
 	if replacement != "" {
 		if _, err := c.Run("has-session", "-t", tmux.SessionTarget(replacement)); err == nil {
-			return killed, setSelected(c, replacement)
+			return killed, record, setSelected(c, replacement)
 		}
 	}
 	order, err = LoadOrder(c)
 	if err != nil || len(order) == 0 {
-		return killed, err
+		return killed, record, err
 	}
-	return killed, setSelected(c, order[0])
+	return killed, record, setSelected(c, order[0])
 }
 
 func isLast(order []string, target string) bool {

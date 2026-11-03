@@ -3,12 +3,8 @@ package control
 import (
 	"cmp"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ppf/dev/internal/agent"
@@ -73,7 +69,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 		if err != nil {
 			return done, err
 		}
-		if dir, err = newDir(filepath.Join(dir, "results"), a.Session); err != nil {
+		if dir, err = config.NewDir(filepath.Join(dir, "results"), a.Session); err != nil {
 			return done, err
 		}
 		if err := worktree.Archive(wt, dir, files); err != nil {
@@ -169,23 +165,6 @@ func prMerged(wt, base, head string) error {
 		return fmt.Errorf("its PR was merged at %s, not at its HEAD %s", pr.HeadRefOid, head)
 	}
 	return nil
-}
-
-// newDir creates parent/name, or name.2, .3, … if taken, so a reused name never mixes in earlier results.
-func newDir(parent, name string) (string, error) {
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
-	}
-	for n := 1; ; n++ {
-		dir := filepath.Join(parent, name)
-		if n > 1 {
-			dir += "." + strconv.Itoa(n)
-		}
-		err := os.Mkdir(dir, 0o755)
-		if !errors.Is(err, fs.ErrExist) {
-			return dir, err
-		}
-	}
 }
 
 // kill switches the clients attached to session over to to, so they aren't detached with it, then kills it

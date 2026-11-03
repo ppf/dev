@@ -56,14 +56,19 @@ func CloseWorktree(c *tmux.Client, a CloseArgs, out io.Writer, readKey func() (b
 		if last && !removeWorktree(c, a, name) {
 			return nil
 		}
-		killed, err := killNow(c, a.Client, a.Current, a.Target)
+		killed, record, err := killNow(c, a.Client, a.Current, a.Target, Ended{Worktree: a.Worktree, WorktreeRemoved: last})
 		if err != nil || !killed || last {
 			return err
 		}
 		// Only now: panes inside the worktree would block its removal
-		removeWorktree(c, a, name)
+		if removeWorktree(c, a, name) {
+			if err := markRemoved(record); err != nil {
+				showMessage(c, a.Client, "❌ archive record: "+err.Error())
+				return err
+			}
+		}
 	case 'n', 'N':
-		_, err := killNow(c, a.Client, a.Current, a.Target)
+		_, _, err := killNow(c, a.Client, a.Current, a.Target, Ended{Worktree: a.Worktree})
 		return err
 	}
 	return nil

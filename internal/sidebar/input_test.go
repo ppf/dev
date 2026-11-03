@@ -321,7 +321,7 @@ func inputKillC(t *testing.T) []string {
 	return slices.Concat([]string{
 		"list-sessions -F …",
 		"list-panes -t =c: -F …", "display-message -t %4 -p #{pane_current_path}",
-		"list-sessions -F …",
+		"list-sessions -F …", "list-panes -s -t =c: -F …",
 	}, killCalls(t, "=c:"), []string{
 		"has-session -t =c:", "has-session -t =a:", "set-option -gq @sidebar_selected_session a",
 	})

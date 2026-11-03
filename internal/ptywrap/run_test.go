@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 {
 		switch os.Args[1] {
 		case "wrap":
-			err := Run(os.Args[2:])
+			err := Run(os.Args[2:], nil)
 			fmt.Fprintln(os.Stderr, "Run:", err)
 			os.Exit(99)
 		case "child":

@@ -148,6 +148,12 @@ const (
 	OptMode   = "@agent_mode"
 )
 
+// OptEndedSession and OptEndedTranscript are the pane options keeping the last conversation a SessionEnd cleared.
+const (
+	OptEndedSession    = "@agent_ended_session"
+	OptEndedTranscript = "@agent_ended_transcript"
+)
+
 // prCommand is a gh command that opens a PR or changes its state, global flags (-R owner/repo) included.
 var prCommand = regexp.MustCompile(`\bgh(\s+-\S+(\s+[^-\s]\S*)?)*\s+pr\s+(create|merge|close|reopen|ready)\b`)
 
@@ -183,15 +189,20 @@ func HookSession(input []byte) Session {
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
 // notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
 // or end, recording h's socket (OptSocket) and permission mode (OptMode), and bumping @dev_pr_gen on a PostToolUse
-// of a gh command that changes a PR; Clear (or no session) unsets the session options.
+// of a gh command that changes a PR; Clear (or no session) unsets the session options; Clear keeps the
+// cleared conversation in OptEndedSession and OptEndedTranscript.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	unset := func(option string) []string { return []string{"set-option", "-pu", "-t", pane, option} }
 	set := func(option, value string) []string { return []string{"set-option", "-p", "-t", pane, option, value} }
 	var cmds [][]string
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
-		s = Session{}
 		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion), unset(OptSocket), unset(OptMode)}
+		// For the archive record of a session closed once its agent exited
+		if s.ID != "" {
+			cmds = append(cmds, set(OptEndedSession, s.ID), set(OptEndedTranscript, s.Transcript))
+		}
+		s = Session{}
 	} else {
 		// @agent_since (unix seconds) only moves when the state changes (or a decision comes), so it must run before @agent_state is set;
 		// @agent_cmd ties the state to the writing process, so a crash's leftover is ignored by the sidebar

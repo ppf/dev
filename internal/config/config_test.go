@@ -201,3 +201,12 @@ func TestImportRefusesOverwrite(t *testing.T) {
 		t.Fatalf("existing file changed: %q", data)
 	}
 }
+
+func TestNewDir(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "results")
+	for _, want := range []string{"s", "s.2", "s.3"} {
+		if got, err := NewDir(parent, "s"); err != nil || got != filepath.Join(parent, want) {
+			t.Errorf("NewDir = %q, %v; want %s", got, err, want)
+		}
+	}
+}

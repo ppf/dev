@@ -50,7 +50,7 @@ func TestHerd(t *testing.T) {
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
 	check(t, "started by the boss, by name", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"), "boss")
-	if args := agentArgs(t, d, "=app:1.2"); !strings.Contains(args, `pty-wrap -- claude --settings {"remoteControlAtStartup":false}`) {
+	if args := agentArgs(t, d, "=app:1.2"); !strings.Contains(args, `pty-wrap --close-on-exit -- claude --settings {"remoteControlAtStartup":false}`) {
 		t.Errorf("worker's claude not started without Remote Control: %q", args)
 	}
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
@@ -78,7 +78,7 @@ func TestHerd(t *testing.T) {
 		"1 ❌ web was started by a coordinator outside tmux (--boss): leave it to that coordinator\n")
 	_, errOut, status = devAgent(append(env, "TMUX_PANE="+coordinator), "", "close", "web", "--boss", "boss")
 	check(t, "not even with --boss", status+" "+errOut, "1 ❌ web was started by a coordinator outside tmux (--boss): leave it to that coordinator\n")
-	if args := agentArgs(t, d, "=web:1.2"); !strings.Contains(args, `pty-wrap -- claude --settings {"remoteControlAtStartup":false}`) {
+	if args := agentArgs(t, d, "=web:1.2"); !strings.Contains(args, `pty-wrap --close-on-exit -- claude --settings {"remoteControlAtStartup":false}`) {
 		t.Errorf("--boss worker's claude not started without Remote Control: %q", args)
 	}
 	mine, errOut, status := devAgent(env, "", "list", "--mine", "--boss", "boss")
@@ -119,7 +119,8 @@ func TestHerd(t *testing.T) {
 		_, err := d.Try("has-session", "-t", "=boss:")
 		return err != nil
 	})
-	check(t, "client back on app", d.T("list-clients", "-F", "#{client_session}"), "app")
+	// Like ×: to the first other session in the sidebar's order
+	check(t, "client on the first other session", d.T("list-clients", "-F", "#{client_session}"), "boot")
 
 	// Reopened, the boss has a new session id but the same name: its workers are its own again
 	reopen := exec.Command(devBin, "boss")

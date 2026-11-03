@@ -14,7 +14,6 @@ import (
 
 func newHerdCmd() *cobra.Command {
 	var previews bool
-	var moveClients string
 	cmd := &cobra.Command{
 		Use:     "boss [project]",
 		Aliases: []string{"herd"},
@@ -26,9 +25,6 @@ live previews of the workers it started.`,
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
-			if moveClients != "" {
-				return herd.MoveClients(c, moveClients)
-			}
 			if previews {
 				pane := os.Getenv("TMUX_PANE")
 				if pane == "" {
@@ -60,7 +56,5 @@ live previews of the workers it started.`,
 	}
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
-	cmd.Flags().StringVar(&moveClients, "move-clients", "", "move the clients off the ending boss session `id`")
-	_ = cmd.Flags().MarkHidden("move-clients")
 	return cmd
 }

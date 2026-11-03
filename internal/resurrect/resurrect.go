@@ -480,7 +480,7 @@ func restartsClaude(procs string) bool {
 // resumeAgents types each saved agent's resume command into its restored pane, in a session the restore
 // created; a pane back in another directory gets a fresh agent, as its conversation is stored by directory.
 // Nothing is restarted while resurrect restarts claude itself: two commands would be typed into one pane.
-// A worker (in startedBy) resumes without Remote Control, as it started.
+// A worker (in startedBy) resumes without Remote Control, as it started; a clean exit closes the session, as at its start.
 func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntry, live []string, shell string) error {
 	if len(agents) == 0 {
 		return nil
@@ -495,7 +495,7 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntr
 		warn(c, "@resurrect-processes restarts claude, agents not resumed: remove its claude entry")
 		return nil
 	}
-	argv, err := ptywrap.Argv()
+	argv, err := ptywrap.ClosingArgv()
 	if err != nil {
 		warn(c, "dev executable unknown, agents not restarted")
 		return &stepError{"dev pty-wrap", err}

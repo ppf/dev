@@ -2,10 +2,13 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -164,4 +167,21 @@ func parseConf(path string, reserved []string) ([]Project, error) {
 		projects = append(projects, p)
 	}
 	return projects, nil
+}
+
+// NewDir creates parent/name, or name.2, .3, … if taken, so a reused name never mixes with an earlier one's files.
+func NewDir(parent, name string) (string, error) {
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", err
+	}
+	for n := 1; ; n++ {
+		dir := filepath.Join(parent, name)
+		if n > 1 {
+			dir += "." + strconv.Itoa(n)
+		}
+		err := os.Mkdir(dir, 0o755)
+		if !errors.Is(err, fs.ErrExist) {
+			return dir, err
+		}
+	}
 }
