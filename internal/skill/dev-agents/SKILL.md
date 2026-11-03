@@ -110,8 +110,8 @@ It closes only a worker you started, idle (or waiting only because it sat idle),
 <!-- boss-core:stream -->
 For a series of items in one area (one PR each, item after item), keep each worker's context short: a worker that runs for hours reaches a full context, and auto-compaction loses detail.
 
-- **Default: a fresh worker per item.** Once an item's PR is merged, clean up its worker and start the next item in a fresh worker: it starts from the current default branch with an empty context.
-- **Only between items:** never hand a new item to a worker with undelivered work (open PR, review fixes pending, uncommitted changes), and never replace one that has it.
+- **Default: a fresh worker per item.** Once an item's PR is opened, clean up its worker and start the next item in a fresh worker: it starts from the current default branch with an empty context.
+- **Only between items:** never hand a new item to a worker with undelivered work (review fixes pending, uncommitted or unpushed changes), and never replace one that has it.
 - **Context filling up:** replace a long-running worker whose context is filling up at the next item boundary rather than starting another item in it.
 <!-- /boss-core:stream -->
 
