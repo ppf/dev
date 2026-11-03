@@ -82,12 +82,12 @@ To stop a worker's turn when the user asks, or when it's clearly off track: `sto
 
 ## Archive delivered workers
 
-A worker's work is delivered when its PR is merged, or its result is reported with nothing left for it. Archiving stops it, cleans up its worktree by default, and archives its finished side sessions too; `unarchive_session` brings it back.
+A worker's work is delivered when its PR is opened, or its result is reported with nothing left for it. Archiving stops it, cleans up its worktree by default, and archives its finished side sessions too; `unarchive_session` brings it back.
 
-- **PR merged → archive without asking.** Once you have checked that the worker's PR is merged (`gh pr view <n> --json state,mergeCommit`, not just its note), the worker is idle, and nothing is left for it, `archive_session` it right away and report it in one line ("Archived fix-login: PR #12 merged as abc1234").
+- **PR opened → archive without asking.** Once you have checked that the worker's PR is open or merged at the worker's HEAD (`gh pr view <n> --json state,headRefOid`, not just its note), the worker is idle, and nothing is left for it, `archive_session` it right away and report it in one line ("Archived fix-login: PR #12 open").
 - **Anything else → ask first** (in auto mode the app may not ask for you): a result reported without a PR, or a PR closed unmerged. List those in the roll-up and ask once ("Archive docs-api (RESULT-docs-api.md read)?"), then `archive_session` each one they approve.
 
-The app refuses one that is still working, pinned, or open on screen: tell the user. It may keep a worktree that holds untracked or uncommitted files (e.g. `RESULT.md`): read what you need from it first; the user can discard a kept worktree from the app, so never delete it with git yourself. Never archive one with undelivered work (open PR, pending fixes, uncommitted or unpushed changes), nor a session you didn't start. Don't offer the app-wide `auto_archive_on_pr_close` setting: archiving merged workers is this skill's job.
+The app refuses one that is still working, pinned, or open on screen: tell the user. It may keep a worktree that holds untracked or uncommitted files (e.g. `RESULT.md`): read what you need from it first; the user can discard a kept worktree from the app, so never delete it with git yourself. Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a session you didn't start. Don't offer the app-wide `auto_archive_on_pr_close` setting: archiving delivered workers is this skill's job.
 
 ## A stream of tasks in one area
 
@@ -96,8 +96,8 @@ Over Remote Control a stream stalls: the `<side-sessions-event>` exception above
 <!-- boss-core:stream -->
 For a series of items in one area (one PR each, item after item), keep each worker's context short: a worker that runs for hours reaches a full context, and auto-compaction loses detail.
 
-- **Default: a fresh worker per item.** Once an item's PR is merged, clean up its worker and start the next item in a fresh worker: it starts from the current default branch with an empty context.
-- **Only between items:** never hand a new item to a worker with undelivered work (open PR, review fixes pending, uncommitted changes), and never replace one that has it.
+- **Default: a fresh worker per item.** Once an item's PR is opened, clean up its worker and start the next item in a fresh worker: it starts from the current default branch with an empty context.
+- **Only between items:** never hand a new item to a worker with undelivered work (review fixes pending, uncommitted or unpushed changes), and never replace one that has it.
 - **Context filling up:** replace a long-running worker whose context is filling up at the next item boundary rather than starting another item in it.
 <!-- /boss-core:stream -->
 
