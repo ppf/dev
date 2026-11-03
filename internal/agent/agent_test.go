@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func TestRecord(t *testing.T) {
 	t.Cleanup(func() { now = time.Now })
 	session := " ; set-option -p -t %1 @agent_session s ; set-option -p -t %1 @agent_transcript /t/s.jsonl"
 	noSession := " ; set-option -pu -t %1 @agent_session ; set-option -pu -t %1 @agent_transcript"
-	noSocket := " ; set-option -pu -t %1 @agent_socket"
+	noSocket := " ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_pid"
 	recorded := "set-option -pF -t %1 @agent_since #{?#{&&:#{==:#{@agent_state},idle},#{@agent_since}},#{@agent_since},100} ; set-option -p -t %1 @agent_active 100 ; set-option -p -t %1 @agent_state idle ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"
 	tests := []struct {
 		name, state string
@@ -95,7 +96,7 @@ func TestRecord(t *testing.T) {
 		{"a decision starts its own stretch", Waiting, Session{}, "set-option -pF -t %1 @agent_since 100 ; set-option -p -t %1 @agent_active 100 ; set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt" + noSocket + noSession},
 		{"clear unsets everything but the ended conversation", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode" +
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode ; set-option -pu -t %1 @agent_pid" +
 				" ; set-option -p -t %1 @agent_ended_session s ; set-option -p -t %1 @agent_ended_transcript /t/s.jsonl" + noSession},
 	}
 	for _, tt := range tests {
@@ -388,14 +389,14 @@ func TestRecordHook(t *testing.T) {
 		{"gh pr edit leaves it", Working, prHook("PostToolUse", "gh pr edit --title x"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"gh pr view leaves it", Working, prHook("PostToolUse", "gh pr view --json state"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
 		{"a failed gh pr create leaves it", Working, prHook("PostToolUseFailure", "gh pr create"), "set-option -p -t %1 @agent_state working ; set-option -pF -t %1 @agent_cmd #{pane_current_command}"},
-		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode"},
-		{"socket and mode recorded", Working, Hook{Event: "PostToolUse", PermissionMode: "auto", Socket: "/tmp/cc-socks/1.sock"}, "set-option -p -t %1 @agent_state working ; " +
-			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_socket /tmp/cc-socks/1.sock ; set-option -p -t %1 @agent_mode auto"},
+		{"clear keeps the count", Clear, Hook{}, "set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode ; set-option -pu -t %1 @agent_pid"},
+		{"socket, pid and mode recorded", Working, Hook{Event: "PostToolUse", PermissionMode: "auto", Socket: "/tmp/cc-socks/1.sock", PID: "42"}, "set-option -p -t %1 @agent_state working ; " +
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_socket /tmp/cc-socks/1.sock ; set-option -p -t %1 @agent_pid 42 ; set-option -p -t %1 @agent_mode auto"},
 		{"a notification keeps the mode", Waiting, Hook{Event: "Notification", NotificationType: "idle_prompt", Socket: "/s"}, "set-option -p -t %1 @agent_state waiting ; " +
-			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for idle_prompt ; set-option -p -t %1 @agent_socket /s"},
+			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for idle_prompt ; set-option -p -t %1 @agent_socket /s ; set-option -pu -t %1 @agent_pid"},
 		{"a new session's mode is unknown", Idle, Hook{Event: "SessionStart", Socket: "/s"}, "set-option -p -t %1 @agent_state idle ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_question ; " +
-			"set-option -p -t %1 @agent_socket /s ; set-option -pu -t %1 @agent_mode"},
+			"set-option -p -t %1 @agent_socket /s ; set-option -pu -t %1 @agent_pid ; set-option -pu -t %1 @agent_mode"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -415,7 +416,7 @@ func TestRecordHook(t *testing.T) {
 				if slices.Contains(turnBounds, tt.hook.Event) {
 					want += " ; set-option -pu -t %1 @agent_question"
 				}
-				want += " ; set-option -pu -t %1 @agent_socket"
+				want += " ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_pid"
 				if tt.hook.Event == "SessionStart" {
 					want += " ; set-option -pu -t %1 @agent_mode"
 				}
@@ -424,6 +425,57 @@ func TestRecordHook(t *testing.T) {
 				t.Errorf("Record ran %q, %v; want %q", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestNested(t *testing.T) {
+	self, parent := strconv.Itoa(os.Getpid()), strconv.Itoa(os.Getppid())
+	tests := []struct {
+		name, registered, pid string
+		want                  bool
+	}{
+		{"no pid", parent, "", false},
+		{"no registered claude", "", self, false},
+		{"the registered claude", self, self, false},
+		{"a claude below it", parent, self, true},
+		{"one not below it", self, parent, false},
+		{"a registered claude that's gone", "999999999", self, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tmux.NewFake(func(args []string) (string, error) {
+				if got := strings.Join(args, " "); got != "display-message -t %1 -p #{@agent_pid}" {
+					t.Errorf("tmux %q", got)
+				}
+				return tt.registered + "\n", nil
+			})
+			if got, err := Nested(c, "%1", tt.pid); err != nil || got != tt.want {
+				t.Errorf("Nested(%q under %q) = %v, %v; want %v", tt.pid, tt.registered, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDescends(t *testing.T) {
+	ps := "    1     0\n   10     1\n   20    10\n   30    20\n   40     1\n 7 8\n 8 7\n"
+	tests := []struct {
+		name, pid, ancestor string
+		want                bool
+	}{
+		{"child", "20", "10", true},
+		{"grandchild", "30", "10", true},
+		{"itself", "10", "10", false},
+		{"sibling", "40", "10", false},
+		{"ancestor of it", "10", "30", false},
+		{"a loop ends", "7", "99", false},
+	}
+	for _, tt := range tests {
+		if got, err := descends(ps, tt.pid, tt.ancestor); err != nil || got != tt.want {
+			t.Errorf("%s: descends(%s, %s) = %v, %v; want %v", tt.name, tt.pid, tt.ancestor, got, err, tt.want)
+		}
+	}
+	if _, err := descends(ps, "99", "10"); err == nil {
+		t.Error("descends of a pid ps doesn't list: want an error")
 	}
 }
 

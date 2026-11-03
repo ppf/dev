@@ -44,6 +44,8 @@ dev needs terminal-notifier 3.0 or later (native, built on UserNotifications). I
 
 Set Claude Code's `"preferredNotifChannel": "notifications_disabled"` (in `~/.claude/settings.json`) to avoid duplicate notifications. Hook errors go to stderr, which Claude Code hides for a successful hook; run `claude --debug` to see them.
 
+A claude the pane's Claude runs itself (`claude -p` from its Bash tool) inherits the pane's `TMUX_PANE`. `dev state` records the hook's Claude process (`CLAUDE_PID`, `@agent_pid`); it and `dev question` ignore hooks from a claude running below it: they change no state and send no notification or boss note. A new Claude in the pane (after `/exit` or a crash) registers as before.
+
 ## Codex state
 
 Codex CLI hooks give Codex panes the same sidebar state and notifications (needs approval). In `~/.codex/hooks.json`, call `dev state --codex <state>`:

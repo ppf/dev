@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -139,6 +140,8 @@ type Hook struct {
 	} `json:"tool_input"`
 	// Socket is Claude's cross-session messaging socket, from the hook's environment (CLAUDE_CODE_MESSAGING_SOCKET).
 	Socket string `json:"-"`
+	// PID is the Claude process running the hook, from its environment (CLAUDE_PID).
+	PID string `json:"-"`
 }
 
 // OptSocket and OptMode are the pane options holding Claude's messaging socket (Hook.Socket) and permission
@@ -147,6 +150,9 @@ const (
 	OptSocket = "@agent_socket"
 	OptMode   = "@agent_mode"
 )
+
+// OptPID is the pane option holding the pid of the Claude that recorded the pane's state (Hook.PID).
+const OptPID = "@agent_pid"
 
 // OptEndedSession and OptEndedTranscript are the pane options keeping the last conversation a SessionEnd cleared.
 const (
@@ -188,7 +194,7 @@ func HookSession(input []byte) Session {
 // and @agent_transcript in one chained tmux call, bumping @agent_prompts (and recording Grok's turn id in
 // @agent_prompt_id) on UserPromptSubmit, setting @agent_waiting_for to why a waiting state waits (Claude's
 // notification type, else the event: Codex's PermissionRequest), unsetting @agent_question at a turn's start
-// or end, recording h's socket (OptSocket) and permission mode (OptMode), and bumping @dev_pr_gen on a PostToolUse
+// or end, recording h's socket (OptSocket), pid (OptPID) and permission mode (OptMode), and bumping @dev_pr_gen on a PostToolUse
 // of a gh command that changes a PR; Clear (or no session) unsets the session options; Clear keeps the
 // cleared conversation in OptEndedSession and OptEndedTranscript.
 func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
@@ -197,7 +203,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	var cmds [][]string
 	if state == Clear {
 		// @agent_prompts stays: a count that restarted could repeat the value a waiter read before /clear
-		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion), unset(OptSocket), unset(OptMode)}
+		cmds = [][]string{unset("@agent_state"), unset("@agent_cmd"), unset("@agent_cost"), unset(OptContext), unset("@agent_since"), unset(OptActive), unset("@agent_prompt_id"), unset(OptQuestion), unset(OptSocket), unset(OptMode), unset(OptPID)}
 		// For the archive record of a session closed once its agent exited
 		if s.ID != "" {
 			cmds = append(cmds, set(OptEndedSession, s.ID), set(OptEndedTranscript, s.Transcript))
@@ -241,6 +247,11 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 		} else {
 			cmds = append(cmds, set(OptSocket, h.Socket))
 		}
+		if h.PID == "" {
+			cmds = append(cmds, unset(OptPID))
+		} else {
+			cmds = append(cmds, set(OptPID, h.PID))
+		}
 		switch {
 		case h.PermissionMode != "":
 			cmds = append(cmds, set(OptMode, h.PermissionMode))
@@ -264,6 +275,52 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 	}
 	_, err := c.Run(args...)
 	return err
+}
+
+// Nested reports a Claude hook (pid: its CLAUDE_PID) from a claude running below the pane's registered one
+// (OptPID), such as a `claude -p` from its Bash tool: it inherits the pane's TMUX_PANE but isn't its agent.
+// A registered claude that is gone, or isn't an ancestor, doesn't hold the pane; a hook without a pid is never nested.
+func Nested(c *tmux.Client, pane, pid string) (bool, error) {
+	if pid == "" {
+		return false, nil
+	}
+	registered, err := c.Run("display-message", "-t", pane, "-p", "#{"+OptPID+"}")
+	if err != nil {
+		return false, err
+	}
+	registered = strings.TrimSpace(registered)
+	if registered == "" || registered == pid {
+		return false, nil
+	}
+	out, err := exec.Command("ps", "-A", "-o", "pid=", "-o", "ppid=").Output()
+	if e, ok := errors.AsType[*exec.ExitError](err); ok && len(e.Stderr) > 0 {
+		return false, fmt.Errorf("agent: ps: %s", strings.Join(strings.Fields(string(e.Stderr)), " "))
+	}
+	if err != nil {
+		return false, fmt.Errorf("agent: ps: %w", err)
+	}
+	return descends(string(out), pid, registered)
+}
+
+// descends reports process pid running below ancestor in ps's "pid ppid" lines; a pid ps doesn't list (the
+// hook's own claude runs) is an error.
+func descends(ps, pid, ancestor string) (bool, error) {
+	parent := map[string]string{}
+	for line := range strings.Lines(ps) {
+		if f := strings.Fields(line); len(f) == 2 {
+			parent[f[0]] = f[1]
+		}
+	}
+	if _, ok := parent[pid]; !ok {
+		return false, fmt.Errorf("agent: ps doesn't list CLAUDE_PID %s", pid)
+	}
+	// Bounded: ps lists processes over time, so a pid reused meanwhile could close a loop
+	for i, p := 0, parent[pid]; i < len(parent) && p != ""; i, p = i+1, parent[p] {
+		if p == ancestor {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // OptActive is the pane option holding when (unix seconds) the agent last ran a hook: a finished tool call, its

@@ -32,7 +32,12 @@ so dev boss's picker and inbox decision notes can show it. It never decides: not
 			if !ok {
 				return nil
 			}
-			if err := agent.RecordQuestion(tmux.New(), pane, q); err != nil {
+			c := tmux.New()
+			nested, err := agent.Nested(c, pane, os.Getenv("CLAUDE_PID"))
+			if err == nil && !nested {
+				err = agent.RecordQuestion(c, pane, q)
+			}
+			if err != nil {
 				// A failing hook would show as an error on every dialog
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev question: "+err.Error())
 			}
