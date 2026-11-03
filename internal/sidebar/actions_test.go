@@ -242,7 +242,7 @@ func TestActionKill(t *testing.T) {
 				actPane("a", "%0", "%0", "/"), actPane("b", "%1", "%1", tt.bDir), actPane("b", "%2", "%1", tt.bDir),
 				actPane("c", "%3", "", tt.cDir),
 			}}
-			if err := kill(w.client(), "/dev/tty1", "a", tt.target); err != nil {
+			if err := Close(w.client(), "/dev/tty1", "a", tt.target); err != nil {
 				t.Fatal(err)
 			}
 			if got := w.log(); !slices.Equal(got, tt.want) {
@@ -376,7 +376,7 @@ func killCalls(t *testing.T, target string) []string {
 	return []string{"kill-session -t " + target + " ; run-shell -b " + tmux.ShellJoin(exe, "resurrect", "snapshot")}
 }
 
-func TestKillSession(t *testing.T) {
+func TestActionKillSession(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +400,12 @@ func TestKillSession(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &actWorld{sessions: tt.sessions, exitEmpty: tt.exitEmpty}
 			// The last listed session is the one closed
-			if err := KillSession(w.client(), tt.sessions[len(tt.sessions)-1]); err != nil {
+			c := w.client()
+			order, err := LoadOrder(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := killSession(c, tt.sessions[len(tt.sessions)-1], order); err != nil {
 				t.Fatal(err)
 			}
 			want := append([]string{"list-sessions -F …"}, tt.want...)

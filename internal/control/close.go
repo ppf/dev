@@ -81,12 +81,20 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err := closable(c, a, wt, head); err != nil {
 		return done, err
 	}
-	if err := kill(c, a.Session, own); err != nil {
+	record := sidebar.Ended{Worktree: wt}
+	if done.Results != "" {
+		record.Note = "untracked files copied to " + done.Results
+	}
+	dir, err := kill(c, a.Session, own, record)
+	if err != nil {
 		return done, fmt.Errorf("killing %s: %w", a.Session, err)
 	}
 	// Only now: panes inside the worktree would block its removal
 	if err := worktree.Remove(mainRoot, wt); err != nil {
 		return done, fmt.Errorf("killed %s, but removing %s failed, so it and branch %q remain: %w", a.Session, wt, branch, err)
+	}
+	if err := sidebar.MarkRemoved(dir); err != nil {
+		return done, fmt.Errorf("removed %s, but its archive record: %w", wt, err)
 	}
 	// Never delete the default branch, even if the worker switched to it
 	if branch != "" && "origin/"+branch != base {
@@ -167,23 +175,17 @@ func prMerged(wt, base, head string) error {
 	return nil
 }
 
-// kill switches the clients attached to session over to to, so they aren't detached with it, then kills it
-// for good (sidebar.KillSession).
-func kill(c *tmux.Client, session, to string) error {
+// kill switches the clients attached to session over to to, so they aren't detached with it, then closes it
+// for good with record (sidebar.CloseUnasked), returning the record's directory.
+func kill(c *tmux.Client, session, to string, record sidebar.Ended) (string, error) {
 	clients, err := c.Run("list-clients", "-t", tmux.SessionTarget(session), "-F", "#{client_name}")
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, client := range strings.Fields(clients) {
 		if _, err := c.Run("switch-client", "-c", client, "-t", tmux.SessionTarget(to)); err != nil {
-			return err
+			return "", err
 		}
 	}
-	if err := sidebar.KillSession(c, session); err != nil {
-		return err
-	}
-	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err == nil {
-		return fmt.Errorf("%s is still there after kill-session", session)
-	}
-	return nil
+	return sidebar.CloseUnasked(c, session, record)
 }

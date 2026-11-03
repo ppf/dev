@@ -62,7 +62,7 @@ func CloseWorktree(c *tmux.Client, a CloseArgs, out io.Writer, readKey func() (b
 		}
 		// Only now: panes inside the worktree would block its removal
 		if removeWorktree(c, a, name) {
-			if err := markRemoved(record); err != nil {
+			if err := MarkRemoved(record); err != nil {
 				showMessage(c, a.Client, "❌ archive record: "+err.Error())
 				return err
 			}

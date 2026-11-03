@@ -125,8 +125,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		target := m.confirm
 		m.confirm = ""
 		if key == "y" {
-			// For good, like the sidebar's ×: the next restore leaves it out
-			return m, m.action(func() error { return sidebar.KillSession(m.c, target) })
+			// The sidebar's × close: for good, archived, its worktree asked about
+			return m, m.action(func() error { return sidebar.Close(m.c, m.snap.client, m.snap.name, target) })
 		}
 		return m, nil
 	}

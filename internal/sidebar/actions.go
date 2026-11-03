@@ -46,9 +46,10 @@ func OpenPicker(c *tmux.Client, client string) error {
 	return err
 }
 
-// kill closes target for client for good, the sidebar's x/× and an agent's exit (Exited); a worktree no other
+// Close closes target for client for good, the one close of every path (the sidebar's x/×, the previews' x, an
+// agent's exit); a worktree no other
 // session uses is asked about in the 70×8 close-worktree popup, which owns the rest (kill_session_by_name).
-func kill(c *tmux.Client, client, current, target string) error {
+func Close(c *tmux.Client, client, current, target string) error {
 	if target == "" {
 		return nil
 	}
@@ -152,17 +153,9 @@ func isLast(order []string, target string) bool {
 	return len(order) == 1 && order[0] == target
 }
 
-// KillSession closes session for good: `dev resurrect snapshot` saves once it is gone, so the next restore
+// killSession closes session for good: `dev resurrect snapshot` saves once it is gone, so the next restore
 // leaves it out. With exit-empty on (tmux's default), the last session dies in a server job that holds the
 // server up (exit-empty off) for that save, which records no sessions, then turns it back on: the server exits.
-func KillSession(c *tmux.Client, session string) error {
-	order, err := LoadOrder(c)
-	if err != nil {
-		return err
-	}
-	return killSession(c, session, order)
-}
-
 func killSession(c *tmux.Client, session string, order []string) error {
 	target := tmux.SessionTarget(session)
 	snapshot, err := selfCommand("resurrect", "snapshot")

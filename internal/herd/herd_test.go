@@ -2,7 +2,6 @@ package herd
 
 import (
 	"errors"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -259,13 +258,8 @@ func TestKill(t *testing.T) {
 	m, _ = press(m, "x")
 	_, cmd = press(m, "y")
 	cmd()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// sidebar.KillSession: the fake lists no sessions, so b isn't the last and dies with its snapshot queued
-	if len(ran) != 2 || !strings.HasPrefix(ran[0], "list-sessions ") ||
-		ran[1] != "kill-session -t =b: ; run-shell -b "+tmux.ShellJoin(exe, "resurrect", "snapshot") {
+	// sidebar.Close (TestHerdKill runs it whole): the fake lists no sessions, so there's nothing to close
+	if len(ran) != 1 || !strings.HasPrefix(ran[0], "list-sessions ") {
 		t.Errorf("y ran %q", ran)
 	}
 }

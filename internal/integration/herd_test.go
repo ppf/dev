@@ -187,6 +187,9 @@ func TestHerdKillForgets(t *testing.T) {
 	waitScreen(t, d.server, previews, "Kill web? y/n")
 	d.T("send-keys", "-t", previews, "y")
 	actWait(d, "x, y on web: saved without it", d.saved, "app boot boss")
+	if _, err := os.Stat(filepath.Join(d.tmp, "state/dev/archive/web/session.json")); err != nil {
+		t.Errorf("x, y on web: no archive record: %v", err)
+	}
 
 	d.kill()
 	d.T("start-server", ";", "set-option", "-g", "@dev_restored", "1", ";", "run-shell", restore)

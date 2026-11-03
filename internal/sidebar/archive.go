@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,8 +67,8 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 	return dir, writeRecord(dir, e)
 }
 
-// markRemoved records in dir's record that the session's worktree was removed.
-func markRemoved(dir string) error {
+// MarkRemoved records in dir's record that the session's worktree was removed.
+func MarkRemoved(dir string) error {
 	data, err := os.ReadFile(filepath.Join(dir, recordFile))
 	if err != nil {
 		return err
@@ -102,7 +103,7 @@ func Exited(c *tmux.Client, target string) error {
 		return err
 	}
 	if client, _, _ := strings.Cut(clients, "\n"); client != "" {
-		return kill(c, client, session, session)
+		return Close(c, client, session, session)
 	}
 	var e Ended
 	_, wt, ok, err := sessionWorktree(c, session)
@@ -112,14 +113,24 @@ func Exited(c *tmux.Client, target string) error {
 	if ok {
 		e.Worktree, e.Note = wt, "worktree kept: no client attached to ask about it"
 	}
+	_, err = CloseUnasked(c, session, e)
+	return err
+}
+
+// CloseUnasked closes session for good with e as its record, asking nothing and switching no client, and
+// returns the record's directory.
+func CloseUnasked(c *tmux.Client, session string, e Ended) (string, error) {
 	// The sidebars' selection stays where it is, unless on session
 	selected, err := c.Run("show-option", "-gqv", optSelected)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if selected = strings.TrimSuffix(selected, "\n"); selected == session {
 		selected = ""
 	}
-	_, _, err = killNow(c, "", selected, session, e)
-	return err
+	killed, record, err := killNow(c, "", selected, session, e)
+	if err == nil && !killed {
+		err = fmt.Errorf("%s is still there after kill-session", session)
+	}
+	return record, err
 }
