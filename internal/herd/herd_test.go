@@ -258,7 +258,7 @@ func TestKill(t *testing.T) {
 	m, _ = press(m, "x")
 	_, cmd = press(m, "y")
 	cmd()
-	// sidebar.Close (TestHerdKill runs it whole): the fake lists no sessions, so there's nothing to close
+	// sidebar.Close (TestHerdKillForgets runs it whole): the fake lists no sessions, so there's nothing to close
 	if len(ran) != 1 || !strings.HasPrefix(ran[0], "list-sessions ") {
 		t.Errorf("y ran %q", ran)
 	}

@@ -46,9 +46,9 @@ func OpenPicker(c *tmux.Client, client string) error {
 	return err
 }
 
-// Close closes target for client for good, the one close of every path (the sidebar's x/×, the previews' x, an
-// agent's exit); a worktree no other
-// session uses is asked about in the 70×8 close-worktree popup, which owns the rest (kill_session_by_name).
+// Close closes target for client for good, the one close of every path (the sidebar's x/×, the previews' x,
+// an agent's exit); a worktree no other session uses is asked about in the 70×8 close-worktree popup, which
+// owns the rest (kill_session_by_name).
 func Close(c *tmux.Client, client, current, target string) error {
 	if target == "" {
 		return nil

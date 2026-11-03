@@ -93,15 +93,15 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err := worktree.Remove(mainRoot, wt); err != nil {
 		return done, fmt.Errorf("killed %s, but removing %s failed, so it and branch %q remain: %w", a.Session, wt, branch, err)
 	}
-	if err := sidebar.MarkRemoved(dir); err != nil {
-		return done, fmt.Errorf("removed %s, but its archive record: %w", wt, err)
-	}
 	// Never delete the default branch, even if the worker switched to it
 	if branch != "" && "origin/"+branch != base {
 		if err := worktree.DeleteBranch(mainRoot, branch); err != nil {
 			return done, fmt.Errorf("removed %s, but deleting branch %s failed: %w", wt, branch, err)
 		}
 		done.Branch = branch
+	}
+	if err := sidebar.MarkRemoved(dir); err != nil {
+		return done, fmt.Errorf("closed %s, but its archive record %s: %w", a.Session, dir, err)
 	}
 	return done, nil
 }
