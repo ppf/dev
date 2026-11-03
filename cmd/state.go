@@ -43,18 +43,30 @@ func newStateCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 				return nil
 			}
+			c := tmux.New()
 			// Grok sets GROK_HOOK_EVENT on every hook, also on the Claude hooks it imports from ~/.claude
 			grok := os.Getenv("GROK_HOOK_EVENT") != ""
+			var pid string
+			if !codex && !grok {
+				pid = os.Getenv("CLAUDE_PID")
+				nested, err := agent.Nested(c, pane, pid)
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if nested {
+					return nil
+				}
+			}
 			if !ok || grok && agent.GrokSkip(input) {
 				// A subagent's tool call (or Grok's session end): progress for the boss inbox, though not the pane's state
 				if pane != "" && !codex {
-					if err := agent.Touch(tmux.New(), pane); err != nil {
+					if err := agent.Touch(c, pane); err != nil {
 						fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 					}
 				}
 				return nil
 			}
-			c := tmux.New()
 			hook := agent.ParseHook(input)
 			if grok {
 				stale, err := agent.GrokStale(c, pane, hook)
@@ -70,7 +82,7 @@ func newStateCmd() *cobra.Command {
 			var session agent.Session
 			if !codex && !grok {
 				session = agent.HookSession(input)
-				hook.Socket = os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET")
+				hook.Socket, hook.PID = os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"), pid
 			}
 			if codex {
 				if pane, ok, err = agent.CodexPane(c, input); err != nil {

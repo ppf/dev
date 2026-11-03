@@ -9,6 +9,7 @@ import (
 func TestQuestionHook(t *testing.T) {
 	ask := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}`
 	t.Setenv("TMUX_PANE", "")
+	t.Setenv("CLAUDE_PID", "")
 	if out, errOut, err := execute(t, ask, "question"); out != "" || errOut != "" || err != nil {
 		t.Errorf("outside tmux: %q %q %v", out, errOut, err)
 	}

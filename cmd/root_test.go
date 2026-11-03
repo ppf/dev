@@ -295,12 +295,12 @@ func TestImportDefaultSource(t *testing.T) {
 
 func TestState(t *testing.T) {
 	tests := []struct {
-		name, pane, stdin string
-		grok              bool
-		args              []string
-		wantErr           error // nil = success
-		wantArgErr        bool
-		wantStderr        string
+		name, pane, stdin, pid string
+		grok                   bool
+		args                   []string
+		wantErr                error // nil = success
+		wantArgErr             bool
+		wantStderr             string
 	}{
 		{name: "no TMUX_PANE is a no-op", args: []string{"working"}, stdin: "not json"},
 		{name: "malformed JSON reported, exit 0", pane: "%1", args: []string{"working"}, stdin: "{",
@@ -309,7 +309,10 @@ func TestState(t *testing.T) {
 			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
 		{name: "grok subagent only stamps its activity", pane: "%1", grok: true, args: []string{"working"}, stdin: `{"hook_event_name":"PostToolUse","subagentType":"explore"}`,
 			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
+		{name: "grok skips the nested check", pane: "%1", pid: "42", grok: true, args: []string{"idle"}, stdin: `{}`, wantErr: tmux.ErrNoSocket},
 		{name: "records on the pane", pane: "%1", args: []string{"idle"}, stdin: `{}`, wantErr: tmux.ErrNoSocket},
+		{name: "a claude's hook first checks it isn't nested, exit 0", pane: "%1", pid: "42", args: []string{"idle"}, stdin: `{}`,
+			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
 		{name: "codex ignores missing TMUX_PANE", args: []string{"--codex", "working"}, stdin: `{"cwd":"/"}`,
 			wantStderr: "❌ dev state: " + tmux.ErrNoSocket.Error() + "\n"},
 		{name: "codex bad cwd reported, exit 0", args: []string{"--codex", "working"}, stdin: `{"cwd":5}`,
@@ -324,6 +327,7 @@ func TestState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("TMUX_PANE", tt.pane)
 			t.Setenv("GROK_HOOK_EVENT", map[bool]string{true: "PostToolUse"}[tt.grok])
+			t.Setenv("CLAUDE_PID", tt.pid)
 			_, errOut, err := execute(t, tt.stdin, append([]string{"state"}, tt.args...)...)
 			switch {
 			case tt.wantArgErr:
