@@ -205,10 +205,11 @@ func TestActionKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	killB := killCalls(t, "=b:")
+	const archiveB = "list-panes -s -t =b: -F …"
 	plainKill := slices.Concat([]string{
 		"list-sessions -F …",
 		"list-panes -t =b: -F …", "display-message -t %2 -p #{pane_current_path}",
-		"list-sessions -F …"}, killB, []string{"has-session -t =b:", "has-session -t =a:",
+		"list-sessions -F …", archiveB}, killB, []string{"has-session -t =b:", "has-session -t =a:",
 		"set-option -gq @sidebar_selected_session a",
 	})
 	for _, tt := range []struct {
@@ -223,7 +224,7 @@ func TestActionKill(t *testing.T) {
 		{"last session", []string{"b"}, "b", "/", "/", append([]string{
 			"list-sessions -F …",
 			"list-panes -t =b: -F …", "display-message -t %2 -p #{pane_current_path}",
-			"list-sessions -F …", "show-option -gv exit-empty"}, killB...)},
+			"list-sessions -F …", archiveB, "show-option -gv exit-empty"}, killB...)},
 		{"gone: select current", []string{"a", "c"}, "b", "/", "/", []string{
 			"list-sessions -F …", "set-option -gq @sidebar_selected_session a",
 		}},
@@ -241,7 +242,7 @@ func TestActionKill(t *testing.T) {
 				actPane("a", "%0", "%0", "/"), actPane("b", "%1", "%1", tt.bDir), actPane("b", "%2", "%1", tt.bDir),
 				actPane("c", "%3", "", tt.cDir),
 			}}
-			if err := kill(w.client(), "/dev/tty1", "a", tt.target); err != nil {
+			if err := Close(w.client(), "/dev/tty1", "a", tt.target); err != nil {
 				t.Fatal(err)
 			}
 			if got := w.log(); !slices.Equal(got, tt.want) {
@@ -322,12 +323,13 @@ func TestActionKillNow(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &actWorld{sessions: tt.sessions, undying: tt.undying}
-			killed, err := killNow(w.client(), "/dev/tty1", tt.current, tt.target)
-			if err != nil || killed != tt.killed {
-				t.Errorf("killNow = %t, %v; want %t", killed, err, tt.killed)
+			killed, record, err := killNow(w.client(), "/dev/tty1", tt.current, tt.target, Ended{})
+			if err != nil || killed != tt.killed || (record != "") != tt.killed {
+				t.Errorf("killNow = %t, %q, %v; want %t", killed, record, err, tt.killed)
 			}
-			var want []string
-			for _, call := range tt.want {
+			// The record goes first, before a kill that may end this process
+			want := []string{tt.want[0], "list-panes -s -t =" + tt.target + ": -F …"}
+			for _, call := range tt.want[1:] {
 				if target, ok := strings.CutPrefix(call, "kill-session -t "); ok {
 					want = append(want, killCalls(t, target)...)
 					continue
@@ -356,7 +358,7 @@ func TestActionKillNowFails(t *testing.T) {
 			if !tt.undying {
 				w.sessions = []string{"a"}
 			}
-			killed, err := killNow(w.client(), "/dev/tty1", "a", "b")
+			killed, _, err := killNow(w.client(), "/dev/tty1", "a", "b", Ended{})
 			if killed == tt.wantErr || (err != nil) != tt.wantErr {
 				t.Errorf("killNow = %t, %v; want killed %t, error %t", killed, err, !tt.wantErr, tt.wantErr)
 			}
@@ -374,7 +376,7 @@ func killCalls(t *testing.T, target string) []string {
 	return []string{"kill-session -t " + target + " ; run-shell -b " + tmux.ShellJoin(exe, "resurrect", "snapshot")}
 }
 
-func TestKillSession(t *testing.T) {
+func TestActionKillSession(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -398,7 +400,12 @@ func TestKillSession(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &actWorld{sessions: tt.sessions, exitEmpty: tt.exitEmpty}
 			// The last listed session is the one closed
-			if err := KillSession(w.client(), tt.sessions[len(tt.sessions)-1]); err != nil {
+			c := w.client()
+			order, err := LoadOrder(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := killSession(c, tt.sessions[len(tt.sessions)-1], order); err != nil {
 				t.Fatal(err)
 			}
 			want := append([]string{"list-sessions -F …"}, tt.want...)

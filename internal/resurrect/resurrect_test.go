@@ -620,7 +620,7 @@ func TestRestoreAgents(t *testing.T) {
 	fresh := func(session, id string) []string {
 		return warned(session + ":1.2: conversation " + id + " not resumed (directory changed or transcript gone), fresh agent")
 	}
-	argv, err := ptywrap.Argv()
+	argv, err := ptywrap.ClosingArgv()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +797,7 @@ func TestRestoreBoss(t *testing.T) {
 	queried := []string{"has-session -t =boss-p", slotQuery("1.2"), slotQuery("1.3")}
 	procs := "show-option -gqv @resurrect-default-processes ; show-option -gqv @resurrect-processes"
 	devtSlot := "display-message -t =devt:1.2 -p #{pane_current_command}" + tmux.Sep + "#{pane_id}" + tmux.Sep + "#{pane_current_path}"
-	argv, err := ptywrap.Argv()
+	argv, err := ptywrap.ClosingArgv()
 	if err != nil {
 		t.Fatal(err)
 	}

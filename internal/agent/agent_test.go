@@ -94,8 +94,9 @@ func TestRecord(t *testing.T) {
 		{"no session unsets the old one", Idle, Session{}, recorded + noSocket + noSession},
 		{"a decision starts its own stretch", Waiting, Session{}, "set-option -pF -t %1 @agent_since 100 ; set-option -p -t %1 @agent_active 100 ; set-option -p -t %1 @agent_state waiting ; " +
 			"set-option -pF -t %1 @agent_cmd #{pane_current_command} ; set-option -p -t %1 @agent_waiting_for permission_prompt" + noSocket + noSession},
-		{"clear unsets everything", Clear, Session{"s", "/t/s.jsonl"},
-			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode" + noSession},
+		{"clear unsets everything but the ended conversation", Clear, Session{"s", "/t/s.jsonl"},
+			"set-option -pu -t %1 @agent_state ; set-option -pu -t %1 @agent_cmd ; set-option -pu -t %1 @agent_cost ; set-option -pu -t %1 @agent_context ; set-option -pu -t %1 @agent_since ; set-option -pu -t %1 @agent_active ; set-option -pu -t %1 @agent_prompt_id ; set-option -pu -t %1 @agent_question ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_mode" +
+				" ; set-option -p -t %1 @agent_ended_session s ; set-option -p -t %1 @agent_ended_transcript /t/s.jsonl" + noSession},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

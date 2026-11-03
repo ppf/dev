@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -22,14 +23,15 @@ const (
 )
 
 // Run runs argv like exec would, wrapping its graphics APCs when inside tmux with a terminal for stdin and
-// stdout; elsewhere it execs argv in place. Once argv runs, Run exits with its status and never returns.
+// stdout; elsewhere it execs argv in place. Once argv runs, Run exits with its status and never returns,
+// calling exited (when set) with the status of a command that exited rather than died from a signal.
 //
 // The command keeps the terminal's process group, session and controlling terminal (its /dev/tty), so
 // job control and signals sent to the group reach it as before; only its stdio is the new pty. Run
 // copies stdin to it raw, resizes it with the terminal and forwards the HUP, INT, QUIT and TERM it gets
 // (one sent to the whole group reaches the command twice). When the command stops (Claude's Ctrl-Z), Run
 // stops too, so the shell gets the terminal back.
-func Run(argv []string) error {
+func Run(argv []string, exited func(status int)) error {
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
 		return err
@@ -131,6 +133,9 @@ func Run(argv []string) error {
 			if ws.Signaled() {
 				os.Exit(128 + int(ws.Signal()))
 			}
+			if exited != nil {
+				exited(ws.ExitStatus())
+			}
 			os.Exit(ws.ExitStatus())
 		}
 	}
@@ -215,9 +220,18 @@ func copyInput(ptmx, tty *os.File, proc *os.Process) {
 
 // Argv is argv run under this executable's `dev pty-wrap`.
 func Argv(argv ...string) ([]string, error) {
+	return wrapArgv(nil, argv)
+}
+
+// ClosingArgv is argv run under `dev pty-wrap --close-on-exit`: a clean exit closes its tmux session for good.
+func ClosingArgv(argv ...string) ([]string, error) {
+	return wrapArgv([]string{"--close-on-exit"}, argv)
+}
+
+func wrapArgv(flags, argv []string) ([]string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("ptywrap: %w", err)
 	}
-	return append([]string{exe, "pty-wrap", "--"}, argv...), nil
+	return slices.Concat([]string{exe, "pty-wrap"}, flags, []string{"--"}, argv), nil
 }

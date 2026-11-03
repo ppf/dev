@@ -23,7 +23,7 @@ func newSidebarCmd() *cobra.Command {
 			return sidebar.Run(tmux.New(), pane)
 		},
 	}
-	cmd.AddCommand(newSidebarToggleCmd(), newSidebarEnsureCmd(), newCloseWorktreeCmd())
+	cmd.AddCommand(newSidebarToggleCmd(), newSidebarEnsureCmd(), newCloseWorktreeCmd(), newExitedCmd())
 	return cmd
 }
 
@@ -73,4 +73,20 @@ func newCloseWorktreeCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&a.Client, "client", "", "client tty to act on (default: tmux's current client)")
 	return cmd
+}
+
+func newExitedCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "exited <status> <target>",
+		Short:  "After a clean exit (status 0) of a pane: close target's session (target: a pane or session id) for good, like the sidebar's ×",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			// A crash or a server going down leaves the session for the next restore
+			if args[0] != "0" {
+				return nil
+			}
+			return sidebar.Exited(tmux.New(), args[1])
+		},
+	}
 }

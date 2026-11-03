@@ -204,6 +204,10 @@ func TestAgentClose(t *testing.T) {
 	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/done"); err == nil {
 		t.Error("❌ branch done still there")
 	}
+	record, err := os.ReadFile(filepath.Join(d.tmp, "state/dev/archive/done/session.json"))
+	if err != nil || !strings.Contains(string(record), `"worktree_removed": true`) || !strings.Contains(string(record), "untracked files copied to "+results) {
+		t.Errorf("❌ archive record: %v %s", err, record)
+	}
 
 	// A second close of that name keeps the first one's results; text output, no client attached
 	again := worker("done", true, "idle", idle)

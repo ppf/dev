@@ -256,12 +256,12 @@ func hasSession(c *tmux.Client, name string) (bool, error) {
 }
 
 // agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control
-// unless a worker's, under dev pty-wrap so its images get through tmux.
+// unless a worker's, under dev pty-wrap so its images get through tmux, its clean exit closing the session.
 func agentCommand(kind, session string, worker bool) (string, error) {
 	if kind != agent.Claude {
 		return kind, nil
 	}
-	argv, err := ptywrap.Argv(agent.ClaudeArgv(session, worker)...)
+	argv, err := ptywrap.ClosingArgv(agent.ClaudeArgv(session, worker)...)
 	if err != nil {
 		return "", err
 	}

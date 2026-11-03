@@ -68,7 +68,7 @@ func TestHerdCompactView(t *testing.T) {
 	check(t, "ask prompt", status+errOut, "0")
 	waitFor(t, "decision note with the inbox off", func() bool { return note() == "needs a decision" })
 
-	// A reopened previews pane keeps its session's view: a hand-made boss (no pane-exited binding)
+	// A reopened previews pane keeps its session's view: a hand-made boss (no pane-died binding)
 	d.T("new-session", "-d", "-s", "boss2", "-x", "200", "-y", "50", "sleep 600")
 	d.T("set-option", "-t", "=boss2:", "@dev_herd", "1")
 	d.T("set-option", "-t", "=boss2:", "@dev_boss_view", "compact")

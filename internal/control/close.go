@@ -3,12 +3,8 @@ package control
 import (
 	"cmp"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ppf/dev/internal/agent"
@@ -73,7 +69,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 		if err != nil {
 			return done, err
 		}
-		if dir, err = newDir(filepath.Join(dir, "results"), a.Session); err != nil {
+		if dir, err = config.NewDir(filepath.Join(dir, "results"), a.Session); err != nil {
 			return done, err
 		}
 		if err := worktree.Archive(wt, dir, files); err != nil {
@@ -85,7 +81,12 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err := closable(c, a, wt, head); err != nil {
 		return done, err
 	}
-	if err := kill(c, a.Session, own); err != nil {
+	record := sidebar.Ended{Worktree: wt}
+	if done.Results != "" {
+		record.Note = "untracked files copied to " + done.Results
+	}
+	dir, err := kill(c, a.Session, own, record)
+	if err != nil {
 		return done, fmt.Errorf("killing %s: %w", a.Session, err)
 	}
 	// Only now: panes inside the worktree would block its removal
@@ -98,6 +99,9 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 			return done, fmt.Errorf("removed %s, but deleting branch %s failed: %w", wt, branch, err)
 		}
 		done.Branch = branch
+	}
+	if err := sidebar.MarkRemoved(dir); err != nil {
+		return done, fmt.Errorf("closed %s, but its archive record %s: %w", a.Session, dir, err)
 	}
 	return done, nil
 }
@@ -171,40 +175,17 @@ func prMerged(wt, base, head string) error {
 	return nil
 }
 
-// newDir creates parent/name, or name.2, .3, … if taken, so a reused name never mixes in earlier results.
-func newDir(parent, name string) (string, error) {
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
-	}
-	for n := 1; ; n++ {
-		dir := filepath.Join(parent, name)
-		if n > 1 {
-			dir += "." + strconv.Itoa(n)
-		}
-		err := os.Mkdir(dir, 0o755)
-		if !errors.Is(err, fs.ErrExist) {
-			return dir, err
-		}
-	}
-}
-
-// kill switches the clients attached to session over to to, so they aren't detached with it, then kills it
-// for good (sidebar.KillSession).
-func kill(c *tmux.Client, session, to string) error {
+// kill switches the clients attached to session over to to, so they aren't detached with it, then closes it
+// for good with record (sidebar.CloseUnasked), returning the record's directory.
+func kill(c *tmux.Client, session, to string, record sidebar.Ended) (string, error) {
 	clients, err := c.Run("list-clients", "-t", tmux.SessionTarget(session), "-F", "#{client_name}")
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, client := range strings.Fields(clients) {
 		if _, err := c.Run("switch-client", "-c", client, "-t", tmux.SessionTarget(to)); err != nil {
-			return err
+			return "", err
 		}
 	}
-	if err := sidebar.KillSession(c, session); err != nil {
-		return err
-	}
-	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err == nil {
-		return fmt.Errorf("%s is still there after kill-session", session)
-	}
-	return nil
+	return sidebar.CloseUnasked(c, session, record)
 }

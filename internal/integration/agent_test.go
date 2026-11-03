@@ -38,7 +38,8 @@ while IFS= read -r line; do
 	ask*) hook waiting Notification permission_prompt; continue ;;
 	esac
 	hook idle Stop
-done`, name), name)
+done
+hook clear SessionEnd`, name), name)
 }
 
 // devAgent runs dev agent args with env and returns stdout, stderr and the exit status.
@@ -249,7 +250,7 @@ func TestAgentStart(t *testing.T) {
 	check(t, "agent", first["session"]+" "+first["agent"]+" "+first["state"]+" "+first["path"], "app Claude idle "+dir)
 	check(t, "agent pane is the layout's claude", d.T("display", "-t", first["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
 	// Not from a pane: no @dev_started_by, so not a worker
-	if args := agentArgs(t, d, first["pane"]); !strings.Contains(args, "pty-wrap -- claude --remote-control=app") {
+	if args := agentArgs(t, d, first["pane"]); !strings.Contains(args, "pty-wrap --close-on-exit -- claude --remote-control=app") {
 		t.Errorf("claude started from outside tmux not named app in Remote Control: %q", args)
 	}
 	check(t, "client not switched", d.T("list-clients", "-F", "#{client_session}"), "boot")

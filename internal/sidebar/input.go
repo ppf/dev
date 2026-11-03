@@ -32,7 +32,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d", "+":
 		return m, runAction(c, client, func() error { return OpenPicker(c, client) })
 	case "x":
-		return m, runAction(c, client, func() error { return kill(c, client, current, target) })
+		return m, runAction(c, client, func() error { return Close(c, client, current, target) })
 	case "r":
 		return m, runAction(c, client, func() error { return rename(c, client, target) })
 	case "o":
@@ -63,7 +63,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, runAction(c, client, func() error { return OpenPicker(c, client) })
 		}
 		if ok && exact {
-			return m, runAction(c, client, func() error { return kill(c, client, current, session) })
+			return m, runAction(c, client, func() error { return Close(c, client, current, session) })
 		}
 	}
 	if !ok {

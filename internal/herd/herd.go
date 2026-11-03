@@ -3,7 +3,6 @@
 package herd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -160,26 +159,6 @@ func tmuxQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "#", "##").Replace(s) + `"`
 }
 
-// MoveClients switches each client on session to the session it was on before, so ending session doesn't
-// detach it; a client without a live one is left to the session's detach-on-destroy.
-func MoveClients(c *tmux.Client, session string) error {
-	out, err := c.Run("list-clients", "-t", session, "-F", "#{client_name}\t#{client_last_session}")
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		client, last, _ := strings.Cut(line, "\t")
-		if last == "" {
-			continue
-		}
-		if _, err := c.Run("switch-client", "-c", client, "-t", tmux.SessionTarget(last)); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
 // Adopt makes session, restored with bare shells in its coordinator and previews panes, a boss again: the
 // coordinator Claude (resume: claude's args resuming its conversation) and the previews replace the shells.
 func Adopt(c *tmux.Client, session, claude, previews string, resume []string) error {
@@ -212,21 +191,24 @@ func coordinatorArgv(session string, args ...string) []string {
 	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", coordinatorPrompt)...)
 }
 
-// bind marks claude and previews with their roles and ends target's session when either closes, its clients
-// moved off first: without them it is no boss; its sidebar comes and goes like any other.
+// bind marks claude and previews with their roles and closes target's session for good when either exits
+// cleanly, as × does (dev sidebar exited): without them it is no boss; a crash or a signal (a shutdown) leaves
+// it for the restore. remain-on-exit keeps them so the archive record still finds the coordinator's conversation.
 func bind(c *tmux.Client, target, exe, claude, previews string) error {
 	id, err := c.Run("display-message", "-p", "-t", claude, "#{session_id}")
 	if err != nil {
 		return err
 	}
 	// Pane ids (%N) need no quoting in the format, unlike a project name; the session id ($N) does, from tmux and the shell
-	id = strings.TrimSpace(id)
-	move := tmuxQuote(tmux.ShellJoin(exe, "boss", "--move-clients", id))
+	cmd, session := tmuxQuote(tmux.ShellJoin(exe, "sidebar", "exited")), tmuxQuote(tmux.ShellJoin(strings.TrimSpace(id)))
+	// The status unquoted for run-shell to expand; empty for a pane killed by a signal
+	exited := cmd[:len(cmd)-1] + " '#{pane_dead_status}' " + session[1:]
 	_, err = c.Run("set-option", "-p", "-t", claude, OptPane, RoleCoordinator, ";", "set-option", "-p", "-t", previews, OptPane, RolePreviews,
-		// For a client MoveClients can't move: the most recently used session, detaching only with the last one
+		";", "set-option", "-p", "-t", claude, "remain-on-exit", "on", ";", "set-option", "-p", "-t", previews, "remain-on-exit", "on",
+		// For a client the close doesn't switch: the most recently used session, detaching only with the last one
 		";", "set-option", "-t", target, "detach-on-destroy", "off",
-		";", "set-hook", "-t", target, "pane-exited", "if -F '#{||:#{==:#{hook_pane},"+claude+"},#{==:#{hook_pane},"+previews+"}}' "+
-			"{ run-shell "+move+" ; kill-session -t '"+id+"' }")
+		";", "set-hook", "-t", target, "pane-died", "if -F '#{||:#{==:#{hook_pane},"+claude+"},#{==:#{hook_pane},"+previews+"}}' "+
+			"{ run-shell -b -E "+exited+" }")
 	return err
 }
 
