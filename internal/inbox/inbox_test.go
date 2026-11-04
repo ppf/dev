@@ -104,7 +104,7 @@ func TestSpan(t *testing.T) {
 	for d, want := range map[time.Duration]string{
 		17*time.Minute + 59*time.Second: "17m", time.Hour: "1h", 65 * time.Minute: "1h 5m", 300 * time.Minute: "5h",
 	} {
-		if got := span(d); got != want {
+		if got := Span(d); got != want {
 			t.Errorf("span(%s) = %q, want %q", d, got, want)
 		}
 	}

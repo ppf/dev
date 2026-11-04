@@ -23,10 +23,12 @@ const (
 )
 
 type transcript struct {
-	lines  []string
-	tool   string
-	model  string
-	tokens int
+	// written is when the transcript was last written
+	written time.Time
+	lines   []string
+	tool    string
+	model   string
+	tokens  int
 	// broken counts rows that failed to parse, but for a last one still being written
 	broken int
 }
@@ -60,11 +62,16 @@ func readTranscript(projects, id string) (transcript, error) {
 	if err != nil || len(paths) == 0 {
 		return transcript{lines: []string{}}, err
 	}
+	info, err := os.Stat(paths[0])
+	if err != nil {
+		return transcript{lines: []string{}}, err
+	}
 	data, err := tail(paths[0], tailBytes)
 	if err != nil {
 		return transcript{lines: []string{}}, err
 	}
 	t := parseTranscript(data)
+	t.written = info.ModTime()
 	if t.broken > 0 {
 		return t, fmt.Errorf("%s: %d rows did not parse", paths[0], t.broken)
 	}
@@ -177,6 +184,14 @@ func lastLines(text string) []string {
 		}
 	}
 	return lines[max(0, len(lines)-lastLineCount):]
+}
+
+// cut cuts s to lineRunes.
+func cut(s string) string {
+	if r := []rune(s); len(r) > lineRunes {
+		return string(r[:lineRunes-1]) + "…"
+	}
+	return s
 }
 
 // contextWindows maps model ids to their context windows (runtime.max_input_tokens) across the files of

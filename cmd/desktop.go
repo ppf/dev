@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -29,9 +30,12 @@ func newDesktopBoardCmd() *cobra.Command {
 		Short: "List a desktop boss session's workers: state, branch, PRs, context use",
 		Long: `List the unarchived sessions a Claude desktop app session started (its workers): live state
 (busy, blocked, idle, stopped), title, branch, PRs and the share of the context window in use. --json adds
-the app's verdict on the last turn and what it needs, the last lines of the newest assistant text and the
-tool in flight. Reads the app's session records, ~/.claude/sessions, the transcripts and Claude Code's model
-catalog; a file that fails to parse is reported on stderr.`,
+the app's verdict on the last turn and what it needs, the last lines of the newest assistant text, the
+tool in flight and health notes, each with a key that stays the same while its condition holds: stuck (busy,
+no progress for 15 min), a decision unanswered for 3 min, context at 80% or more, a rate limit, and its
+resume once the limit reset. Reads the app's session records, ~/.claude/sessions, the transcripts, Claude
+Code's model catalog and the files dev state and dev question write in desktop sessions
+($XDG_STATE_HOME/dev/desktop); a file that fails to parse is reported on stderr.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if boss == "" {
@@ -44,7 +48,11 @@ catalog; a file that fails to parse is reported on stderr.`,
 			if err != nil {
 				return err
 			}
-			workers, warnings, err := desktop.Board(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")), boss)
+			p := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
+			if p.Hooks, err = desktop.HookDir(); err != nil {
+				return err
+			}
+			workers, warnings, err := desktop.Board(p, boss, time.Now())
 			for _, w := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev desktop board: "+w.Error())
 			}

@@ -162,8 +162,8 @@ func question(msg string) (ask, options string) {
 	return "", ""
 }
 
-// span is d in whole minutes: "17m", "1h", "1h 5m".
-func span(d time.Duration) string {
+// Span is d in whole minutes: "17m", "1h", "1h 5m".
+func Span(d time.Duration) string {
 	m := int(d.Minutes())
 	switch {
 	case m < 60:

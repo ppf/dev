@@ -40,6 +40,7 @@ const worker = (fields: Partial<Worker>): Worker => ({
   lastLines: [],
   tool: '',
   context: null,
+  notes: [],
   ...fields,
 })
 
@@ -58,6 +59,9 @@ const WORKERS = [
 ]
 
 type Ran = { exitCode: number; stdout: string; stderr: string }
+
+const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 17m' }
+const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
 /** Starts the session with dev answering `answer()`'s run, or failing to start with that reason. */
 async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)) {
@@ -195,4 +199,72 @@ test('output this mod does not read says so', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
   await ui.unmount()
+})
+
+test('notes show on their tiles', async ($, on) => {
+  await start($, on, ok([worker({ name: 'fix-login', state: 'busy', notes: [STUCK] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^stuck:/ }))?.text).toBe('stuck: no progress for 17m')
+  await ui.unmount()
+})
+
+/** Collects the prompts the mod submits; `answer` is what the engine makes of each. */
+function submits(on: Parameters<typeof start>[1], answer: (text: string) => { text: string } | { drop: string } = text => ({ text })) {
+  const texts: string[] = []
+  on('prompt.submit', (_, e) => {
+    texts.push(e.text)
+    return answer(e.text)
+  })
+  return texts
+}
+
+test('new notes go to the boss once, batched in one prompt', async ($, on) => {
+  const texts = submits(on)
+  let workers = [worker({ name: 'fix-login', state: 'busy', notes: [STUCK] }), worker({ id: 'local_b', name: 'docs-api', notes: [RESUME] })]
+  const { clock } = await start($, on, () => ok(workers))
+  expect(texts).toEqual(['dev-board: fix-login stuck: no progress for 17m; docs-api resume due: rate limit reset 18:05: resume it'])
+
+  // The same keys, newer minutes: not again
+  workers = [worker({ name: 'fix-login', state: 'busy', notes: [{ ...STUCK, text: 'no progress for 19m' }] }), worker({ id: 'local_b', name: 'docs-api', notes: [RESUME] })]
+  await clock.advance(6000)
+  expect(texts.length).toBe(1)
+
+  workers = [worker({ name: 'fix-login', state: 'busy', notes: [STUCK, { key: 'local_a/high context/c', kind: 'high context', text: '85% used' }] })]
+  await clock.advance(2000)
+  expect(texts).toEqual([texts[0], 'dev-board: fix-login high context: 85% used'])
+})
+
+test('a reload sends no note again', async ($, on) => {
+  const texts = submits(on)
+  const { runs, clock } = await start($, on, ok([worker({ name: 'fix-login', state: 'busy', notes: [STUCK] })]))
+  expect(texts.length).toBe(1)
+  const polled = runs.length
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  expect(runs.length).toBe(polled + 1)
+  expect(texts.length).toBe(1)
+})
+
+test('a failed poll sends nothing and forgets nothing', async ($, on) => {
+  const texts = submits(on)
+  let now: Ran = ok([worker({ notes: [STUCK] })])
+  const { clock } = await start($, on, () => now)
+  now = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(2000)
+  now = ok([worker({ notes: [STUCK] })])
+  await clock.advance(2000)
+  expect(texts.length).toBe(1)
+})
+
+test('a refused prompt is shown, not retried', async ($, on) => {
+  const texts = submits(on, () => ({ drop: 'blocked by a hook' }))
+  const toasts: string[] = []
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const { clock } = await start($, on, ok([worker({ notes: [STUCK] })]))
+  await clock.advance(4000)
+  expect(texts.length).toBe(1)
+  expect(toasts).toEqual(['dev-board: worker notes not sent: blocked by a hook'])
 })

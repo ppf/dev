@@ -15,6 +15,7 @@ func desktopHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	org := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code-sessions", "acct", "org")
 	if err := os.MkdirAll(org, 0o755); err != nil {
 		t.Fatal(err)
@@ -74,5 +75,29 @@ func TestDesktopBoardNoBoss(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "")
 	if _, _, err := execute(t, "", "desktop", "board", "--json"); err == nil || !strings.Contains(err.Error(), "no boss session") {
 		t.Errorf("err = %v, want no boss session", err)
+	}
+}
+
+// A hook in a desktop app session writes the session's hook file instead of a pane's options; its end removes it.
+func TestStateDesktop(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	path := filepath.Join(state, "dev", "desktop", "s1.json")
+	if out, errOut, err := execute(t, `{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`, "state", "working"); out != "" || errOut != "" || err != nil {
+		t.Fatalf("%q %q %v", out, errOut, err)
+	}
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), `"state":"working"`) {
+		t.Errorf("hook file = %s, %v; want working", data, err)
+	}
+	if _, errOut, _ := execute(t, "{", "state", "working"); !strings.HasPrefix(errOut, "❌ dev state: ") {
+		t.Errorf("stderr = %q, want malformed input reported", errOut)
+	}
+	if _, errOut, err := execute(t, `{"hook_event_name":"SessionEnd","session_id":"s1"}`, "state", "clear"); errOut != "" || err != nil {
+		t.Fatalf("%q %v", errOut, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("hook file after SessionEnd: %v, want removed", err)
 	}
 }

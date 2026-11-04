@@ -27,8 +27,8 @@ const (
 const (
 	// maxResumes stops resuming a worker that keeps hitting its limit: each resume's failure is a new note.
 	maxResumes = 3
-	// resumeMargin is how long after its reset a worker is resumed.
-	resumeMargin = time.Minute
+	// ResumeMargin is how long after its reset a worker is resumed.
+	ResumeMargin = time.Minute
 	// ResumePrompt is what dev sends a worker once its rate limit reset.
 	ResumePrompt = "Continue where you left off: your last turn stopped on a rate limit, which has reset."
 )
@@ -85,7 +85,7 @@ func ResetTime(msg string, now time.Time) (time.Time, bool) {
 
 // scheduleResume records when dev resumes pane after a rate limit stopped its turn (a StopFailure of
 // error rate_limit): the reset in the hook's message, else in the failure's lines on its screen (failureLines),
-// plus resumeMargin. note is what
+// plus ResumeMargin. note is what
 // the worker's failed note adds: when it resumes, or why it doesn't; "" for another event.
 func scheduleResume(c *tmux.Client, now time.Time, pane string, input []byte) (note string, err error) {
 	var e hookEvent
@@ -109,13 +109,13 @@ func scheduleResume(c *tmux.Client, now time.Time, pane string, input []byte) (n
 	if n, _ := strconv.Atoi(strings.TrimSpace(out)); n >= maxResumes {
 		return fmt.Sprintf("resumed %d times in a row, not resuming it again", n), unsetResume(c, pane, false)
 	}
-	at := reset.Add(resumeMargin)
+	at := reset.Add(ResumeMargin)
 	if _, err := c.Run("set-option", "-p", "-t", pane, OptResumeAt, strconv.FormatInt(at.Unix(), 10), ";",
 		"set-option", "-pF", "-t", pane, OptResumePrompts, "#{@agent_prompts}", ";",
 		"set-option", "-pF", "-t", pane, OptResumeSession, "#{@agent_session}"); err != nil {
 		return "", err
 	}
-	return "dev resumes it at " + clock(at, now), nil
+	return "dev resumes it at " + Clock(at, now), nil
 }
 
 // failureLines is the end of the conversation on a captured screen, where Claude shows the turn's error: the
@@ -133,8 +133,8 @@ func failureLines(capture string) string {
 // a status line.
 const failureRows = 4
 
-// clock is t as a note shows it: the time, and the day unless it's now's.
-func clock(t, now time.Time) string {
+// Clock is t as a note shows it: the time, and the day unless it's now's.
+func Clock(t, now time.Time) string {
 	t = t.In(now.Location())
 	if t.YearDay() == now.YearDay() && t.Year() == now.Year() {
 		return t.Format("15:04")

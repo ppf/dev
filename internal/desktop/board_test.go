@@ -154,7 +154,7 @@ func fixture(t *testing.T) Paths {
 }
 
 func TestBoard(t *testing.T) {
-	workers, warnings, err := Board(fixture(t), boss)
+	workers, warnings, err := Board(fixture(t), boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestBoardStopped(t *testing.T) {
 	if err := os.RemoveAll(p.Live); err != nil {
 		t.Fatal(err)
 	}
-	workers, _, err := Board(p, boss)
+	workers, _, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestBoardStopped(t *testing.T) {
 func TestBoardRunningBlocked(t *testing.T) {
 	p := fixture(t)
 	writeJSON(t, filepath.Join(p.Live, "3.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-blocked", "status": "idle"})
-	workers, _, err := Board(p, boss)
+	workers, _, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestBoardReusedPID(t *testing.T) {
 	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{
 		"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "startedAt": 1000,
 	})
-	workers, _, err := Board(p, boss)
+	workers, _, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestBoardJSON(t *testing.T) {
 	writeJSON(t, filepath.Join(p.Records, "acct", "org", "local_new.json"), map[string]any{
 		"sessionId": "local_new", "createdAt": time.Now().UnixMilli(), "spawnedFrom": map[string]any{"sessionId": boss},
 	})
-	workers, _, err := Board(p, boss)
+	workers, _, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestBoardJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
-		"needsAction", "prs", "state", "title", "tool", "verdict", "worktree"}
+		"needsAction", "notes", "prs", "state", "title", "tool", "verdict", "worktree"}
 	for _, w := range got {
 		keys := slices.Sorted(maps.Keys(w))
 		if !slices.Equal(keys, want) {
@@ -287,6 +287,9 @@ func TestBoardJSON(t *testing.T) {
 		}
 		if _, ok := w["lastLines"].([]any); !ok {
 			t.Errorf("%s: lastLines = %#v, want a list", w["id"], w["lastLines"])
+		}
+		if _, ok := w["notes"].([]any); !ok {
+			t.Errorf("%s: notes = %#v, want a list", w["id"], w["notes"])
 		}
 	}
 	pr := got[0]["prs"].([]any)[0].(map[string]any)
@@ -299,7 +302,7 @@ func TestBoardWarnings(t *testing.T) {
 	p := fixture(t)
 	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "thinking"})
 	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), lines(t, assistant("claude-new-6", text("Hi."))))
-	_, warnings, err := Board(p, boss)
+	_, warnings, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +316,7 @@ func TestBoardWarnings(t *testing.T) {
 
 func TestBoardNoWorkers(t *testing.T) {
 	p := fixture(t)
-	workers, warnings, err := Board(p, "local_other")
+	workers, warnings, err := Board(p, "local_other", time.Now())
 	if err != nil || len(warnings) != 0 {
 		t.Fatalf("err = %v, warnings = %v", err, warnings)
 	}
@@ -323,7 +326,7 @@ func TestBoardNoWorkers(t *testing.T) {
 }
 
 func TestBoardUnknownBoss(t *testing.T) {
-	if _, _, err := Board(fixture(t), "local_nope"); err == nil || !strings.Contains(err.Error(), "local_nope") {
+	if _, _, err := Board(fixture(t), "local_nope", time.Now()); err == nil || !strings.Contains(err.Error(), "local_nope") {
 		t.Errorf("err = %v, want no record for local_nope", err)
 	}
 }
@@ -389,5 +392,43 @@ func TestTail(t *testing.T) {
 	}
 	if got, _ := tail(path, 100); string(got) != "first line\nsecond\nthird\n" {
 		t.Errorf("tail of a short file = %q, want all of it", got)
+	}
+}
+
+// A worker's hook file is found by its current conversation (the live session's id after a /clear).
+func TestBoardNotes(t *testing.T) {
+	p := fixture(t)
+	p.Hooks = t.TempDir()
+	now := time.Now().Add(20 * time.Minute)
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "working", Since: time.Now().Add(-time.Hour).Unix(), Active: time.Now().Unix()})
+	reset := time.Now().Add(-time.Minute)
+	writeJSON(t, filepath.Join(p.Hooks, "cli-idle.json"), Hook{State: "idle", RateLimited: true, ResetAt: reset.Unix()})
+	// The idle worker's record id, which a /clear left behind
+	writeJSON(t, filepath.Join(p.Hooks, "cli-old.json"), Hook{State: "working", Active: 1})
+	workers, warnings, err := Board(p, boss, now)
+	if err != nil || len(warnings) != 1 {
+		t.Fatal(err, warnings)
+	}
+	kinds := func(w Worker) []string {
+		var ks []string
+		for _, n := range w.Notes {
+			ks = append(ks, n.Kind)
+		}
+		return ks
+	}
+	if got := kinds(workers[0]); !slices.Equal(got, []string{"stuck"}) {
+		t.Errorf("busy notes = %+v, want stuck", workers[0].Notes)
+	}
+	if got := kinds(workers[1]); got != nil {
+		t.Errorf("blocked notes = %+v, want none", workers[1].Notes)
+	}
+	if got := kinds(workers[2]); !slices.Equal(got, []string{"resume due", "high context"}) {
+		t.Errorf("idle notes = %+v, want resume due and high context", workers[2].Notes)
+	}
+
+	write(t, filepath.Join(p.Hooks, "cli-busy.json"), "{")
+	_, warnings, _ = Board(p, boss, now)
+	if len(warnings) != 2 || !strings.Contains(warnings[1].Error(), "cli-busy.json") {
+		t.Errorf("warnings = %v, want the broken hook file reported", warnings)
 	}
 }

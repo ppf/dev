@@ -183,7 +183,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			}
 			progress := time.Unix(max(unix(w.Active), unix(w.Since), h.ScreenAt), 0)
 			if quiet := now.Sub(progress); quiet >= StuckWorking {
-				text := "no progress for " + span(quiet)
+				text := "no progress for " + Span(quiet)
 				if w.parked {
 					text += ", waiting on its background tasks"
 				}
@@ -193,7 +193,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			// No stretch to time
 		case agent.Deciding(w.trusted, w.WaitingFor):
 			if held := now.Sub(since); held >= StuckDecision {
-				stuck("waiting on a decision for "+span(held)+", unanswered", w.trusted+w.Since)
+				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since)
 			}
 		case resting(w.trusted, w.WaitingFor):
 			if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
@@ -201,7 +201,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 				for asked >= AskAgain<<h.Reminded {
 					h.Reminded++
 				}
-				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + " (unanswered for " + span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded),
+				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + " (unanswered for " + Span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded),
 					Outside: w.Outside != ""})
 			}
 		}
@@ -241,7 +241,7 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 		return Note{}, false
 	}
 	idle := now.Sub(time.Unix(unix(since), 0))
-	n = Note{Worker: worker, Kind: Stuck, Text: fmt.Sprintf("idle for %s, PR #%d has %s", span(idle), pr.number, strings.Join(issues, " and ")),
+	n = Note{Worker: worker, Kind: Stuck, Text: fmt.Sprintf("idle for %s, PR #%d has %s", Span(idle), pr.number, strings.Join(issues, " and ")),
 		Key: Stuck + "\x00pr" + since, Outside: outside}
 	if h.Stuck != n.Key && s.add(n) {
 		h.Stuck = n.Key
