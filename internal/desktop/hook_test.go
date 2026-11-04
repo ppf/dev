@@ -91,17 +91,35 @@ func TestRecordQuestion(t *testing.T) {
 	if err := RecordQuestion(dir, []byte(ask), t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	want := Hook{State: "waiting", Since: t0.Add(time.Minute).Unix(), Active: t0.Add(time.Minute).Unix(), WaitingFor: "PermissionRequest",
-		Question: "allow Bash: npm test"}
+	// Auto mode may approve it: still working until the dialog's Notification
+	want := Hook{State: "working", Since: t0.Unix(), Active: t0.Add(time.Minute).Unix(), Question: "allow Bash: npm test"}
 	if got, err := ReadHook(path); err != nil || got != want {
 		t.Errorf("hook = %+v, %v; want %+v", got, err, want)
+	}
+	shown := `{"hook_event_name":"Notification","session_id":"s1","notification_type":"permission_prompt"}`
+	if err := RecordState(dir, "waiting", []byte(shown), t0.Add(90*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	want = Hook{State: "waiting", Since: t0.Add(90 * time.Second).Unix(), Active: t0.Add(90 * time.Second).Unix(), WaitingFor: "permission_prompt",
+		Question: "allow Bash: npm test"}
+	if got, _ := ReadHook(path); got != want {
+		t.Errorf("after the Notification: %+v, want %+v", got, want)
+	}
+
+	// A subagent's dialog isn't the session's
+	sub := `{"hook_event_name":"PermissionRequest","session_id":"s1","agent_id":"a1","tool_name":"Read","tool_input":{"file_path":"/x"}}`
+	if err := RecordQuestion(dir, []byte(sub), t0.Add(100*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ReadHook(path); got.Question != "allow Bash: npm test" || got.Active != t0.Add(100*time.Second).Unix() {
+		t.Errorf("after a subagent's dialog: %+v, want only Active moved", got)
 	}
 
 	question := `{"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which?","options":[{"label":"A"},{"label":"B"}]}]}}`
 	if err := RecordQuestion(dir, []byte(question), t0.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := ReadHook(path); got.WaitingFor != "AskUserQuestion" || got.Question != "Which? (A / B)" {
+	if got, _ := ReadHook(path); got.State != "waiting" || got.WaitingFor != "AskUserQuestion" || got.Question != "Which? (A / B)" {
 		t.Errorf("hook = %+v, want AskUserQuestion's question", got)
 	}
 
@@ -119,5 +137,69 @@ func TestRecordQuestion(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "s2.json")); !os.IsNotExist(err) {
 		t.Errorf("s2: %v, want no file", err)
+	}
+}
+
+// Hooks of one session run side by side: none loses another's update.
+func TestRecordStateConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	if err := RecordState(dir, "working", []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error)
+	for i := range 20 {
+		go func() {
+			if i == 0 {
+				done <- RecordQuestion(dir, []byte(`{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"}}`), now)
+				return
+			}
+			done <- RecordState(dir, "working", []byte(`{"hook_event_name":"PostToolUse","session_id":"s1","agent_id":"a1"}`), now)
+		}()
+	}
+	for range 20 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h, err := ReadHook(filepath.Join(dir, "s1.json")); err != nil || h.Question != "allow Bash: ls" {
+		t.Errorf("hook = %+v, %v; want the question kept", h, err)
+	}
+}
+
+func TestRecordStateHeals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s1.json")
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`)
+	if err := RecordState(dir, "working", in, time.Now()); err == nil {
+		t.Error("broken file: want it reported")
+	}
+	if err := RecordState(dir, "working", in, time.Now()); err != nil {
+		t.Errorf("next hook: %v, want the file replaced", err)
+	}
+}
+
+func TestRecordStatePrunes(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	for _, id := range []string{"old", "new"} {
+		if err := RecordState(dir, "idle", []byte(`{"hook_event_name":"Stop","session_id":"`+id+`"}`), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	past := now.Add(-staleHooks - time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "old.json"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordState(dir, "idle", []byte(`{"hook_event_name":"SessionStart","session_id":"s1"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]bool{"old.json": false, "old.json.lock": false, "new.json": true, "s1.json": true} {
+		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
+			t.Errorf("%s: %v, want present=%v", name, err, want)
+		}
 	}
 }

@@ -432,3 +432,37 @@ func TestBoardNotes(t *testing.T) {
 		t.Errorf("warnings = %v, want the broken hook file reported", warnings)
 	}
 }
+
+// A live status change is progress, and its time is in milliseconds.
+func TestBoardStatusChangeIsProgress(t *testing.T) {
+	p := fixture(t)
+	p.Hooks = t.TempDir()
+	now := time.Now().Add(20 * time.Minute)
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "working", Since: 1, Active: 1})
+	writeJSON(t, filepath.Join(p.Hooks, "cli-idle.json"), Hook{State: "idle"})
+	for changed, stuck := range map[time.Duration]bool{time.Minute: false, 20 * time.Minute: true} {
+		writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy",
+			"statusUpdatedAt": now.Add(-changed).UnixMilli()})
+		workers, _, err := Board(p, boss, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(workers[0].Notes) == 1; got != stuck {
+			t.Errorf("status changed %v ago: notes = %+v, want stuck %v", changed, workers[0].Notes, stuck)
+		}
+	}
+}
+
+// A running worker without a hook file: its hooks don't run a dev that writes one.
+func TestBoardNoHookFile(t *testing.T) {
+	p := fixture(t)
+	p.Hooks = t.TempDir()
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "working"})
+	_, warnings, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings[1].Error(), "cli-idle.json: no hook file for Idle one") {
+		t.Errorf("warnings = %v, want the idle worker's missing hook file (not the stopped one's)", warnings)
+	}
+}

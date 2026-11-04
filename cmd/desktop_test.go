@@ -101,3 +101,31 @@ func TestStateDesktop(t *testing.T) {
 		t.Errorf("hook file after SessionEnd: %v, want removed", err)
 	}
 }
+
+// The hook file dev state writes is the one dev desktop board reads.
+func TestDesktopBoardReadsHookFiles(t *testing.T) {
+	desktopHome(t)
+	home := os.Getenv("HOME")
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	live := `{"pid":` + jsonInt(int64(os.Getpid())) + `,"sessionId":"cli-w","hostSessionId":"local_w","status":"idle"}`
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", "sessions", "1.json"), []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failed := `{"hook_event_name":"StopFailure","session_id":"cli-w","error":"rate_limit","last_assistant_message":"You've hit your limit"}`
+	if _, errOut, err := execute(t, failed, "state", "idle"); errOut != "" || err != nil {
+		t.Fatalf("%q %v", errOut, err)
+	}
+	stdout, stderr, err := execute(t, "", "desktop", "board", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, `"kind":"rate-limited","text":"no reset time read"`) || strings.Contains(stderr, "no hook file") {
+		t.Errorf("stdout = %s\nstderr = %s\nwant the rate-limited note from the hook file", stdout, stderr)
+	}
+}

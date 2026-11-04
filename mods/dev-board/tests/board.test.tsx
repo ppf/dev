@@ -268,3 +268,13 @@ test('a refused prompt is shown, not retried', async ($, on) => {
   expect(texts.length).toBe(1)
   expect(toasts).toEqual(['dev-board: worker notes not sent: blocked by a hook'])
 })
+
+test('a dev without notes says so and sends nothing', async ($, on) => {
+  const texts = submits(on)
+  const { notes: _, ...old } = worker({})
+  await start($, on, { exitCode: 0, stdout: JSON.stringify([old]), stderr: '' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  await ui.unmount()
+  expect(texts.length).toBe(0)
+})

@@ -28,7 +28,7 @@ func TestNotes(t *testing.T) {
 		{"nothing known: no stuck note", Worker{State: StateBusy}, Hook{}, 0, []Note{}},
 		{"idle for long: not stuck", Worker{State: StateIdle}, Hook{State: "idle", Since: ago(60), Active: ago(60)}, ago(60), []Note{}},
 		{"a decision unanswered for 4 min", Worker{State: StateBusy},
-			Hook{State: "waiting", Since: ago(4), Active: ago(4), WaitingFor: "PermissionRequest", Question: "allow Bash: ls"}, ago(40),
+			Hook{State: "waiting", Since: ago(4), Active: ago(4), WaitingFor: "permission_prompt", Question: "allow Bash: ls"}, ago(40),
 			[]Note{{Key: "local_w/needs a decision/" + itoa(ago(4)), Kind: "needs a decision", Text: "waiting on a decision for 4m, unanswered: allow Bash: ls"}}},
 		{"a decision of 2 min: not yet", Worker{State: StateBusy}, Hook{State: "waiting", Since: ago(2), WaitingFor: "permission_prompt"}, ago(40), []Note{}},
 		{"a dismissed dialog ended the turn", Worker{State: StateIdle}, Hook{State: "waiting", Since: ago(10), WaitingFor: "permission_prompt"}, ago(40), []Note{}},

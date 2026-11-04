@@ -91,8 +91,10 @@ export const register: Register = on => {
         }
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
-          // Marked first: the prompt waits for the boss to go idle, and a refused one is not retried every tick
-          await update($, sent, keys => [...keys, ...notes.keys].slice(-MAX_SENT))
+          // Marked first: the prompt waits for the boss to go idle, and a refused one is not retried every tick.
+          // The notes still holding go last, so the cap drops only gone ones
+          const holding = new Set(polled.workers.flatMap(w => w.notes.map(n => n.key)))
+          await update($, sent, keys => [...keys.filter(k => !holding.has(k)), ...holding].slice(-MAX_SENT))
           void $.prompt.submit({ text: notes.text }).then(
             r => r.drop !== undefined && $.ui.toast(`dev-board: worker notes not sent: ${r.drop}`),
             (err: unknown) => $.ui.toast(`dev-board: worker notes not sent: ${err instanceof Error ? err.message : String(err)}`),

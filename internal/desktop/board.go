@@ -82,7 +82,7 @@ type Worker struct {
 	Tool string `json:"tool"`
 	// Context is the share of the model's context window in use, in whole percent; nil when unknown.
 	Context *int `json:"context"`
-	// Notes are its health notes (stuck, unanswered decision, high context, rate limit).
+	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
 	Notes []Note `json:"notes"`
 }
 
@@ -305,7 +305,12 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	var h Hook
 	var hookErr error
 	if p.Hooks != "" {
-		h, hookErr = ReadHook(filepath.Join(p.Hooks, cli+".json"))
+		path := filepath.Join(p.Hooks, cli+".json")
+		h, hookErr = ReadHook(path)
+		if _, err := os.Stat(path); running && errors.Is(err, os.ErrNotExist) {
+			// Claude's hooks run a dev without desktop support (or none), or none ran since it was installed
+			hookErr = fmt.Errorf("%s: no hook file for %s: its decision and rate-limit notes are missing until a dev state hook writes it", path, w.Title)
+		}
 	}
 	t, err := readTranscript(p.Projects, cli)
 	w.LastLines = t.lines

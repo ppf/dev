@@ -16,11 +16,11 @@ import (
 func newQuestionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "question",
-		Short: "Claude hook (PermissionRequest, PreToolUse of AskUserQuestion): record the dialog's question on its tmux pane",
+		Short: "Claude hook (PermissionRequest, PreToolUse of AskUserQuestion): record the dialog's question on its tmux pane (or a desktop app session's hook file)",
 		Long: `Claude hook for PermissionRequest and PreToolUse (matcher AskUserQuestion): records what the dialog asks
 (AskUserQuestion's questions, or a permission's tool with its command, file or URL) on the pane (@agent_question),
-so dev boss's picker and inbox decision notes can show it; in a desktop app session, as a decision in its hook
-file for dev desktop board. It never decides: nothing goes to stdout, where Claude reads a decision.`,
+so dev boss's picker and inbox decision notes can show it; in a desktop app session, in its hook file for dev
+desktop board (an AskUserQuestion also as a decision). It never decides: nothing goes to stdout, where Claude reads a decision.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			pane := os.Getenv("TMUX_PANE")
