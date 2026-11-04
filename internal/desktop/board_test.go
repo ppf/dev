@@ -506,3 +506,43 @@ func TestBoardNoHookFile(t *testing.T) {
 		t.Errorf("warnings = %v, want the idle worker's missing hook file (not the stopped one's)", warnings)
 	}
 }
+
+// The board's own wiring: the transcript's list, notes before status (stuck), the record's quit flag.
+func TestBoardStatusWiring(t *testing.T) {
+	p := fixture(t)
+	now := time.Now()
+	old := now.Add(-20 * time.Minute)
+	busy := filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl")
+	write(t, busy, lines(t,
+		assistant("claude-opus-5-5", map[string]any{"type": "tool_use", "id": "p1", "name": updatePlanTool, "input": map[string]any{
+			"items": []map[string]any{{"content": "one", "status": "completed"}, {"content": "two", "status": "in_progress"}},
+		}}),
+		toolResult("p1"),
+		assistant("claude-opus-5-5", toolUse("t2", "Bash")),
+	))
+	if err := os.Chtimes(busy, old, old); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{
+		"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "statusUpdatedAt": old.UnixMilli(),
+	})
+	writeJSON(t, filepath.Join(p.Records, "acct", "org", "local_idle.json"), map[string]any{
+		"sessionId": "local_idle", "cliSessionId": "cli-old", "title": "Idle one", "createdAt": now.Add(-time.Second).UnixMilli(),
+		"spawnedFrom": map[string]any{"sessionId": boss}, "interruptedAwaitingPerson": true,
+	})
+	workers, _, err := Board(p, boss, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := workers[0]
+	if want := []Step{{"one", StepDone}, {"two", StepCurrent}}; !slices.Equal(b.Plan, want) {
+		t.Errorf("busy plan = %v, want %v", b.Plan, want)
+	}
+	if b.Status != StatusStuck || b.StatusText != "no progress for 20m" {
+		t.Errorf("busy status = %s %q, want stuck: no progress for 20m", b.Status, b.StatusText)
+	}
+	idle := workers[2]
+	if idle.ID != "local_idle" || idle.Status != StatusNeedsYou || idle.StatusText != interruptedNote {
+		t.Errorf("running idle worker the app quit on = %s %s %q, want needs you", idle.ID, idle.Status, idle.StatusText)
+	}
+}

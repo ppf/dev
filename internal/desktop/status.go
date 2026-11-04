@@ -10,7 +10,8 @@ import (
 
 // Worker statuses, finer than its state: the first that holds names the tile.
 const (
-	// StatusNeedsYou: a dialog waits on the person (a permission prompt, a question), or did when the app quit.
+	// StatusNeedsYou: a dialog waits on the person (a permission prompt, a question), or did when the app quit
+	// and the worker hasn't run a turn since.
 	StatusNeedsYou = "needs you"
 	// StatusRateLimited: a rate limit stopped its last turn.
 	StatusRateLimited = "rate-limited"
@@ -26,7 +27,7 @@ const (
 	StatusReviewReady = "review ready"
 	// StatusIdle: running between turns.
 	StatusIdle = "idle"
-	// StatusStopped: no live Claude.
+	// StatusStopped: no live Claude, and its last verdict isn't blocked.
 	StatusStopped = "stopped"
 )
 
@@ -38,6 +39,9 @@ const interruptedNote = "a dialog was open when the app quit"
 // last lines, tool and notes. h is its hook file, interrupted the app record's interruptedAwaitingPerson.
 func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) {
 	if w.State == StateStopped {
+		if interrupted {
+			return StatusStopped, interruptedNote
+		}
 		return StatusStopped, ""
 	}
 	busy := w.State == StateBusy
@@ -45,7 +49,8 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 	// A dismissed dialog fires no hook but ends the turn: only a busy worker still waits on it
 	case busy && agent.Deciding(h.State, h.WaitingFor):
 		return StatusNeedsYou, h.Question
-	case interrupted:
+	// A busy worker runs a turn: whatever the app recorded at its quit is over
+	case !busy && interrupted:
 		return StatusNeedsYou, interruptedNote
 	case !busy && h.RateLimited:
 		if h.ResetAt == 0 {

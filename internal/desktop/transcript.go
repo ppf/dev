@@ -55,6 +55,7 @@ type block struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
 	Input     json.RawMessage `json:"input"`
 }
 
@@ -74,19 +75,17 @@ func readTranscript(projects, id string) (transcript, error) {
 	}
 	t, ops := parseTranscript(data)
 	t.written = info.ModTime()
+	var scanErr error
 	if !hasItems(ops) && start > 0 {
 		// The list was set before the tail: a long turn
-		before, err := planOpsBefore(paths[0], start)
-		if err != nil {
-			return t, err
-		}
-		ops = append(before, ops...)
+		before, broken, err := planOpsBefore(paths[0], start)
+		ops, t.broken, scanErr = append(before, ops...), t.broken+broken, err
 	}
 	t.plan = replay(ops)
 	if t.broken > 0 {
-		return t, fmt.Errorf("%s: %d rows did not parse", paths[0], t.broken)
+		scanErr = errors.Join(scanErr, fmt.Errorf("%s: %d rows did not parse", paths[0], t.broken))
 	}
-	return t, nil
+	return t, scanErr
 }
 
 // tail reads the whole lines in the last n bytes of path and where they start; none when no whole line fits.
@@ -143,6 +142,9 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 		}
 		var blocks []block
 		isBlocks := json.Unmarshal(r.Message.Content, &blocks) == nil
+		if isBlocks {
+			ops = append(ops, planOps(blocks)...)
+		}
 		if r.Type == "user" && !(isBlocks && slices.ContainsFunc(blocks, isToolResult)) {
 			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more
 			pending = nil
@@ -155,9 +157,6 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 		if r.Type == "assistant" && r.Message.Usage != nil && r.Message.Model != "<synthetic>" {
 			u := r.Message.Usage
 			t.model, t.tokens = r.Message.Model, u.Input+u.CacheCreation+u.CacheRead
-		}
-		if r.Type == "assistant" {
-			ops = append(ops, planOps(blocks)...)
 		}
 		for _, b := range blocks {
 			switch {

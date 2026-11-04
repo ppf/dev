@@ -34,10 +34,13 @@ type Step struct {
 	Status  string `json:"status"`
 }
 
-// planOp is one update_plan or wrap_up call: items replaces the list (hasItems), advance completes the current
-// step and starts the next pending one, done completes steps and start starts one (1-based), wrapUp
-// completes them all.
+// planOp is one update_plan or wrap_up call, by its tool use id: items replaces the list (hasItems), advance
+// completes the current step and starts the next pending one, done completes steps and start starts one
+// (1-based), wrapUp completes them all. One with failed is no call but call id's error result: that call
+// changed nothing (rejected, interrupted).
 type planOp struct {
+	id       string
+	failed   bool
 	hasItems bool
 	items    []Step
 	advance  bool
@@ -46,16 +49,19 @@ type planOp struct {
 	wrapUp   bool
 }
 
-// planOps are the task list calls among an assistant row's blocks.
+// planOps are the task list calls among a row's blocks, and the tool calls whose results are errors.
 func planOps(blocks []block) []planOp {
 	var ops []planOp
 	for _, b := range blocks {
+		if b.Type == "tool_result" && b.IsError {
+			ops = append(ops, planOp{id: b.ToolUseID, failed: true})
+		}
 		if b.Type != "tool_use" {
 			continue
 		}
 		switch b.Name {
 		case wrapUpTool:
-			ops = append(ops, planOp{wrapUp: true})
+			ops = append(ops, planOp{id: b.ID, wrapUp: true})
 		case updatePlanTool:
 			var in struct {
 				Items   *[]Step `json:"items"`
@@ -66,7 +72,7 @@ func planOps(blocks []block) []planOp {
 			if json.Unmarshal(b.Input, &in) != nil {
 				continue
 			}
-			op := planOp{advance: in.Advance, done: in.Done, start: in.Start}
+			op := planOp{id: b.ID, advance: in.Advance, done: in.Done, start: in.Start}
 			if in.Items != nil {
 				op.hasItems, op.items = true, *in.Items
 			}
@@ -76,15 +82,31 @@ func planOps(blocks []block) []planOp {
 	return ops
 }
 
+// failedCalls are the ids of the calls ops say failed.
+func failedCalls(ops []planOp) map[string]bool {
+	failed := map[string]bool{}
+	for _, op := range ops {
+		if op.failed {
+			failed[op.id] = true
+		}
+	}
+	return failed
+}
+
 // hasItems reports whether ops set the list.
 func hasItems(ops []planOp) bool {
-	return slices.ContainsFunc(ops, func(op planOp) bool { return op.hasItems })
+	failed := failedCalls(ops)
+	return slices.ContainsFunc(ops, func(op planOp) bool { return op.hasItems && !failed[op.id] })
 }
 
 // replay is the task list ops leave, from their last items call on; none without one.
 func replay(ops []planOp) []Step {
 	steps := []Step{}
+	failed := failedCalls(ops)
 	for _, op := range ops {
+		if op.failed || failed[op.id] {
+			continue
+		}
 		if op.hasItems {
 			steps = append([]Step{}, op.items...)
 		}
@@ -126,15 +148,15 @@ func replay(ops []planOp) []Step {
 	return steps
 }
 
-// planOpsBefore reads path backward from end, a row boundary, for the task list calls from the last items call
-// on, at most planScanBytes back; all it found when it found no items call.
-func planOpsBefore(path string, end int64) ([]planOp, error) {
+// planOpsBefore reads path backward from end, a row boundary, for the task list calls back to the chunk holding
+// the last items call (replay drops those before it), at most planScanBytes back, and counts the task list rows
+// that did not parse; all it found when it found no items call.
+func planOpsBefore(path string, end int64) (ops []planOp, broken int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = f.Close() }()
-	var ops []planOp
 	// carry is the start of a row cut by the chunk after, which ends in the chunk before
 	var carry []byte
 	for floor := max(0, end-planScanBytes); end > floor; {
@@ -142,7 +164,7 @@ func planOpsBefore(path string, end int64) ([]planOp, error) {
 		buf := make([]byte, end-start, end-start+int64(len(carry)))
 		n, err := f.ReadAt(buf, start)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return ops, err
+			return ops, broken, err
 		}
 		buf = append(buf[:n], carry...)
 		carry = nil
@@ -156,22 +178,30 @@ func planOpsBefore(path string, end int64) ([]planOp, error) {
 		}
 		var chunk []planOp
 		for line := range bytes.SplitSeq(buf, []byte{'\n'}) {
-			if !bytes.Contains(line, []byte(`"mcp__ccd_turn__`)) || !bytes.Contains(line, []byte(`"type":"assistant"`)) {
+			if !bytes.Contains(line, []byte(`"mcp__ccd_turn__`)) && !bytes.Contains(line, []byte(`"is_error":true`)) {
 				continue
 			}
 			var r row
 			var blocks []block
-			if json.Unmarshal(line, &r) != nil || r.IsSidechain || r.Type != "assistant" ||
-				json.Unmarshal(r.Message.Content, &blocks) != nil {
+			if err := json.Unmarshal(line, &r); err != nil {
+				broken++
+				continue
+			}
+			if r.IsSidechain || (r.Type != "assistant" && r.Type != "user") {
+				continue
+			}
+			if json.Unmarshal(r.Message.Content, &blocks) != nil {
+				broken++
 				continue
 			}
 			chunk = append(chunk, planOps(blocks)...)
 		}
 		ops = append(chunk, ops...)
-		if hasItems(chunk) {
-			return ops, nil
+		// A call's error result may be in a chunk read before
+		if hasItems(ops) {
+			return ops, broken, nil
 		}
 		end = start
 	}
-	return ops, nil
+	return ops, broken, nil
 }

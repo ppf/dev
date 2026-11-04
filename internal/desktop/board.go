@@ -90,7 +90,7 @@ type Worker struct {
 	// idle, stopped); StatusText is what it says: the question, the tool, what it waits on.
 	Status     string `json:"status"`
 	StatusText string `json:"statusText"`
-	// Since is how long it has been in its live state (busy, idle) or, stopped, since the app's last
+	// Since is how long it has been in its live state (busy, idle) or, not running, since the app's last
 	// activity, e.g. 12m; "" when unknown.
 	Since string `json:"since"`
 	// Plan is its task list (update_plan), in order.

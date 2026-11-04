@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Board, Checks, PR, Worker } from '../types'
+import type { Board, Checks, Delivered, PR, Status, Worker } from '../types'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
 const DEV_BIN = 'dev'
@@ -13,7 +13,7 @@ const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const NUDGE = 'Continue where you left off'
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'suggestion', stopped: 'inactive' } as const
-const STATUS_COLORS: Record<string, string> = {
+const STATUS_COLORS: Record<Status, string> = {
   'needs you': 'error',
   'rate-limited': 'warning',
   stuck: 'warning',
@@ -38,7 +38,7 @@ const MAX_SENT = 500
 // By PR URL
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
-const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-1' })
+const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
 const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '' }, { shape: 'view-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -84,6 +84,17 @@ const label = (w: Worker) => w.name || w.title
 
 /** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
 const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
+
+/** Whether `dev delivered` passes for a worktree, else why not (its error, or why it could not run). */
+async function deliveredCheck(run: Run, worktree: string): Promise<Omit<Delivered, 'at'>> {
+  try {
+    const ran = await run([DEV_BIN, 'delivered', worktree], { timeoutMs: 60_000 })
+    const why = ran.exitCode === 0 ? '' : (ran.stderr || ran.stdout).trim() || `${DEV_BIN} delivered exited ${ran.exitCode}`
+    return { isDelivered: ran.exitCode === 0, why }
+  } catch (err) {
+    return { isDelivered: false, why: `${DEV_BIN} delivered: ${errorText(err)}` }
+  }
+}
 
 /** The notes not sent yet, as one prompt (e.g. `dev-board: fix-login stuck: no progress for 17m; …`) and their keys. */
 function unsent(workers: Worker[], sentKeys: readonly string[]): { text: string; keys: string[] } {
@@ -150,12 +161,28 @@ export const register: Register = on => {
     let last = ''
     // The PR URLs and worker ids being read: a slow gh or fetch must not stack another
     const reading = new Set<string>()
-    /** Reads what is due (not read for REFRESH_MS) of the open PRs' checks and the idle PR workers' delivery. */
+    /**
+     * Reads what is due (not read for REFRESH_MS) of the open PRs' checks and the delivery of the workers with a PR
+     * not busy. A busy worker's delivery is dropped: what it does may undo it. Entries gone from the board go too.
+     */
     const refresh = async (workers: Worker[]) => {
       const now = await $.clock.now()
       const due = (at: number | undefined, key: string) => !reading.has(key) && (at === undefined || now - at >= REFRESH_MS)
+      const openPRs = workers.flatMap(w => w.prs.filter(pr => pr.state === 'OPEN'))
+      const candidates = workers.filter(w => w.prs.length > 0 && w.state !== 'busy' && w.worktree !== '')
+      const keep = <T,>(m: Record<string, T>, keys: Set<string>) =>
+        Object.keys(m).every(k => keys.has(k)) ? m : Object.fromEntries(Object.entries(m).filter(([k]) => keys.has(k)))
       const readChecks = await read($, checks)
-      for (const pr of workers.flatMap(w => w.prs.filter(pr => pr.state === 'OPEN'))) {
+      const openURLs = new Set(openPRs.map(pr => pr.url))
+      if (keep(readChecks, openURLs) !== readChecks) {
+        await update($, checks, m => keep(m, openURLs))
+      }
+      const readDelivered = await read($, delivered)
+      const candidateIds = new Set(candidates.map(w => w.id))
+      if (keep(readDelivered, candidateIds) !== readDelivered) {
+        await update($, delivered, m => keep(m, candidateIds))
+      }
+      for (const pr of openPRs) {
         if (due(readChecks[pr.url]?.at, pr.url)) {
           reading.add(pr.url)
           void prChecks(run, pr.url)
@@ -163,16 +190,11 @@ export const register: Register = on => {
             .finally(() => reading.delete(pr.url))
         }
       }
-      const readDelivered = await read($, delivered)
-      for (const w of workers.filter(w => w.prs.length > 0 && w.state !== 'busy' && w.worktree !== '')) {
+      for (const w of candidates) {
         if (due(readDelivered[w.id]?.at, w.id)) {
           reading.add(w.id)
-          void run([DEV_BIN, 'delivered', w.worktree], { timeoutMs: 60_000 })
-            .then(
-              ran => ran.exitCode === 0,
-              () => false,
-            )
-            .then(isDelivered => update($, delivered, m => ({ ...m, [w.id]: { at: now, isDelivered } })))
+          void deliveredCheck(run, w.worktree)
+            .then(got => update($, delivered, m => ({ ...m, [w.id]: { ...got, at: now } })))
             .finally(() => reading.delete(w.id))
         }
       }
@@ -188,7 +210,7 @@ export const register: Register = on => {
           await update($, board, () => polled)
           last = json
         }
-        await refresh(polled.workers)
+        void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`dev-board: PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
           // Marked first: the prompt waits for the boss to go idle, and a refused one is not retried every tick.
@@ -241,16 +263,33 @@ export const register: Register = on => {
       update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
     const compose = (id: string) => update($, view, s => ({ ...s, composing: s.composing === id ? '' : id }))
     const copy = async (id: string, surface: typeof e.surface) => {
-      // A remote surface (the desktop app) has no clipboard path yet: the Mac's then
-      const copied = (await $.ui.copy({ text: id, surface })).isCopied || (await $.process.run(['pbcopy'], { stdin: id })).exitCode === 0
-      await $.ui.toast(copied ? `Copied ${id}` : `dev-board: could not copy ${id}`)
+      try {
+        // A remote surface (the desktop app) has no clipboard path yet: the Mac's then
+        const copied = (await $.ui.copy({ text: id, surface })).isCopied || (await $.process.run(['pbcopy'], { stdin: id })).exitCode === 0
+        await $.ui.toast(copied ? `Copied ${id}` : `dev-board: could not copy ${id}`)
+      } catch (err) {
+        await $.ui.toast(`dev-board: could not copy ${id}: ${errorText(err)}`)
+      }
     }
     const openSession = async (w: Worker) => {
-      // The app's deep link to a session; it ignores it while deep links are off (policy, logged out)
-      const ran = await $.process.run(['open', `claude://code/continue?session=${w.id}`])
-      if (ran.exitCode !== 0) {
-        await $.ui.toast(`dev-board: could not open ${label(w)}: ${ran.stderr.trim() || `open exited ${ran.exitCode}`}`)
+      try {
+        // The app's deep link to a session; it ignores it while deep links are off (policy, logged out)
+        const ran = await $.process.run(['open', `claude://code/continue?session=${w.id}`])
+        if (ran.exitCode !== 0) {
+          await $.ui.toast(`dev-board: could not open ${label(w)}: ${ran.stderr.trim() || `open exited ${ran.exitCode}`}`)
+        }
+      } catch (err) {
+        await $.ui.toast(`dev-board: could not open ${label(w)}: ${errorText(err)}`)
       }
+    }
+    const archive = async (w: Worker) => {
+      // Checked again: the last check may be a minute old
+      const got = await deliveredCheck((argv, init) => $.process.run(argv, init), w.worktree)
+      if (!got.isDelivered) {
+        await $.ui.toast(`dev-board: ${label(w)} not archived: ${got.why}`)
+        return
+      }
+      await send(ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
     return (
@@ -261,7 +300,7 @@ export const register: Register = on => {
         {workers.map(w => {
           const done = w.plan.filter(s => s.status === 'completed').length
           const isExpanded = v.expanded.includes(w.id)
-          const canArchive = w.state !== 'busy' && deliveredRead[w.id]?.isDelivered === true
+          const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
 
           return (
             <Box key={w.id} flexDirection="column">
@@ -289,6 +328,8 @@ export const register: Register = on => {
                   {w.detail === '' ? '' : `: ${w.detail}`}
                 </Text>
               )}
+              {w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && <Text color="warning">needs: {w.needsAction}</Text>}
+              {delivery?.isDelivered === false && <Text dimColor>not delivered: {delivery.why}</Text>}
               {w.notes.map(n => (
                 <Text key={n.key} color="warning">
                   {n.kind}: {n.text}
@@ -303,9 +344,7 @@ export const register: Register = on => {
                 {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
                 <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send(ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
                 <Button key={`${w.id}:copy`} label="Copy id" dimColor onPress={press => void copy(w.id, press.surface)} />
-                {canArchive && (
-                  <Button key={`${w.id}:archive`} label="Archive" onPress={() => void send(ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)} />
-                )}
+                {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
               </Box>
               {isExpanded &&
                 w.plan.map(s => (

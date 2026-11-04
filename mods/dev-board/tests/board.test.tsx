@@ -70,7 +70,7 @@ const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
 /** What the other commands the mod runs answer: gh pr checks, dev delivered, open, pbcopy (by argv[0]/argv[1]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'open' | 'pbcopy', Ran | string>>
+type Others = Partial<Record<'gh' | 'delivered' | 'open' | 'pbcopy', Ran | string | (() => Ran | string)>>
 
 /** Every run of a command other than `dev desktop board`, with its stdin. */
 type OtherRun = { argv: readonly string[]; stdin?: string }
@@ -87,9 +87,10 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop'
+    const other = others[e.argv[1] === 'delivered' ? 'delivered' : (e.argv[0] as 'gh' | 'open' | 'pbcopy')]
     const now = isBoard
       ? answer()
-      : (others[e.argv[1] === 'delivered' ? 'delivered' : (e.argv[0] as 'gh' | 'open' | 'pbcopy')] ??
+      : ((typeof other === 'function' ? other() : other) ??
         (e.argv[0] === 'gh' ? { exitCode: 1, stdout: '', stderr: 'no checks reported' } : e.argv[1] === 'delivered' ? { exitCode: 1, stdout: '', stderr: 'not delivered' } : { exitCode: 0, stdout: '', stderr: '' }))
     if (isBoard) {
       runs.push(e.argv)
@@ -497,3 +498,76 @@ function collectToasts(on: On) {
   })
   return toasts
 }
+
+const DELIVERED: Ran = { exitCode: 0, stdout: 'delivered', stderr: '' }
+
+test('Archive checks delivery again when pressed, and says why not', async ($, on) => {
+  const texts = submits(on)
+  const toasts = collectToasts(on)
+  let delivery: Ran = DELIVERED
+  await start($, on, ok([worker({ prs: [OPEN_PR] })]), { delivered: () => delivery })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  delivery = { exitCode: 1, stdout: '', stderr: 'uncommitted changes to tracked files' }
+  await ui.press({ key: 'local_a:archive' })
+  expect(texts).toEqual([])
+  expect(toasts).toEqual(['dev-board: a not archived: uncommitted changes to tracked files'])
+  await ui.unmount()
+})
+
+test('a worker going busy drops its delivery: Archive waits for a new check', async ($, on) => {
+  let workers = [worker({ prs: [OPEN_PR] })]
+  const { otherRuns, clock } = await start($, on, () => ok(workers), { delivered: DELIVERED })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'local_a:archive' })).toBeTruthy()
+  workers = [worker({ state: 'busy', status: 'working', prs: [OPEN_PR] })]
+  await clock.advance(2000)
+  expect(await ui.find({ key: 'local_a:archive' })).toBeFalsy()
+  workers = [worker({ prs: [OPEN_PR] })]
+  await clock.advance(2000)
+  // Checked again at once, not a minute after the last
+  expect(otherRuns.filter(r => r.argv[1] === 'delivered').length).toBe(2)
+  expect(await ui.find({ key: 'local_a:archive' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a dev delivered that cannot run says why, with no Archive', async ($, on) => {
+  await start($, on, ok([worker({ prs: [OPEN_PR] })]), { delivered: 'spawn dev ENOENT' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^not delivered/ }))?.text).toMatch(/^not delivered: dev delivered: .*ENOENT/)
+  expect(await ui.find({ key: 'local_a:archive' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a worker with no worktree runs no dev delivered', async ($, on) => {
+  const { otherRuns } = await start($, on, ok([worker({ worktree: '', prs: [OPEN_PR] })]))
+  expect(otherRuns.filter(r => r.argv[1] === 'delivered')).toEqual([])
+})
+
+test('a dev without plans says so', async ($, on) => {
+  const { plan: _, ...old } = worker({})
+  await start($, on, { exitCode: 0, stdout: JSON.stringify([old]), stderr: '' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  await ui.unmount()
+})
+
+test("a needs-action of a worker not blocked still shows", async ($, on) => {
+  await start($, on, ok([worker({ status: 'idle', verdict: 'blocked', needsAction: 'pick one' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^needs:/ }))?.text).toBe('needs: pick one')
+  await ui.unmount()
+})
+
+test('Open and Copy id that cannot run say so', async ($, on) => {
+  const toasts = collectToasts(on)
+  on('ui.copy', () => ({ value: { isCopied: false as const, reason: 'no-clipboard' as const } }))
+  await start($, on, ok([worker({})]), { open: 'denied by a rule', pbcopy: 'denied by a rule' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:open' })
+  await ui.press({ key: 'local_a:copy' })
+  expect(toasts).toEqual([
+    'dev-board: could not open a: dev-board: $.process.run: denied by a rule',
+    'dev-board: could not copy local_a: dev-board: $.process.run: denied by a rule',
+  ])
+  await ui.unmount()
+})

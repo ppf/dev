@@ -9,13 +9,13 @@ A Claude Code mod for a boss session in the Claude desktop app: a live board of 
   - **Message…** opens a field; Enter asks the boss to relay its text: `dev-board: message <name> (<id>): <text>`.
   - **Nudge** asks the boss to relay `Continue where you left off`: `dev-board: nudge <name> (<id>): Continue where you left off`.
   - **Copy id** copies the worker's `local_…` id.
-  - **Archive**, shown once `dev delivered <worktree>` exits 0 for an idle worker with a PR, asks the boss to archive it: `dev-board: archive <name> (<id>): dev delivered exited 0`.
+  - **Archive**, shown once `dev delivered <worktree>` exits 0 for a worker not busy with a PR and a worktree (else the tile says `not delivered: <why>`), checks it again and asks the boss to archive it: `dev-board: archive <name> (<id>): dev delivered exited 0`. A worker going busy drops its last check.
 
   The prompts wait for the boss to go idle; a toast says each was queued, or why not. A worker's permission prompt can't be answered here: answer it in its session (**Open**).
 - Health notes (stuck, a decision unanswered, high context, rate-limited, resume due) show on their tile. A note the boss hasn't had yet goes to it as one prompt per poll for all new ones, e.g. `dev-board: fix-login stuck: no progress for 17m; docs-api resume due: rate limit reset 18:05: resume it`, which starts a boss turn once it is idle. The keys sent are kept in the session's state, so a reload of the mod sends none again; a prompt the app refuses shows as a toast and isn't retried.
 - The band above the prompt sums them up, e.g. `1 needs you · 3 workers · 1 busy · 1 blocked · PR #78 open` (red while one needs you); hidden when there are none (or while a survey shows).
 
-Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`; `gh pr checks` per open PR and `dev delivered` per idle worker with a PR run at most once a minute each. Without `gh` on the app's `PATH` the PR row says why. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs no `dev`; the pane says why.
+Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`; `gh pr checks` per open PR and `dev delivered` per worker not busy with a PR run at most once a minute each. Without `gh` on the app's `PATH` the PR row says why. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs no `dev`; the pane says why.
 
 ## Load it
 

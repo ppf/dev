@@ -7,6 +7,9 @@ export type Note = { key: string; kind: string; text: string }
 /** A step of a worker's task list (its update_plan calls replayed). */
 export type Step = { content: string; status: 'completed' | 'in_progress' | 'pending' }
 
+/** A worker's status, finer than its state; the first that holds (`internal/desktop/status.go`). */
+export type Status = 'needs you' | 'rate-limited' | 'stuck' | 'working' | 'waiting' | 'blocked' | 'review ready' | 'idle' | 'stopped'
+
 /** One object of `dev desktop board --json`. */
 export type Worker = {
   id: string
@@ -25,7 +28,7 @@ export type Worker = {
   tool: string
   context: number | null
   notes: Note[]
-  status: string
+  status: Status
   statusText: string
   since: string
   plan: Step[]
@@ -40,8 +43,8 @@ export type Check = { name: string; bucket: string }
 /** A PR's checks as last read (`at`, the clock's ms), or why they could not be. */
 export type Checks = { at: number; checks: Check[]; error: string }
 
-/** Whether `dev delivered` last passed (`at`, the clock's ms) for a worker's worktree. */
-export type Delivered = { at: number; isDelivered: boolean }
+/** Whether `dev delivered` last passed (`at`, the clock's ms) for a worker's worktree, else why not. */
+export type Delivered = { at: number; isDelivered: boolean; why: string }
 
 /** The pane's own state: the workers whose task list is expanded, the one a message is typed for. */
 export type View = { expanded: string[]; composing: string }
