@@ -205,6 +205,42 @@ func TestBoard(t *testing.T) {
 	if idle.Context == nil || *idle.Context != 100 {
 		t.Errorf("idle context = %v, want capped at 100", idle.Context)
 	}
+	for _, w := range workers {
+		t.Logf("%s: %s %q", w.ID, w.Status, w.StatusText)
+	}
+	if busy.Status != StatusWorking || busy.StatusText != "Bash" || blocked.Status != StatusBlocked ||
+		blocked.StatusText != "pick one" || idle.Status != StatusIdle {
+		t.Errorf("statuses = %s %q, %s %q, %s, want working Bash, blocked pick one, idle", busy.Status,
+			busy.StatusText, blocked.Status, blocked.StatusText, idle.Status)
+	}
+}
+
+// Since counts from the live status's change while running, else from the app's last activity.
+func TestBoardSince(t *testing.T) {
+	p := fixture(t)
+	now := time.Now()
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{
+		"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "statusUpdatedAt": now.Add(-12 * time.Minute).UnixMilli(),
+	})
+	org := filepath.Join(p.Records, "acct", "org")
+	writeJSON(t, filepath.Join(org, "local_blocked.json"), map[string]any{
+		"sessionId": "local_blocked", "cliSessionId": "cli-blocked", "createdAt": now.Add(-time.Second).UnixMilli(),
+		"lastActivityAt": now.Add(-3 * time.Minute).UnixMilli(), "spawnedFrom": map[string]any{"sessionId": boss},
+		"interruptedAwaitingPerson": true,
+	})
+	workers, _, err := Board(p, boss, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workers[0].Since != "12m" {
+		t.Errorf("busy since = %q, want 12m", workers[0].Since)
+	}
+	if workers[2].ID != "local_blocked" || workers[2].Since != "3m" {
+		t.Errorf("stopped since = %s %q, want local_blocked 3m", workers[2].ID, workers[2].Since)
+	}
+	if workers[2].State != StateStopped || workers[2].Status != StatusStopped {
+		t.Errorf("a stopped worker the app quit on = %s/%s, want stopped: its dialog is gone", workers[2].State, workers[2].Status)
+	}
 }
 
 func TestBoardStopped(t *testing.T) {
@@ -276,7 +312,8 @@ func TestBoardJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
-		"needsAction", "notes", "prs", "state", "title", "tool", "verdict", "worktree"}
+		"needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "verdict",
+		"worktree"}
 	for _, w := range got {
 		keys := slices.Sorted(maps.Keys(w))
 		if !slices.Equal(keys, want) {
@@ -290,6 +327,9 @@ func TestBoardJSON(t *testing.T) {
 		}
 		if _, ok := w["notes"].([]any); !ok {
 			t.Errorf("%s: notes = %#v, want a list", w["id"], w["notes"])
+		}
+		if _, ok := w["plan"].([]any); !ok {
+			t.Errorf("%s: plan = %#v, want a list", w["id"], w["plan"])
 		}
 	}
 	pr := got[0]["prs"].([]any)[0].(map[string]any)
@@ -349,7 +389,7 @@ func TestParseTranscript(t *testing.T) {
 		synthetic,
 		sidechain,
 	) + `{"type":"assistant","message":{"content":[{"type":"text","text":"half wr`
-	got := parseTranscript([]byte(data))
+	got, _ := parseTranscript([]byte(data))
 	if !slices.Equal(got.lines, []string{"API error"}) {
 		t.Errorf("lines = %q, want the synthetic row's text (only its usage is skipped)", got.lines)
 	}
@@ -359,7 +399,7 @@ func TestParseTranscript(t *testing.T) {
 	if got.broken != 0 {
 		t.Errorf("broken = %d, want 0: the last, unended row is being written", got.broken)
 	}
-	if got := parseTranscript([]byte("{\"type\":\"assistant\",oops\n")); got.broken != 1 {
+	if got, _ := parseTranscript([]byte("{\"type\":\"assistant\",oops\n")); got.broken != 1 {
 		t.Errorf("broken = %d, want 1 for an ended row that does not parse", got.broken)
 	}
 	if got.model != "claude-opus-5-5" || got.tokens != 250_000 {
@@ -377,20 +417,20 @@ func TestLastLinesCut(t *testing.T) {
 func TestTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	write(t, path, "first line\nsecond\nthird\n")
-	got, err := tail(path, 10)
+	got, start, err := tail(path, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "third\n" {
-		t.Errorf("tail = %q, want the whole lines in the last 10 bytes", got)
+	if string(got) != "third\n" || start != 18 {
+		t.Errorf("tail = %q at %d, want the whole lines in the last 10 bytes, at 18", got, start)
 	}
-	if got, _ := tail(path, 6); string(got) != "third\n" {
+	if got, _, _ := tail(path, 6); string(got) != "third\n" {
 		t.Errorf("tail cut right after a newline = %q, want the line starting there", got)
 	}
-	if got, _ := tail(path, 3); len(got) != 0 {
+	if got, _, _ := tail(path, 3); len(got) != 0 {
 		t.Errorf("tail with no whole line = %q, want none", got)
 	}
-	if got, _ := tail(path, 100); string(got) != "first line\nsecond\nthird\n" {
+	if got, start, _ := tail(path, 100); string(got) != "first line\nsecond\nthird\n" || start != 0 {
 		t.Errorf("tail of a short file = %q, want all of it", got)
 	}
 }
@@ -464,5 +504,45 @@ func TestBoardNoHookFile(t *testing.T) {
 	}
 	if len(warnings) != 2 || !strings.Contains(warnings[1].Error(), "cli-idle.json: no hook file for Idle one") {
 		t.Errorf("warnings = %v, want the idle worker's missing hook file (not the stopped one's)", warnings)
+	}
+}
+
+// The board's own wiring: the transcript's list, notes before status (stuck), the record's quit flag.
+func TestBoardStatusWiring(t *testing.T) {
+	p := fixture(t)
+	now := time.Now()
+	old := now.Add(-20 * time.Minute)
+	busy := filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl")
+	write(t, busy, lines(t,
+		assistant("claude-opus-5-5", map[string]any{"type": "tool_use", "id": "p1", "name": updatePlanTool, "input": map[string]any{
+			"items": []map[string]any{{"content": "one", "status": "completed"}, {"content": "two", "status": "in_progress"}},
+		}}),
+		toolResult("p1"),
+		assistant("claude-opus-5-5", toolUse("t2", "Bash")),
+	))
+	if err := os.Chtimes(busy, old, old); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{
+		"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "statusUpdatedAt": old.UnixMilli(),
+	})
+	writeJSON(t, filepath.Join(p.Records, "acct", "org", "local_idle.json"), map[string]any{
+		"sessionId": "local_idle", "cliSessionId": "cli-old", "title": "Idle one", "createdAt": now.Add(-time.Second).UnixMilli(),
+		"spawnedFrom": map[string]any{"sessionId": boss}, "interruptedAwaitingPerson": true,
+	})
+	workers, _, err := Board(p, boss, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := workers[0]
+	if want := []Step{{"one", StepDone}, {"two", StepCurrent}}; !slices.Equal(b.Plan, want) {
+		t.Errorf("busy plan = %v, want %v", b.Plan, want)
+	}
+	if b.Status != StatusStuck || b.StatusText != "no progress for 20m" {
+		t.Errorf("busy status = %s %q, want stuck: no progress for 20m", b.Status, b.StatusText)
+	}
+	idle := workers[2]
+	if idle.ID != "local_idle" || idle.Status != StatusNeedsYou || idle.StatusText != interruptedNote {
+		t.Errorf("running idle worker the app quit on = %s %s %q, want needs you", idle.ID, idle.Status, idle.StatusText)
 	}
 }

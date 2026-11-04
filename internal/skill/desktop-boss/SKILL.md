@@ -69,6 +69,7 @@ On each note:
 - **Auto-fix** wakes a worker only on a CI failure, so after green CI nobody merges. On a `WAITING (Auto-fix: …)` note, run the bounded `gh pr checks` loop above yourself with `run_in_background` (exit `8`: run it again; `1`: message the worker the failure); on green, merge if the user allowed it in the brief, or message the worker to.
 - **Failed or stuck:** a worker that stopped on an error or a rate limit, or that has run unusually long with no note: check it (`get_session`), tell the user, and nudge it with `SendMessage` once the cause is fixed.
 - **`dev-board:` notes** (from the `dev-board` mod, one prompt for its new health notes): *stuck* → check it, then nudge it with `SendMessage`; *needs a decision* → link the worker for the user, as for permission prompts; *resume due* → `SendMessage` "Continue where you left off: your last turn stopped on a rate limit, which has reset."; *rate-limited* → nothing until resume due; *high context* → replace the worker at the next item boundary (see below).
+- **`dev-board:` buttons** (the user pressed one on the board): `dev-board: message <name> (<local_id>): <text>` → `SendMessage` `<text>` verbatim to that id; `dev-board: nudge <name> (<local_id>): Continue where you left off` → `SendMessage` that text to it; `dev-board: archive <name> (<local_id>): dev delivered exited 0` → the user asked to archive it: `archive_session` it if it's idle with nothing left for it (else say why not), and report it in one line.
 <!-- boss-core:rollup -->
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
@@ -104,4 +105,4 @@ For a series of items in one area (one PR each, item after item), keep each work
 
 Check a worker's context with `get_usage` and its session id.
 
-With the `dev-board` mod loaded, `/board` opens the live worker board: state, PRs, context and notes per worker.
+With the `dev-board` mod loaded, `/board` opens the live worker board: status, task list, PRs with CI checks, context and notes per worker, and the buttons above.

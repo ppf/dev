@@ -15,6 +15,8 @@ import (
 	"slices"
 	"syscall"
 	"time"
+
+	"github.com/ppf/dev/internal/inbox"
 )
 
 // Paths are the directories the board reads.
@@ -84,6 +86,15 @@ type Worker struct {
 	Context *int `json:"context"`
 	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
 	Notes []Note `json:"notes"`
+	// Status is finer than State (needs you, rate-limited, stuck, working, waiting, blocked, review ready,
+	// idle, stopped); StatusText is what it says: the question, the tool, what it waits on.
+	Status     string `json:"status"`
+	StatusText string `json:"statusText"`
+	// Since is how long it has been in its live state (busy, idle) or, not running, since the app's last
+	// activity, e.g. 12m; "" when unknown.
+	Since string `json:"since"`
+	// Plan is its task list (update_plan), in order.
+	Plan []Step `json:"plan"`
 }
 
 type record struct {
@@ -100,7 +111,9 @@ type record struct {
 		Name      string `json:"name"`
 		UserFork  bool   `json:"userFork"`
 	} `json:"spawnedFrom"`
-	PRs []struct {
+	// InterruptedAwaitingPerson marks a session the app quit on while a dialog waited on the person.
+	InterruptedAwaitingPerson bool `json:"interruptedAwaitingPerson"`
+	PRs                       []struct {
 		Number int    `json:"prNumber"`
 		URL    string `json:"url"`
 		State  string `json:"state"`
@@ -276,6 +289,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 		LastActivityAt: r.LastActivityAt,
 		LastLines:      []string{},
 		Notes:          []Note{},
+		Plan:           []Step{},
 	}
 	for _, pr := range r.PRs {
 		w.PRs = append(w.PRs, PR(pr))
@@ -299,7 +313,15 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	default:
 		w.State = StateStopped
 	}
+	sinceAt := r.LastActivityAt
+	if running {
+		sinceAt = l.StatusUpdatedAt
+	}
+	if sinceAt > 0 {
+		w.Since = inbox.Span(now.Sub(time.UnixMilli(sinceAt)))
+	}
 	if cli == "" {
+		w.Status, w.StatusText = status(w, Hook{}, r.InterruptedAwaitingPerson, now)
 		return w, nil
 	}
 	var h Hook
@@ -314,6 +336,9 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	}
 	t, err := readTranscript(p.Projects, cli)
 	w.LastLines = t.lines
+	if t.plan != nil {
+		w.Plan = t.plan
+	}
 	if w.State == StateBusy {
 		w.Tool = t.tool
 	}
@@ -330,6 +355,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 		seen = max(seen, l.StatusUpdatedAt/1000)
 	}
 	w.Notes = notes(w, cli, h, seen, now)
+	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	return w, errors.Join(err, hookErr)
 }
 
