@@ -23,8 +23,9 @@ type Note struct {
 }
 
 // notes are w's health notes at now from its hook file h (the zero Hook when there is none) and seen, its
-// last progress the app shows in unix seconds (its transcript's last write, its live status's change): stuck (busy with no progress for inbox.StuckWorking), a decision unanswered for
-// inbox.StuckDecision, a context at inbox.ContextFull or above, a rate limit and its resume once it reset.
+// last progress the app shows in unix seconds (its transcript's last write, its live status's change): stuck
+// (busy with no progress for inbox.StuckWorking), a decision unanswered for inbox.StuckDecision, a context at
+// inbox.ContextFull or above, a rate limit and its resume once it reset.
 // A stopped worker has none: its hook file may be a crash's leftover.
 func notes(w Worker, cli string, h Hook, seen int64, now time.Time) []Note {
 	ns := []Note{}
@@ -46,9 +47,9 @@ func notes(w Worker, cli string, h Hook, seen int64, now time.Time) []Note {
 			add(inbox.Decision, text, unix(h.Since))
 		}
 	case w.State == StateBusy:
-		progress := time.Unix(max(h.Active, h.Since, seen), 0)
-		if quiet := now.Sub(progress); progress.Unix() > 0 && quiet >= inbox.StuckWorking {
-			add(inbox.Stuck, "no progress for "+inbox.Span(quiet), unix(progress.Unix()))
+		progress := max(h.Active, h.Since, seen)
+		if quiet := now.Sub(time.Unix(progress, 0)); progress > 0 && quiet >= inbox.StuckWorking {
+			add(inbox.Stuck, "no progress for "+inbox.Span(quiet), unix(progress))
 		}
 	case h.RateLimited:
 		reset := time.Unix(h.ResetAt, 0)

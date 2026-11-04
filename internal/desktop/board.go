@@ -302,7 +302,8 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	if cli == "" {
 		return w, nil
 	}
-	h, hookErr := Hook{}, error(nil)
+	var h Hook
+	var hookErr error
 	if p.Hooks != "" {
 		h, hookErr = ReadHook(filepath.Join(p.Hooks, cli+".json"))
 	}

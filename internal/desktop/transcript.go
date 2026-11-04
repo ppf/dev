@@ -23,7 +23,6 @@ const (
 )
 
 type transcript struct {
-	// written is when the transcript was last written
 	written time.Time
 	lines   []string
 	tool    string
