@@ -31,12 +31,12 @@ async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout:
 
 /** The band's line, e.g. `3 workers · 1 busy · 1 blocked · PR #78 open`. */
 function bandLine(workers: Worker[]): string {
-  const count = (state: Worker['state']) => workers.filter(w => w.state === state).length
   const open = workers.flatMap(w => w.prs.filter(pr => pr.state === 'OPEN').map(pr => `#${pr.number}`))
   const parts = [`${workers.length} worker${workers.length === 1 ? '' : 's'}`]
   for (const state of ['busy', 'blocked'] as const) {
-    if (count(state) > 0) {
-      parts.push(`${count(state)} ${state}`)
+    const count = workers.filter(w => w.state === state).length
+    if (count > 0) {
+      parts.push(`${count} ${state}`)
     }
   }
   if (open.length > 0) {

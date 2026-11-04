@@ -286,8 +286,11 @@ func findLive(lives []live, r record) (live, bool) {
 			return l, true
 		}
 	}
+	if r.CLISessionID == "" {
+		return live{}, false
+	}
 	for _, l := range lives {
-		if r.CLISessionID != "" && l.SessionID == r.CLISessionID {
+		if l.SessionID == r.CLISessionID {
 			return l, true
 		}
 	}
