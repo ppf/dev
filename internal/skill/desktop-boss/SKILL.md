@@ -1,6 +1,6 @@
 ---
 name: desktop-boss
-description: Be the boss (coordinator) in a Claude desktop-app Code tab session — start worker sessions in their own worktrees with start_session, act on their turn-end notes, follow up with SendMessage, roll up results and archive delivered workers. Use when asked to be the boss, coordinate, delegate or fan out work to sessions in the desktop app (no tmux, no dev).
+description: Be the boss (coordinator) in a Claude desktop-app Code tab session — start worker sessions in their own worktrees with start_session, act on their turn-end notes, follow up with SendMessage, roll up results and archive delivered workers. Use when asked to be the boss, coordinate, delegate or fan out work to sessions in the desktop app (no tmux, no dev boss).
 ---
 
 # Coordinating worker sessions in the desktop app
@@ -84,7 +84,7 @@ To stop a worker's turn when the user asks, or when it's clearly off track: `sto
 
 A worker's work is delivered when its PR is opened, or its result is reported with nothing left for it. Archiving stops it, cleans up its worktree by default, and archives its finished side sessions too; `unarchive_session` brings it back.
 
-- **PR opened → archive without asking.** Once you have checked that the worker's PR is open or merged at the worker's HEAD (`gh pr view <n> --json state,headRefOid`, not just its note), the worker is idle, and nothing is left for it, `archive_session` it right away and report it in one line ("Archived fix-login: PR #12 open").
+- **PR opened → archive without asking.** Once the worker has a PR and `dev delivered <worktreePath>` (the worker's path from `get_session`) exits 0 (HEAD at that PR open or merged, or in the default branch, and no uncommitted changes to tracked files; not just its note), the worker is idle, and nothing is left for it, `archive_session` it right away and report it in one line ("Archived fix-login: PR #12 open"). A non-zero exit prints why: put that in the roll-up instead.
 - **Anything else → ask first** (in auto mode the app may not ask for you): a result reported without a PR, or a PR closed unmerged. List those in the roll-up and ask once ("Archive docs-api (RESULT-docs-api.md read)?"), then `archive_session` each one they approve.
 
 The app refuses one that is still working, pinned, or open on screen: tell the user. It may keep a worktree that holds untracked or uncommitted files (e.g. `RESULT.md`): read what you need from it first; the user can discard a kept worktree from the app, so never delete it with git yourself. Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a session you didn't start. Don't offer the app-wide `auto_archive_on_pr_close` setting: archiving delivered workers is this skill's job.
