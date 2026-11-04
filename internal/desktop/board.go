@@ -1,6 +1,7 @@
 // Package desktop reads what the Claude desktop app keeps of a boss session's workers: the app's session
-// records, Claude's live session files and the workers' transcripts. All three are private, undocumented
-// formats, read leniently: unknown fields are ignored, a file that fails to parse is reported.
+// records, Claude's live session files, the workers' transcripts and Claude Code's model catalog. All are
+// private, undocumented formats, read leniently: unknown fields are ignored, a file that fails to parse is
+// reported (the boss's own record must parse).
 package desktop
 
 import (
@@ -24,22 +25,25 @@ type Paths struct {
 	Live string
 	// Projects holds the transcripts, <cwd-slug>/<session id>.jsonl.
 	Projects string
-	// Models holds the app's model catalog, *.json, for the models' context windows.
+	// Models holds Claude Code's model catalog, *.json, for the models' context windows.
 	Models string
 }
 
-// DefaultPaths are the macOS locations under home.
-func DefaultPaths(home string) Paths {
+// DefaultPaths are the macOS locations under home and Claude's config directory (~/.claude when "").
+func DefaultPaths(home, config string) Paths {
+	if config == "" {
+		config = filepath.Join(home, ".claude")
+	}
 	return Paths{
 		Records:  filepath.Join(home, "Library", "Application Support", "Claude", "claude-code-sessions"),
-		Live:     filepath.Join(home, ".claude", "sessions"),
-		Projects: filepath.Join(home, ".claude", "projects"),
-		Models:   filepath.Join(home, ".claude", "cache", "model-catalog"),
+		Live:     filepath.Join(config, "sessions"),
+		Projects: filepath.Join(config, "projects"),
+		Models:   filepath.Join(config, "cache", "model-catalog"),
 	}
 }
 
-// Worker states: busy runs a turn, blocked ended its last turn waiting on the person, idle is running
-// between turns, stopped has no live Claude.
+// Worker states, the first that holds: busy runs a turn, blocked ended its last turn waiting on the person
+// (running or not), idle runs between turns, stopped has no live Claude.
 const (
 	StateBusy    = "busy"
 	StateBlocked = "blocked"
@@ -56,17 +60,17 @@ type PR struct {
 
 // Worker is one tile of the board.
 type Worker struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Title     string `json:"title"`
-	Branch    string `json:"branch"`
-	Worktree  string `json:"worktree"`
-	PRs       []PR   `json:"prs"`
-	State     string `json:"state"`
-	CreatedAt int64  `json:"createdAt"`
-	// LastActivityAt is the app's last activity time, in milliseconds since the epoch.
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Title    string `json:"title"`
+	Branch   string `json:"branch"`
+	Worktree string `json:"worktree"`
+	PRs      []PR   `json:"prs"`
+	State    string `json:"state"`
+	// CreatedAt and LastActivityAt are the app's times, in milliseconds since the epoch.
+	CreatedAt      int64 `json:"createdAt"`
 	LastActivityAt int64 `json:"lastActivityAt"`
-	// Verdict is the app's summary of the last finished turn: completed, blocked or review_ready.
+	// Verdict is the app's summary of the last finished turn, e.g. completed, blocked or review_ready.
 	Verdict     string `json:"verdict"`
 	Detail      string `json:"detail"`
 	NeedsAction string `json:"needsAction"`
@@ -90,6 +94,7 @@ type record struct {
 	SpawnedFrom    *struct {
 		SessionID string `json:"sessionId"`
 		Name      string `json:"name"`
+		UserFork  bool   `json:"userFork"`
 	} `json:"spawnedFrom"`
 	PRs []struct {
 		Number int    `json:"prNumber"`
@@ -105,6 +110,8 @@ type record struct {
 
 type live struct {
 	PID           int    `json:"pid"`
+	StartedAt     int64  `json:"startedAt"`
+	Kind          string `json:"kind"`
 	SessionID     string `json:"sessionId"`
 	HostSessionID string `json:"hostSessionId"`
 	Status        string `json:"status"`
@@ -151,7 +158,14 @@ func records(dir, boss string) ([]record, []error, error) {
 	for _, path := range paths {
 		// Records run to 100+ MB in all, read every few seconds: a worker's was written after the boss
 		// started, and only those naming the boss are parsed
-		if info, err := os.Stat(path); err != nil || info.ModTime().Before(bossAt) {
+		info, err := os.Stat(path)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				warnings = append(warnings, err)
+			}
+			continue
+		}
+		if info.ModTime().Before(bossAt) {
 			continue
 		}
 		data, err := os.ReadFile(path)
@@ -167,7 +181,8 @@ func records(dir, boss string) ([]record, []error, error) {
 			warnings = append(warnings, fmt.Errorf("%s: %w", path, err))
 			continue
 		}
-		if r.SpawnedFrom != nil && r.SpawnedFrom.SessionID == boss && !r.IsArchived {
+		// A fork the person made (/btw) is theirs, not a worker
+		if r.SpawnedFrom != nil && r.SpawnedFrom.SessionID == boss && !r.SpawnedFrom.UserFork && !r.IsArchived {
 			recs = append(recs, r)
 		}
 	}
@@ -215,19 +230,34 @@ func liveSessions(dir string) ([]live, []error) {
 			warnings = append(warnings, fmt.Errorf("%s: %w", path, err))
 			continue
 		}
-		if l.PID > 0 && alive(l.PID) {
+		// Only a session's own Claude, not one it runs (claude -p inherits its host session id)
+		if l.Kind != "" && l.Kind != "interactive" {
+			continue
+		}
+		// Fields renamed or a status this board doesn't know: every worker would show the wrong state
+		if l.PID <= 0 || l.SessionID == "" || (l.Status != StateBusy && l.Status != StateIdle) {
+			warnings = append(warnings, fmt.Errorf("%s: unexpected live session (pid %d, session %q, status %q)",
+				path, l.PID, l.SessionID, l.Status))
+			continue
+		}
+		if alive(l) {
 			lives = append(lives, l)
 		}
 	}
 	return lives, warnings
 }
 
-func alive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+// alive is whether l's Claude still runs: its pid does, and started by l's startedAt (a pid reused after a
+// crash started later).
+func alive(l live) bool {
+	if err := syscall.Kill(l.PID, 0); err != nil && !errors.Is(err, syscall.EPERM) {
+		return false
+	}
+	started, ok := procStart(l.PID)
+	return !ok || l.StartedAt == 0 || started.Unix() <= l.StartedAt/1000
 }
 
-// worker joins r with its live session and transcript; the error is a transcript that could not be read.
+// worker joins r with its live session and transcript; the error is what it could not read of them.
 func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, error) {
 	w := Worker{
 		ID:             r.SessionID,
@@ -266,18 +296,19 @@ func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, er
 		return w, nil
 	}
 	t, err := readTranscript(p.Projects, cli)
-	if err != nil {
-		return w, err
-	}
 	w.LastLines = t.lines
 	if w.State == StateBusy {
 		w.Tool = t.tool
 	}
-	if window := windows[t.model]; window > 0 && t.tokens > 0 {
+	window := windows[t.model]
+	if window > 0 && t.tokens > 0 {
 		pct := min(100, (t.tokens*100+window/2)/window)
 		w.Context = &pct
 	}
-	return w, nil
+	if err == nil && window == 0 && t.tokens > 0 && windows != nil {
+		err = fmt.Errorf("no context window for model %s in the model catalog", t.model)
+	}
+	return w, err
 }
 
 func findLive(lives []live, r record) (live, bool) {

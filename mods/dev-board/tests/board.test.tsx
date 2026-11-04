@@ -59,17 +59,19 @@ const WORKERS = [
 
 type Ran = { exitCode: number; stdout: string; stderr: string }
 
-/** Starts the session with dev answering `ran`, or failing to start with that reason. */
-async function start($: Engine, on: On, ran: Ran | string) {
+/** Starts the session with dev answering `answer()`'s run, or failing to start with that reason. */
+async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)) {
+  const answer = typeof ran === 'function' ? ran : () => ran
   const runs: (readonly string[])[] = []
   on('command.register', () => ({ value: { command: 'board' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
     runs.push(e.argv)
-    if (typeof ran === 'string') {
-      return { deny: ran }
+    const now = answer()
+    if (typeof now === 'string') {
+      return { deny: now }
     }
-    return { value: { ...ran, isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { ...now, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   mock.env(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_boss' })
   const clock = mock.clock(on)
@@ -160,5 +162,37 @@ test('outside the desktop app it says so and runs nothing', async ($, on) => {
   expect(runs).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text' }))?.text).toMatch(/Not a desktop app session/)
+  await ui.unmount()
+})
+
+test('each poll that changes the board redraws it', async ($, on) => {
+  let now: Ran = ok(WORKERS)
+  const { clock } = await start($, on, () => now)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /Worker B/ }))?.text).toBeTruthy()
+
+  now = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(2000)
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('boom')
+
+  now = ok(WORKERS)
+  await clock.advance(2000)
+  expect(await ui.find({ type: 'Text', text: /^boom$/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /Worker B/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test("a busy worker hides its last turn's needs", async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', verdict: 'blocked', needsAction: 'old ask' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /needs: old ask/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^last turn: blocked$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('output this mod does not read says so', async ($, on) => {
+  await start($, on, { exitCode: 0, stdout: JSON.stringify([{ id: 'x' }]), stderr: '' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
   await ui.unmount()
 })

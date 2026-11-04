@@ -20,7 +20,7 @@ export type Worker = {
   context: number | null
 }
 
-/** The last poll: its workers, or why it failed; warnings are its stderr. */
+/** The last poll: its workers, or why it failed or did not run; warnings are its stderr. */
 export type Board = { workers: Worker[]; error: string; warnings: string }
 
 declare module 'claude-code' {

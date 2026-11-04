@@ -26,11 +26,12 @@ func newDesktopBoardCmd() *cobra.Command {
 	var boss string
 	cmd := &cobra.Command{
 		Use:   "board",
-		Short: "List a desktop boss session's workers: state, PR, last turn's verdict, last lines, context use",
+		Short: "List a desktop boss session's workers: state, branch, PRs, context use",
 		Long: `List the unarchived sessions a Claude desktop app session started (its workers): live state
-(busy, blocked, idle, stopped), branch, PRs, the app's verdict on the last turn, the last lines of the newest
-assistant text, the tool in flight and the share of the context window in use. Reads the app's session
-records, ~/.claude/sessions and the transcripts; a file that fails to parse is reported on stderr.`,
+(busy, blocked, idle, stopped), title, branch, PRs and the share of the context window in use. --json adds
+the app's verdict on the last turn and what it needs, the last lines of the newest assistant text and the
+tool in flight. Reads the app's session records, ~/.claude/sessions, the transcripts and Claude Code's model
+catalog; a file that fails to parse is reported on stderr.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if boss == "" {
@@ -43,7 +44,7 @@ records, ~/.claude/sessions and the transcripts; a file that fails to parse is r
 			if err != nil {
 				return err
 			}
-			workers, warnings, err := desktop.Board(desktop.DefaultPaths(home), boss)
+			workers, warnings, err := desktop.Board(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")), boss)
 			for _, w := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev desktop board: "+w.Error())
 			}

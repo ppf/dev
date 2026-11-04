@@ -2,8 +2,11 @@ package desktop
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -71,7 +74,7 @@ func toolResult(id string) map[string]any {
 // fixture lays out a home with a boss and its workers, returning its paths.
 func fixture(t *testing.T) Paths {
 	t.Helper()
-	p := DefaultPaths(t.TempDir())
+	p := DefaultPaths(t.TempDir(), "")
 	org := filepath.Join(p.Records, "acct", "org")
 	now := time.Now().UnixMilli()
 	rec := func(id string, fields map[string]any) {
@@ -98,6 +101,7 @@ func fixture(t *testing.T) Paths {
 		"cliSessionId": "cli-old", "title": "Idle one", "createdAt": now - 1000, "spawnedFrom": from,
 		"postTurnSummary": map[string]any{"status_category": "completed", "status_detail": "done", "needs_action": ""},
 	})
+	rec("local_fork", map[string]any{"cliSessionId": "cli-f", "spawnedFrom": map[string]any{"sessionId": boss, "userFork": true, "btw": true}})
 	rec("local_archived", map[string]any{"cliSessionId": "cli-a", "isArchived": true, "spawnedFrom": from})
 	rec("local_other", map[string]any{"cliSessionId": "cli-o", "spawnedFrom": map[string]any{"sessionId": "local_x"}})
 	// Names the boss but does not parse: reported
@@ -119,6 +123,10 @@ func fixture(t *testing.T) Paths {
 	// A crashed Claude's file
 	writeJSON(t, filepath.Join(p.Live, "3.json"), map[string]any{"pid": deadPID, "sessionId": "cli-blocked", "status": "busy"})
 	write(t, filepath.Join(p.Live, "4.abc.key"), "not json")
+	// A claude -p the idle worker runs inherits its host session id
+	writeJSON(t, filepath.Join(p.Live, "5.json"), map[string]any{
+		"pid": pid, "sessionId": "cli-nested", "hostSessionId": "local_idle", "status": "busy", "kind": "print",
+	})
 
 	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), lines(t,
 		assistant("claude-opus-5-5", text("Looking."), toolUse("t1", "Read")),
@@ -135,8 +143,12 @@ func fixture(t *testing.T) Paths {
 		map[string]any{"id": "claude-opus-5-5", "runtime": map[string]any{"max_input_tokens": 1_000_000}},
 		map[string]any{"id": "claude-haiku-4-5", "runtime": map[string]any{"max_input_tokens": 200_000}},
 	}}})
-	if err := os.Chtimes(filepath.Join(p.Models, "old.json"), past, past); err != nil {
-		t.Fatal(err)
+	// The newest file lists no windows: the newest that does is read
+	writeJSON(t, filepath.Join(p.Models, "newest.json"), map[string]any{"floor": 1})
+	for name, at := range map[string]time.Time{"old.json": past, "new.json": time.Now().Add(-time.Minute)} {
+		if err := os.Chtimes(filepath.Join(p.Models, name), at, at); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return p
 }
@@ -154,7 +166,7 @@ func TestBoard(t *testing.T) {
 		ids[i] = w.ID
 	}
 	if want := []string{"local_busy", "local_blocked", "local_idle"}; !slices.Equal(ids, want) {
-		t.Fatalf("workers = %v, want %v (oldest first, archived and others' left out)", ids, want)
+		t.Fatalf("workers = %v, want %v (oldest first, archived, forks and others' left out)", ids, want)
 	}
 
 	busy, blocked, idle := workers[0], workers[1], workers[2]
@@ -215,6 +227,90 @@ func TestBoardStopped(t *testing.T) {
 	}
 }
 
+func TestBoardRunningBlocked(t *testing.T) {
+	p := fixture(t)
+	writeJSON(t, filepath.Join(p.Live, "3.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-blocked", "status": "idle"})
+	workers, _, err := Board(p, boss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workers[1].State != StateBlocked {
+		t.Errorf("running worker whose last turn is blocked = %s, want blocked", workers[1].State)
+	}
+}
+
+func TestBoardReusedPID(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("process start times are read on macOS only")
+	}
+	p := fixture(t)
+	// The pid runs, but started after this Claude did: a crashed Claude's pid reused
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{
+		"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "startedAt": 1000,
+	})
+	workers, _, err := Board(p, boss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workers[0].State == StateBusy {
+		t.Errorf("worker on a reused pid = busy, want not running")
+	}
+}
+
+// TestBoardJSON pins the JSON the dev-board mod reads (mods/dev-board/types/index.d.ts).
+func TestBoardJSON(t *testing.T) {
+	p := fixture(t)
+	writeJSON(t, filepath.Join(p.Records, "acct", "org", "local_new.json"), map[string]any{
+		"sessionId": "local_new", "createdAt": time.Now().UnixMilli(), "spawnedFrom": map[string]any{"sessionId": boss},
+	})
+	workers, _, err := Board(p, boss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
+		"needsAction", "prs", "state", "title", "tool", "verdict", "worktree"}
+	for _, w := range got {
+		keys := slices.Sorted(maps.Keys(w))
+		if !slices.Equal(keys, want) {
+			t.Errorf("keys = %v, want %v", keys, want)
+		}
+		if _, ok := w["prs"].([]any); !ok {
+			t.Errorf("%s: prs = %#v, want a list", w["id"], w["prs"])
+		}
+		if _, ok := w["lastLines"].([]any); !ok {
+			t.Errorf("%s: lastLines = %#v, want a list", w["id"], w["lastLines"])
+		}
+	}
+	pr := got[0]["prs"].([]any)[0].(map[string]any)
+	if keys := slices.Sorted(maps.Keys(pr)); !slices.Equal(keys, []string{"number", "state", "url"}) {
+		t.Errorf("PR keys = %v", keys)
+	}
+}
+
+func TestBoardWarnings(t *testing.T) {
+	p := fixture(t)
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "thinking"})
+	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), lines(t, assistant("claude-new-6", text("Hi."))))
+	_, warnings, err := Board(p, boss)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fmt.Sprint(warnings)
+	for _, want := range []string{`status "thinking"`, "no context window for model claude-new-6", "local_broken.json"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("warnings = %s, want one naming %s", got, want)
+		}
+	}
+}
+
 func TestBoardNoWorkers(t *testing.T) {
 	p := fixture(t)
 	workers, warnings, err := Board(p, "local_other")
@@ -233,23 +329,35 @@ func TestBoardUnknownBoss(t *testing.T) {
 }
 
 func TestParseTranscript(t *testing.T) {
-	sidechain := assistant("claude-opus-5-5", text("subagent text"))
+	sidechain := assistant("claude-haiku-4-5", text("subagent text"), toolUse("s", "WebFetch"))
 	sidechain["isSidechain"] = true
+	sidechain["message"].(map[string]any)["usage"] = map[string]any{"input_tokens": 9}
 	synthetic := assistant("<synthetic>", text("API error"))
+	prompt := map[string]any{"type": "user", "message": map[string]any{"content": "a typed prompt"}}
+	meta := map[string]any{"type": "user", "isMeta": true, "message": map[string]any{"content": "a reminder"}}
 	data := lines(t,
+		// Left unanswered by a crash: the next prompt ends it
+		assistant("claude-opus-5-5", toolUse("x", "Edit")),
+		prompt,
 		assistant("claude-opus-5-5", toolUse("a", "Read"), toolUse("b", "Grep")),
 		toolResult("b"),
-		map[string]any{"type": "user", "message": map[string]any{"content": "a typed prompt"}},
+		meta,
 		assistant("claude-opus-5-5", text("main")),
-		sidechain,
 		synthetic,
+		sidechain,
 	) + `{"type":"assistant","message":{"content":[{"type":"text","text":"half wr`
 	got := parseTranscript([]byte(data))
 	if !slices.Equal(got.lines, []string{"API error"}) {
 		t.Errorf("lines = %q, want the synthetic row's text (only its usage is skipped)", got.lines)
 	}
 	if got.tool != "Read" {
-		t.Errorf("tool = %q, want Read (Grep answered)", got.tool)
+		t.Errorf("tool = %q, want Read (Grep answered, Edit's turn over)", got.tool)
+	}
+	if got.broken != 0 {
+		t.Errorf("broken = %d, want 0: the last, unended row is being written", got.broken)
+	}
+	if got := parseTranscript([]byte("{\"type\":\"assistant\",oops\n")); got.broken != 1 {
+		t.Errorf("broken = %d, want 1 for an ended row that does not parse", got.broken)
 	}
 	if got.model != "claude-opus-5-5" || got.tokens != 250_000 {
 		t.Errorf("model, tokens = %q, %d", got.model, got.tokens)
@@ -272,6 +380,12 @@ func TestTail(t *testing.T) {
 	}
 	if string(got) != "third\n" {
 		t.Errorf("tail = %q, want the whole lines in the last 10 bytes", got)
+	}
+	if got, _ := tail(path, 6); string(got) != "third\n" {
+		t.Errorf("tail cut right after a newline = %q, want the line starting there", got)
+	}
+	if got, _ := tail(path, 3); len(got) != 0 {
+		t.Errorf("tail with no whole line = %q, want none", got)
 	}
 	if got, _ := tail(path, 100); string(got) != "first line\nsecond\nthird\n" {
 		t.Errorf("tail of a short file = %q, want all of it", got)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -26,11 +27,14 @@ type transcript struct {
 	tool   string
 	model  string
 	tokens int
+	// broken counts rows that failed to parse, but for a last one still being written
+	broken int
 }
 
 type row struct {
 	Type        string `json:"type"`
 	IsSidechain bool   `json:"isSidechain"`
+	IsMeta      bool   `json:"isMeta"`
 	Message     struct {
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
@@ -60,10 +64,14 @@ func readTranscript(projects, id string) (transcript, error) {
 	if err != nil {
 		return transcript{lines: []string{}}, err
 	}
-	return parseTranscript(data), nil
+	t := parseTranscript(data)
+	if t.broken > 0 {
+		return t, fmt.Errorf("%s: %d rows did not parse", paths[0], t.broken)
+	}
+	return t, nil
 }
 
-// tail reads the last n bytes of path, from the first whole line in them.
+// tail reads the whole lines in the last n bytes of path; none when no whole line fits.
 func tail(path string, n int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -74,11 +82,14 @@ func tail(path string, n int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	off := max(0, info.Size()-n)
+	// One byte more: a cut right after a newline keeps the line that starts there
+	off := max(0, info.Size()-n-1)
 	data := make([]byte, info.Size()-off)
-	if _, err := f.ReadAt(data, off); err != nil && !errors.Is(err, io.EOF) {
+	read, err := f.ReadAt(data, off)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
+	data = data[:read]
 	if off > 0 {
 		i := bytes.IndexByte(data, '\n')
 		if i < 0 {
@@ -90,23 +101,38 @@ func tail(path string, n int64) ([]byte, error) {
 }
 
 // parseTranscript reads the main thread's rows: the newest assistant text and usage, and the newest tool use
-// without a result. A line that does not parse is skipped: the last one may be mid-write.
+// without a result. A line that does not parse is skipped, and counted unless it is the last, unended one
+// (being written).
 func parseTranscript(data []byte) transcript {
 	t := transcript{lines: []string{}}
 	var pending []block
-	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+	lines := bytes.Split(data, []byte{'\n'})
+	for i, line := range lines {
 		// Most bytes are other rows (attachments, request shapes): only these two are parsed
-		if !bytes.Contains(line, []byte(`"type":"assistant"`)) && !bytes.Contains(line, []byte(`"tool_result"`)) {
+		if !bytes.Contains(line, []byte(`"type":"assistant"`)) && !bytes.Contains(line, []byte(`"type":"user"`)) {
 			continue
 		}
 		var r row
-		if json.Unmarshal(line, &r) != nil || r.IsSidechain || (r.Type != "assistant" && r.Type != "user") {
+		if err := json.Unmarshal(line, &r); err != nil {
+			if i < len(lines)-1 {
+				t.broken++
+			}
+			continue
+		}
+		if r.IsSidechain || r.IsMeta || (r.Type != "assistant" && r.Type != "user") {
 			continue
 		}
 		var blocks []block
-		if json.Unmarshal(r.Message.Content, &blocks) != nil {
+		isBlocks := json.Unmarshal(r.Message.Content, &blocks) == nil
+		if r.Type == "user" && !(isBlocks && slices.ContainsFunc(blocks, isToolResult)) {
+			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more
+			pending = nil
 			continue
 		}
+		if !isBlocks {
+			continue
+		}
+		// Synthetic rows (interrupts, API errors) carry zero usage
 		if r.Type == "assistant" && r.Message.Usage != nil && r.Message.Model != "<synthetic>" {
 			u := r.Message.Usage
 			t.model, t.tokens = r.Message.Model, u.Input+u.CacheCreation+u.CacheRead
@@ -127,6 +153,8 @@ func parseTranscript(data []byte) transcript {
 	}
 	return t
 }
+
+func isToolResult(b block) bool { return b.Type == "tool_result" }
 
 func without(pending []block, id string) []block {
 	for i, b := range pending {
@@ -151,33 +179,35 @@ func lastLines(text string) []string {
 	return lines[max(0, len(lines)-lastLineCount):]
 }
 
-// contextWindows maps model ids to their context windows (runtime.max_input_tokens) from the newest file
-// of the app's model catalog; none is an empty map, so context shows as unknown.
+// contextWindows maps model ids to their context windows (runtime.max_input_tokens) across the files of
+// Claude Code's model catalog (one per account and org, most listing none), a newer file's window winning;
+// nil when there is no catalog.
 func contextWindows(dir string) (map[string]int, error) {
-	windows := map[string]int{}
 	paths, err := filepath.Glob(filepath.Join(dir, "*.json"))
-	if err != nil {
-		return windows, err
+	if err != nil || len(paths) == 0 {
+		return nil, err
 	}
-	var newest string
-	var newestAt time.Time
+	modTimes := map[string]time.Time{}
 	for _, p := range paths {
-		if info, err := os.Stat(p); err == nil && info.ModTime().After(newestAt) {
-			newest, newestAt = p, info.ModTime()
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, err
 		}
+		modTimes[p] = info.ModTime()
 	}
-	if newest == "" {
-		return windows, nil
+	slices.SortFunc(paths, func(a, b string) int { return modTimes[a].Compare(modTimes[b]) })
+	windows := map[string]int{}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return windows, err
+		}
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return windows, fmt.Errorf("%s: %w", p, err)
+		}
+		collectWindows(doc, windows)
 	}
-	data, err := os.ReadFile(newest)
-	if err != nil {
-		return windows, err
-	}
-	var doc any
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return windows, fmt.Errorf("%s: %w", newest, err)
-	}
-	collectWindows(doc, windows)
 	return windows, nil
 }
 

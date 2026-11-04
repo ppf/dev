@@ -11,10 +11,10 @@ const PERIOD_MS = 2000
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'suggestion', stopped: 'inactive' } as const
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 
-// Change the tag when Board's fields change: it declines what an earlier version stored
+// Change the tag when Board's, Worker's or PR's fields change: the atom then declines what an earlier version stored
 const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-1' })
 
-/** Runs `dev desktop board` once: its workers, or its error text. */
+/** Runs `dev desktop board` once: its workers with its stderr as warnings, or its error text. */
 async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>, boss: string): Promise<Board> {
   try {
     const ran = await run([DEV_BIN, 'desktop', 'board', '--json', '--boss', boss])
@@ -22,7 +22,12 @@ async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout:
     if (ran.exitCode !== 0) {
       return { workers: [], error: stderr || `${DEV_BIN} desktop board exited ${ran.exitCode}`, warnings: '' }
     }
-    return { workers: JSON.parse(ran.stdout) as Worker[], error: '', warnings: stderr }
+    const workers: unknown = JSON.parse(ran.stdout)
+    // A dev older or newer than this mod: say so rather than fail drawing
+    if (!Array.isArray(workers) || !workers.every(w => Array.isArray(w?.prs) && Array.isArray(w?.lastLines))) {
+      return { workers: [], error: `${DEV_BIN} desktop board printed workers this mod does not read: is dev up to date?`, warnings: '' }
+    }
+    return { workers: workers as Worker[], error: '', warnings: stderr }
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
     return { workers: [], error: `${DEV_BIN} desktop board: ${why}`, warnings: '' }
@@ -64,8 +69,8 @@ export const register: Register = on => {
         const polled = await poll(argv => $.process.run(argv), boss)
         const json = JSON.stringify(polled)
         if (json !== last) {
-          last = json
           await update($, board, () => polled)
+          last = json
         }
       } finally {
         isPolling = false

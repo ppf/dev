@@ -2,10 +2,10 @@
 
 A Claude Code mod for a boss session in the Claude desktop app: a live board of the sessions it started (its workers), from `dev desktop board --json`.
 
-- `/board` opens the **Workers** pane (docked in the right side panel): one tile per worker with its state (● busy, blocked, idle, stopped), title, branch, PRs with their state (click to open), the app's verdict on its last turn and what it needs from you, the tool in flight, its context use and the last lines of its newest reply.
-- The band above the prompt sums them up, e.g. `3 workers · 1 busy · 1 blocked · PR #78 open`; hidden when there are none.
+- `/board` opens the **Workers** pane (the desktop app docks it in the right side panel): one tile per worker with its state (● busy, blocked, idle, stopped), title, branch, PRs with their state (click to open), the app's verdict on its last turn and what it needs from you, the tool in flight, its context use and the last lines of its newest reply.
+- The band above the prompt sums them up, e.g. `3 workers · 1 busy · 1 blocked · PR #78 open`; hidden when there are none (or while a survey shows).
 
-Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs nothing.
+Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs no `dev`; the pane says why.
 
 ## Load it
 
