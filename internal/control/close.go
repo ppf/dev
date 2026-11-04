@@ -51,7 +51,7 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 		return done, fmt.Errorf("can't check %s's commits: %w", a.Session, err)
 	}
 	// Slow too (gh/glab): before the checks, which then only need its HEAD unchanged
-	head, err := delivered(wt, base)
+	head, _, err := delivered(wt, base)
 	if err != nil {
 		return done, err
 	}
@@ -136,39 +136,86 @@ func closable(c *tmux.Client, a Agent, wt, head string) error {
 	return nil
 }
 
-// delivered returns wt's HEAD once it is in base, or is the head of an open or merged PR/MR (prDelivered).
-func delivered(wt, base string) (string, error) {
+// Delivery is whether a worktree's work is delivered, as `dev delivered --json` reports it.
+type Delivery struct {
+	Delivered bool   `json:"delivered"`
+	Head      string `json:"head,omitempty"`
+	Reason    string `json:"reason"`       // how it is delivered, or why not
+	PR        int    `json:"pr,omitempty"` // the PR/MR delivering it; 0 when HEAD is in the base branch or not delivered
+}
+
+// Delivered runs Close's non-tmux checks on the worktree at path (under .claude/worktrees).
+func Delivered(path string) (Delivery, error) {
+	var d Delivery
+	mainRoot, wt, ok := worktree.SessionWorktree(path)
+	if !ok {
+		return d, d.refused(fmt.Errorf("%s isn't in a .claude/worktrees worktree", path))
+	}
+	base, err := worktree.FetchDefault(mainRoot)
+	if err != nil {
+		return d, d.refused(fmt.Errorf("can't check %s's commits: %w", wt, err))
+	}
+	head, pr, err := delivered(wt, base)
+	d.Head = head
+	if err != nil {
+		return d, d.refused(err)
+	}
+	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
+		return d, d.refused(cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt)))
+	}
+	if now, err := worktree.Head(wt); err != nil || now != head {
+		return d, d.refused(cmp.Or(err, fmt.Errorf("%s got new commits while checking", wt)))
+	}
+	d.Delivered, d.Reason = true, "in "+base
+	if pr.Number != 0 {
+		d.PR, d.Reason = pr.Number, fmt.Sprintf("%s #%d %s", pr.Kind, pr.Number, pr.State)
+	}
+	return d, nil
+}
+
+// refused records err as d's reason and returns it.
+func (d *Delivery) refused(err error) error {
+	d.Reason = err.Error()
+	return err
+}
+
+// delivered returns wt's HEAD (also on an error, once read) when it is in base, or is the head of an open or
+// merged PR/MR (prDelivered), which it returns too; a zero change when HEAD is in base.
+func delivered(wt, base string) (string, change, error) {
 	// Read first: a HEAD moving on after it fails closable
 	head, err := worktree.Head(wt)
 	if err != nil {
-		return "", err
+		return "", change{}, err
 	}
 	merged, err := worktree.Merged(wt, base)
 	if err != nil {
-		return "", err
+		return head, change{}, err
 	}
-	if !merged {
-		if err := prDelivered(wt, base, head); err != nil {
-			return "", fmt.Errorf("%s has commits that aren't in %s, and no PR/MR open or merged at its HEAD: %w", wt, base, err)
-		}
+	if merged {
+		return head, change{}, nil
 	}
-	return head, nil
+	pr, err := prDelivered(wt, base, head)
+	if err != nil {
+		return head, change{}, fmt.Errorf("%s has commits that aren't in %s, and no PR/MR open or merged at its HEAD: %w", wt, base, err)
+	}
+	return head, pr, nil
 }
 
 // change is a PR or MR of a commit.
 type change struct {
+	Kind       string // PR or MR
 	Number     int
 	State      string // open, merged, closed or locked
 	Head, Base string // head commit, base branch
 }
 
-// prDelivered checks that a PR (gh) or MR (glab) with head as its head commit is open, or merged into base's
-// branch, as a squash or rebase merge leaves its commits out of base. Looked up by commit in origin's
+// prDelivered returns the PR (gh) or MR (glab) with head as its head commit that is open, or merged into
+// base's branch, as a squash or rebase merge leaves its commits out of base. Looked up by commit in origin's
 // repository, so a PR from a fork to its upstream counts.
-func prDelivered(wt, base, head string) error {
+func prDelivered(wt, base, head string) (change, error) {
 	kind, changes, err := changesOf(wt, head)
 	if err != nil {
-		return err
+		return change{}, err
 	}
 	branch := strings.TrimPrefix(base, "origin/")
 	var why []string
@@ -178,9 +225,9 @@ func prDelivered(wt, base, head string) error {
 			// HEAD behind the PR's head; an unpushed commit after it fails the lookup instead
 			why = append(why, fmt.Sprintf("%s #%d is at %s, not at its HEAD %s", kind, c.Number, c.Head, head))
 		case c.State == "open":
-			return nil
+			return c, nil
 		case c.State == "merged" && c.Base == branch:
-			return nil
+			return c, nil
 		case c.State == "merged":
 			why = append(why, fmt.Sprintf("%s #%d was merged into %s", kind, c.Number, c.Base))
 		default:
@@ -188,9 +235,9 @@ func prDelivered(wt, base, head string) error {
 		}
 	}
 	if len(why) == 0 {
-		return fmt.Errorf("no %s has it", kind)
+		return change{}, fmt.Errorf("no %s has it", kind)
 	}
-	return errors.New(strings.Join(why, "; "))
+	return change{}, errors.New(strings.Join(why, "; "))
 }
 
 // changesOf lists the PRs (gh, for github.com or a host gh is signed in to) or else MRs (glab) of origin's
@@ -234,7 +281,7 @@ func changesOf(wt, head string) (string, []change, error) {
 			if pr.MergedAt != nil {
 				pr.State = "merged"
 			}
-			changes = append(changes, change{pr.Number, pr.State, pr.Head.SHA, pr.Base.Ref})
+			changes = append(changes, change{"PR", pr.Number, pr.State, pr.Head.SHA, pr.Base.Ref})
 		}
 		return "PR", changes, nil
 	}
@@ -255,7 +302,7 @@ func changesOf(wt, head string) (string, []change, error) {
 		if mr.State == "opened" {
 			mr.State = "open"
 		}
-		changes = append(changes, change{mr.IID, mr.State, mr.SHA, mr.TargetBranch})
+		changes = append(changes, change{"MR", mr.IID, mr.State, mr.SHA, mr.TargetBranch})
 	}
 	return "MR", changes, nil
 }
