@@ -113,6 +113,7 @@ dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
 dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)
 dev agent send-keys <target> esc|enter|ctrl+c|1|…
 dev agent close <target> [--json]              # close a finished worker: session, worktree, branch
+dev delivered <worktree> [--json]              # close's delivered checks only, for a desktop-app boss: exit 0 if delivered
 dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 dev agent skill desktop-boss > ~/.claude/skills/desktop-boss/SKILL.md   # its desktop-app twin (start_session, SendMessage)
 ```
@@ -128,6 +129,8 @@ Some changes run no Claude hook, so `dev agent` reads them off the screen:
 - Claude's agent panel under its status lines (`⏺ main`, a `◯` row per teammate or background agent) isn't taken for the end of its input box.
 
 `close` ends a worker whose work is delivered: the caller's own worker only (its `@dev_started_by` names the calling session), idle or waiting only because it sat idle, in a `.claude/worktrees` worktree no other session has a pane in, with no changes to tracked files and its HEAD in origin's default branch (local `origin/HEAD`, after a fetch; checked with `git merge-base --is-ancestor`, as `git branch -d` refuses when the branch's own remote ref is stale). Otherwise HEAD must be the head commit of a PR/MR that is open, or merged into that branch (a squash or rebase merge leaves its commits out of it): looked up by commit in origin's repository (`gh api repos/<owner>/<repo>/commits/<HEAD>/pulls` for a github.com origin or one on a host `gh` is signed in to, else `glab api …/repository/commits/<HEAD>/merge_requests`), so on GitHub a PR from origin, a fork, to its upstream counts. A commit after the PR's head is refused. Without `gh`/`glab`, or when it fails, such a worker is refused with its error. Anything else is refused, naming the failed check, before it touches the worker. It copies the worktree's untracked, not ignored files (e.g. `RESULT.md`) to `$XDG_STATE_HOME/dev/results/<session>/` (`<session>.2`, … when that exists) and prints where; ignored files go with the worktree. It moves clients watching the worker to the caller's session, kills the worker's session, removes its worktree and force-deletes its branch. Claude Code's auto mode blocks a coordinator's raw `tmux kill-session` and `git worktree remove`; allow `Bash(dev agent close:*)` instead.
+
+`dev delivered <worktree>` runs close's checks of the work alone (HEAD in the default branch or at an open or merged PR/MR, no changes to tracked files) on a `.claude/worktrees` worktree, with no tmux, touching nothing but the fetch of origin, e.g. for the desktop-boss skill before `archive_session`. Delivered: exit 0 and `delivered: <head> (PR #12 open|PR #12 merged|in origin/main)` (`MR #12 …` on GitLab); else exit 1 and the failed check. `--json` prints `{delivered, head, reason, pr}` either way (`pr` only when a PR/MR delivers it, `head` once read). `delivered` is a subcommand, so no project can be named `delivered`.
 
 ## Coordinator view
 
