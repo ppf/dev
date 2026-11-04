@@ -70,7 +70,7 @@ func readTranscript(projects, id string) (transcript, error) {
 	}
 	data, start, err := tail(paths[0], tailBytes)
 	if err != nil {
-		return transcript{lines: []string{}, plan: []Step{}}, err
+		return transcript{lines: []string{}}, err
 	}
 	t, ops := parseTranscript(data)
 	t.written = info.ModTime()

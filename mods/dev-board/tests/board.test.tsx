@@ -489,7 +489,6 @@ test("Open opens the worker's session through the app's deep link", async ($, on
   await ui.unmount()
 })
 
-/** Collects the toasts the mod raises. */
 function collectToasts(on: On) {
   const toasts: string[] = []
   on('ui.toast', (_, e) => {

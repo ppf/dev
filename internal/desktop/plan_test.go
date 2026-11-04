@@ -86,7 +86,7 @@ func TestTranscriptPlanBeforeTail(t *testing.T) {
 		return map[string]any{"type": "attachment", "attachment": strings.Repeat("x", n)}
 	}
 	call := func(id string, input map[string]any) map[string]any {
-		return assistant("claude-opus-5-5", map[string]any{"type": "tool_use", "id": id, "name": updatePlan, "input": input})
+		return assistant("claude-opus-5-5", map[string]any{"type": "tool_use", "id": id, "name": updatePlanTool, "input": input})
 	}
 	rows := []any{
 		call("t1", map[string]any{"items": []map[string]any{{"content": "one", "status": "pending"}}}),

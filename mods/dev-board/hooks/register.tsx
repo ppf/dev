@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Board, Checks, Worker } from '../types'
+import type { Board, Checks, PR, Worker } from '../types'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
 const DEV_BIN = 'dev'
@@ -80,6 +80,11 @@ async function prChecks(run: Run, url: string): Promise<Omit<Checks, 'at'>> {
   }
 }
 
+const label = (w: Worker) => w.name || w.title
+
+/** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
+const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
+
 /** The notes not sent yet, as one prompt (e.g. `dev-board: fix-login stuck: no progress for 17m; …`) and their keys. */
 function unsent(workers: Worker[], sentKeys: readonly string[]): { text: string; keys: string[] } {
   const done = new Set(sentKeys)
@@ -93,11 +98,6 @@ function unsent(workers: Worker[], sentKeys: readonly string[]): { text: string;
   }
   return { text: lines.length === 0 ? '' : `dev-board: ${lines.join('; ')}`, keys }
 }
-
-const label = (w: Worker) => w.name || w.title
-
-/** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
-const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
 
 /** The band's line, e.g. `1 needs you · 3 workers · 1 busy · 1 blocked · PR #78 open`. */
 function bandLine(workers: Worker[]): string {
@@ -127,6 +127,13 @@ function age(w: Worker): string {
 function statusLine(w: Worker): string {
   const head = w.status === 'waiting' && w.since !== '' ? `waiting ${w.since}` : w.status
   return w.statusText === '' ? head : `${head} · ${w.statusText}`
+}
+
+/** A PR's CI line, e.g. `✅ build ❌ test`, or why it has none; '' for a PR not open or not read yet. */
+function ciLine(pr: PR, c: Checks | undefined): string {
+  if (pr.state !== 'OPEN' || c === undefined) return ''
+  if (c.error !== '') return c.error
+  return c.checks.map(k => `${CHECK_ICONS[k.bucket] ?? k.bucket} ${k.name}`).join(' ')
 }
 
 export const register: Register = on => {
@@ -219,8 +226,8 @@ export const register: Register = on => {
       return <Text dimColor>Loading workers…</Text>
     }
     const v = await read($, view)
-    const prChecks = await read($, checks)
-    const isDelivered = await read($, delivered)
+    const checksRead = await read($, checks)
+    const deliveredRead = await read($, delivered)
     // Needs you first, the rest oldest first
     const workers = [...b.workers].sort((x, y) => Number(y.status === NEEDS_YOU) - Number(x.status === NEEDS_YOU))
 
@@ -254,7 +261,7 @@ export const register: Register = on => {
         {workers.map(w => {
           const done = w.plan.filter(s => s.status === 'completed').length
           const isExpanded = v.expanded.includes(w.id)
-          const canArchive = w.state !== 'busy' && isDelivered[w.id]?.isDelivered === true
+          const canArchive = w.state !== 'busy' && deliveredRead[w.id]?.isDelivered === true
 
           return (
             <Box key={w.id} flexDirection="column">
@@ -265,8 +272,8 @@ export const register: Register = on => {
               <Text color={STATUS_COLORS[w.status] ?? 'text'}>{statusLine(w)}</Text>
               <Text dimColor>{[age(w), w.branch, w.context === null ? '' : `context ${w.context}%`].filter(s => s !== '').join(' · ')}</Text>
               {w.prs.map(pr => {
-                const c = prChecks[pr.url]
-                const ci = pr.state !== 'OPEN' || c === undefined ? '' : c.error !== '' ? c.error : c.checks.map(k => `${CHECK_ICONS[k.bucket] ?? k.bucket} ${k.name}`).join(' ')
+                const c = checksRead[pr.url]
+                const ci = ciLine(pr, c)
 
                 return (
                   <Text key={pr.url}>

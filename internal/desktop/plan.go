@@ -6,12 +6,13 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 )
 
 // The desktop app's task list tools: update_plan sets and moves the list, wrap_up checks it off.
 const (
-	updatePlan = "mcp__ccd_turn__update_plan"
-	wrapUp     = "mcp__ccd_turn__wrap_up"
+	updatePlanTool = "mcp__ccd_turn__update_plan"
+	wrapUpTool     = "mcp__ccd_turn__wrap_up"
 )
 
 // Step statuses, as update_plan has them.
@@ -53,9 +54,9 @@ func planOps(blocks []block) []planOp {
 			continue
 		}
 		switch b.Name {
-		case wrapUp:
+		case wrapUpTool:
 			ops = append(ops, planOp{wrapUp: true})
-		case updatePlan:
+		case updatePlanTool:
 			var in struct {
 				Items   *[]Step `json:"items"`
 				Advance bool    `json:"advance"`
@@ -77,12 +78,7 @@ func planOps(blocks []block) []planOp {
 
 // hasItems reports whether ops set the list.
 func hasItems(ops []planOp) bool {
-	for _, op := range ops {
-		if op.hasItems {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(ops, func(op planOp) bool { return op.hasItems })
 }
 
 // replay is the task list ops leave, from their last items call on; none without one.
@@ -141,7 +137,7 @@ func planOpsBefore(path string, end int64) ([]planOp, error) {
 	var ops []planOp
 	// carry is the start of a row cut by the chunk after, which ends in the chunk before
 	var carry []byte
-	for scanned := int64(0); end > 0 && scanned < planScanBytes; {
+	for floor := max(0, end-planScanBytes); end > floor; {
 		start := max(0, end-planChunk)
 		buf := make([]byte, end-start, end-start+int64(len(carry)))
 		n, err := f.ReadAt(buf, start)
@@ -153,7 +149,6 @@ func planOpsBefore(path string, end int64) ([]planOp, error) {
 		if start > 0 {
 			i := bytes.IndexByte(buf, '\n')
 			if i < 0 {
-				scanned += end - start
 				carry, end = buf, start
 				continue
 			}
@@ -176,7 +171,6 @@ func planOpsBefore(path string, end int64) ([]planOp, error) {
 		if hasItems(chunk) {
 			return ops, nil
 		}
-		scanned += end - start
 		end = start
 	}
 	return ops, nil

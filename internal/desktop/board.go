@@ -112,7 +112,7 @@ type record struct {
 		UserFork  bool   `json:"userFork"`
 	} `json:"spawnedFrom"`
 	// InterruptedAwaitingPerson marks a session the app quit on while a dialog waited on the person.
-	InterruptedAwaitingPerson *bool `json:"interruptedAwaitingPerson"`
+	InterruptedAwaitingPerson bool `json:"interruptedAwaitingPerson"`
 	PRs                       []struct {
 		Number int    `json:"prNumber"`
 		URL    string `json:"url"`
@@ -320,9 +320,8 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	if sinceAt > 0 {
 		w.Since = inbox.Span(now.Sub(time.UnixMilli(sinceAt)))
 	}
-	interrupted := r.InterruptedAwaitingPerson != nil && *r.InterruptedAwaitingPerson
 	if cli == "" {
-		w.Status, w.StatusText = status(w, Hook{}, interrupted, now)
+		w.Status, w.StatusText = status(w, Hook{}, r.InterruptedAwaitingPerson, now)
 		return w, nil
 	}
 	var h Hook
@@ -356,7 +355,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 		seen = max(seen, l.StatusUpdatedAt/1000)
 	}
 	w.Notes = notes(w, cli, h, seen, now)
-	w.Status, w.StatusText = status(w, h, interrupted, now)
+	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	return w, errors.Join(err, hookErr)
 }
 
