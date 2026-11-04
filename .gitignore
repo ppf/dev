@@ -2,3 +2,5 @@
 *.test
 *.out
 /dist/
+/bin/
+mods/*/.claude-plugin/types/

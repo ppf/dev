@@ -174,6 +174,14 @@ Notes sit in `$XDG_STATE_HOME/dev/inbox/` (one locked file per boss), a worker's
 tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
 ```
 
+## Desktop worker board
+
+```bash
+dev desktop board [--json] [--boss <local_id>]   # a desktop app boss session's workers
+```
+
+Lists the unarchived sessions a Claude desktop app session started (default: `$CLAUDE_CODE_HOST_SESSION_ID`, the session it runs in): state (busy, blocked, idle, stopped), branch, PRs, the app's verdict on the last turn and what it needs, the tool in flight, context use and the last lines of the newest reply. It joins the app's session records (`~/Library/Application Support/Claude/claude-code-sessions`), `~/.claude/sessions` and the transcripts; the context window comes from the app's model catalog. These are private app formats: a file that fails to parse is reported on stderr. The [dev-board mod](mods/dev-board/README.md) shows it live in a pane of the boss session.
+
 ## Session cost
 
 The sidebar shows each Claude session's estimated cost (`Claude · idle · $1.24 · title`), and `dev agent list --json` reports it as `cost_usd`. The number is Claude Code's own `cost.total_cost_usd`, the list-price estimate `/cost` shows. It covers every API call of the conversation, and resets on `/clear`. It isn't your bill on a subscription plan. `dev statusline` records it from the status line input, so run your status line through it:

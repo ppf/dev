@@ -1,0 +1,6 @@
+{
+  "name": "dev-board",
+  "version": "0.1.0",
+  "description": "Live board of a desktop boss session's workers, from dev desktop board",
+  "types": "./types/index.d.ts"
+}

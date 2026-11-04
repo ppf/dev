@@ -36,7 +36,7 @@ func newRootCmd() *cobra.Command {
 		return openProject(cmd, args[0], wt, false, false, "", "")
 	}
 	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
-		newResurrectCmd(), newCompactCmd(), newAgentCmd(), newStatuslineCmd(), newHerdCmd(), newPtyWrapCmd(), newQuestionCmd())
+		newResurrectCmd(), newCompactCmd(), newAgentCmd(), newStatuslineCmd(), newHerdCmd(), newPtyWrapCmd(), newQuestionCmd(), newDesktopCmd())
 	return root
 }
 
