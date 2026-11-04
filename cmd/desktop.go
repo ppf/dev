@@ -31,7 +31,9 @@ func newDesktopBoardCmd() *cobra.Command {
 		Long: `List the unarchived sessions a Claude desktop app session started (its workers): live state
 (busy, blocked, idle, stopped), title, branch, PRs and the share of the context window in use. --json adds
 the app's verdict on the last turn and what it needs, the last lines of the newest assistant text, the
-tool in flight and health notes, each with a key that stays the same while its condition holds: stuck (busy,
+tool in flight, a finer status (needs you, rate-limited, stuck, working, waiting, blocked, review ready,
+idle, stopped) and what it says, how long it has been in its state, its task list (update_plan) and health
+notes, each with a key that stays the same while its condition holds: stuck (busy,
 no progress for 15 min), a decision unanswered for 3 min, context at 80% or more, a rate limit, and its
 resume once the limit reset. Reads the app's session records, ~/.claude/sessions, the transcripts, Claude
 Code's model catalog and the files dev state and dev question write in desktop sessions (desktop/ in

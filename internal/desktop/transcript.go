@@ -28,6 +28,8 @@ type transcript struct {
 	tool    string
 	model   string
 	tokens  int
+	// plan is the task list its update_plan and wrap_up calls leave
+	plan []Step
 	// broken counts rows that failed to parse, but for a last one still being written
 	broken int
 }
@@ -48,11 +50,12 @@ type row struct {
 }
 
 type block struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	ToolUseID string `json:"tool_use_id"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	ToolUseID string          `json:"tool_use_id"`
+	Input     json.RawMessage `json:"input"`
 }
 
 // readTranscript reads the end of session id's transcript, found under any project; none yet is no error.
@@ -65,53 +68,63 @@ func readTranscript(projects, id string) (transcript, error) {
 	if err != nil {
 		return transcript{lines: []string{}}, err
 	}
-	data, err := tail(paths[0], tailBytes)
+	data, start, err := tail(paths[0], tailBytes)
 	if err != nil {
-		return transcript{lines: []string{}}, err
+		return transcript{lines: []string{}, plan: []Step{}}, err
 	}
-	t := parseTranscript(data)
+	t, ops := parseTranscript(data)
 	t.written = info.ModTime()
+	if !hasItems(ops) && start > 0 {
+		// The list was set before the tail: a long turn
+		before, err := planOpsBefore(paths[0], start)
+		if err != nil {
+			return t, err
+		}
+		ops = append(before, ops...)
+	}
+	t.plan = replay(ops)
 	if t.broken > 0 {
 		return t, fmt.Errorf("%s: %d rows did not parse", paths[0], t.broken)
 	}
 	return t, nil
 }
 
-// tail reads the whole lines in the last n bytes of path; none when no whole line fits.
-func tail(path string, n int64) ([]byte, error) {
+// tail reads the whole lines in the last n bytes of path and where they start; none when no whole line fits.
+func tail(path string, n int64) ([]byte, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	// One byte more: a cut right after a newline keeps the line that starts there
 	off := max(0, info.Size()-n-1)
 	data := make([]byte, info.Size()-off)
 	read, err := f.ReadAt(data, off)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, 0, err
 	}
 	data = data[:read]
 	if off > 0 {
 		i := bytes.IndexByte(data, '\n')
 		if i < 0 {
-			return nil, nil
+			return nil, 0, nil
 		}
-		data = data[i+1:]
+		data, off = data[i+1:], off+int64(i)+1
 	}
-	return data, nil
+	return data, off, nil
 }
 
-// parseTranscript reads the main thread's rows: the newest assistant text and usage, and the newest tool use
-// without a result. A line that does not parse is skipped, and counted unless it is the last, unended one
-// (being written).
-func parseTranscript(data []byte) transcript {
+// parseTranscript reads the main thread's rows: the newest assistant text and usage, the newest tool use
+// without a result, and the task list calls. A line that does not parse is skipped, and counted unless it is
+// the last, unended one (being written).
+func parseTranscript(data []byte) (transcript, []planOp) {
 	t := transcript{lines: []string{}}
 	var pending []block
+	var ops []planOp
 	lines := bytes.Split(data, []byte{'\n'})
 	for i, line := range lines {
 		// Most bytes are other rows (attachments, request shapes): only these two are parsed
@@ -143,6 +156,9 @@ func parseTranscript(data []byte) transcript {
 			u := r.Message.Usage
 			t.model, t.tokens = r.Message.Model, u.Input+u.CacheCreation+u.CacheRead
 		}
+		if r.Type == "assistant" {
+			ops = append(ops, planOps(blocks)...)
+		}
 		for _, b := range blocks {
 			switch {
 			case r.Type == "assistant" && b.Type == "text" && strings.TrimSpace(b.Text) != "":
@@ -157,7 +173,7 @@ func parseTranscript(data []byte) transcript {
 	if len(pending) > 0 {
 		t.tool = pending[len(pending)-1].Name
 	}
-	return t
+	return t, ops
 }
 
 func isToolResult(b block) bool { return b.Type == "tool_result" }
