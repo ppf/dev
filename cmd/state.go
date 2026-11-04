@@ -5,11 +5,13 @@ import (
 	"io"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/tmux"
@@ -21,7 +23,7 @@ func newStateCmd() *cobra.Command {
 	var codex bool
 	cmd := &cobra.Command{
 		Use:   "state <working|waiting|idle|clear|tool-failed>",
-		Short: "Claude, Codex or Grok hook: record the agent state on its tmux pane",
+		Short: "Claude, Codex or Grok hook: record the agent state on its tmux pane (or a desktop app session's hook file)",
 		Args: cobra.MatchAll(cobra.ExactArgs(1), func(_ *cobra.Command, args []string) error {
 			if !slices.Contains(states, args[0]) {
 				return fmt.Errorf("unknown state %q, want one of %v", args[0], states)
@@ -30,12 +32,23 @@ func newStateCmd() *cobra.Command {
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pane := os.Getenv("TMUX_PANE")
-			if pane == "" && !codex {
+			if pane == "" && !codex && !desktop.InApp() {
 				return nil
 			}
 			input, err := io.ReadAll(cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			if pane == "" && !codex {
+				// A desktop app session: its hook file stands in for the pane's options
+				dir, err := desktop.HookDir()
+				if err == nil {
+					err = desktop.RecordState(dir, args[0], input, time.Now())
+				}
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+				}
+				return nil
 			}
 			state, ok, err := agent.Resolve(args[0], input)
 			if err != nil {

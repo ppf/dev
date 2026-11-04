@@ -413,7 +413,7 @@ func TestRecordHook(t *testing.T) {
 			want := tt.want
 			if tt.state != Clear && tt.hook.Socket == "" {
 				// The socket and mode cases spell them out
-				if slices.Contains(turnBounds, tt.hook.Event) {
+				if slices.Contains(TurnBounds, tt.hook.Event) {
 					want += " ; set-option -pu -t %1 @agent_question"
 				}
 				want += " ; set-option -pu -t %1 @agent_socket ; set-option -pu -t %1 @agent_pid"

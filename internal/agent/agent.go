@@ -238,7 +238,7 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 			// dev agent prompt refuses a waiting agent unless it's only idle: a paste would answer a permission dialog
 			cmds = append(cmds, set("@agent_waiting_for", cmp.Or(h.NotificationType, h.Event)))
 		}
-		if slices.Contains(turnBounds, h.Event) {
+		if slices.Contains(TurnBounds, h.Event) {
 			// Not on a PostToolUse: a tool run alongside may end while the dialog is still open
 			cmds = append(cmds, unset(OptQuestion))
 		}
@@ -362,8 +362,8 @@ func settle(c *tmux.Client, pane, cond, state string) error {
 	return err
 }
 
-// turnBounds are the hook events starting or ending a turn, which end any dialog in it.
-var turnBounds = []string{"SessionStart", "UserPromptSubmit", "Stop", "StopFailure"}
+// TurnBounds are the hook events starting or ending a turn, which end any dialog in it.
+var TurnBounds = []string{"SessionStart", "UserPromptSubmit", "Stop", "StopFailure"}
 
 // now is the clock @agent_since reads; tests replace it.
 var now = time.Now

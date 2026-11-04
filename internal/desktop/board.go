@@ -27,6 +27,8 @@ type Paths struct {
 	Projects string
 	// Models holds Claude Code's model catalog, *.json, for the models' context windows.
 	Models string
+	// Hooks holds the sessions' hook files (Hook), <session id>.json; "" for none.
+	Hooks string
 }
 
 // DefaultPaths are the macOS locations under home and Claude's config directory (~/.claude when "").
@@ -80,6 +82,8 @@ type Worker struct {
 	Tool string `json:"tool"`
 	// Context is the share of the model's context window in use, in whole percent; nil when unknown.
 	Context *int `json:"context"`
+	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
+	Notes []Note `json:"notes"`
 }
 
 type record struct {
@@ -115,11 +119,13 @@ type live struct {
 	SessionID     string `json:"sessionId"`
 	HostSessionID string `json:"hostSessionId"`
 	Status        string `json:"status"`
+	// StatusUpdatedAt is when Status last changed, in milliseconds since the epoch.
+	StatusUpdatedAt int64 `json:"statusUpdatedAt"`
 }
 
-// Board lists boss's unarchived workers, oldest first; warnings name files it could not read, err that boss
-// has no readable app record.
-func Board(p Paths, boss string) (workers []Worker, warnings []error, err error) {
+// Board lists boss's unarchived workers, oldest first, with their notes at now; warnings name files it could
+// not read, err that boss has no readable app record.
+func Board(p Paths, boss string, now time.Time) (workers []Worker, warnings []error, err error) {
 	recs, warnings, err := records(p.Records, boss)
 	if err != nil || len(recs) == 0 {
 		return []Worker{}, warnings, err
@@ -132,7 +138,7 @@ func Board(p Paths, boss string) (workers []Worker, warnings []error, err error)
 	}
 	workers = make([]Worker, 0, len(recs))
 	for _, r := range recs {
-		w, err := worker(p, r, lives, windows)
+		w, err := worker(p, r, lives, windows, now)
 		if err != nil {
 			warnings = append(warnings, err)
 		}
@@ -257,8 +263,8 @@ func alive(l live) bool {
 	return !ok || l.StartedAt == 0 || started.Unix() <= l.StartedAt/1000
 }
 
-// worker joins r with its live session and transcript; the error is what it could not read of them.
-func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, error) {
+// worker joins r with its live session, transcript and hook file; the error is what it could not read of them.
+func worker(p Paths, r record, lives []live, windows map[string]int, now time.Time) (Worker, error) {
 	w := Worker{
 		ID:             r.SessionID,
 		Name:           r.SpawnedFrom.Name,
@@ -269,6 +275,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, er
 		CreatedAt:      r.CreatedAt,
 		LastActivityAt: r.LastActivityAt,
 		LastLines:      []string{},
+		Notes:          []Note{},
 	}
 	for _, pr := range r.PRs {
 		w.PRs = append(w.PRs, PR(pr))
@@ -295,6 +302,16 @@ func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, er
 	if cli == "" {
 		return w, nil
 	}
+	var h Hook
+	var hookErr error
+	if p.Hooks != "" {
+		path := filepath.Join(p.Hooks, cli+".json")
+		h, hookErr = ReadHook(path)
+		if _, err := os.Stat(path); running && errors.Is(err, os.ErrNotExist) {
+			// Claude's hooks run a dev without desktop support (or none), or none ran since it was installed
+			hookErr = fmt.Errorf("%s: no hook file for %s: its decision and rate-limit notes are missing until a dev state hook writes it", path, w.Title)
+		}
+	}
 	t, err := readTranscript(p.Projects, cli)
 	w.LastLines = t.lines
 	if w.State == StateBusy {
@@ -308,7 +325,12 @@ func worker(p Paths, r record, lives []live, windows map[string]int) (Worker, er
 	if err == nil && window == 0 && t.tokens > 0 && windows != nil {
 		err = fmt.Errorf("no context window for model %s in the model catalog", t.model)
 	}
-	return w, err
+	seen := t.written.Unix()
+	if running {
+		seen = max(seen, l.StatusUpdatedAt/1000)
+	}
+	w.Notes = notes(w, cli, h, seen, now)
+	return w, errors.Join(err, hookErr)
 }
 
 func findLive(lives []live, r record) (live, bool) {

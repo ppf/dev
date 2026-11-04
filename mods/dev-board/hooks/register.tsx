@@ -11,8 +11,11 @@ const PERIOD_MS = 2000
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'suggestion', stopped: 'inactive' } as const
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 
-// Change the tag when Board's, Worker's or PR's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-1' })
+// Change the tag when Board's, Worker's, PR's or Note's fields change: the atom then declines what an earlier version stored
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-2' })
+// The keys of the notes already sent to the boss, newest last, so a reload sends none again
+const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
+const MAX_SENT = 500
 
 /** Runs `dev desktop board` once: its workers with its stderr as warnings, or its error text. */
 async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>, boss: string): Promise<Board> {
@@ -24,7 +27,7 @@ async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout:
     }
     const workers: unknown = JSON.parse(ran.stdout)
     // A dev older or newer than this mod: say so rather than fail drawing
-    if (!Array.isArray(workers) || !workers.every(w => Array.isArray(w?.prs) && Array.isArray(w?.lastLines))) {
+    if (!Array.isArray(workers) || !workers.every(w => Array.isArray(w?.prs) && Array.isArray(w?.lastLines) && Array.isArray(w?.notes))) {
       return { workers: [], error: `${DEV_BIN} desktop board printed workers this mod does not read: is dev up to date?`, warnings: '' }
     }
     return { workers: workers as Worker[], error: '', warnings: stderr }
@@ -32,6 +35,20 @@ async function poll(run: (argv: string[]) => Promise<{ exitCode: number; stdout:
     const why = err instanceof Error ? err.message : String(err)
     return { workers: [], error: `${DEV_BIN} desktop board: ${why}`, warnings: '' }
   }
+}
+
+/** The notes not sent yet, as one prompt (e.g. `dev-board: fix-login stuck: no progress for 17m; …`) and their keys. */
+function unsent(workers: Worker[], sentKeys: readonly string[]): { text: string; keys: string[] } {
+  const done = new Set(sentKeys)
+  const lines: string[] = []
+  const keys: string[] = []
+  for (const w of workers) {
+    for (const n of w.notes.filter(n => !done.has(n.key))) {
+      lines.push(`${w.name || w.title} ${n.kind}: ${n.text}`)
+      keys.push(n.key)
+    }
+  }
+  return { text: lines.length === 0 ? '' : `dev-board: ${lines.join('; ')}`, keys }
 }
 
 /** The band's line, e.g. `3 workers · 1 busy · 1 blocked · PR #78 open`. */
@@ -71,6 +88,17 @@ export const register: Register = on => {
         if (json !== last) {
           await update($, board, () => polled)
           last = json
+        }
+        const notes = unsent(polled.workers, await read($, sent))
+        if (notes.text !== '') {
+          // Marked first: the prompt waits for the boss to go idle, and a refused one is not retried every tick.
+          // The notes still holding go last, so the cap drops only gone ones
+          const holding = new Set(polled.workers.flatMap(w => w.notes.map(n => n.key)))
+          await update($, sent, keys => [...keys.filter(k => !holding.has(k)), ...holding].slice(-MAX_SENT))
+          void $.prompt.submit({ text: notes.text }).then(
+            r => r.drop !== undefined && $.ui.toast(`dev-board: worker notes not sent: ${r.drop}`),
+            (err: unknown) => $.ui.toast(`dev-board: worker notes not sent: ${err instanceof Error ? err.message : String(err)}`),
+          )
         }
       } finally {
         isPolling = false
@@ -122,6 +150,11 @@ export const register: Register = on => {
               </Text>
             )}
             {w.needsAction !== '' && w.state !== 'busy' && <Text color="warning">needs: {w.needsAction}</Text>}
+            {w.notes.map(n => (
+              <Text key={n.key} color="warning">
+                {n.kind}: {n.text}
+              </Text>
+            ))}
             {w.tool !== '' && <Text color="claude">running {w.tool}</Text>}
             {w.lastLines.map(line => (
               <Text dimColor>{line}</Text>
