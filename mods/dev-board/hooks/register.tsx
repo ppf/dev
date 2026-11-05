@@ -268,8 +268,11 @@ function ciRollup(pr: PR, c: Checks | undefined): Rollup | undefined {
 
 /** The names of the checks that make the rollup (the failed ones, the running ones, else all), e.g. `test lint`. */
 function ciNames(c: Checks, rollup: Rollup): string {
-  const makes = (bucket: string) =>
-    rollup === 'failed' ? FAILED_BUCKETS.includes(bucket) : rollup === 'running' ? !PASSED_BUCKETS.includes(bucket) && !FAILED_BUCKETS.includes(bucket) : true
+  const makes = (bucket: string) => {
+    if (rollup === 'failed') return FAILED_BUCKETS.includes(bucket)
+    if (rollup === 'running') return !PASSED_BUCKETS.includes(bucket) && !FAILED_BUCKETS.includes(bucket)
+    return true
+  }
   return c.checks.filter(k => makes(k.bucket)).map(k => k.name).join(' ')
 }
 
