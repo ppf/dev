@@ -2,7 +2,13 @@
 
 A Claude Code mod for a boss session in the Claude desktop app: a live board of the sessions it started (its workers), from `dev desktop board --json`.
 
-- `/board` opens the **Workers** pane (the desktop app docks it in the right side panel): one tile per worker with its state (● busy, blocked, idle, stopped), title and task list progress (`3/7`), its status and what it says (`needs you · allow Bash: …`, `working · Bash`, `waiting 4m · Auto-fix: PR #80`, `rate-limited · resumes 18:05`, `stuck · no progress for 17m`, `blocked`, `review ready`, `idle`), how long (`busy 12m`, `idle 3m ago`), branch, context use, PRs with their state (click to open) and an open PR's CI checks (✅ ❌ ⏳, from `gh pr checks`), the app's verdict on its last turn and the last lines of its newest reply. Tiles that need you come first.
+- `/board` opens the **Workers** pane (the desktop app docks it in the right side panel), its tiles in sections by status, each with its count, empty ones hidden: **Needs you** (red), **Working** (working, stuck, rate-limited; accent), **Waiting** (waiting, blocked, review ready; amber), **Idle** (idle, stopped; muted). A section's color marks its header, its open tiles' left rule and their status; colors are the app theme's, so light and dark both work.
+- A tile:
+  - header row: ▾/▸ (fold), state dot (● busy, blocked, idle, stopped), title, task list progress (`3/7`), status and what it says (`needs you · allow Bash: …`, `working · Bash`, `waiting · Auto-fix: PR #80`, `rate-limited · resumes 18:05`, `stuck · no progress for 17m`), time in that state (`12m`);
+  - meta row: branch · context use · PRs with their state (click to open) and an open PR's CI checks (✅ ❌ ⏳, from `gh pr checks`);
+  - the app's verdict on its last turn and the last two lines of its newest reply, each cut to one row; health notes; buttons.
+
+  Idle tiles are folded to their header row, unless they carry a health note; the rest are open. **▸**/**▾** folds or unfolds one; that choice sticks across polls and status changes for the session.
 - Buttons per tile:
   - **Tasks** expands the task list (✅ done, 🔄 current, ◌ pending).
   - **Open** opens the worker's session in the app (`claude://code/continue?session=<id>`).

@@ -111,6 +111,15 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
 
 const ok = (workers: Worker[], stderr = ''): Ran => ({ exitCode: 0, stdout: JSON.stringify(workers), stderr })
 
+type Mounted = Pick<Awaited<ReturnType<Engine['ui']['mount']>>, 'find' | 'press'>
+
+/** Unfolds a worker's tile if folded (an idle worker's is, by default). */
+async function unfold(ui: Mounted, id = 'local_a') {
+  if ((await ui.find({ key: `${id}:fold` }))?.props.label === '▸') {
+    await ui.press({ key: `${id}:fold` })
+  }
+}
+
 test('the pane shows a tile per worker, on every surface', async ($, on) => {
   const { runs, clock } = await start($, on, ok(WORKERS))
   await clock.advance(2000)
@@ -119,11 +128,11 @@ test('the pane shows a tile per worker, on every surface', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /^busy · feature\/a · context 42%$/ }))?.text).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /^working/ }))?.text).toBe('working · Bash')
+    expect((await ui.find({ type: 'Text', text: /^● Worker A/ }))?.text).toBe('● Worker A · working · Bash')
+    expect((await ui.find({ type: 'Text', text: /^feature\/a · context 42%$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Running the tests/ }))?.text).toBe('Running the tests.')
     expect((await ui.find({ type: 'Text', text: /last turn: completed/ }))?.text).toBe('last turn: completed')
-    expect((await ui.find({ type: 'Text', text: /^blocked ·/ }))?.text).toBe('blocked · pick one')
+    expect((await ui.find({ type: 'Text', text: /^● Worker B/ }))?.text).toBe('● Worker B · blocked · pick one')
     expect((await ui.find({ type: 'Text', text: /^blocked: two ways$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /PR #78 open/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBeTruthy()
@@ -322,7 +331,8 @@ test('the task list is collapsed, its count in the header; Tasks expands it', as
   await start($, on, ok([worker({ plan: [...PLAN] })]))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A 1/3')
+    expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A 1/3 · idle')
+    await unfold(ui)
     expect(await ui.find({ type: 'Text', text: /Write the mod/ })).toBeFalsy()
     await ui.press({ key: 'local_a:tasks' })
     expect((await ui.find({ type: 'Text', text: /Read the code/ }))?.text).toBe('✅ Read the code')
@@ -337,7 +347,8 @@ test('the task list is collapsed, its count in the header; Tasks expands it', as
 test('no task list: no count and no Tasks button', async ($, on) => {
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A')
+  expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A · idle')
+  await unfold(ui)
   expect(await ui.find({ key: 'local_a:tasks' })).toBeFalsy()
   await ui.unmount()
 })
@@ -349,9 +360,7 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const titles = (await ui.findAll({ type: 'Text', text: /^● / })).map(t => t.text)
-  expect(titles).toEqual(['● Worker B', '● Worker A'])
-  expect((await ui.find({ type: 'Text', text: /^needs you/ }))?.text).toBe('needs you · allow Bash: rm -rf bin')
-  expect((await ui.find({ type: 'Text', text: /^busy 12m/ }))?.text).toBe('busy 12m · feature/a')
+  expect(titles).toEqual(['● Worker B · needs you · allow Bash: rm -rf bin · 5m', '● Worker A · working · 12m'])
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 2 workers · 2 busy')
@@ -361,8 +370,7 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
 test('a waiting worker says on what and for how long', async ($, on) => {
   await start($, on, ok([worker({ status: 'waiting', statusText: 'Auto-fix: PR #80', since: '4m' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /^waiting/ }))?.text).toBe('waiting 4m · Auto-fix: PR #80')
-  expect((await ui.find({ type: 'Text', text: /^idle 4m ago/ }))?.text).toBe('idle 4m ago · feature/a')
+  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Worker A · waiting · Auto-fix: PR #80 · 4m')
   await ui.unmount()
 })
 
@@ -378,7 +386,7 @@ test("an open PR's checks show on its row, read once a minute", async ($, on) =>
   const gh = () => otherRuns.filter(r => r.argv[0] === 'gh')
   expect(gh().map(r => r.argv)).toEqual([['gh', 'pr', 'checks', OPEN_PR.url, '--json', 'name,bucket']])
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /PR #80/ }))?.text).toBe('PR #80 open  ✅ test ❌ lint ⏳ e2e')
+  expect((await ui.find({ type: 'Text', text: /PR #80/ }))?.text).toBe('feature/a · PR #80 open ✅ test ❌ lint ⏳ e2e')
   await ui.unmount()
   await clock.advance(58_000)
   expect(gh().length).toBe(1)
@@ -389,7 +397,8 @@ test("an open PR's checks show on its row, read once a minute", async ($, on) =>
 test('checks that could not be read say why', async ($, on) => {
   await start($, on, ok([worker({ prs: [OPEN_PR] })]), { gh: 'spawn gh ENOENT' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /PR #80/ }))?.text).toMatch(/^PR #80 open {2}gh pr checks: .*ENOENT/)
+  await unfold(ui)
+  expect((await ui.find({ type: 'Text', text: /PR #80/ }))?.text).toMatch(/^feature\/a · PR #80 open gh pr checks: .*ENOENT/)
   await ui.unmount()
 })
 
@@ -403,6 +412,7 @@ test('Archive shows once dev delivered passes, and asks the boss to archive', as
   const { otherRuns } = await start($, on, ok([worker({ prs: [OPEN_PR] })]), { delivered: { exitCode: 0, stdout: 'delivered', stderr: '' } })
   expect(otherRuns.filter(r => r.argv[1] === 'delivered').map(r => r.argv)).toEqual([['dev', 'delivered', '/wt/a']])
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:archive' })
   expect(texts).toEqual(['dev-board: archive a (local_a): dev delivered exited 0'])
   await ui.unmount()
@@ -416,6 +426,7 @@ test('no Archive while not delivered, nor dev delivered run for a busy worker or
   ]))
   expect(otherRuns.filter(r => r.argv[1] === 'delivered').map(r => r.argv)).toEqual([['dev', 'delivered', '/wt/a']])
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   expect(await ui.find({ key: 'local_a:archive' })).toBeFalsy()
   await ui.unmount()
 })
@@ -425,6 +436,7 @@ test('Nudge asks the boss to relay "Continue where you left off"', async ($, on)
   const toasts = collectToasts(on)
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:nudge' })
   expect(texts).toEqual(['dev-board: nudge a (local_a): Continue where you left off'])
   expect(toasts).toEqual(['dev-board: nudge for a queued for the boss'])
@@ -436,6 +448,7 @@ test('Message… opens a field whose text the boss is asked to relay', async ($,
   await start($, on, ok([worker({})]))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
+    await unfold(ui)
     expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
     await ui.press({ key: 'local_a:message' })
     expect(await ui.find({ key: 'local_a:draft' })).toBeTruthy()
@@ -450,6 +463,7 @@ test('an empty message closes the field and sends nothing', async ($, on) => {
   const texts = submits(on)
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:message' })
   await ui.input({ key: 'local_a:draft', text: '  ' })
   expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
@@ -460,6 +474,7 @@ test('an empty message closes the field and sends nothing', async ($, on) => {
 test('the mobile app, with no field, has no Message…', async ($, on) => {
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  await unfold(ui)
   expect(await ui.find({ key: 'local_a:message' })).toBeFalsy()
   expect(await ui.find({ key: 'local_a:nudge' })).toBeTruthy()
   await ui.unmount()
@@ -471,6 +486,7 @@ test("Copy id copies on the surface, else with the Mac's pbcopy", async ($, on) 
   on('ui.copy', () => ({ value: copied ? { isCopied: true as const } : { isCopied: false as const, reason: 'no-clipboard' as const } }))
   const { otherRuns } = await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:copy' })
   expect(otherRuns.filter(r => r.argv[0] === 'pbcopy')).toEqual([])
   copied = false
@@ -484,6 +500,7 @@ test("Open opens the worker's session through the app's deep link", async ($, on
   const toasts = collectToasts(on)
   const { otherRuns } = await start($, on, ok([worker({})]), { open: { exitCode: 1, stdout: '', stderr: 'no handler' } })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:open' })
   expect(otherRuns.filter(r => r.argv[0] === 'open').map(r => r.argv)).toEqual([['open', 'claude://code/continue?session=local_a']])
   expect(toasts).toEqual(['dev-board: could not open a: no handler'])
@@ -507,6 +524,7 @@ test('Archive checks delivery again when pressed, and says why not', async ($, o
   let delivery: Ran = DELIVERED
   await start($, on, ok([worker({ prs: [OPEN_PR] })]), { delivered: () => delivery })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   delivery = { exitCode: 1, stdout: '', stderr: 'uncommitted changes to tracked files' }
   await ui.press({ key: 'local_a:archive' })
   expect(texts).toEqual([])
@@ -518,6 +536,7 @@ test('a worker going busy drops its delivery: Archive waits for a new check', as
   let workers = [worker({ prs: [OPEN_PR] })]
   const { otherRuns, clock } = await start($, on, () => ok(workers), { delivered: DELIVERED })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   expect(await ui.find({ key: 'local_a:archive' })).toBeTruthy()
   workers = [worker({ state: 'busy', status: 'working', prs: [OPEN_PR] })]
   await clock.advance(2000)
@@ -533,6 +552,7 @@ test('a worker going busy drops its delivery: Archive waits for a new check', as
 test('a dev delivered that cannot run says why, with no Archive', async ($, on) => {
   await start($, on, ok([worker({ prs: [OPEN_PR] })]), { delivered: 'spawn dev ENOENT' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   expect((await ui.find({ type: 'Text', text: /^not delivered/ }))?.text).toMatch(/^not delivered: dev delivered: .*ENOENT/)
   expect(await ui.find({ key: 'local_a:archive' })).toBeFalsy()
   await ui.unmount()
@@ -554,6 +574,7 @@ test('a dev without plans says so', async ($, on) => {
 test("a needs-action of a worker not blocked still shows", async ($, on) => {
   await start($, on, ok([worker({ status: 'idle', verdict: 'blocked', needsAction: 'pick one' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   expect((await ui.find({ type: 'Text', text: /^needs:/ }))?.text).toBe('needs: pick one')
   await ui.unmount()
 })
@@ -563,11 +584,90 @@ test('Open and Copy id that cannot run say so', async ($, on) => {
   on('ui.copy', () => ({ value: { isCopied: false as const, reason: 'no-clipboard' as const } }))
   await start($, on, ok([worker({})]), { open: 'denied by a rule', pbcopy: 'denied by a rule' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
   await ui.press({ key: 'local_a:open' })
   await ui.press({ key: 'local_a:copy' })
   expect(toasts).toEqual([
     'dev-board: could not open a: dev-board: $.process.run: denied by a rule',
     'dev-board: could not copy local_a: dev-board: $.process.run: denied by a rule',
   ])
+  await ui.unmount()
+})
+
+const BY_STATUS = [
+  worker({ id: 'local_i', title: 'Idle', status: 'idle' }),
+  worker({ id: 'local_s', title: 'Stopped', state: 'stopped', status: 'stopped' }),
+  worker({ id: 'local_w', title: 'Waiting', status: 'waiting' }),
+  worker({ id: 'local_r', title: 'Review', status: 'review ready' }),
+  worker({ id: 'local_b', title: 'Blocked', state: 'blocked', status: 'blocked' }),
+  worker({ id: 'local_k', title: 'Working', state: 'busy', status: 'working' }),
+  worker({ id: 'local_t', title: 'Stuck', state: 'busy', status: 'stuck' }),
+  worker({ id: 'local_l', title: 'Limited', state: 'busy', status: 'rate-limited' }),
+  worker({ id: 'local_n', title: 'Needs', state: 'busy', status: 'needs you' }),
+]
+
+test('idle and stopped tiles fold to one line; the rest stay open', async ($, on) => {
+  await start($, on, ok(BY_STATUS))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const id of ['local_i', 'local_s']) {
+    expect((await ui.find({ key: `${id}:fold` }))?.props.label).toBe('▸')
+    expect(await ui.find({ key: `${id}:nudge` })).toBeFalsy()
+  }
+  for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
+    expect((await ui.find({ key: `${id}:fold` }))?.props.label).toBe('▾')
+    expect(await ui.find({ key: `${id}:nudge` })).toBeTruthy()
+  }
+  expect((await ui.find({ type: 'Text', text: /^● Idle/ }))?.text).toBe('● Idle · idle')
+  await ui.unmount()
+})
+
+test('an idle tile with a health note opens', async ($, on) => {
+  await start($, on, ok([worker({ state: 'stopped', status: 'stopped', notes: [RESUME] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^resume due:/ }))?.text).toBe('resume due: rate limit reset 18:05: resume it')
+  await ui.unmount()
+})
+
+test("a fold or unfold sticks across polls and status changes, per worker", async ($, on) => {
+  let workers = [worker({ state: 'busy', status: 'working' }), worker({ id: 'local_b', title: 'Worker B' }), worker({ id: 'local_c', title: 'Worker C' })]
+  const { clock } = await start($, on, () => ok(workers))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const label = async (id: string) => (await ui.find({ key: `${id}:fold` }))?.props.label
+  await ui.press({ key: 'local_a:fold' })
+  await ui.press({ key: 'local_b:fold' })
+  expect([await label('local_a'), await label('local_b'), await label('local_c')]).toEqual(['▸', '▾', '▸'])
+
+  workers = [worker({ since: '3m' }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working', since: '1m' }), worker({ id: 'local_c', title: 'Worker C', since: '9m' })]
+  await clock.advance(4000)
+  expect([await label('local_a'), await label('local_b'), await label('local_c')]).toEqual(['▸', '▾', '▸'])
+  expect(await ui.find({ key: 'local_b:nudge' })).toBeTruthy()
+  expect(await ui.find({ key: 'local_a:nudge' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('sections group the workers by status, with counts, needs you first; empty ones hidden', async ($, on) => {
+  let workers = BY_STATUS
+  const { clock } = await start($, on, () => ok(workers))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const rows = async () => (await ui.findAll({ type: 'Text', text: /^(● |NEEDS YOU \d|WORKING \d|WAITING \d|IDLE \d)/ })).map(t => t.text.split(' · ')[0])
+  expect(await rows()).toEqual([
+    'NEEDS YOU 1',
+    '● Needs',
+    'WORKING 3',
+    '● Working',
+    '● Stuck',
+    '● Limited',
+    'WAITING 3',
+    '● Waiting',
+    '● Review',
+    '● Blocked',
+    'IDLE 2',
+    '● Idle',
+    '● Stopped',
+  ])
+
+  workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
+  await clock.advance(2000)
+  expect(await rows()).toEqual(['WORKING 1', '● Working', 'IDLE 1', '● Idle'])
   await ui.unmount()
 })
