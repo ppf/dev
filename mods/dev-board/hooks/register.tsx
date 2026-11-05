@@ -602,7 +602,7 @@ export const register: Register = on => {
       await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
-    /** The question a worker waits on: each question's header and text, its options as buttons (their descriptions dim beside them), and Send where it takes more than one press; unanswerable from here, a note that the options open its session. */
+    /** The question a worker waits on: each question's header and text, its options as buttons in one wrapping row (their descriptions a caption under it), and Send where it takes more than one press; unanswerable from here, a note that the options open its session. */
     const questionRows = (w: Worker, a: Ask, color: string) => {
       const held = picksFor(a, picksRead[w.id])
       if (held?.isSent) {
@@ -622,6 +622,7 @@ export const register: Register = on => {
               if (q.multiSelect) return isChosen ? '☑ ' : '☐ '
               return isChosen ? '◉ ' : '○ '
             }
+            const described = q.options.filter(o => o.description !== '').map(o => `${o.label}: ${o.description}`).join(' · ')
 
             return (
               <Box key={`${w.id}:q${qi}`} flexDirection="column" rowGap="xs" minWidth={0}>
@@ -633,26 +634,23 @@ export const register: Register = on => {
                   )}
                   <Text weight="semibold">{q.question}</Text>
                 </Box>
-                {q.options.map((o, oi) => {
-                  const isChosen = chosen.includes(o.label)
-                  // Without the worker's mod watching, only its own dialog answers: the option opens it
-                  const press = () => void (a.answerable || a.reply ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
-
-                  return (
-                    <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
-                      <Box flexShrink={0}>
-                        <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${o.label}`} variant={isChosen ? 'primary' : undefined} onPress={press} />
-                      </Box>
-                      {o.description !== '' && (
-                        <Box flexShrink={1} minWidth={0}>
-                          <Text size="footnote" dimColor>
-                            {o.description}
-                          </Text>
-                        </Box>
-                      )}
-                    </Box>
-                  )
-                })}
+                {q.options.length > 0 && (
+                  <Box key={`${w.id}:q${qi}:options`} flexDirection="row" flexWrap="wrap" columnGap={1} rowGap="xs" minWidth={0}>
+                    {q.options.map((o, oi) => {
+                      const isChosen = chosen.includes(o.label)
+                      // Without the worker's mod watching, only its own dialog answers: the option opens it
+                      const press = () => void (a.answerable || a.reply ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
+                      // One press: the first option leads, as in the app's own next-step box; toggles: the picked ones
+                      const isPrimary = isOnePress(a) ? oi === 0 : isChosen
+                      return <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${o.label}`} variant={isPrimary ? 'primary' : undefined} onPress={press} />
+                    })}
+                  </Box>
+                )}
+                {described !== '' && (
+                  <Text key={`${w.id}:q${qi}:about`} size="caption" color="subtle" wrap="wrap">
+                    {described}
+                  </Text>
+                )}
               </Box>
             )
           })}
@@ -813,11 +811,12 @@ export const register: Register = on => {
         </Text>
       )
       const statusText = plainLine(statusLine(w, group))
+      // Open, a caption under the title; folded, the size of the row it sits in
       const status = statusText !== '' && (
         <Text
-          size="footnote"
-          color={group === 'Needs you' ? 'error' : isOpen ? 'text' : 'subtle'}
-          weight={group === 'Needs you' ? 'semibold' : isOpen ? 'medium' : 'regular'}
+          size={isOpen ? 'caption' : 'footnote'}
+          color={group === 'Needs you' ? 'error' : 'subtle'}
+          weight={group === 'Needs you' ? 'semibold' : 'regular'}
           wrap="truncate-end"
         >
           {isOpen ? statusText : `· ${statusText}`}
@@ -872,8 +871,10 @@ export const register: Register = on => {
       }
 
       const lastLines = w.lastLines.filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w)).slice(-(verdict === '' ? MAX_LAST_LINES : 1))
-      // Working and Idle tiles ask nothing of the person: their buttons recede to text
-      const quiet = isAttention ? {} : ({ plain: true, dimColor: true } as const)
+      // Working and Idle tiles ask nothing of the person, and a question's options shown answer it: their buttons recede to text
+      const showsOptions = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent && w.ask.questions.some(q => q.options.length > 0)
+      const isQuiet = !isAttention || showsOptions
+      const quiet = isQuiet ? ({ plain: true, dimColor: true } as const) : {}
 
       // Blocks one gap apart: the title, its question, what it does, its tasks, its buttons
       return card(
@@ -945,7 +946,7 @@ export const register: Register = on => {
           {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
           <Box key={`${w.id}:actions`} flexDirection="column" rowGap="xs" minWidth={0}>
             <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-              <Button key={`${w.id}:open`} label="Open" variant={isAttention ? 'primary' : undefined} {...quiet} onPress={() => void openSession(w)} />
+              <Button key={`${w.id}:open`} label="Open" variant={isQuiet ? undefined : 'primary'} {...quiet} onPress={() => void openSession(w)} />
               {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" {...quiet} onPress={() => void compose(w.id)} />}
               {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
             </Box>
