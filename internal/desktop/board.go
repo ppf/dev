@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/inbox"
 )
 
@@ -45,6 +46,9 @@ func DefaultPaths(home, config string) Paths {
 		Models:   filepath.Join(config, "cache", "model-catalog"),
 	}
 }
+
+// liveWaiting is a live session's status while a dialog waits on the person (a question, a permission prompt).
+const liveWaiting = "waiting"
 
 // Worker states, the first that holds: busy runs a turn, blocked ended its last turn waiting on the person
 // (running or not), idle runs between turns, stopped has no live Claude.
@@ -134,6 +138,8 @@ type live struct {
 	Status        string `json:"status"`
 	// StatusUpdatedAt is when Status last changed, in milliseconds since the epoch.
 	StatusUpdatedAt int64 `json:"statusUpdatedAt"`
+	// WaitingFor is what a waiting session waits for, e.g. input needed.
+	WaitingFor string `json:"waitingFor"`
 }
 
 // Board lists boss's unarchived workers, oldest first, with their notes at now; warnings name files it could
@@ -254,7 +260,7 @@ func liveSessions(dir string) ([]live, []error) {
 			continue
 		}
 		// Fields renamed or a status this board doesn't know: every worker would show the wrong state
-		if l.PID <= 0 || l.SessionID == "" || (l.Status != StateBusy && l.Status != StateIdle) {
+		if l.PID <= 0 || l.SessionID == "" || (l.Status != StateBusy && l.Status != StateIdle && l.Status != liveWaiting) {
 			warnings = append(warnings, fmt.Errorf("%s: unexpected live session (pid %d, session %q, status %q)",
 				path, l.PID, l.SessionID, l.Status))
 			continue
@@ -304,7 +310,8 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 		cli = l.SessionID
 	}
 	switch {
-	case running && l.Status == StateBusy:
+	// Waiting on a dialog is still mid-turn
+	case running && (l.Status == StateBusy || l.Status == liveWaiting):
 		w.State = StateBusy
 	case w.Verdict == StateBlocked:
 		w.State = StateBlocked
@@ -333,6 +340,13 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 			// Claude's hooks run a dev without desktop support (or none), or none ran since it was installed
 			hookErr = fmt.Errorf("%s: no hook file for %s: its decision and rate-limit notes are missing until a dev state hook writes it", path, w.Title)
 		}
+	}
+	if running && l.Status == liveWaiting {
+		if !agent.Deciding(h.State, h.WaitingFor) {
+			// The hook file lags or is missing: the live file says a dialog waits, since its status changed
+			h.State, h.WaitingFor, h.Question, h.Since = agent.Waiting, "", "", cmp.Or(l.StatusUpdatedAt/1000, now.Unix())
+		}
+		h.Question = cmp.Or(h.Question, l.WaitingFor)
 	}
 	t, err := readTranscript(p.Projects, cli)
 	w.LastLines = t.lines
