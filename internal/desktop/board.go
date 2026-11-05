@@ -350,7 +350,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	var hasAsked bool
 	if p.Questions != "" {
 		asked, hasAsked, askErr = readPending(p.Questions, w.ID)
-		if hasAsked && !running && canPrune {
+		if hasAsked && !running && canPrune && writtenBefore(filepath.Join(p.Questions, w.ID+".json"), now.Add(-questionGrace)) {
 			// A session gone mid-question left its file: no dialog waits on it
 			askErr, hasAsked = removePending(p.Questions, w.ID, asked.ToolUseID), false
 		}

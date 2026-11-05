@@ -146,6 +146,7 @@ func TestBoardAsk(t *testing.T) {
 	writeJSON(t, filepath.Join(p.Questions, "local_busy.json"), map[string]any{"toolUseId": "tu9", "questions": []agent.Ask{dbQuestion}})
 	writeJSON(t, filepath.Join(p.Questions, "local_blocked.json"), map[string]any{"toolUseId": "tu1", "questions": []agent.Ask{dbQuestion}})
 	write(t, filepath.Join(p.Questions, "local_blocked.answer.json"), `{}`)
+	backdate(t, filepath.Join(p.Questions, "local_blocked.json"), questionGrace+time.Second)
 
 	workers, _, err := Board(p, boss, time.Now())
 	if err != nil {
@@ -179,6 +180,36 @@ func TestBoardAsk(t *testing.T) {
 	// An idle worker's unanswered tool use (the idle fixture's Bash) is no question
 	if workers[2].Ask != nil {
 		t.Errorf("idle ask = %+v", workers[2].Ask)
+	}
+}
+
+// A question file of a session not seen running is kept a while: it may have started since the live files were read.
+func TestBoardAskGoneGrace(t *testing.T) {
+	p := fixture(t)
+	p.Questions = filepath.Join(t.TempDir(), "questions")
+	path := filepath.Join(p.Questions, "local_blocked.json")
+	writeJSON(t, path, map[string]any{"toolUseId": "tu1", "questions": []agent.Ask{dbQuestion}})
+	if _, _, err := Board(p, boss, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("fresh question file of a session not seen running removed: %v", err)
+	}
+	backdate(t, path, questionGrace+time.Second)
+	if _, _, err := Board(p, boss, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("old question file of a gone session kept: %v", err)
+	}
+}
+
+// backdate sets path's times ago.
+func backdate(t *testing.T, path string, ago time.Duration) {
+	t.Helper()
+	at := time.Now().Add(-ago)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
 	}
 }
 
