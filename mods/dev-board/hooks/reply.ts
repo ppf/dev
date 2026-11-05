@@ -50,11 +50,7 @@ export function registerReply(on: On): void {
   })
 }
 
-/**
- * Takes the board's reply to app session `session`'s wrap_up ask as the person's own: writes
- * questions/<session>.listen every BEAT_MS, and submits questions/<session>.reply.json's text once, if it
- * answers the wrap_up the last turn ended on; any other is dropped.
- */
+/** Rewrites questions/<session>.listen every BEAT_MS and submits the board's reply to the last turn's wrap_up ask as the person's own, once; any other is dropped. */
 export async function listenForReplies($: EngineInterface, session: string): Promise<void> {
   const dir = await questionsDir($)
   const listen = `${dir}/${session}.listen`
@@ -86,12 +82,13 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
         return say(`reply for ${String(r.toolUseId)} dropped: this session's last turn ended on ${to || 'no wrap_up'}`)
       }
       await update($, replyTo, () => '')
+      const reply = r.text
       const turn = turns
       // Sent from a timer of its own, as /board's prompt is
       $.clock.after(0, async () => {
         if (turns !== turn) return say(`reply for ${to} dropped: a turn started before it was sent`)
-        const sent = await $.prompt.submit({ text: r.text ?? '', asUser: true }).catch((err: unknown) => ({ drop: errorText(err) }))
-        if (sent.drop !== undefined) await $.ui.toast(`dev-board: the board's reply "${r.text}" not sent: ${sent.drop}`)
+        const sent = await $.prompt.submit({ text: reply, asUser: true }).catch((err: unknown) => ({ drop: errorText(err) }))
+        if (sent.drop !== undefined) await $.ui.toast(`dev-board: the board's reply "${reply}" not sent: ${sent.drop}`)
       })
     } catch (err) {
       say(`reply not read: ${errorText(err)}`)
