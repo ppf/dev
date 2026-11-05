@@ -129,7 +129,7 @@ test('a reply the app refuses says so in a toast', async ($, on) => {
   await wrapUp($, 'w1')
   files.set(REPLY, reply('w1', 'Yes'))
   await clock.advance(1000)
-  expect(toasts).toEqual(['dev-board: the board\'s reply "Yes" not sent: blocked by a hook'])
+  expect(toasts).toEqual(['the board\'s reply "Yes" not sent: blocked by a hook'])
 })
 
 test('a reply taken as a turn starts is not submitted behind it', async ($, on) => {

@@ -112,10 +112,10 @@ const label = (w: Worker) => w.name || w.title
 async function send($: EngineInterface, text: string, what: string): Promise<boolean> {
   try {
     const r = await $.prompt.submit({ text })
-    await $.ui.toast(r.drop === undefined ? `dev-board: ${what} queued for the boss` : `dev-board: ${what} not sent: ${r.drop}`)
+    await $.ui.toast(r.drop === undefined ? `${what} queued for the boss` : `${what} not sent: ${r.drop}`)
     return r.drop === undefined
   } catch (err) {
-    await $.ui.toast(`dev-board: ${what} not sent: ${errorText(err)}`)
+    await $.ui.toast(`${what} not sent: ${errorText(err)}`)
     return false
   }
 }
@@ -181,34 +181,46 @@ const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && 
 /** Whether the tile shows the person something to act on: a health note, a need or a question. */
 const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w) || w.ask != null
 
-/** The status and what it says, e.g. `blocked · pick one`; the status left out where its section says it (`allow Bash: rm -rf bin` under Needs you). */
+/**
+ * The status and what it says, e.g. `blocked · pick one`; the status left out where its section says it (`allow Bash: rm -rf bin`
+ * under Needs you), save a working worker's between tools, so its row stays as the tool comes and goes.
+ */
 const statusLine = (w: Worker, group: (typeof GROUPS)[number]) =>
-  [w.status === group.toLowerCase() ? '' : w.status, w.statusText].filter(s => s !== '').join(' · ')
+  w.status === 'working' && w.statusText === '' ? 'working' : [w.status === group.toLowerCase() ? '' : w.status, w.statusText].filter(s => s !== '').join(' · ')
 
 /** A code fence line (```ts), which says nothing on its own. */
 const isFence = (line: string) => /^\s*```/.test(line)
 
-/** A reply line without its inline markdown: a leading `- ` or `* `, backticks, and `**` or `__` around words outside code. */
+/** A turn-end marker line (`IDLE`, `WAITING (CI)`), as dev reads it for the status. */
+const isMarker = (line: string) => /^(IDLE|WAITING \(.*)$/.test(line.replace(/^[*_` ]+|[*_` ]+$/g, ''))
+
+/** A reply line without its inline markdown: a leading `- ` or `* `, backticks, and outside code `**` or `__` around words and a link's `[text](url)` for its text. */
 const plainLine = (line: string) =>
   line
     .replace(/^\s*[-*]\s+/, '')
     .split('`')
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/!?\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, '$1').replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
     .join('')
 
-/** Whether a reply line says what the status does (`Blocked: pick one` beside `blocked · pick one`): their first 40 characters alike, case, inline markdown, end punctuation and a leading `<status>:` aside. */
-function repeatsStatus(line: string, w: Worker): boolean {
-  const said = (s: string) => plainLine(s).trim().toLowerCase().replace(/[.!…]+$/, '')
+/**
+ * Whether a reply line says what the tile does above it: the status (`Blocked: pick one` beside `blocked · pick one`) or a
+ * question it asks; their first 40 characters alike, case, inline markdown, end punctuation and a leading `<status>:` aside.
+ */
+function repeatsTile(line: string, w: Worker): boolean {
+  const said = (s: string) => plainLine(s).trim().toLowerCase().replace(/[.!?…]+$/, '')
   const text = said(line)
   const rest = text.startsWith(`${w.status}:`) ? text.slice(w.status.length + 1).trimStart() : text
-  const what = said(w.statusText)
-  return what !== '' && rest.slice(0, 40) === what.slice(0, 40)
+  const shown = [w.statusText, ...(w.ask?.questions.map(q => q.question) ?? [])].map(said)
+  return shown.some(what => what !== '' && rest.slice(0, 40) === what.slice(0, 40))
 }
 
-/** The verdict on its last turn and its detail; where the status says the verdict (`review_ready`), only a detail the status row lacks. */
+/**
+ * The verdict on its last turn and its detail; where the status says the verdict (`review_ready`), or a waiting worker's own
+ * marker says it is not done, only a detail the status row lacks.
+ */
 function verdictLine(w: Worker): string {
   if (w.verdict === '') return ''
-  if (w.verdict.replaceAll('_', ' ') === w.status) return w.detail === w.statusText ? '' : w.detail
+  if (w.verdict.replaceAll('_', ' ') === w.status || w.status === 'waiting') return w.detail === w.statusText ? '' : w.detail
   if (w.detail === '') return w.verdict
   return `${w.verdict}: ${w.detail}`
 }
@@ -319,9 +331,9 @@ export const register: Register = on => {
         if (untaken.length > 0) {
           const ids = new Set(untaken.map(([id]) => id))
           await update($, picks, m => Object.fromEntries(Object.entries(m).map(([id, p]) => [id, ids.has(id) ? { ...p, isSent: false, sentAt: undefined } : p])))
-          for (const w of polled.workers.filter(w => ids.has(w.id))) await $.ui.toast(`dev-board: ${label(w)} did not take the reply: press it again`)
+          for (const w of polled.workers.filter(w => ids.has(w.id))) await $.ui.toast(`${label(w)} did not take the reply: press it again`)
         }
-        void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`dev-board: PR checks not read: ${errorText(err)}`))
+        void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
           // Marked first: the prompt waits for the boss to go idle, and a refused one is not retried every tick.
@@ -329,8 +341,8 @@ export const register: Register = on => {
           const holding = new Set(polled.workers.flatMap(w => w.notes.map(n => n.key)))
           await update($, sent, keys => [...keys.filter(k => !holding.has(k)), ...holding].slice(-MAX_SENT))
           void $.prompt.submit({ text: notes.text }).then(
-            r => r.drop !== undefined && $.ui.toast(`dev-board: worker notes not sent: ${r.drop}`),
-            (err: unknown) => $.ui.toast(`dev-board: worker notes not sent: ${errorText(err)}`),
+            r => r.drop !== undefined && $.ui.toast(`worker notes not sent: ${r.drop}`),
+            (err: unknown) => $.ui.toast(`worker notes not sent: ${errorText(err)}`),
           )
         }
       } finally {
@@ -391,7 +403,7 @@ export const register: Register = on => {
       // A message given back after a refusal is the field's text until the person types
       const text = drafts.get(`${surface}:${w.id}`) ?? (await read($, view)).unsent[w.id]
       if (text === undefined) {
-        await $.ui.toast(`dev-board: no text read for ${label(w)}: press Enter in the field to send it`)
+        await $.ui.toast(`no text read for ${label(w)}: press Enter in the field to send it`)
         return
       }
       await message(w, text)
@@ -407,9 +419,9 @@ export const register: Register = on => {
       try {
         // A remote surface (the desktop app) has no clipboard path yet: the Mac's then
         const copied = (await $.ui.copy({ text: id, surface })).isCopied || (await $.process.run(['pbcopy'], { stdin: id })).exitCode === 0
-        await $.ui.toast(copied ? `Copied ${id}` : `dev-board: could not copy ${id}`)
+        await $.ui.toast(copied ? `Copied ${id}` : `could not copy ${id}`)
       } catch (err) {
-        await $.ui.toast(`dev-board: could not copy ${id}: ${errorText(err)}`)
+        await $.ui.toast(`could not copy ${id}: ${errorText(err)}`)
       }
     }
     const openSession = async (w: Worker) => {
@@ -417,10 +429,10 @@ export const register: Register = on => {
         // The app's deep link to a session; it ignores it while deep links are off (policy, logged out)
         const ran = await $.process.run(['open', `claude://code/continue?session=${w.id}`])
         if (ran.exitCode !== 0) {
-          await $.ui.toast(`dev-board: could not open ${label(w)}: ${ran.stderr.trim() || `open exited ${ran.exitCode}`}`)
+          await $.ui.toast(`could not open ${label(w)}: ${ran.stderr.trim() || `open exited ${ran.exitCode}`}`)
         }
       } catch (err) {
-        await $.ui.toast(`dev-board: could not open ${label(w)}: ${errorText(err)}`)
+        await $.ui.toast(`could not open ${label(w)}: ${errorText(err)}`)
       }
     }
     /** Picks an option: a one-press question sends it; else it toggles (one per single-select question). */
@@ -433,13 +445,13 @@ export const register: Register = on => {
       }
       if (isOnePress(a)) return answer(w, a, picked(undefined))
       // From the stored picks, not this drawing's: two quick presses both count
-      return update($, picks, m => ({ ...m, [w.id]: picked(m[w.id]) })).catch((err: unknown) => $.ui.toast(`dev-board: pick not kept: ${errorText(err)}`))
+      return update($, picks, m => ({ ...m, [w.id]: picked(m[w.id]) })).catch((err: unknown) => $.ui.toast(`pick not kept: ${errorText(err)}`))
     }
     /** Writes the person's picks for the worker's mod to answer its dialog with (`dev desktop answer`). */
     const answer = async (w: Worker, a: Ask, p: Picks) => {
       const missing = a.questions.find(q => (p.picks[q.question] ?? []).length === 0)
       if (missing !== undefined) {
-        await $.ui.toast(`dev-board: pick an answer to "${missing.question}" first`)
+        await $.ui.toast(`pick an answer to "${missing.question}" first`)
         return
       }
       if (answering.has(w.id)) return
@@ -450,7 +462,7 @@ export const register: Register = on => {
         const text = Object.values(answers).join('; ')
         const isSent = await (a.listening ? replyDirect(w, a, text) : send($, ask('message', w, text), `answer for ${label(w)}`)).finally(() => answering.delete(w.id))
         const sentAt = a.listening ? await $.clock.now() : undefined
-        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true, sentAt } })).catch((err: unknown) => $.ui.toast(`dev-board: reply not marked sent: ${errorText(err)}`))
+        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true, sentAt } })).catch((err: unknown) => $.ui.toast(`reply not marked sent: ${errorText(err)}`))
         return
       }
       let why = ''
@@ -464,23 +476,23 @@ export const register: Register = on => {
         answering.delete(w.id)
       }
       if (why !== '') {
-        await $.ui.toast(`dev-board: ${label(w)} not answered: ${why}`)
+        await $.ui.toast(`${label(w)} not answered: ${why}`)
         return
       }
-      await $.ui.toast(`dev-board: answered ${label(w)}: ${Object.values(answers).join('; ')}`)
+      await $.ui.toast(`answered ${label(w)}: ${Object.values(answers).join('; ')}`)
       await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } }))
     }
     /** Hands the reply to the worker's mod; whether it was written. */
     const replyDirect = async (w: Worker, a: Ask, text: string) => {
       const why = await writeReply($, w.id, a.toolUseId, text)
-      await $.ui.toast(why === '' ? `dev-board: replied to ${label(w)}: ${text}` : `dev-board: reply for ${label(w)} not sent: ${why}`)
+      await $.ui.toast(why === '' ? `replied to ${label(w)}: ${text}` : `reply for ${label(w)} not sent: ${why}`)
       return why === ''
     }
     const archive = async (w: Worker) => {
       // Checked again: the last check may be a minute old
       const got = await deliveredCheck((argv, init) => $.process.run(argv, init), w.worktree)
       if (!got.isDelivered) {
-        await $.ui.toast(`dev-board: ${label(w)} not archived: ${got.why}`)
+        await $.ui.toast(`${label(w)} not archived: ${got.why}`)
         return
       }
       await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
@@ -622,7 +634,11 @@ export const register: Register = on => {
       const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
       const meta = [w.branch, w.context === null ? '' : `context ${w.context}%`].filter(s => s !== '').join(' · ')
       const verdict = verdictLine(w)
-      const foldButton = <Button key={`${w.id}:fold`} label={isOpen ? '▾' : '▸'} plain dimColor onPress={() => void fold(w.id, !isOpen)} />
+      const foldButton = (
+        <Button key={`${w.id}:fold`} label={`${isOpen ? 'Fold' : 'Unfold'} ${w.title || w.name}`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
+          {isOpen ? '▾' : '▸'}
+        </Button>
+      )
       const dot = <Text color={STATE_COLORS[w.state]}>●</Text>
       // A Text nested in a cut one wraps on the desktop (each Text sets its own white-space): what may be cut is one
       // Text of plain strings, the dot left outside it
@@ -688,21 +704,32 @@ export const register: Register = on => {
             </Box>
             {w.ask ? questionRows(w, w.ask, color) : status}
             {(meta !== '' || w.prs.length > 0) && (
-              <Text size="caption">
-                <Text color="subtle">{meta}</Text>
-                {w.prs.map((pr, i) => {
-                  const c = checksRead[pr.url]
-                  const ci = ciLine(pr, c)
-
-                  return (
-                    <Text key={pr.url}>
-                      <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
-                      <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
-                      {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
+              // The branch and context cut to one line, as one Text of plain strings; the PRs wrap to the next row
+              <Box key={`${w.id}:meta`} flexDirection="row" flexWrap="wrap" minWidth={0}>
+                {meta !== '' && (
+                  <Box flexShrink={1} minWidth={0}>
+                    <Text size="caption" color="subtle" wrap="truncate-end">
+                      {meta}
                     </Text>
-                  )
-                })}
-              </Text>
+                  </Box>
+                )}
+                {w.prs.length > 0 && (
+                  <Text size="caption">
+                    {w.prs.map((pr, i) => {
+                      const c = checksRead[pr.url]
+                      const ci = ciLine(pr, c)
+
+                      return (
+                        <Text key={pr.url}>
+                          <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
+                          <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
+                          {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
+                        </Text>
+                      )
+                    })}
+                  </Text>
+                )}
+              </Box>
             )}
             {verdict !== '' && (
               <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
@@ -726,10 +753,10 @@ export const register: Register = on => {
               </Text>
             ))}
             {w.lastLines
-              .filter(line => !isFence(line) && !repeatsStatus(line, w))
+              .filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w))
               .slice(-MAX_LAST_LINES)
-              .map(line => (
-                <Text size="footnote" dimColor italic wrap="truncate-end">
+              .map((line, i) => (
+                <Text key={`${w.id}:line${i}`} size="footnote" dimColor italic wrap="truncate-end">
                   {plainLine(line)}
                 </Text>
               ))}
@@ -748,10 +775,10 @@ export const register: Register = on => {
             </Box>
             {Input !== undefined && v.composing === w.id && (
               <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} marginTop="xs" minWidth={0}>
-                {/* A short placeholder: a one-line field does not grow on the desktop, so its own width must hold it */}
+                {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
                 <Input
                   key={`${w.id}:draft`}
-                  placeholder="Message…"
+                  label={`Message ${label(w)}`}
                   value={v.unsent[w.id]}
                   autoFocus
                   onInput={(text, input) => {

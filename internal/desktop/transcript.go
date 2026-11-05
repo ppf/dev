@@ -44,7 +44,9 @@ type row struct {
 	Type        string `json:"type"`
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
-	Message     struct {
+	// A /compact summary, written as a user row
+	IsCompactSummary bool `json:"isCompactSummary"`
+	Message          struct {
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
@@ -154,6 +156,10 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 		if r.Type == "user" && !(isBlocks && slices.ContainsFunc(blocks, isToolResult)) {
 			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more, a wrap_up ask is answered
 			pending, t.wrapAsk = nil, nil
+			if isPrompt(r, blocks) {
+				// The last turn's text (its IDLE or WAITING marker too) is no longer what it says
+				t.lines = []string{}
+			}
 			continue
 		}
 		if !isBlocks {
@@ -198,6 +204,27 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 }
 
 func isToolResult(b block) bool { return b.Type == "tool_result" }
+
+// nonPrompts start the user rows Claude Code writes that start no turn: an interrupt, a local slash command and its output.
+var nonPrompts = []string{"[Request interrupted", "<command-name>", "<command-message>", "<local-command-"}
+
+// isPrompt is whether user row r, its content blocks, is a prompt that starts a turn.
+func isPrompt(r row, blocks []block) bool {
+	if r.IsCompactSummary {
+		return false
+	}
+	var text string
+	if json.Unmarshal(r.Message.Content, &text) != nil {
+		for _, b := range blocks {
+			if b.Type == "text" {
+				text = b.Text
+				break
+			}
+		}
+	}
+	text = strings.TrimSpace(text)
+	return !slices.ContainsFunc(nonPrompts, func(p string) bool { return strings.HasPrefix(text, p) })
+}
 
 func without(pending []block, id string) []block {
 	for i, b := range pending {

@@ -476,6 +476,19 @@ func TestParseTranscript(t *testing.T) {
 	if !slices.Equal(got.lines, []string{"API error"}) {
 		t.Errorf("lines = %q, want the synthetic row's text (only its usage is skipped)", got.lines)
 	}
+	if got, _ := parseTranscript([]byte(lines(t, assistant("claude-opus-5-5", text("Which one?")), prompt, assistant("claude-opus-5-5", toolUse("c", "Bash"))))); got.lines == nil || len(got.lines) > 0 {
+		t.Errorf("lines = %q, want none, not nil: the prompt started a turn that has said nothing yet", got.lines)
+	}
+	waiting := assistant("claude-opus-5-5", text("Pushed.\nWAITING (CI)"))
+	for _, r := range []map[string]any{
+		{"type": "user", "message": map[string]any{"content": "<local-command-stdout>Set effort to low</local-command-stdout>"}},
+		{"type": "user", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "[Request interrupted by user]"}}}},
+		{"type": "user", "isCompactSummary": true, "message": map[string]any{"content": "This session is being continued…"}},
+	} {
+		if got, _ := parseTranscript([]byte(lines(t, waiting, r))); !slices.Equal(got.lines, []string{"Pushed.", "WAITING (CI)"}) {
+			t.Errorf("lines after %v = %q, want the marker kept: the row starts no turn", r, got.lines)
+		}
+	}
 	if got.tool != "Read" {
 		t.Errorf("tool = %q, want Read (Grep answered, Edit's turn over)", got.tool)
 	}
