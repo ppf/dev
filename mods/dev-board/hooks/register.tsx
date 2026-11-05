@@ -217,7 +217,10 @@ function bandLine(workers: Worker[]): string {
 /** The pane's title, e.g. `Workers · 3 · 1 needs you`. */
 function paneTitle(workers: Worker[]): string {
   const needsYou = workers.filter(w => w.status === NEEDS_YOU).length
-  return ['Workers', ...(workers.length > 0 ? [`${workers.length}`] : []), ...(needsYou > 0 ? [`${needsYou} needs you`] : [])].join(' · ')
+  const parts = ['Workers']
+  if (workers.length > 0) parts.push(`${workers.length}`)
+  if (needsYou > 0) parts.push(`${needsYou} needs you`)
+  return parts.join(' · ')
 }
 
 /** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
