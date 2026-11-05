@@ -1280,12 +1280,14 @@ test("a listening worker's reply goes to its reply file for its own mod, not thr
   })
   const { otherRuns } = await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true, listening: true })]), {}, { HOME: '/home' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /opens it/ })).toBeFalsy()
   await ui.press({ key: 'local_a:q0:o1:pick' })
 
   const path = '/home/.local/state/dev/desktop/questions/local_a.reply.json'
   expect(JSON.parse(written.get(`${path}.tmp`) ?? 'null')).toEqual({ toolUseId: 'w1', text: 'register.tsx', writtenAt: 0 })
   expect(otherRuns.map(r => r.argv)).toContainEqual(['mv', '-f', `${path}.tmp`, path])
   expect(texts).toEqual([])
+  expect(otherRuns.filter(r => r.argv[0] === 'open')).toEqual([])
   expect(toasts).toEqual(['dev-board: replied to a: register.tsx'])
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
   await ui.unmount()

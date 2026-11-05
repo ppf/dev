@@ -62,7 +62,9 @@ notes, each with a key that stays the same while its condition holds: stuck (bus
 no progress for 15 min), a decision unanswered for 3 min, context at 80% or more, a rate limit, and its
 resume once the limit reset. Reads the app's session records, ~/.claude/sessions, the transcripts, Claude
 Code's model catalog and the files dev state and dev question write in desktop sessions (desktop/ in
-dev's state directory); a file that fails to parse is reported on stderr.`,
+dev's state directory); a file that fails to parse is reported on stderr, as is a dev-board mod
+(CLAUDE_CODE_PLUGIN_DIRS) changed on disk since the boss's Claude started: it runs the copy it loaded then
+(not checked with CLAUDE_CODE_PLUGIN_DIR_WATCH=1, which reloads it).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if boss == "" {
@@ -80,6 +82,7 @@ dev's state directory); a file that fails to parse is reported on stderr.`,
 				return err
 			}
 			p.Questions = desktop.QuestionsDir(p.Hooks)
+			p.Mod = desktop.ModDir(os.Getenv("CLAUDE_CODE_PLUGIN_DIRS"), os.Getenv("CLAUDE_CODE_PLUGIN_DIR_WATCH") == "1")
 			workers, warnings, err := desktop.Board(p, boss, time.Now())
 			for _, w := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev desktop board: "+w.Error())
