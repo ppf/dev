@@ -476,6 +476,9 @@ func TestParseTranscript(t *testing.T) {
 	if !slices.Equal(got.lines, []string{"API error"}) {
 		t.Errorf("lines = %q, want the synthetic row's text (only its usage is skipped)", got.lines)
 	}
+	if got, _ := parseTranscript([]byte(lines(t, assistant("claude-opus-5-5", text("Which one?")), prompt, assistant("claude-opus-5-5", toolUse("c", "Bash"))))); !slices.Equal(got.lines, []string{}) {
+		t.Errorf("lines = %q, want none: the prompt started a turn that has said nothing yet", got.lines)
+	}
 	if got.tool != "Read" {
 		t.Errorf("tool = %q, want Read (Grep answered, Edit's turn over)", got.tool)
 	}

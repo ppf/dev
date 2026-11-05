@@ -105,7 +105,7 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
         if (sent.drop === undefined) return
         // Still the ask the worker shows: the board offers it again
         if (turns === turn) await update($, replyTo, () => to)
-        await $.ui.toast(`dev-board: the board's reply "${reply}" not sent: ${sent.drop}`)
+        await $.ui.toast(`the board's reply "${reply}" not sent: ${sent.drop}`)
       })
       lastError = ''
     } catch (err) {

@@ -152,8 +152,9 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			ops = append(ops, planOps(blocks)...)
 		}
 		if r.Type == "user" && !(isBlocks && slices.ContainsFunc(blocks, isToolResult)) {
-			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more, a wrap_up ask is answered
-			pending, t.wrapAsk = nil, nil
+			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more, a wrap_up ask is
+			// answered, the last turn's text is no longer what it says
+			pending, t.wrapAsk, t.lines = nil, nil, []string{}
 			continue
 		}
 		if !isBlocks {
