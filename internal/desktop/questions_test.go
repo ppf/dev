@@ -372,3 +372,60 @@ func TestBoardWrapUpAsk(t *testing.T) {
 		t.Errorf("busy ask = %+v, want none", a)
 	}
 }
+
+// A wrap_up ask is listening while its running worker's mod writes its heartbeat; a stale one, or a worker not running, is not.
+func TestBoardWrapUpListening(t *testing.T) {
+	p := fixture(t)
+	p.Questions = filepath.Join(t.TempDir(), "questions")
+	data, err := os.ReadFile(filepath.Join("testdata", "wrapup.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
+	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), string(data))
+	write(t, filepath.Join(p.Questions, "local_idle.listen"), "w1")
+	// The blocked worker's session is gone: its heartbeat, fresh or not, is no listener
+	write(t, filepath.Join(p.Questions, "local_blocked.listen"), "w1")
+
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := workers[2].Ask; a == nil || !a.Reply || !a.Listening {
+		t.Errorf("idle ask = %+v, want a listening reply", a)
+	}
+	if a := workers[1].Ask; a == nil || a.Listening {
+		t.Errorf("blocked ask = %+v, want a reply not listening", a)
+	}
+
+	// A mod that knows no wrap_up (loaded since it was called) takes no reply to it
+	write(t, filepath.Join(p.Questions, "local_idle.listen"), "")
+	workers, _, err = Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := workers[2].Ask; a == nil || a.Listening {
+		t.Errorf("idle ask with a heartbeat naming no wrap_up = %+v, want not listening", a)
+	}
+
+	write(t, filepath.Join(p.Questions, "local_idle.listen"), "w1")
+	backdate(t, filepath.Join(p.Questions, "local_idle.listen"), listenFresh+time.Second)
+	workers, _, err = Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := workers[2].Ask; a == nil || a.Listening {
+		t.Errorf("idle ask with a stale heartbeat = %+v, want not listening", a)
+	}
+}
+
+// The mod reads the field by this name.
+func TestPendingListeningJSON(t *testing.T) {
+	data, err := json.Marshal(Pending{Listening: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"listening":true`) {
+		t.Errorf("JSON = %s, want listening:true", data)
+	}
+}

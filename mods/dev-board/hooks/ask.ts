@@ -5,14 +5,19 @@ const ANSWER_POLL_MS = 1000
 
 type Answer = { toolUseId: string; answers: Record<string, string> }
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+export const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** This session's question and answer files, under dev's state directory; undefined outside a desktop app session. */
+/** Where the mods keep the questions and answers, under dev's state directory (`desktop.QuestionsDir`). */
+export async function questionsDir($: EngineInterface): Promise<string> {
+  const state = (await $.env.get('XDG_STATE_HOME')) || `${await $.env.get('HOME')}/.local/state`
+  return `${state}/dev/desktop/questions`
+}
+
+/** This session's question and answer files; undefined outside a desktop app session. */
 async function files($: EngineInterface) {
   const session = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
   if (!session) return undefined
-  const state = (await $.env.get('XDG_STATE_HOME')) || `${await $.env.get('HOME')}/.local/state`
-  const dir = `${state}/dev/desktop/questions`
+  const dir = await questionsDir($)
   return { session, asked: `${dir}/${session}.json`, answered: `${dir}/${session}.answer.json` }
 }
 
