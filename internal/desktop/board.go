@@ -199,8 +199,8 @@ func Board(p Paths, boss string, now time.Time) (workers []Worker, warnings []er
 	return workers, warnings, nil
 }
 
-// staleMod says when the mod's files changed after boss's Claude started: it loads mods at its start, so it runs
-// the older copy; nil when not, or boss isn't running.
+// staleMod says when the files the mod loads from dir changed after boss's Claude started: it loads mods at its
+// start, so it runs the older copy; nil when not, or dir or that start is unknown.
 func staleMod(dir string, lives []live, boss string) error {
 	i := slices.IndexFunc(lives, func(l live) bool { return l.HostSessionID == boss })
 	if dir == "" || i < 0 || lives[i].StartedAt == 0 {

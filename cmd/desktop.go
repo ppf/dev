@@ -63,7 +63,8 @@ no progress for 15 min), a decision unanswered for 3 min, context at 80% or more
 resume once the limit reset. Reads the app's session records, ~/.claude/sessions, the transcripts, Claude
 Code's model catalog and the files dev state and dev question write in desktop sessions (desktop/ in
 dev's state directory); a file that fails to parse is reported on stderr, as is a dev-board mod
-(CLAUDE_CODE_PLUGIN_DIRS) changed on disk since the boss session started, which runs the older copy.`,
+(CLAUDE_CODE_PLUGIN_DIRS) changed on disk since the boss's Claude started: it runs the copy it loaded then
+(not checked with CLAUDE_CODE_PLUGIN_DIR_WATCH=1, which reloads it).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if boss == "" {
