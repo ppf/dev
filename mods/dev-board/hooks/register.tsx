@@ -314,6 +314,8 @@ export const register: Register = on => {
   const drafts = new Map<string, string>()
   // The workers whose answer is being written: a second press waits for it
   const answering = new Set<string>()
+  // The title last given to the pane, or found on it; /board forgets it, as a poll may land between its read and its open
+  let titled: string | undefined
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: "Show this boss session's workers in a pane" })
     const boss = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
@@ -325,17 +327,14 @@ export const register: Register = on => {
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
-    // The title the open pane was last given, or found with
-    let titled: string | undefined
-    /** Gives an open pane the title (an open id only retitles); one not open or placed yet is tried next tick, as a /board may open it with old counts; a failure is said once. */
+    let isRetitling = false
+    /** Gives an open pane the title once per title (an open id only retitles); a failure is said once. */
     const retitle = async (title: string) => {
-      if (title === titled) return
+      titled = title
       try {
         const pane = (await $.ui.panes()).find(p => p.id === PANE)
-        if (pane === undefined) return
-        if (pane.title === title || (await $.ui.open({ id: PANE, title })).isPlaced) titled = title
+        if (pane !== undefined && pane.title !== title) await $.ui.open({ id: PANE, title })
       } catch (err) {
-        titled = title
         await $.ui.toast(`pane not retitled: ${errorText(err)}`)
       }
     }
@@ -425,8 +424,12 @@ export const register: Register = on => {
           await update($, picks, m => Object.fromEntries(Object.entries(m).map(([id, p]) => [id, ids.has(id) ? { ...p, isSent: false, sentAt: undefined } : p])))
           for (const w of polled.workers.filter(w => ids.has(w.id))) await $.ui.toast(`${label(w)} did not take the reply: press it again`)
         }
-        // A failed poll keeps the last title
-        if (polled.error === '') await retitle(paneTitle(polled.workers))
+        // A failed poll keeps the last title; off the poll's path, one at a time
+        const title = paneTitle(polled.workers)
+        if (polled.error === '' && title !== titled && !isRetitling) {
+          isRetitling = true
+          void retitle(title).finally(() => (isRetitling = false))
+        }
         void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
@@ -453,6 +456,7 @@ export const register: Register = on => {
   let isAskingBoss = false
   on('command.run', { command: 'board' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: paneTitle((await read($, board))?.workers ?? []) })
+    titled = undefined
     // Sent from a timer: one sent from this hook would wait on the turn the command holds, and the host refuses it.
     // Marked as the timer fires, so a timer that never fires leaves it to the next /board; a refused prompt is not retried
     if (!isAskingBoss && (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) && !(await read($, bossAsked))) {

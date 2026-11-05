@@ -1727,43 +1727,41 @@ test("the pane's title carries the counts while it is open, retitled only when t
   expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers' })
 })
 
-test('a pane not placed yet is retitled again next tick; a failed retitle says so once', async ($, on) => {
+test('a failed retitle says so once', async ($, on) => {
   const opens: string[] = []
-  let isPlaced = false
   on('ui.open', (_, e) => {
     opens.push(e.title ?? '')
-    if (e.title === 'Workers · 4') return { deny: 'no surface' }
-    return { value: isPlaced ? { isPlaced: true } : { isPlaced: false, reason: 'too narrow' } }
+    return { deny: 'no surface' }
   })
   const toasts = collectToasts(on)
-  let now: Ran = ok(WORKERS)
-  const { clock } = await start($, on, () => now, {}, {}, () => [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: false }])
-  await clock.settle()
-  expect(opens).toEqual(['Workers · 3'])
-  isPlaced = true
-  await clock.advance(2000)
-  expect(opens).toEqual(['Workers · 3', 'Workers · 3'])
-  await clock.advance(2000)
-  expect(opens.length).toBe(2)
-  now = ok([...WORKERS, worker({ id: 'local_d' })])
+  const { clock } = await start($, on, ok(WORKERS), {}, {}, () => [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }])
   await clock.advance(4000)
-  expect(opens.at(-1)).toBe('Workers · 4')
+  expect(opens).toEqual(['Workers · 3'])
   const failed = toasts.filter(t => t.startsWith('pane not retitled'))
   expect(failed.length).toBe(1)
   expect(failed[0]).toMatch(/no surface/)
 })
 
-test('a pane not open is not opened to retitle it; opened with older counts, it is retitled next tick', async ($, on) => {
+test('a pane not open is not opened to retitle it, nor looked for every tick; one /board opens is looked at again', async ($, on) => {
   const opens: unknown[] = []
   on('ui.open', (_, e) => {
     opens.push(e)
     return { value: { isPlaced: true } }
   })
   let panes: UiPane[] = []
-  const { clock } = await start($, on, ok(WORKERS), {}, {}, () => panes)
+  let panesRead = 0
+  const { clock } = await start($, on, ok(WORKERS), {}, {}, () => {
+    panesRead += 1
+    return panes
+  })
   await clock.advance(4000)
   expect(opens).toEqual([])
+  // Looked at once per title, not every tick
+  expect(panesRead).toBe(1)
+  // /board opens it (here with older counts, as when a poll lands between its read and its open): the next tick looks again
   panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
+  await runBoard($)
   await clock.advance(2000)
-  expect(opens).toEqual([{ id: 'board', title: 'Workers · 3' }])
+  expect(panesRead).toBe(2)
+  expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers · 3' })
 })
