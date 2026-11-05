@@ -133,7 +133,10 @@ func askInput(b block) (Pending, bool) {
 	return Pending{ToolUseID: b.ID, Questions: in.Questions}, true
 }
 
-// wrapUpAsk reads a wrap_up call's ask, its reply buttons the options (app actions, e.g. commit, are no reply); ok=false for another tool or a wrap_up without one.
+// wrapUpActions is how many of a wrap_up call's actions the app draws: it drops the rest.
+const wrapUpActions = 2
+
+// wrapUpAsk reads a wrap_up call's ask, its reply buttons the options (of the actions the app draws; app actions, e.g. commit, are no reply); ok=false for another tool or a wrap_up without one.
 func wrapUpAsk(b block) (Pending, bool) {
 	if b.Name != wrapUpTool {
 		return Pending{}, false
@@ -149,7 +152,7 @@ func wrapUpAsk(b block) (Pending, bool) {
 		return Pending{}, false
 	}
 	q := agent.Ask{Question: in.Ask, Options: []agent.Choice{}}
-	for _, a := range in.Actions {
+	for _, a := range in.Actions[:min(len(in.Actions), wrapUpActions)] {
 		if a.Label != "" && a.Action == "" {
 			q.Options = append(q.Options, agent.Choice{Label: a.Label})
 		}

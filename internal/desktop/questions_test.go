@@ -320,6 +320,9 @@ func TestTranscriptWrapUpAsk(t *testing.T) {
 		{"answered by a prompt", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "Yes"}}}, "", 0},
 		{"a newer one without an ask", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "")), toolResult("w2")}, "", 0},
 		{"a newer one", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "Really?", reply, reply)), toolResult("w2")}, "w2", 2},
+		// The app draws the first two actions only
+		{"three reply actions", []any{assistant("m", wrapUpUse("w1", "Go?", reply, reply, reply)), toolResult("w1")}, "w1", 2},
+		{"a reply action past an app action", []any{assistant("m", wrapUpUse("w1", "Go?", map[string]any{"action": "commit", "label": "Commit"}, reply, reply)), toolResult("w1")}, "w1", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -416,6 +419,31 @@ func TestBoardWrapUpListening(t *testing.T) {
 	}
 	if a := workers[2].Ask; a == nil || a.Listening {
 		t.Errorf("idle ask with a stale heartbeat = %+v, want not listening", a)
+	}
+}
+
+// A running worker whose last turn ended blocked on a wrap_up ask with three reply actions (the first live
+// test's) shows a listening reply with the two buttons the app draws.
+func TestBoardWrapUpBlockedRunning(t *testing.T) {
+	p := fixture(t)
+	p.Questions = filepath.Join(t.TempDir(), "questions")
+	data, err := os.ReadFile(filepath.Join("testdata", "wrapup-blocked.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
+	writeJSON(t, filepath.Join(p.Live, "3.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-blocked", "status": "idle"})
+	const id = "toolu_01C5JVKbH8XCiySPyhAAfcBc"
+	write(t, filepath.Join(p.Questions, "local_blocked.listen"), id)
+
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := workers[1]
+	want := agent.Ask{Question: "Which release should I describe?", Options: []agent.Choice{{Label: "v0.42.0"}, {Label: "v0.41.0"}}}
+	if w.State != StateBlocked || w.Ask == nil || w.Ask.ToolUseID != id || !w.Ask.Reply || w.Ask.Answerable || !w.Ask.Listening || !reflect.DeepEqual(w.Ask.Questions, []agent.Ask{want}) {
+		t.Errorf("blocked running worker = %s, ask %+v; want blocked, a listening reply to %s with v0.42.0 and v0.41.0", w.State, w.Ask, id)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,22 @@ type Paths struct {
 	Hooks string
 	// Questions holds the open questions the sessions' mods write (Pending), <app session id>.json; "" for none.
 	Questions string
+	// Mod is the dev-board mod's folder (ModDir); "" for none.
+	Mod string
+}
+
+// ModDir is the dev-board mod's folder among Claude's plugin folders (CLAUDE_CODE_PLUGIN_DIRS, list-separated);
+// "" for none, or when the session watches them (CLAUDE_CODE_PLUGIN_DIR_WATCH): it reloads a changed mod itself.
+func ModDir(pluginDirs string, isWatched bool) string {
+	if isWatched {
+		return ""
+	}
+	for _, dir := range filepath.SplitList(pluginDirs) {
+		if filepath.Base(filepath.Clean(dir)) == "dev-board" {
+			return dir
+		}
+	}
+	return ""
 }
 
 // DefaultPaths are the macOS locations under home and Claude's config directory (~/.claude when "").
@@ -155,6 +172,9 @@ func Board(p Paths, boss string, now time.Time) (workers []Worker, warnings []er
 	}
 	lives, liveWarnings := liveSessions(p.Live)
 	warnings = append(warnings, liveWarnings...)
+	if err := staleMod(p.Mod, lives, boss); err != nil {
+		warnings = append(warnings, err)
+	}
 	if p.Questions != "" {
 		// Any session's, a boss's or the person's own too, once gone that long
 		if err := prune(p.Questions, "*", now); err != nil {
@@ -177,6 +197,37 @@ func Board(p Paths, boss string, now time.Time) (workers []Worker, warnings []er
 	}
 	slices.SortStableFunc(workers, func(a, b Worker) int { return cmp.Compare(a.CreatedAt, b.CreatedAt) })
 	return workers, warnings, nil
+}
+
+// staleMod says when the mod's files changed after boss's Claude started: it loads mods at its start, so it runs
+// the older copy; nil when not, or boss isn't running.
+func staleMod(dir string, lives []live, boss string) error {
+	i := slices.IndexFunc(lives, func(l live) bool { return l.HostSessionID == boss })
+	if dir == "" || i < 0 || lives[i].StartedAt == 0 {
+		return nil
+	}
+	started := time.UnixMilli(lives[i].StartedAt)
+	var newest time.Time
+	for _, sub := range []string{".claude-plugin", "hooks", "skills"} {
+		err := filepath.WalkDir(filepath.Join(dir, sub), func(_ string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			info, err := d.Info()
+			if err == nil && info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+			return err
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	if !newest.After(started) {
+		return nil
+	}
+	return fmt.Errorf("the dev-board mod in %s changed at %s, after this session started (%s): this board runs the older copy; start a new session (or restart the app) to load it",
+		dir, newest.Format("15:04"), started.Format("15:04"))
 }
 
 // records reads the app records spawned from boss and not archived; one that fails to read is a warning.

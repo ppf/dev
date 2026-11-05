@@ -360,6 +360,67 @@ func TestBoardWarnings(t *testing.T) {
 	}
 }
 
+// Mod files changed after the boss's Claude started: it runs the copy it loaded then, and the board says so.
+func TestBoardStaleMod(t *testing.T) {
+	p := fixture(t)
+	p.Mod = filepath.Join(t.TempDir(), "dev-board")
+	// Its pid is this test's, started before now
+	writeJSON(t, filepath.Join(p.Live, "9.json"), map[string]any{
+		"pid": os.Getpid(), "sessionId": "cli-boss", "hostSessionId": boss, "status": "idle", "startedAt": time.Now().UnixMilli(),
+	})
+	write(t, filepath.Join(p.Mod, "hooks", "register.tsx"), "")
+	backdate(t, filepath.Join(p.Mod, "hooks", "register.tsx"), -time.Minute)
+	write(t, filepath.Join(p.Mod, "README.md"), "")
+	backdate(t, filepath.Join(p.Mod, "README.md"), -time.Minute)
+	stale := func() bool {
+		t.Helper()
+		_, warnings, err := Board(p, boss, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Contains(fmt.Sprint(warnings), "start a new session")
+	}
+	if !stale() {
+		t.Errorf("a hook changed after the boss started: no warning")
+	}
+
+	// Older than the boss's start; the README is no part of what it loads
+	backdate(t, filepath.Join(p.Mod, "hooks", "register.tsx"), time.Hour)
+	if stale() {
+		t.Errorf("mod older than the boss: warned")
+	}
+
+	write(t, filepath.Join(p.Mod, "skills", "boss", "SKILL.md"), "")
+	backdate(t, filepath.Join(p.Mod, "skills", "boss", "SKILL.md"), -time.Minute)
+	if !stale() {
+		t.Errorf("a skill changed after the boss started: no warning")
+	}
+
+	// The boss is not running
+	write(t, filepath.Join(p.Live, "9.json"), "{}")
+	if stale() {
+		t.Errorf("boss not running: warned")
+	}
+}
+
+func TestModDir(t *testing.T) {
+	dirs := "/a/other" + string(filepath.ListSeparator) + "/dev/mods/dev-board/"
+	for _, c := range []struct {
+		dirs      string
+		isWatched bool
+		want      string
+	}{
+		{"", false, ""},
+		{"/a/other", false, ""},
+		{dirs, false, "/dev/mods/dev-board/"},
+		{dirs, true, ""},
+	} {
+		if got := ModDir(c.dirs, c.isWatched); got != c.want {
+			t.Errorf("ModDir(%q, %v) = %q, want %q", c.dirs, c.isWatched, got, c.want)
+		}
+	}
+}
+
 func TestBoardNoWorkers(t *testing.T) {
 	p := fixture(t)
 	workers, warnings, err := Board(p, "local_other", time.Now())
