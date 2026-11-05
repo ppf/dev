@@ -327,10 +327,7 @@ export const register: Register = on => {
     let last = ''
     // The title the open pane was last given, or found with
     let titled: string | undefined
-    /**
-     * Gives an open pane the title (an open id only retitles); one not open, or not placed yet, is looked at again next
-     * tick (a /board between a poll and its look may open it with the last counts); a failure is said once per title.
-     */
+    /** Gives an open pane the title (an open id only retitles); one not open or placed yet is tried next tick, as a /board may open it with old counts; a failure is said once. */
     const retitle = async (title: string) => {
       if (title === titled) return
       try {
