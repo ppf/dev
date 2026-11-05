@@ -12,18 +12,22 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const NUDGE = 'Continue where you left off'
-const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'suggestion', stopped: 'inactive' } as const
-const STATUS_COLORS: Record<Status, string> = {
-  'needs you': 'error',
-  'rate-limited': 'warning',
-  stuck: 'warning',
-  working: 'success',
-  waiting: 'suggestion',
-  blocked: 'warning',
-  'review ready': 'merged',
-  idle: 'inactive',
-  stopped: 'inactive',
+const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stopped: 'inactive' } as const
+// The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
+const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
+const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
+const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
+  'needs you': 'Needs you',
+  working: 'Working',
+  stuck: 'Working',
+  'rate-limited': 'Working',
+  waiting: 'Waiting',
+  blocked: 'Waiting',
+  'review ready': 'Waiting',
+  idle: 'Idle',
+  stopped: 'Idle',
 }
+const MAX_LAST_LINES = 2
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 const STEP_ICONS: Record<string, string> = { completed: '✅', in_progress: '🔄', pending: '◌' }
 const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending: '⏳', skipping: '⏭', cancel: '⊘' }
@@ -39,7 +43,7 @@ const MAX_SENT = 500
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
-const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '' }, { shape: 'view-1' })
+const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {} }, { shape: 'view-2' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -128,17 +132,14 @@ function bandLine(workers: Worker[]): string {
   return parts.join(' · ')
 }
 
-/** How long a worker has been in its state, e.g. `busy 12m`, `idle 3m ago`. */
-function age(w: Worker): string {
-  if (w.since === '') return w.state
-  return w.state === 'busy' ? `busy ${w.since}` : `${w.state} ${w.since} ago`
-}
+/** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
+const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked'
 
-/** The status line, e.g. `needs you · allow Bash: rm -rf bin`, `waiting 4m · Auto-fix: PR #80`. */
-function statusLine(w: Worker): string {
-  const head = w.status === 'waiting' && w.since !== '' ? `waiting ${w.since}` : w.status
-  return w.statusText === '' ? head : `${head} · ${w.statusText}`
-}
+/** Whether the tile shows the person something to act on: a health note or a need. */
+const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w)
+
+/** The status and what it says, e.g. `needs you · allow Bash: rm -rf bin`. */
+const statusLine = (w: Worker) => (w.statusText === '' ? w.status : `${w.status} · ${w.statusText}`)
 
 /** A PR's CI line, e.g. `✅ build ❌ test`, or why it has none; '' for a PR not open or not read yet. */
 function ciLine(pr: PR, c: Checks | undefined): string {
@@ -250,8 +251,6 @@ export const register: Register = on => {
     const v = await read($, view)
     const checksRead = await read($, checks)
     const deliveredRead = await read($, delivered)
-    // Needs you first, the rest oldest first
-    const workers = [...b.workers].sort((x, y) => Number(y.status === NEEDS_YOU) - Number(x.status === NEEDS_YOU))
 
     /** Sends the boss a prompt a button asks for, saying in a toast whether it was queued. */
     const send = (text: string, what: string) =>
@@ -261,6 +260,9 @@ export const register: Register = on => {
       )
     const toggle = (id: string) =>
       update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
+    // Folding drops the tile's message field rather than keep it hidden
+    const fold = (id: string, isOpen: boolean) =>
+      update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen }, composing: !isOpen && s.composing === id ? '' : s.composing }))
     const compose = (id: string) => update($, view, s => ({ ...s, composing: s.composing === id ? '' : id }))
     const copy = async (id: string, surface: typeof e.surface) => {
       try {
@@ -292,83 +294,150 @@ export const register: Register = on => {
       await send(ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
-    return (
-      <Box flexDirection="column" gap={1}>
-        {b.error !== '' && <Text color="error">{b.error}</Text>}
-        {b.warnings !== '' && <Text color="warning">{b.warnings}</Text>}
-        {b.error === '' && b.workers.length === 0 && <Text dimColor>No workers.</Text>}
-        {workers.map(w => {
-          const done = w.plan.filter(s => s.status === 'completed').length
-          const isExpanded = v.expanded.includes(w.id)
-          const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
-
-          return (
-            <Box key={w.id} flexDirection="column">
-              <Text>
-                <Text color={STATE_COLORS[w.state]}>●</Text> <Text weight="bold">{w.title || w.name}</Text>
-                {w.plan.length > 0 && <Text dimColor>{` ${done}/${w.plan.length}`}</Text>}
+    /** One worker's tile: a header row (folded, all it shows), a meta row, its last turn and what it needs, notes, its reply's last lines, buttons. */
+    const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
+      const color = GROUP_COLORS[group]
+      const done = w.plan.filter(s => s.status === 'completed').length
+      const isExpanded = v.expanded.includes(w.id)
+      const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
+      const meta = [w.branch, w.context === null ? '' : `context ${w.context}%`].filter(s => s !== '').join(' · ')
+      const header = (
+        <Box flexDirection="row" columnGap={1}>
+          <Button key={`${w.id}:fold`} label={isOpen ? '▾' : '▸'} plain dimColor onPress={() => void fold(w.id, !isOpen)} />
+          <Box flexShrink={1}>
+            <Text wrap={isOpen ? 'wrap' : 'truncate-end'}>
+              <Text color={STATE_COLORS[w.state]}>●</Text>{' '}
+              <Text weight="semibold" dimColor={!isOpen}>
+                {w.title || w.name}
               </Text>
-              <Text color={STATUS_COLORS[w.status] ?? 'text'}>{statusLine(w)}</Text>
-              <Text dimColor>{[age(w), w.branch, w.context === null ? '' : `context ${w.context}%`].filter(s => s !== '').join(' · ')}</Text>
-              {w.prs.map(pr => {
+              {w.plan.length > 0 && (
+                <Text size="footnote" color="subtle" tabular>
+                  {` ${done}/${w.plan.length}`}
+                </Text>
+              )}
+              <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'}>
+                {` · ${statusLine(w)}`}
+              </Text>
+              {w.since !== '' && (
+                <Text size="footnote" color="subtle" tabular>
+                  {` · ${w.since}`}
+                </Text>
+              )}
+            </Text>
+          </Box>
+          {/* Outside the cut text, so truncation never hides it */}
+          {!isOpen && asksForPerson(w) && (
+            <Text size="footnote" color="warning">
+              ⚠
+            </Text>
+          )}
+        </Box>
+      )
+      if (!isOpen) {
+        // Lined up with an open tile's title, past its rule
+        return <Box paddingLeft={2}>{header}</Box>
+      }
+
+      return (
+        <Box flexDirection="column" borderStyle="quote" borderColor={color} paddingLeft={1}>
+          {header}
+          {(meta !== '' || w.prs.length > 0) && (
+            <Text size="caption">
+              <Text color="subtle">{meta}</Text>
+              {w.prs.map((pr, i) => {
                 const c = checksRead[pr.url]
                 const ci = ciLine(pr, c)
 
                 return (
                   <Text key={pr.url}>
+                    <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
                     <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
-                    {ci !== '' && <Text dimColor={c?.error !== ''}>{`  ${ci}`}</Text>}
+                    {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
                   </Text>
                 )
               })}
-              {w.verdict !== '' && (
-                <Text dimColor={w.state === 'busy'}>
-                  {w.state === 'busy' ? 'last turn: ' : ''}
-                  {w.verdict}
-                  {w.detail === '' ? '' : `: ${w.detail}`}
-                </Text>
-              )}
-              {w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && <Text color="warning">needs: {w.needsAction}</Text>}
-              {delivery?.isDelivered === false && <Text dimColor>not delivered: {delivery.why}</Text>}
-              {w.notes.map(n => (
-                <Text key={n.key} color="warning">
-                  {n.kind}: {n.text}
-                </Text>
-              ))}
-              {w.lastLines.map(line => (
-                <Text dimColor>{line}</Text>
-              ))}
-              <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-                {w.plan.length > 0 && <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} dimColor onPress={() => void toggle(w.id)} />}
-                <Button key={`${w.id}:open`} label="Open" onPress={() => void openSession(w)} />
-                {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
-                <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send(ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
-                <Button key={`${w.id}:copy`} label="Copy id" dimColor onPress={press => void copy(w.id, press.surface)} />
-                {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
-              </Box>
-              {isExpanded &&
-                w.plan.map(s => (
-                  <Text dimColor={s.status === 'completed'}>
-                    {STEP_ICONS[s.status] ?? '◌'} {s.content}
-                  </Text>
-                ))}
-              {Input !== undefined && v.composing === w.id && (
-                <Input
-                  key={`${w.id}:draft`}
-                  placeholder={`Message to ${label(w)}, relayed by the boss`}
-                  submitLabel="send"
-                  autoFocus
-                  onSubmit={text => {
-                    void update($, view, s => ({ ...s, composing: '' }))
-                    if (text.trim() !== '') {
-                      void send(ask('message', w, text.trim()), `message for ${label(w)}`)
-                    }
-                  }}
-                />
-              )}
-            </Box>
-          )
-        })}
+            </Text>
+          )}
+          {w.verdict !== '' && (
+            <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
+              {w.state === 'busy' ? 'last turn: ' : ''}
+              {w.verdict}
+              {w.detail === '' ? '' : `: ${w.detail}`}
+            </Text>
+          )}
+          {showsNeeds(w) && (
+            <Text size="footnote" color="warning" weight="medium">
+              needs: {w.needsAction}
+            </Text>
+          )}
+          {delivery?.isDelivered === false && (
+            <Text size="footnote" color="subtle">
+              not delivered: {delivery.why}
+            </Text>
+          )}
+          {w.notes.map(n => (
+            <Text key={n.key} size="footnote" color="warning" weight="medium">
+              {n.kind}: {n.text}
+            </Text>
+          ))}
+          {w.lastLines.slice(-MAX_LAST_LINES).map(line => (
+            <Text size="footnote" dimColor italic wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop="xs">
+            {w.plan.length > 0 && <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} dimColor onPress={() => void toggle(w.id)} />}
+            <Button key={`${w.id}:open`} label="Open" variant={group === 'Needs you' ? 'primary' : undefined} onPress={() => void openSession(w)} />
+            {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
+            <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send(ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
+            <Button key={`${w.id}:copy`} label="Copy id" dimColor onPress={press => void copy(w.id, press.surface)} />
+            {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
+          </Box>
+          {isExpanded &&
+            w.plan.map(s => (
+              <Text size="footnote" dimColor={s.status === 'completed'}>
+                {STEP_ICONS[s.status] ?? '◌'} {s.content}
+              </Text>
+            ))}
+          {Input !== undefined && v.composing === w.id && (
+            <Input
+              key={`${w.id}:draft`}
+              placeholder={`Message to ${label(w)}, relayed by the boss`}
+              submitLabel="send"
+              autoFocus
+              onSubmit={text => {
+                void update($, view, s => ({ ...s, composing: '' }))
+                if (text.trim() !== '') {
+                  void send(ask('message', w, text.trim()), `message for ${label(w)}`)
+                }
+              }}
+            />
+          )}
+        </Box>
+      )
+    }
+    // A status a newer dev adds shows under Working, unfolded, rather than not at all
+    const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working') === group) }))
+      .filter(s => s.workers.length > 0)
+
+    return (
+      <Box flexDirection="column" gap="md">
+        {b.error !== '' && <Text color="error">{b.error}</Text>}
+        {b.warnings !== '' && <Text color="warning">{b.warnings}</Text>}
+        {b.error === '' && b.workers.length === 0 && <Text dimColor>No workers.</Text>}
+        {sections.map(({ group, workers }) => (
+          <Box key={group} flexDirection="column" rowGap="xs">
+            <Text size="footnote" weight="semibold" color={GROUP_COLORS[group]}>
+              {group.toUpperCase()}
+              <Text weight="regular" color="subtle" tabular>
+                {` ${workers.length}`}
+              </Text>
+            </Text>
+            {workers.map(w => (
+              <Box key={w.id}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || asksForPerson(w) || v.composing === w.id))}</Box>
+            ))}
+          </Box>
+        ))}
       </Box>
     )
   })
