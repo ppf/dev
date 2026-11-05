@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ppf/dev/internal/agent"
 )
@@ -17,6 +18,16 @@ type Pending struct {
 	// AskedAt is when the mod wrote it, in milliseconds since the epoch; 0 from the transcript.
 	AskedAt    int64 `json:"askedAt"`
 	Answerable bool  `json:"answerable"`
+}
+
+// questionGrace is how long a question file of a session not seen running is kept: one that started after the
+// live files were read may have just written it.
+const questionGrace = time.Minute
+
+// writtenBefore is whether path was last written before t; false when it can't be read.
+func writtenBefore(path string, t time.Time) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.ModTime().Before(t)
 }
 
 // QuestionsDir is where the mods keep the questions and answers: hooks' questions/ (HookDir).
