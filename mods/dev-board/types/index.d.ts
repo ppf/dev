@@ -57,6 +57,7 @@ declare module 'claude-code' {
       checks: Shaped<Record<string, Checks>>
       delivered: Shaped<Record<string, Delivered>>
       view: Shaped<View>
+      bossAsked: Shaped<boolean>
     }
   }
 }

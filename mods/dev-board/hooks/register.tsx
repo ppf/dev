@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Board, Checks, Delivered, PR, Status, Worker } from '../types'
 
@@ -12,6 +12,7 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const NUDGE = 'Continue where you left off'
+const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stopped: 'inactive' } as const
 // The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
@@ -44,6 +45,8 @@ const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
 const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {} }, { shape: 'view-2' })
+// Whether /board asked this session to be the boss, so it asks once per session
+const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -85,6 +88,13 @@ async function prChecks(run: Run, url: string): Promise<Omit<Checks, 'at'>> {
 }
 
 const label = (w: Worker) => w.name || w.title
+
+/** Sends the boss a prompt, saying in a toast whether it was queued. */
+const send = ($: EngineInterface, text: string, what: string) =>
+  $.prompt.submit({ text }).then(
+    r => $.ui.toast(r.drop === undefined ? `dev-board: ${what} queued for the boss` : `dev-board: ${what} not sent: ${r.drop}`),
+    (err: unknown) => $.ui.toast(`dev-board: ${what} not sent: ${errorText(err)}`),
+  )
 
 /** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
 const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
@@ -253,8 +263,19 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Whether a boss prompt waits on its timer; a reload cancels both
+  let isAskingBoss = false
   on('command.run', { command: 'board' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: 'Workers' })
+    // Sent from a timer: one sent from this hook would wait on the turn the command holds, and the host refuses it.
+    // Marked as the timer fires, so a timer that never fires leaves it to the next /board; a refused prompt is not retried
+    if (!isAskingBoss && (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) && !(await read($, bossAsked))) {
+      isAskingBoss = true
+      $.clock.after(0, async () => {
+        await update($, bossAsked, () => true)
+        await send($, BOSS_PROMPT, 'boss mode')
+      })
+    }
 
     return { text: opened.isPlaced ? 'Worker board opened.' : 'Worker board opened; this surface does not place panes.' }
   })
@@ -272,12 +293,6 @@ export const register: Register = on => {
     const checksRead = await read($, checks)
     const deliveredRead = await read($, delivered)
 
-    /** Sends the boss a prompt a button asks for, saying in a toast whether it was queued. */
-    const send = (text: string, what: string) =>
-      $.prompt.submit({ text }).then(
-        r => $.ui.toast(r.drop === undefined ? `dev-board: ${what} queued for the boss` : `dev-board: ${what} not sent: ${r.drop}`),
-        (err: unknown) => $.ui.toast(`dev-board: ${what} not sent: ${errorText(err)}`),
-      )
     const toggle = (id: string) =>
       update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
     // Folding drops the tile's message field rather than keep it hidden
@@ -311,7 +326,7 @@ export const register: Register = on => {
         await $.ui.toast(`dev-board: ${label(w)} not archived: ${got.why}`)
         return
       }
-      await send(ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
+      await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
     /** One worker's tile: folded, one row; open, a header row, a status row, a meta row, its last turn and what it needs, notes, its reply's last lines, its tasks, buttons. */
@@ -454,7 +469,7 @@ export const register: Register = on => {
               onPress={() => void openSession(w)}
             />
             {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
-            <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send(ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
+            <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send($, ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
             {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
             <Button key={`${w.id}:copy`} label="Copy id" plain onPress={press => void copy(w.id, press.surface)} />
           </Box>
@@ -467,7 +482,7 @@ export const register: Register = on => {
               onSubmit={text => {
                 void update($, view, s => ({ ...s, composing: '' }))
                 if (text.trim() !== '') {
-                  void send(ask('message', w, text.trim()), `message for ${label(w)}`)
+                  void send($, ask('message', w, text.trim()), `message for ${label(w)}`)
                 }
               }}
             />

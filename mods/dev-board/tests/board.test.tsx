@@ -208,6 +208,77 @@ test('outside the desktop app it says so and runs nothing', async ($, on) => {
   await ui.unmount()
 })
 
+const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
+
+/** Runs `/board` as the person typing it would. */
+const runBoard = ($: Engine) =>
+  $.command.run({ command: 'board', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+
+test('/board asks the session to be the boss once: not again on reopening the pane or a reload', async ($, on) => {
+  const texts = submits(on)
+  const toasts = collectToasts(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const { clock } = await start($, on, ok([]))
+  expect(texts).toEqual([])
+
+  expect(await runBoard($)).toEqual({ text: 'Worker board opened.' })
+  // Again before the prompt's timer fires
+  await runBoard($)
+  await clock.settle()
+  expect(texts).toEqual([BOSS_PROMPT])
+  expect(toasts).toEqual(['dev-board: boss mode queued for the boss'])
+
+  await runBoard($)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await runBoard($)
+  await clock.settle()
+  expect(texts).toEqual([BOSS_PROMPT])
+})
+
+test('a refused boss prompt is shown, not retried', async ($, on) => {
+  const texts = submits(on, () => ({ drop: 'blocked by a hook' }))
+  const toasts = collectToasts(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const { clock } = await start($, on, ok([]))
+  await runBoard($)
+  await clock.settle()
+  await runBoard($)
+  await clock.settle()
+  expect(texts).toEqual([BOSS_PROMPT])
+  expect(toasts).toEqual(['dev-board: boss mode not sent: blocked by a hook'])
+})
+
+test('a session whose stored state says it was asked is not asked again', async ($, on) => {
+  // What the mod stored before a reload, which starts its module variables over; held here so writes go through
+  let stored = { value: { shape: 'boss-asked-1', value: true } as unknown, version: 1 }
+  on('state.get', (_, e, next) => (e.key === 'bossAsked' ? { value: stored } : next(e)))
+  on('state.set', (_, e, next) => {
+    if (e.key !== 'bossAsked') return next(e)
+    if (e.ifVersion !== undefined && e.ifVersion !== stored.version) return { value: { isSet: false, version: stored.version } }
+    stored = { value: e.value, version: stored.version + 1 }
+    return { value: { isSet: true, version: stored.version } }
+  })
+  const texts = submits(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const { clock } = await start($, on, ok([]))
+  await runBoard($)
+  await clock.settle()
+  expect(texts).toEqual([])
+})
+
+test('outside the desktop app /board asks no one to be the boss', async ($, on) => {
+  const texts = submits(on)
+  on('command.register', () => ({ value: { command: 'board' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no panes here' } }))
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(await runBoard($)).toEqual({ text: 'Worker board opened; this surface does not place panes.' })
+  await clock.settle()
+  expect(texts).toEqual([])
+})
+
 test('each poll that changes the board redraws it', async ($, on) => {
   let now: Ran = ok(WORKERS)
   const { clock } = await start($, on, () => now)
