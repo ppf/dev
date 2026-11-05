@@ -170,14 +170,18 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 				t.lines = lastLines(b.Text)
 			case r.Type == "assistant" && b.Type == "tool_use":
 				pending = append(pending, b)
-				if p, ok := wrapUpAsk(b); ok {
-					t.wrapAsk = &p
+				if b.Name == wrapUpTool {
+					// A newer box replaces the older one, an ask or none
+					t.wrapAsk = nil
+					if p, ok := wrapUpAsk(b); ok {
+						t.wrapAsk = &p
+					}
 				}
 			case r.Type == "user" && b.Type == "tool_result":
 				pending = without(pending, b.ToolUseID)
 				t.answered[b.ToolUseID] = true
 				if b.IsError && t.wrapAsk != nil && t.wrapAsk.ToolUseID == b.ToolUseID {
-					// The app refused the box: no question showed
+					// A call the app rejected (its input invalid) showed no question
 					t.wrapAsk = nil
 				}
 			}

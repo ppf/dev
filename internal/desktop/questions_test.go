@@ -318,6 +318,7 @@ func TestTranscriptWrapUpAsk(t *testing.T) {
 		{"no ask", []any{assistant("m", wrapUpUse("w1", "", reply)), toolResult("w1")}, "", 0},
 		{"refused", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), errorResult("w1")}, "", 0},
 		{"answered by a prompt", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "Yes"}}}, "", 0},
+		{"a newer one without an ask", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "")), toolResult("w2")}, "", 0},
 		{"a newer one", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "Really?", reply, reply)), toolResult("w2")}, "w2", 2},
 	}
 	for _, c := range cases {
@@ -342,6 +343,7 @@ func TestBoardWrapUpAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
+	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), string(data))
 	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), string(data)+lines(t,
 		map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "ask.ts"}},
 		assistant("claude-opus-5-5", askUse("tu8", dbQuestion)),
@@ -352,6 +354,9 @@ func TestBoardWrapUpAsk(t *testing.T) {
 	}
 	if a := workers[1].Ask; a == nil || a.ToolUseID != "w1" || !a.Reply {
 		t.Errorf("blocked ask = %+v, want w1's wrap_up ask", a)
+	}
+	if a := workers[2].Ask; a == nil || a.ToolUseID != "w1" || !a.Reply {
+		t.Errorf("idle ask = %+v, want w1's wrap_up ask", a)
 	}
 	if a := workers[0].Ask; a == nil || a.ToolUseID != "tu8" || a.Reply {
 		t.Errorf("busy ask = %+v, want its dialog's tu8", a)

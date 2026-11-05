@@ -410,7 +410,7 @@ export const register: Register = on => {
         // A wrap_up ask: the boss relays the pick as a message
         answering.add(w.id)
         const isSent = await send($, ask('message', w, Object.values(answers).join('; ')), `answer for ${label(w)}`).finally(() => answering.delete(w.id))
-        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } }))
+        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } })).catch((err: unknown) => $.ui.toast(`dev-board: reply not marked sent: ${errorText(err)}`))
         return
       }
       let why = ''
