@@ -215,6 +215,13 @@ test('warnings show above the tiles, a row each: ⚠, then its line without dev\
   await ui.unmount()
 })
 
+test("a warning line without dev's prefix shows as it is; blank lines show none", async ($, on) => {
+  await start($, on, ok(WORKERS, 'plain line\n\n⚠ bare'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await textsOf(ui, 'warnings')).toEqual(['⚠', 'plain line', '⚠', 'bare'])
+  await ui.unmount()
+})
+
 test('outside the desktop app it says so and runs nothing', async ($, on) => {
   let runs = 0
   on('command.register', () => ({ value: { command: 'board' } }))
@@ -1711,6 +1718,39 @@ test("the pane's title carries the counts while it is open, retitled only when t
   now = { exitCode: 1, stdout: '', stderr: 'boom' }
   await clock.advance(2000)
   expect(opens.length).toBe(opened)
+  // Down again: the needs you part goes, then the count
+  now = ok(WORKERS)
+  await clock.advance(2000)
+  expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers · 3' })
+  now = ok([])
+  await clock.advance(2000)
+  expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers' })
+})
+
+test('a pane not placed yet is retitled again next tick; a failed retitle says so once', async ($, on) => {
+  const opens: string[] = []
+  let isPlaced = false
+  on('ui.open', (_, e) => {
+    opens.push(e.title ?? '')
+    if (e.title === 'Workers · 4') return { deny: 'no surface' }
+    return { value: isPlaced ? { isPlaced: true } : { isPlaced: false, reason: 'too narrow' } }
+  })
+  const toasts = collectToasts(on)
+  let now: Ran = ok(WORKERS)
+  const { clock } = await start($, on, () => now, {}, {}, () => [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: false }])
+  await clock.settle()
+  expect(opens).toEqual(['Workers · 3'])
+  isPlaced = true
+  await clock.advance(2000)
+  expect(opens).toEqual(['Workers · 3', 'Workers · 3'])
+  await clock.advance(2000)
+  expect(opens.length).toBe(2)
+  now = ok([...WORKERS, worker({ id: 'local_d' })])
+  await clock.advance(4000)
+  expect(opens.at(-1)).toBe('Workers · 4')
+  const failed = toasts.filter(t => t.startsWith('pane not retitled'))
+  expect(failed.length).toBe(1)
+  expect(failed[0]).toMatch(/no surface/)
 })
 
 test('a pane not open is not opened to retitle it', async ($, on) => {

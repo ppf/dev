@@ -325,6 +325,20 @@ export const register: Register = on => {
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
+    // The title the open pane was last given, or found with
+    let titled: string | undefined
+    /** Gives an open pane the title (an open id only retitles); one not placed yet is tried again next tick, a failure said once per title. */
+    const retitle = async (title: string) => {
+      if (title === titled) return
+      try {
+        const pane = (await $.ui.panes()).find(p => p.id === PANE)
+        // Not open: /board opens it with the title then
+        if (pane === undefined || pane.title === title || (await $.ui.open({ id: PANE, title })).isPlaced) titled = title
+      } catch (err) {
+        titled = title
+        await $.ui.toast(`pane not retitled: ${errorText(err)}`)
+      }
+    }
     // Each worker's ask on the last poll that listed them
     let lastAsked: Map<string, string | undefined> | undefined
     // The PR URLs and worker ids being read: a slow gh or fetch must not stack another
@@ -382,16 +396,6 @@ export const register: Register = on => {
           }
           await update($, board, () => polled)
           last = json
-          // An open pane's title follows the counts (an open id only retitles); a failed poll keeps the last
-          if (polled.error === '') {
-            const title = paneTitle(polled.workers)
-            void $.ui
-              .panes()
-              .then(async panes => {
-                if (panes.some(p => p.id === PANE && p.title !== title)) await $.ui.open({ id: PANE, title })
-              })
-              .catch((err: unknown) => $.ui.toast(`pane not retitled: ${errorText(err)}`))
-          }
           // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
           const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
           if (polled.error === '') {
@@ -421,6 +425,8 @@ export const register: Register = on => {
           await update($, picks, m => Object.fromEntries(Object.entries(m).map(([id, p]) => [id, ids.has(id) ? { ...p, isSent: false, sentAt: undefined } : p])))
           for (const w of polled.workers.filter(w => ids.has(w.id))) await $.ui.toast(`${label(w)} did not take the reply: press it again`)
         }
+        // A failed poll keeps the last title
+        if (polled.error === '') await retitle(paneTitle(polled.workers))
         void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
@@ -775,7 +781,7 @@ export const register: Register = on => {
       )
     }
 
-    /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the title. */
+    /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the name. */
     const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
       const color = GROUP_COLORS[group]
       const done = w.plan.filter(s => s.status === 'completed').length
@@ -820,7 +826,7 @@ export const register: Register = on => {
         </Text>
       )
       if (!isOpen) {
-        // Lined up with an open tile's title, past its rule; the title and status are cut, the rest kept
+        // Lined up with an open tile's name, past its rule; the name and status are cut, the rest kept
         return (
           <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} paddingLeft={2} minWidth={0}>
             {foldButton}
@@ -866,7 +872,7 @@ export const register: Register = on => {
           {/* Blocks one gap apart: the title, its question, what it does, its tasks, its buttons */}
           <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
             <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
-              {/* Never wraps: the title is cut, its time kept at the right */}
+              {/* Never wraps: the name is cut, its time kept at the right */}
               <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   {name}
