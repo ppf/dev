@@ -314,8 +314,17 @@ export const register: Register = on => {
         const polled = await poll(run, boss)
         const json = JSON.stringify(polled)
         if (json !== last) {
+          const before = new Map((await read($, board))?.workers.map(w => [w.id, w.ask?.toolUseId]))
           await update($, board, () => polled)
           last = json
+          // A new question opens a tile the person folded
+          const newlyAsking = new Set(polled.workers.filter(w => w.ask != null && w.ask.toolUseId !== before.get(w.id)).map(w => w.id))
+          if (newlyAsking.size > 0) {
+            await update($, view, s => {
+              const tiles = Object.fromEntries(Object.entries(s.tiles).filter(([id]) => !newlyAsking.has(id)))
+              return Object.keys(tiles).length === Object.keys(s.tiles).length ? s : { ...s, tiles }
+            })
+          }
           // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
           const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
           const held = await read($, picks)

@@ -13,7 +13,7 @@ import (
 // Worker statuses, finer than its state: the first that holds names the tile.
 const (
 	// StatusNeedsYou: a dialog waits on the person (a permission prompt, a question; its hook file or live session
-	// says so), or did when the app quit and the worker hasn't run a turn since.
+	// says so), or did when the app quit and the worker hasn't run a turn since; or its last turn ended on a blocked wrap_up ask.
 	StatusNeedsYou = "needs you"
 	// StatusRateLimited: a rate limit stopped its last turn.
 	StatusRateLimited = "rate-limited"
@@ -41,7 +41,7 @@ const interruptedNote = "a dialog was open when the app quit"
 const waitingNote = "waiting for you"
 
 // status is w's status and what it says (the question, the tool, what it waits on); w has its state, verdict,
-// last lines, tool and notes. h is its hook file (or what the live file says while a dialog waits), interrupted the app record's interruptedAwaitingPerson.
+// last lines, tool, notes and ask. h is its hook file (or what the live file says while a dialog waits), interrupted the app record's interruptedAwaitingPerson.
 func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) {
 	if w.State == StateStopped {
 		if interrupted {
@@ -69,6 +69,10 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 			}
 		}
 		return StatusWorking, w.Tool
+	}
+	// The worker's own IDLE marker says only that nothing runs: its question still waits on the person
+	if w.Ask != nil && w.Ask.Blocked {
+		return StatusNeedsYou, w.Ask.Questions[0].Question
 	}
 	// The marker may have a short sentence after it: the newest marker line wins
 	for _, l := range slices.Backward(w.LastLines) {

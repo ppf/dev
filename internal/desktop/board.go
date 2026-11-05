@@ -456,7 +456,6 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		seen = max(seen, l.StatusUpdatedAt/1000)
 	}
 	w.Notes = notes(w, cli, h, seen, now)
-	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	// Asked before its idle stretch began: that turn is over (a question asked since that read is the next poll's)
 	endedSince := w.State != StateBusy && asked.AskedAt < l.StatusUpdatedAt
 	switch {
@@ -474,6 +473,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		w.Ask = t.wrapAsk
 		w.Ask.Listening = running && p.Questions != "" && isListening(p.Questions, w.ID, w.Ask.ToolUseID, now)
 	}
+	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	return w, errors.Join(err, hookErr, askErr)
 }
 
