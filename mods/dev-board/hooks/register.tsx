@@ -829,12 +829,27 @@ export const register: Register = on => {
           {isOpen ? sinceText : `· ${sinceText}`}
         </Text>
       )
+      // Folded or open, the same card: the arrow, dot and name stay put as its body opens under them
+      const card = (rows: ReturnType<typeof h>) => (
+        <Box
+          flexDirection="row"
+          alignItems="flex-start"
+          columnGap={1}
+          borderStyle="quote"
+          borderColor={isAttention ? color : 'inactive'}
+          borderDimColor={!isAttention}
+          paddingLeft={1}
+          minWidth={0}
+        >
+          {foldButton}
+          {dot}
+          {rows}
+        </Box>
+      )
       if (!isOpen) {
-        // Flush with its section's header; the name and status are cut, the rest kept
-        return (
-          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
-            {foldButton}
-            {dot}
+        // The name and status are cut, the rest kept
+        return card(
+          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0}>
             <Box flexShrink={1} minWidth={0}>
               {name}
             </Box>
@@ -852,7 +867,7 @@ export const register: Register = on => {
                 ⚠
               </Text>
             )}
-          </Box>
+          </Box>,
         )
       }
 
@@ -860,114 +875,101 @@ export const register: Register = on => {
       // Working and Idle tiles ask nothing of the person: their buttons recede to text
       const quiet = isAttention ? {} : ({ plain: true, dimColor: true } as const)
 
-      return (
-        <Box
-          flexDirection="row"
-          alignItems="flex-start"
-          columnGap={1}
-          borderStyle="quote"
-          borderColor={isAttention ? color : 'inactive'}
-          borderDimColor={!isAttention}
-          paddingLeft={1}
-          minWidth={0}
-        >
-          {foldButton}
-          {dot}
-          {/* Blocks one gap apart: the title, its question, what it does, its tasks, its buttons */}
-          <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
-            <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
-              {/* Never wraps: the name is cut, its time kept at the right */}
-              <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  {name}
-                </Box>
-                <Box flexShrink={0}>{since}</Box>
+      // Blocks one gap apart: the title, its question, what it does, its tasks, its buttons
+      return card(
+        <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
+          <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
+            {/* Never wraps: the name is cut, its time kept at the right */}
+            <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                {name}
               </Box>
-              {w.name !== '' && w.title !== '' && w.title !== w.name && (
-                <Text key={`${w.id}:title`} size="caption" color="subtle" wrap="truncate-end">
-                  {w.title}
-                </Text>
-              )}
+              <Box flexShrink={0}>{since}</Box>
             </Box>
-            {w.ask && questionRows(w, w.ask, color)}
-            <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
-              {!w.ask && status}
-              {(w.branch !== '' || w.context !== null) && (
-                // The branch cut at its start, so its unique end shows; the context use pinned right
-                <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
-                  {w.branch !== '' && (
-                    <Box flexShrink={1} minWidth={0}>
-                      <Text size="caption" color="subtle" mono wrap="truncate-start">
-                        {w.branch}
-                      </Text>
-                    </Box>
-                  )}
-                  {w.context !== null && (
-                    <Box flexShrink={0}>
-                      <Text size="caption" color="subtle" tabular>
-                        {`context ${w.context}%`}
-                      </Text>
-                    </Box>
-                  )}
-                </Box>
-              )}
-              {w.prs.map(pr => prRow(w, pr))}
-              {verdict !== '' && (
-                <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
-                  {w.state === 'busy' ? 'last turn: ' : ''}
-                  {verdict}
-                </Text>
-              )}
-              {showsNeeds(w) && (
-                <Text size="footnote" color="warning" weight="medium">
-                  needs: {w.needsAction}
-                </Text>
-              )}
-              {delivery?.isDelivered === false && (
-                <Text size="footnote" color="subtle">
-                  not delivered: {delivery.why}
-                </Text>
-              )}
-              {w.notes.map(n => (
-                <Text key={n.key} size="footnote" color="warning" weight="medium">
-                  {n.kind}: {n.text}
-                </Text>
-              ))}
-              {lastLines.map((line, i) => (
-                <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
-                  {plainLine(line)}
-                </Text>
-              ))}
-            </Box>
-            {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
-            <Box key={`${w.id}:actions`} flexDirection="column" rowGap="xs" minWidth={0}>
-              <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-                <Button key={`${w.id}:open`} label="Open" variant={isAttention ? 'primary' : undefined} {...quiet} onPress={() => void openSession(w)} />
-                {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" {...quiet} onPress={() => void compose(w.id)} />}
-                {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
-              </Box>
-              {Input !== undefined && v.composing === w.id && (
-                <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
-                  {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
-                  <Input
-                    key={`${w.id}:draft`}
-                    label={`Message ${label(w)}`}
-                    value={v.unsent[w.id]}
-                    autoFocus
-                    onInput={(text, input) => {
-                      drafts.set(`${input.surface}:${w.id}`, text)
-                      // A given-back text follows the person's edits, so a redraw never puts the refused one back
-                      if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
-                    }}
-                    onSubmit={text => void message(w, text)}
-                  />
-                  <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
-                  <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
-                </Box>
-              )}
-            </Box>
+            {w.name !== '' && w.title !== '' && w.title !== w.name && (
+              <Text key={`${w.id}:title`} size="caption" color="subtle" wrap="truncate-end">
+                {w.title}
+              </Text>
+            )}
           </Box>
-        </Box>
+          {w.ask && questionRows(w, w.ask, color)}
+          <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
+            {!w.ask && status}
+            {(w.branch !== '' || w.context !== null) && (
+              // The branch cut at its start, so its unique end shows; the context use pinned right
+              <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
+                {w.branch !== '' && (
+                  <Box flexShrink={1} minWidth={0}>
+                    <Text size="caption" color="subtle" mono wrap="truncate-start">
+                      {w.branch}
+                    </Text>
+                  </Box>
+                )}
+                {w.context !== null && (
+                  <Box flexShrink={0}>
+                    <Text size="caption" color="subtle" tabular>
+                      {`context ${w.context}%`}
+                    </Text>
+                  </Box>
+                )}
+              </Box>
+            )}
+            {w.prs.map(pr => prRow(w, pr))}
+            {verdict !== '' && (
+              <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
+                {w.state === 'busy' ? 'last turn: ' : ''}
+                {verdict}
+              </Text>
+            )}
+            {showsNeeds(w) && (
+              <Text size="footnote" color="warning" weight="medium">
+                needs: {w.needsAction}
+              </Text>
+            )}
+            {delivery?.isDelivered === false && (
+              <Text size="footnote" color="subtle">
+                not delivered: {delivery.why}
+              </Text>
+            )}
+            {w.notes.map(n => (
+              <Text key={n.key} size="footnote" color="warning" weight="medium">
+                {n.kind}: {n.text}
+              </Text>
+            ))}
+            {lastLines.map((line, i) => (
+              <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
+                {plainLine(line)}
+              </Text>
+            ))}
+          </Box>
+          {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
+          <Box key={`${w.id}:actions`} flexDirection="column" rowGap="xs" minWidth={0}>
+            <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+              <Button key={`${w.id}:open`} label="Open" variant={isAttention ? 'primary' : undefined} {...quiet} onPress={() => void openSession(w)} />
+              {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" {...quiet} onPress={() => void compose(w.id)} />}
+              {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
+            </Box>
+            {Input !== undefined && v.composing === w.id && (
+              <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+                {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
+                <Input
+                  key={`${w.id}:draft`}
+                  label={`Message ${label(w)}`}
+                  value={v.unsent[w.id]}
+                  autoFocus
+                  onInput={(text, input) => {
+                    drafts.set(`${input.surface}:${w.id}`, text)
+                    // A given-back text follows the person's edits, so a redraw never puts the refused one back
+                    if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
+                  }}
+                  onSubmit={text => void message(w, text)}
+                />
+                <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
+                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
+              </Box>
+            )}
+          </Box>
+        </Box>,
       )
     }
     // A status a newer dev adds shows under Working, unfolded, rather than not at all
@@ -1020,7 +1022,15 @@ export const register: Register = on => {
     }
     const { Text } = $.ui.resolve(e)
     const line = bandLine(b.workers)
+    if (!b.workers.some(w => w.status === NEEDS_YOU)) return <Text dimColor>{line}</Text>
+    // Only what asks for the person is red: `1 needs you`, the rest dim
+    const [needsYou, ...rest] = line.split(' · ')
 
-    return b.workers.some(w => w.status === NEEDS_YOU) ? <Text color="error">{line}</Text> : <Text dimColor>{line}</Text>
+    return (
+      <Text>
+        <Text color="error">{needsYou}</Text>
+        <Text dimColor>{` · ${rest.join(' · ')}`}</Text>
+      </Text>
+    )
   })
 }

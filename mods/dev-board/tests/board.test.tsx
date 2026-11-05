@@ -448,7 +448,7 @@ async function stepAt(ui: Mounted, key: string) {
 test('the task list: Tasks, a bar and its count above the steps; collapsed, the step at hand', async ($, on) => {
   await start($, on, ok([worker({ plan: [...PLAN] })]))
   const folded = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await header(folded)).toBe('● Worker A 1/3')
+  expect(await header(folded)).toBe('Worker A 1/3')
   await folded.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -556,7 +556,7 @@ test('a collapsed task list with every step done shows no step under its bar', a
 test('no task list: no count and no Tasks button', async ($, on) => {
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await header(ui)).toBe('● Worker A')
+  expect(await header(ui)).toBe('Worker A')
   await unfold(ui)
   expect(await ui.find({ key: 'local_a:tasks' })).toBeFalsy()
   await ui.unmount()
@@ -576,6 +576,9 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 2 workers · 2 busy')
+  // Only the needs you part is red
+  const parts = (await band.find({ type: 'Text' }))?.children as { props: { color?: string; dimColor?: boolean }; children: string[] }[]
+  expect(parts.map(p => [p.children.join(''), p.props.color ?? (p.props.dimColor ? 'dim' : '')])).toEqual([['1 needs you', 'error'], [' · 2 workers · 2 busy', 'dim']])
   await band.unmount()
 })
 
@@ -888,7 +891,7 @@ test('idle and stopped tiles fold to one line; the rest stay open', async ($, on
     expect((await ui.find({ key: `${id}:fold` }))?.text).toBe('▾')
     expect(await ui.find({ key: `${id}:open` })).toBeTruthy()
   }
-  expect(await header(ui, 'local_i')).toBe('● Idle')
+  expect(await header(ui, 'local_i')).toBe('Idle')
   // Dimmed once, by a theme color; an open title not at all
   const name = await ui.find({ type: 'Text', text: /^Idle$/ })
   expect([name?.props.color, name?.props.dimColor]).toEqual(['subtle', undefined])
@@ -903,7 +906,7 @@ test('an idle tile with a health note opens; folded by the person, it ends in �
   await ui.press({ key: 'local_a:fold' })
   await clock.advance(2000)
   expect(await ui.find({ type: 'Text', text: /^resume due:/ })).toBeFalsy()
-  expect(await header(ui)).toBe('● Worker A · stopped ⚠')
+  expect(await header(ui)).toBe('Worker A · stopped ⚠')
   expect((await ui.find({ type: 'Text', text: /^⚠$/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
@@ -967,10 +970,10 @@ test('sections group the workers by status, with counts, needs you first; empty 
   let workers = BY_STATUS
   const { clock } = await start($, on, () => ok(workers))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  // Section headers, their counts and the tiles' headers, in order: a tile by its title, a folded one's dot first
+  // Section headers, their counts and the tiles' headers, in order: a tile by its name
   const rows = async () => {
     const els = (await ui.findAll({})).filter(el => el.key?.endsWith(':header') || (el.type === 'Text' && /^(NEEDS YOU|WORKING|WAITING|IDLE|\d+)$/.test(el.text)))
-    return Promise.all(els.map(async el => (el.key === undefined ? el.text : (await header(ui, el.key.replace(/:header$/, '')))?.split(' ').slice(0, 2).join(' '))))
+    return Promise.all(els.map(async el => (el.key === undefined ? el.text : (await header(ui, el.key.replace(/:header$/, '')))?.split(' ')[0])))
   }
   expect(await rows()).toEqual([
     'NEEDS YOU',
@@ -988,15 +991,15 @@ test('sections group the workers by status, with counts, needs you first; empty 
     'Blocked',
     'IDLE',
     '2',
-    '● Idle',
-    '● Stopped',
+    'Idle',
+    'Stopped',
   ])
   // The count beside its header, not in the header's color
   expect((await ui.find({ type: 'Text', text: /^2$/ }))?.props.color).toBe('subtle')
 
   workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
   await clock.advance(2000)
-  expect(await rows()).toEqual(['WORKING', '1', 'Working', 'IDLE', '1', '● Idle'])
+  expect(await rows()).toEqual(['WORKING', '1', 'Working', 'IDLE', '1', 'Idle'])
   await ui.unmount()
 })
 
@@ -1076,9 +1079,9 @@ test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below t
     expect((await ui.find({ key: id }))?.props).toMatchObject({ flexDirection: 'column', minWidth: 0 })
   }
   const boxes = await ui.findAll({ type: 'Box' })
-  // The open tile's rule box, its rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
+  // Each tile's card; the open one's rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
   const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
-  expect(shrinking.length).toBe(8)
+  expect(shrinking.length).toBe(9)
   expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
   // The titles are cut; the open one's progress and time never shrink
   for (const title of ['Worker A', 'Worker B']) {
@@ -1098,7 +1101,7 @@ test("a review-ready tile says its detail once, on the status row", async ($, on
 test("a folded tile's status and time follow its title, split by ·", async ($, on) => {
   await start($, on, ok([worker({ title: 'Stopped', state: 'stopped', status: 'stopped', since: '5m' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await header(ui)).toBe('● Stopped · stopped · 5m')
+  expect(await header(ui)).toBe('Stopped · stopped · 5m')
   // Its time never shrinks: a desktop Text not cut wraps anywhere once squeezed
   expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.flexShrink === 0).map(b => b.text)).toEqual(['· 5m'])
   await ui.unmount()
@@ -1597,7 +1600,7 @@ test('a new question opens a tile the person folded; folded again, it stays fold
   workers = [worker({ state: 'blocked', status: 'needs you', statusText: FILE.question, ask, since: '1m' })]
   await clock.advance(2000)
   expect((await ui.find({ key: 'local_a:fold' }))?.text).toBe('▸')
-  expect(await header(ui)).toBe(`● Worker A · ${FILE.question} · 1m ⚠`)
+  expect(await header(ui)).toBe(`Worker A · ${FILE.question} · 1m ⚠`)
 
   // Another worker's new question opens only its own tile
   workers = [worker({ state: 'blocked', status: 'needs you', statusText: FILE.question, ask }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working' })]
@@ -1639,7 +1642,7 @@ test('a named worker is titled by its name, its long title a caption under it; f
   expect((await textsOf(ui, 'local_a:head'))?.at(-1)).toBe('Fix the login redirect loop')
   // A title that is the name says nothing more
   expect(await textsOf(ui, 'local_b:head')).toEqual(['docs'])
-  expect(await header(ui, 'local_c')).toBe('● spike')
+  expect(await header(ui, 'local_c')).toBe('spike')
   expect(await ui.find({ type: 'Text', text: 'An abandoned spike' })).toBeFalsy()
   await ui.unmount()
 })
@@ -1764,4 +1767,17 @@ test('a pane not open is not opened to retitle it, nor looked for every tick; on
   await clock.advance(2000)
   expect(panesRead).toBe(2)
   expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers · 3' })
+})
+
+test('folded or open, a tile is the same card, its arrow and dot first, so unfolding only opens its body', async ($, on) => {
+  await start($, on, ok([worker({ status: 'idle' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const card = async () => {
+    const tile = (await ui.findAll({ type: 'Box' })).find(b => b.props.borderStyle === 'quote')
+    return [tile?.props.paddingLeft, (tile?.children as { type: string; props: { key?: string } }[]).map(c => c.props.key ?? c.type)]
+  }
+  expect(await card()).toEqual([1, ['local_a:fold', 'Text', 'local_a:header']])
+  await ui.press({ key: 'local_a:fold' })
+  expect(await card()).toEqual([1, ['local_a:fold', 'Text', 'local_a:rows']])
+  await ui.unmount()
 })
