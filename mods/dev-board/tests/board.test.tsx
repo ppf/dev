@@ -627,7 +627,8 @@ test('an idle tile with a health note opens; folded by the person, it ends in �
   await ui.press({ key: 'local_a:fold' })
   await clock.advance(2000)
   expect(await ui.find({ type: 'Text', text: /^resume due:/ })).toBeFalsy()
-  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Worker A · stopped · ⚠')
+  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Worker A · stopped')
+  expect((await ui.find({ type: 'Text', text: /^⚠$/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
 
@@ -695,5 +696,20 @@ test('sections group the workers by status, with counts, needs you first; empty 
   workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
   await clock.advance(2000)
   expect(await rows()).toEqual(['WORKING 1', '● Working', 'IDLE 1', '● Idle'])
+  await ui.unmount()
+})
+
+test('a message being typed keeps its tile open as the worker goes idle; folding it drops the field', async ($, on) => {
+  let workers = [worker({ state: 'busy', status: 'working' })]
+  const { clock } = await start($, on, () => ok(workers))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:message' })
+  workers = [worker({})]
+  await clock.advance(2000)
+  expect(await ui.find({ key: 'local_a:draft' })).toBeTruthy()
+  await ui.press({ key: 'local_a:fold' })
+  expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
+  await ui.press({ key: 'local_a:fold' })
+  expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
   await ui.unmount()
 })

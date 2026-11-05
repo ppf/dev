@@ -132,8 +132,11 @@ function bandLine(workers: Worker[]): string {
   return parts.join(' · ')
 }
 
-/** Whether the tile shows the person something to act on: a health note, or what a worker not running needs. */
-const asksForPerson = (w: Worker) => w.notes.length > 0 || (w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked')
+/** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
+const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked'
+
+/** Whether the tile shows the person something to act on: a health note or a need. */
+const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w)
 
 /** The status and what it says, e.g. `needs you · allow Bash: rm -rf bin`. */
 const statusLine = (w: Worker) => (w.statusText === '' ? w.status : `${w.status} · ${w.statusText}`)
@@ -257,7 +260,9 @@ export const register: Register = on => {
       )
     const toggle = (id: string) =>
       update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
-    const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen } }))
+    // Folding drops the tile's message field rather than keep it hidden
+    const fold = (id: string, isOpen: boolean) =>
+      update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen }, composing: !isOpen && s.composing === id ? '' : s.composing }))
     const compose = (id: string) => update($, view, s => ({ ...s, composing: s.composing === id ? '' : id }))
     const copy = async (id: string, surface: typeof e.surface) => {
       try {
@@ -299,31 +304,33 @@ export const register: Register = on => {
       const header = (
         <Box flexDirection="row" columnGap={1}>
           <Button key={`${w.id}:fold`} label={isOpen ? '▾' : '▸'} plain dimColor onPress={() => void fold(w.id, !isOpen)} />
-          <Text wrap={isOpen ? 'wrap' : 'truncate-end'}>
-            <Text color={STATE_COLORS[w.state]}>●</Text>{' '}
-            <Text weight="semibold" dimColor={!isOpen}>
-              {w.title || w.name}
+          <Box flexShrink={1}>
+            <Text wrap={isOpen ? 'wrap' : 'truncate-end'}>
+              <Text color={STATE_COLORS[w.state]}>●</Text>{' '}
+              <Text weight="semibold" dimColor={!isOpen}>
+                {w.title || w.name}
+              </Text>
+              {w.plan.length > 0 && (
+                <Text size="footnote" color="subtle" tabular>
+                  {` ${done}/${w.plan.length}`}
+                </Text>
+              )}
+              <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'}>
+                {` · ${statusLine(w)}`}
+              </Text>
+              {w.since !== '' && (
+                <Text size="footnote" color="subtle" tabular>
+                  {` · ${w.since}`}
+                </Text>
+              )}
             </Text>
-            {w.plan.length > 0 && (
-              <Text size="footnote" color="subtle" tabular>
-                {` ${done}/${w.plan.length}`}
-              </Text>
-            )}
-            <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'}>
-              {` · ${statusLine(w)}`}
+          </Box>
+          {/* Outside the cut text, so truncation never hides it */}
+          {!isOpen && asksForPerson(w) && (
+            <Text size="footnote" color="warning">
+              ⚠
             </Text>
-            {w.since !== '' && (
-              <Text size="footnote" color="subtle" tabular>
-                {` · ${w.since}`}
-              </Text>
-            )}
-            {/* Folded by the person, it still says it asks for them */}
-            {!isOpen && asksForPerson(w) && (
-              <Text size="footnote" color="warning">
-                {' · ⚠'}
-              </Text>
-            )}
-          </Text>
+          )}
         </Box>
       )
       if (!isOpen) {
@@ -358,7 +365,7 @@ export const register: Register = on => {
               {w.detail === '' ? '' : `: ${w.detail}`}
             </Text>
           )}
-          {w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && (
+          {showsNeeds(w) && (
             <Text size="footnote" color="warning" weight="medium">
               needs: {w.needsAction}
             </Text>
@@ -410,7 +417,7 @@ export const register: Register = on => {
       )
     }
     // A status a newer dev adds shows under Working, unfolded, rather than not at all
-    const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (GROUP_OF[w.status] ?? 'Working') === group) }))
+    const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working') === group) }))
       .filter(s => s.workers.length > 0)
 
     return (
@@ -427,7 +434,7 @@ export const register: Register = on => {
               </Text>
             </Text>
             {workers.map(w => (
-              <Box key={w.id}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || asksForPerson(w)))}</Box>
+              <Box key={w.id}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || asksForPerson(w) || v.composing === w.id))}</Box>
             ))}
           </Box>
         ))}
