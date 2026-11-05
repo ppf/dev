@@ -384,11 +384,20 @@ func TestBoardStaleMod(t *testing.T) {
 		t.Errorf("a hook changed after the boss started: no warning")
 	}
 
-	// Older than the boss's start; the README is no part of what it loads
+	// Older than the boss's start; the README and the engine's types are no part of what it loads
+	write(t, filepath.Join(p.Mod, ".claude-plugin", "types", "claude-code", "index.d.ts"), "")
+	backdate(t, filepath.Join(p.Mod, ".claude-plugin", "types", "claude-code", "index.d.ts"), -time.Minute)
 	backdate(t, filepath.Join(p.Mod, "hooks", "register.tsx"), time.Hour)
 	if stale() {
 		t.Errorf("mod older than the boss: warned")
 	}
+
+	write(t, filepath.Join(p.Mod, ".claude-plugin", "plugin.json"), "{}")
+	backdate(t, filepath.Join(p.Mod, ".claude-plugin", "plugin.json"), -time.Minute)
+	if !stale() {
+		t.Errorf("the manifest changed after the boss started: no warning")
+	}
+	backdate(t, filepath.Join(p.Mod, ".claude-plugin", "plugin.json"), time.Hour)
 
 	write(t, filepath.Join(p.Mod, "skills", "boss", "SKILL.md"), "")
 	backdate(t, filepath.Join(p.Mod, "skills", "boss", "SKILL.md"), -time.Minute)

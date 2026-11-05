@@ -208,7 +208,8 @@ func staleMod(dir string, lives []live, boss string) error {
 	}
 	started := time.UnixMilli(lives[i].StartedAt)
 	var newest time.Time
-	for _, sub := range []string{".claude-plugin", "hooks", "skills"} {
+	// Not .claude-plugin/types/: a session that watches the folder writes it on each load
+	for _, sub := range []string{".claude-plugin/plugin.json", "hooks", "skills"} {
 		err := filepath.WalkDir(filepath.Join(dir, sub), func(_ string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -229,8 +230,12 @@ func staleMod(dir string, lives []live, boss string) error {
 	if !newest.After(started) {
 		return nil
 	}
+	layout := "15:04"
+	if newest.YearDay() != started.YearDay() || newest.Year() != started.Year() {
+		layout = "Jan 2 15:04"
+	}
 	return fmt.Errorf("the dev-board mod in %s changed at %s, after this session started (%s): this board runs the older copy; start a new session (or restart the app) to load it",
-		dir, newest.Format("15:04"), started.Format("15:04"))
+		dir, newest.Format(layout), started.Format(layout))
 }
 
 // records reads the app records spawned from boss and not archived; one that fails to read is a warning.
