@@ -10,6 +10,15 @@ export type Step = { content: string; status: 'completed' | 'in_progress' | 'pen
 /** A worker's status, finer than its state; the first that holds (`internal/desktop/status.go`). */
 export type Status = 'needs you' | 'rate-limited' | 'stuck' | 'working' | 'waiting' | 'blocked' | 'review ready' | 'idle' | 'stopped'
 
+/** One of an AskUserQuestion's questions; `description` may be empty. */
+export type Question = { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
+
+/** The question a busy worker waits on: from its mod's file (`answerable` from the board), else its transcript (its own dialog only). */
+export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean }
+
+/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` took them. */
+export type Picks = { toolUseId: string; picks: Record<string, string[]>; isSent: boolean }
+
 /** One object of `dev desktop board --json`. */
 export type Worker = {
   id: string
@@ -32,6 +41,8 @@ export type Worker = {
   statusText: string
   since: string
   plan: Step[]
+  /** Absent from a dev older than this mod. */
+  ask?: Ask | null
 }
 
 /** The last poll: its workers, or why it failed or did not run; warnings are its stderr. */
@@ -58,6 +69,7 @@ declare module 'claude-code' {
       delivered: Shaped<Record<string, Delivered>>
       view: Shaped<View>
       bossAsked: Shaped<boolean>
+      picks: Shaped<Record<string, Picks>>
     }
   }
 }

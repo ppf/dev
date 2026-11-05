@@ -226,7 +226,8 @@ func TestBoardSince(t *testing.T) {
 	})
 	org := filepath.Join(p.Records, "acct", "org")
 	writeJSON(t, filepath.Join(org, "local_blocked.json"), map[string]any{
-		"sessionId": "local_blocked", "cliSessionId": "cli-blocked", "createdAt": now.Add(-time.Second).UnixMilli(),
+		// Newer than every fixture worker (theirs are the fixture's now less up to 3 s), however fast it ran
+		"sessionId": "local_blocked", "cliSessionId": "cli-blocked", "createdAt": now.UnixMilli(),
 		"lastActivityAt": now.Add(-3 * time.Minute).UnixMilli(), "spawnedFrom": map[string]any{"sessionId": boss},
 		"interruptedAwaitingPerson": true,
 	})
@@ -313,7 +314,7 @@ func TestBoardJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
+	want := []string{"ask", "branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
 		"needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "verdict",
 		"worktree"}
 	for _, w := range got {

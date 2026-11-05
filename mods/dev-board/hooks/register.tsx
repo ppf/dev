@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Board, Checks, Delivered, PR, Status, Worker } from '../types'
+import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Worker } from '../types'
+import { registerAsk } from './ask'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
 const DEV_BIN = 'dev'
@@ -35,8 +36,8 @@ const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending:
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
-// Change the tag when Board's, Worker's, PR's, Note's or Step's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-3' })
+// Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-4' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -47,6 +48,8 @@ const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, {
 const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {} }, { shape: 'view-2' })
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
+// The person's picks on the workers' questions, by worker id
+const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -61,7 +64,12 @@ async function poll(run: Run, boss: string): Promise<Board> {
     const workers: unknown = JSON.parse(ran.stdout)
     // A dev older or newer than this mod: say so rather than fail drawing
     const isRead = (w: Worker) =>
-      Array.isArray(w?.prs) && Array.isArray(w?.lastLines) && Array.isArray(w?.notes) && Array.isArray(w?.plan) && typeof w?.status === 'string'
+      Array.isArray(w?.prs) &&
+      Array.isArray(w?.lastLines) &&
+      Array.isArray(w?.notes) &&
+      Array.isArray(w?.plan) &&
+      typeof w?.status === 'string' &&
+      (w.ask == null || Array.isArray(w.ask.questions))
     if (!Array.isArray(workers) || !workers.every(isRead)) {
       return { workers: [], error: `${DEV_BIN} desktop board printed workers this mod does not read: is dev up to date?`, warnings: '' }
     }
@@ -98,6 +106,15 @@ const send = ($: EngineInterface, text: string, what: string) =>
 
 /** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
 const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
+
+/** The answers `dev desktop answer` takes: question text to its picks, a multi-select's comma-joined as the dialog joins them. */
+const answersOf = (a: Ask, p: Picks) => Object.fromEntries(a.questions.map(q => [q.question, (p.picks[q.question] ?? []).join(', ')]))
+
+/** Whether the question is answered by one press: a single question, one pick. */
+const isOnePress = (a: Ask) => a.questions.length === 1 && a.questions[0]?.multiSelect === false
+
+/** Whether a worker's picks are for the question it waits on now. */
+const picksFor = (a: Ask, p: Picks | undefined) => (p?.toolUseId === a.toolUseId ? p : undefined)
 
 /** Whether `dev delivered` passes for a worktree, else why not (its error, or why it could not run). */
 async function deliveredCheck(run: Run, worktree: string): Promise<Omit<Delivered, 'at'>> {
@@ -188,8 +205,11 @@ function ciLine(pr: PR, c: Checks | undefined): string {
 }
 
 export const register: Register = on => {
+  registerAsk(on)
   // What each open message field holds, by surface and worker id (each surface's field holds its own), for its Send button
   const drafts = new Map<string, string>()
+  // The workers whose answer is being written: a second press waits for it
+  const answering = new Set<string>()
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: "Show this boss session's workers in a pane" })
     const boss = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
@@ -251,6 +271,12 @@ export const register: Register = on => {
         if (json !== last) {
           await update($, board, () => polled)
           last = json
+          // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
+          const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
+          const held = await read($, picks)
+          if (polled.error === '' && Object.entries(held).some(([id, p]) => asked.get(id) !== p.toolUseId)) {
+            await update($, picks, m => Object.fromEntries(Object.entries(m).filter(([id, p]) => asked.get(id) === p.toolUseId)))
+          }
         }
         void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`dev-board: PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
@@ -303,6 +329,7 @@ export const register: Register = on => {
     const v = await read($, view)
     const checksRead = await read($, checks)
     const deliveredRead = await read($, delivered)
+    const picksRead = await read($, picks)
 
     const toggle = (id: string) =>
       update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
@@ -352,6 +379,44 @@ export const register: Register = on => {
         await $.ui.toast(`dev-board: could not open ${label(w)}: ${errorText(err)}`)
       }
     }
+    /** Picks an option: a one-press question sends it; else it toggles (one per single-select question). */
+    const pick = (w: Worker, a: Ask, question: string, option: string, isMulti: boolean) => {
+      const picked = (held: Picks | undefined): Picks => {
+        const prior = picksFor(a, held)?.picks
+        const chosen = prior?.[question] ?? []
+        const toggled = chosen.includes(option) ? chosen.filter(o => o !== option) : [...chosen, option]
+        return { toolUseId: a.toolUseId, picks: { ...prior, [question]: isMulti ? toggled : [option] }, isSent: false }
+      }
+      if (isOnePress(a)) return answer(w, a, picked(undefined))
+      // From the stored picks, not this drawing's: two quick presses both count
+      return update($, picks, m => ({ ...m, [w.id]: picked(m[w.id]) })).catch((err: unknown) => $.ui.toast(`dev-board: pick not kept: ${errorText(err)}`))
+    }
+    /** Writes the person's picks for the worker's mod to answer its dialog with (`dev desktop answer`). */
+    const answer = async (w: Worker, a: Ask, p: Picks) => {
+      const missing = a.questions.find(q => (p.picks[q.question] ?? []).length === 0)
+      if (missing !== undefined) {
+        await $.ui.toast(`dev-board: pick an answer to "${missing.question}" first`)
+        return
+      }
+      if (answering.has(w.id)) return
+      const answers = answersOf(a, p)
+      let why = ''
+      answering.add(w.id)
+      try {
+        const ran = await $.process.run([DEV_BIN, 'desktop', 'answer', w.id, a.toolUseId], { stdin: JSON.stringify(answers) })
+        why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} desktop answer exited ${ran.exitCode}`
+      } catch (err) {
+        why = errorText(err)
+      } finally {
+        answering.delete(w.id)
+      }
+      if (why !== '') {
+        await $.ui.toast(`dev-board: ${label(w)} not answered: ${why}`)
+        return
+      }
+      await $.ui.toast(`dev-board: answered ${label(w)}: ${Object.values(answers).join('; ')}`)
+      await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } }))
+    }
     const archive = async (w: Worker) => {
       // Checked again: the last check may be a minute old
       const got = await deliveredCheck((argv, init) => $.process.run(argv, init), w.worktree)
@@ -360,6 +425,74 @@ export const register: Register = on => {
         return
       }
       await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
+    }
+
+    /** The question a worker waits on: each question's header and text, its options as buttons (their descriptions dim beside them), and Send where it takes more than one press; unanswerable from here, a note that the options open its session. */
+    const questionRows = (w: Worker, a: Ask, color: string) => {
+      const held = picksFor(a, picksRead[w.id])
+      if (held?.isSent) {
+        return (
+          <Text key={`${w.id}:sent`} size="footnote" color="subtle">
+            sent: {Object.values(answersOf(a, held)).join('; ')}; waiting for the worker
+          </Text>
+        )
+      }
+
+      return (
+        <Box key={`${w.id}:ask`} flexDirection="column" rowGap="xs" marginTop="xs" minWidth={0}>
+          {a.questions.map((q, qi) => {
+            const chosen = held?.picks[q.question] ?? []
+            const mark = (isChosen: boolean) => {
+              if (isOnePress(a)) return ''
+              if (q.multiSelect) return isChosen ? '☑ ' : '☐ '
+              return isChosen ? '◉ ' : '○ '
+            }
+
+            return (
+              <Box key={`${w.id}:q${qi}`} flexDirection="column" rowGap="xs" minWidth={0}>
+                <Box flexDirection="column" minWidth={0}>
+                  {q.header !== '' && (
+                    <Text size="caption" color={color} weight="semibold">
+                      {q.header}
+                    </Text>
+                  )}
+                  <Text weight="semibold">{q.question}</Text>
+                </Box>
+                {q.options.map((o, oi) => {
+                  const isChosen = chosen.includes(o.label)
+                  // Without the worker's mod watching, only its own dialog answers: the option opens it
+                  const press = () => void (a.answerable ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
+
+                  return (
+                    <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
+                      <Box flexShrink={0}>
+                        <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${o.label}`} variant={isChosen ? 'primary' : undefined} onPress={press} />
+                      </Box>
+                      {o.description !== '' && (
+                        <Box flexShrink={1} minWidth={0}>
+                          <Text size="footnote" dimColor>
+                            {o.description}
+                          </Text>
+                        </Box>
+                      )}
+                    </Box>
+                  )
+                })}
+              </Box>
+            )
+          })}
+          {!a.answerable && (
+            <Text size="footnote" color="subtle">
+              answered in its session: an option opens it
+            </Text>
+          )}
+          {a.answerable && !isOnePress(a) && (
+            <Box flexDirection="row">
+              <Button key={`${w.id}:answer`} label="Send" variant="primary" onPress={() => void answer(w, a, held ?? { toolUseId: a.toolUseId, picks: {}, isSent: false })} />
+            </Box>
+          )}
+        </Box>
+      )
     }
 
     /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the title. */
@@ -437,7 +570,7 @@ export const register: Register = on => {
                 {since}
               </Box>
             </Box>
-            {status}
+            {w.ask ? questionRows(w, w.ask, color) : status}
             {(meta !== '' || w.prs.length > 0) && (
               <Text size="caption">
                 <Text color="subtle">{meta}</Text>
