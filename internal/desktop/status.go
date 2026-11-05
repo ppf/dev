@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"cmp"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ const (
 	StatusStuck = "stuck"
 	// StatusWorking: busy.
 	StatusWorking = "working"
-	// StatusWaiting: its last turn ended on `WAITING (…)`: CI or a background job will wake it.
+	// StatusWaiting: its last turn ended on `WAITING (…)` (a line of its last few): CI or a background job will wake it.
 	StatusWaiting = "waiting"
 	// StatusBlocked: the app's verdict on its last turn is blocked (it waits on the person).
 	StatusBlocked = "blocked"
@@ -69,16 +70,17 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 		}
 		return StatusWorking, w.Tool
 	}
-	last := ""
-	if len(w.LastLines) > 0 {
-		last = strings.Trim(w.LastLines[len(w.LastLines)-1], "*_` ")
-	}
-	if what, ok := strings.CutPrefix(last, "WAITING ("); ok {
-		return StatusWaiting, strings.TrimSuffix(what, ")")
+	// The marker may have a short sentence after it: the newest marker line wins
+	for _, l := range slices.Backward(w.LastLines) {
+		l = strings.Trim(l, "*_` ")
+		if what, ok := strings.CutPrefix(l, "WAITING ("); ok {
+			return StatusWaiting, strings.TrimSuffix(what, ")")
+		}
+		if l == "IDLE" {
+			return StatusIdle, ""
+		}
 	}
 	switch {
-	case last == "IDLE":
-		return StatusIdle, ""
 	case w.State == StateBlocked:
 		return StatusBlocked, w.NeedsAction
 	case w.Verdict == "review_ready":

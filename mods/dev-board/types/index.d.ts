@@ -13,10 +13,13 @@ export type Status = 'needs you' | 'rate-limited' | 'stuck' | 'working' | 'waiti
 /** One of an AskUserQuestion's questions; `description` may be empty. */
 export type Question = { question: string; header: string; options: { label: string; description: string }[]; multiSelect: boolean }
 
-/** The question a busy worker waits on: from its mod's file (`answerable` from the board), else its transcript (its own dialog only). */
-export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean }
+/**
+ * The question a busy worker waits on: from its mod's file (`answerable` from the board), else its transcript (its own dialog only);
+ * or the wrap_up ask its last turn ended on (`reply`: answered by a message, its options the reply buttons; absent from a dev older than this mod).
+ */
+export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean; reply?: boolean }
 
-/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` took them. */
+/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` (or the boss, for a reply) took them. */
 export type Picks = { toolUseId: string; picks: Record<string, string[]>; isSent: boolean }
 
 /** One object of `dev desktop board --json`. */

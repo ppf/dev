@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -279,5 +280,95 @@ func TestBoardPrunesOldQuestions(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Errorf("fresh file of a session no worker of this boss: %v", err)
+	}
+}
+
+func wrapUpUse(id, ask string, actions ...map[string]any) map[string]any {
+	return map[string]any{"type": "tool_use", "id": id, "name": wrapUpTool, "input": map[string]any{"recap": "r", "ask": ask, "actions": actions}}
+}
+
+func errorResult(id string) map[string]any {
+	r := toolResult(id)
+	r["message"].(map[string]any)["content"].([]any)[0].(map[string]any)["is_error"] = true
+	return r
+}
+
+func TestTranscriptWrapUpAsk(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "wrapup.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := parseTranscript(data)
+	want := agent.Ask{Question: "Which file under mods/dev-board/hooks should I describe?", Options: []agent.Choice{{Label: "ask.ts"}, {Label: "register.tsx"}}}
+	if a := tr.wrapAsk; a == nil || a.ToolUseID != "w1" || !a.Reply || a.Answerable || len(a.Questions) != 1 || !reflect.DeepEqual(a.Questions[0], want) {
+		t.Errorf("wrap_up ask = %+v, want w1's question with its two reply labels", a)
+	}
+	if tr.ask != nil {
+		t.Errorf("ask = %+v, want none: wrap_up is no dialog", tr.ask)
+	}
+
+	reply := map[string]any{"label": "Yes"}
+	cases := []struct {
+		name    string
+		rows    []any
+		want    string
+		options int
+	}{
+		{"no reply actions", []any{assistant("m", wrapUpUse("w1", "Go?", map[string]any{"action": "create_pr", "label": "PR"})), toolResult("w1")}, "w1", 0},
+		{"no ask", []any{assistant("m", wrapUpUse("w1", "", reply)), toolResult("w1")}, "", 0},
+		{"refused", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), errorResult("w1")}, "", 0},
+		{"answered by a prompt", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "Yes"}}}, "", 0},
+		{"a newer one without an ask", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "")), toolResult("w2")}, "", 0},
+		{"a newer one", []any{assistant("m", wrapUpUse("w1", "Go?", reply)), toolResult("w1"), assistant("m", wrapUpUse("w2", "Really?", reply, reply)), toolResult("w2")}, "w2", 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr, _ := parseTranscript([]byte(lines(t, c.rows...)))
+			got, options := "", 0
+			if tr.wrapAsk != nil {
+				got, options = tr.wrapAsk.ToolUseID, len(tr.wrapAsk.Questions[0].Options)
+			}
+			if got != c.want || options != c.options {
+				t.Errorf("wrap_up ask %q with %d options, want %q with %d", got, options, c.want, c.options)
+			}
+		})
+	}
+}
+
+// A wrap_up ask is shown once its turn is over; a busy worker's open dialog is newer.
+func TestBoardWrapUpAsk(t *testing.T) {
+	p := fixture(t)
+	data, err := os.ReadFile(filepath.Join("testdata", "wrapup.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
+	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), string(data))
+	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), string(data)+lines(t,
+		map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "ask.ts"}},
+		assistant("claude-opus-5-5", askUse("tu8", dbQuestion)),
+	))
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := workers[1].Ask; a == nil || a.ToolUseID != "w1" || !a.Reply {
+		t.Errorf("blocked ask = %+v, want w1's wrap_up ask", a)
+	}
+	if a := workers[2].Ask; a == nil || a.ToolUseID != "w1" || !a.Reply {
+		t.Errorf("idle ask = %+v, want w1's wrap_up ask", a)
+	}
+	if a := workers[0].Ask; a == nil || a.ToolUseID != "tu8" || a.Reply {
+		t.Errorf("busy ask = %+v, want its dialog's tu8", a)
+	}
+
+	// Still busy, its turn is not over yet
+	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), string(data))
+	workers, _, err = Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := workers[0].Ask; a != nil {
+		t.Errorf("busy ask = %+v, want none", a)
 	}
 }

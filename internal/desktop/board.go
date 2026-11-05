@@ -101,7 +101,7 @@ type Worker struct {
 	Since string `json:"since"`
 	// Plan is its task list (update_plan), in order.
 	Plan []Step `json:"plan"`
-	// Ask is the question its open dialog asks, nil for none.
+	// Ask is the question its open dialog asks, or its last turn's wrap_up ask; nil for none.
 	Ask *Pending `json:"ask"`
 }
 
@@ -409,6 +409,10 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	}
 	if w.Ask == nil && w.State == StateBusy && t.ask != nil {
 		w.Ask = t.ask
+	}
+	// Its turn over, the ask it ended on waits for a message
+	if w.Ask == nil && w.State != StateBusy && t.wrapAsk != nil {
+		w.Ask = t.wrapAsk
 	}
 	return w, errors.Join(err, hookErr, askErr)
 }
