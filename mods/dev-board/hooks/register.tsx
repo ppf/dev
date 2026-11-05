@@ -265,6 +265,8 @@ export const register: Register = on => {
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
+    // Each worker's ask on the last poll that listed them
+    let lastAsked: Map<string, string | undefined> | undefined
     // The PR URLs and worker ids being read: a slow gh or fetch must not stack another
     const reading = new Set<string>()
     /**
@@ -313,10 +315,27 @@ export const register: Register = on => {
         const polled = await poll(run, boss)
         const json = JSON.stringify(polled)
         if (json !== last) {
+          if (lastAsked === undefined) {
+            // After a reload, the board it stored is the last poll
+            const stored = await read($, board)
+            if (stored !== null && stored.error === '') lastAsked = new Map(stored.workers.map(w => [w.id, w.ask?.toolUseId]))
+          }
           await update($, board, () => polled)
           last = json
           // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
           const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
+          if (polled.error === '') {
+            // A new question opens a tile the person folded
+            const before = lastAsked
+            const newlyAsking = new Set(polled.workers.filter(w => w.ask != null && before !== undefined && w.ask.toolUseId !== before.get(w.id)).map(w => w.id))
+            lastAsked = asked
+            if (newlyAsking.size > 0) {
+              await update($, view, s => {
+                const tiles = Object.fromEntries(Object.entries(s.tiles).filter(([id]) => !newlyAsking.has(id)))
+                return Object.keys(tiles).length === Object.keys(s.tiles).length ? s : { ...s, tiles }
+              })
+            }
+          }
           const held = await read($, picks)
           if (polled.error === '' && Object.entries(held).some(([id, p]) => asked.get(id) !== p.toolUseId)) {
             await update($, picks, m => Object.fromEntries(Object.entries(m).filter(([id, p]) => asked.get(id) === p.toolUseId)))

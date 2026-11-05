@@ -24,6 +24,8 @@ type Pending struct {
 	Reply bool `json:"reply"`
 	// Listening marks a Reply whose worker's mod takes the reply as its next prompt: <questions>/<id>.listen names it, written within listenFresh.
 	Listening bool `json:"listening"`
+	// Blocked marks a Reply whose wrap_up said the worker waits on the person (blocked: true).
+	Blocked bool `json:"-"`
 }
 
 // listenFresh is how recently a worker's mod must have written its <id>.listen heartbeat (every 2 s) to be taken as listening.
@@ -143,6 +145,7 @@ func wrapUpAsk(b block) (Pending, bool) {
 	}
 	var in struct {
 		Ask     string `json:"ask"`
+		Blocked bool   `json:"blocked"`
 		Actions []struct {
 			Label  string `json:"label"`
 			Action string `json:"action"`
@@ -157,5 +160,5 @@ func wrapUpAsk(b block) (Pending, bool) {
 			q.Options = append(q.Options, agent.Choice{Label: a.Label})
 		}
 	}
-	return Pending{ToolUseID: b.ID, Questions: []agent.Ask{q}, Reply: true}, true
+	return Pending{ToolUseID: b.ID, Questions: []agent.Ask{q}, Reply: true, Blocked: in.Blocked}, true
 }
