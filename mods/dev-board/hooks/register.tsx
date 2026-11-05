@@ -830,9 +830,9 @@ export const register: Register = on => {
         </Text>
       )
       if (!isOpen) {
-        // Lined up with an open tile's name, past its rule; the name and status are cut, the rest kept
+        // Flush with its section's header; the name and status are cut, the rest kept
         return (
-          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} paddingLeft={2} minWidth={0}>
+          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
             {foldButton}
             {dot}
             <Box flexShrink={1} minWidth={0}>

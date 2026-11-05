@@ -1077,7 +1077,7 @@ test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below t
   }
   const boxes = await ui.findAll({ type: 'Box' })
   // The open tile's rule box, its rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
-  const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || b.props.paddingLeft === 2 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
+  const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
   expect(shrinking.length).toBe(8)
   expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
   // The titles are cut; the open one's progress and time never shrink
