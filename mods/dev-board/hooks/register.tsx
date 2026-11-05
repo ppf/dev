@@ -465,7 +465,7 @@ export const register: Register = on => {
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
     /** The pane's one message in place of tiles: a glyph, its text and a dim hint, centred. */
     const notice = (key: string, text: string, glyph?: { mark: string; color: string }, hint?: string) => (
-      <Box key={key} flexDirection="column" alignItems="center" paddingY="md" minWidth={0}>
+      <Box key={key} flexDirection="column" alignItems="center" paddingY="sm" minWidth={0}>
         {glyph && <Text color={glyph.color}>{glyph.mark}</Text>}
         <Text size="footnote" color="subtle" wrap="wrap">
           {text}
@@ -856,7 +856,6 @@ export const register: Register = on => {
           borderColor={isAttention ? color : 'inactive'}
           borderDimColor={!isAttention}
           paddingLeft={1}
-          paddingY="xs"
           minWidth={0}
         >
           {foldButton}
@@ -963,7 +962,7 @@ export const register: Register = on => {
       .filter(s => s.workers.length > 0)
 
     return (
-      <Box flexDirection="column" gap="md">
+      <Box flexDirection="column" gap="sm">
         {b.error !== '' && notice('error', b.error, { mark: '⚠', color: 'error' }, b.error === NOT_DESKTOP ? undefined : `retries every ${PERIOD_MS / 1000} s`)}
         {b.warnings !== '' && (
           <Box key="warnings" flexDirection="column" minWidth={0}>
