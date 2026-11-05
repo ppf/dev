@@ -211,20 +211,20 @@ func staleMod(dir string, lives []live, boss string) error {
 	// Not .claude-plugin/types/: a session that watches the folder writes it on each load
 	for _, sub := range []string{".claude-plugin/plugin.json", "hooks", "skills"} {
 		err := filepath.WalkDir(filepath.Join(dir, sub), func(_ string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
+			if err == nil && !d.IsDir() {
+				var info fs.FileInfo
+				if info, err = d.Info(); err == nil && info.ModTime().After(newest) {
+					newest = info.ModTime()
+				}
 			}
-			info, err := d.Info()
-			if err != nil {
-				return err
+			// No such folder, or a file gone since it was listed (a save, a checkout): the rest is still read
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
 			}
-			if info.ModTime().After(newest) {
-				newest = info.ModTime()
-			}
-			return nil
-		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
+		})
+		if err != nil {
+			return fmt.Errorf("dev-board mod in %s not checked for changes: %w", dir, err)
 		}
 	}
 	if !newest.After(started) {

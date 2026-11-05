@@ -405,8 +405,15 @@ func TestBoardStaleMod(t *testing.T) {
 		t.Errorf("a skill changed after the boss started: no warning")
 	}
 
-	// The boss is not running
-	write(t, filepath.Join(p.Live, "9.json"), "{}")
+	// Its start unknown
+	writeJSON(t, filepath.Join(p.Live, "9.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-boss", "hostSessionId": boss, "status": "idle"})
+	if stale() {
+		t.Errorf("boss start unknown: warned")
+	}
+
+	writeJSON(t, filepath.Join(p.Live, "9.json"), map[string]any{
+		"pid": deadPID, "sessionId": "cli-boss", "hostSessionId": boss, "status": "idle", "startedAt": time.Now().UnixMilli(),
+	})
 	if stale() {
 		t.Errorf("boss not running: warned")
 	}
