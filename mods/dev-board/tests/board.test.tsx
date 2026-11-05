@@ -128,12 +128,17 @@ test('the pane shows a tile per worker, on every surface', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /^● Worker A/ }))?.text).toBe('● Worker A · working · Bash')
+    expect((await ui.find({ type: 'Text', text: /^● Worker A/ }))?.text).toBe('● Worker A')
+    // Its status left out: the Working section says it
+    expect((await ui.find({ type: 'Text', text: /^Bash$/ }))?.text).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /^working/ })).toBeFalsy()
     expect((await ui.find({ type: 'Text', text: /^feature\/a · context 42%$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Running the tests/ }))?.text).toBe('Running the tests.')
     expect((await ui.find({ type: 'Text', text: /last turn: completed/ }))?.text).toBe('last turn: completed')
-    expect((await ui.find({ type: 'Text', text: /^● Worker B/ }))?.text).toBe('● Worker B · blocked · pick one')
-    expect((await ui.find({ type: 'Text', text: /^blocked: two ways$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /^● Worker B/ }))?.text).toBe('● Worker B')
+    // The status, its need and the verdict's detail, each said once
+    expect((await ui.findAll({ type: 'Text', text: /blocked|pick one/ })).map(t => t.text)).toEqual(['blocked · pick one'])
+    expect((await ui.find({ type: 'Text', text: /^two ways$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /PR #78 open/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBeTruthy()
     await ui.unmount()
@@ -329,15 +334,28 @@ const PLAN = [
 
 test('the task list is collapsed, its count in the header; Tasks expands it', async ($, on) => {
   await start($, on, ok([worker({ plan: [...PLAN] })]))
+  const folded = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await folded.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A 1/3')
+  await folded.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A 1/3 · idle')
     await unfold(ui)
+    expect((await ui.find({ type: 'Text', text: /^1\/3$/ }))?.text).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /Write the mod/ })).toBeFalsy()
+    expect((await ui.find({ key: 'local_a:tasks' }))?.props.plain).toBe(true)
     await ui.press({ key: 'local_a:tasks' })
-    expect((await ui.find({ type: 'Text', text: /Read the code/ }))?.text).toBe('✅ Read the code')
-    expect((await ui.find({ type: 'Text', text: /Write the mod/ }))?.text).toBe('🔄 Write the mod')
-    expect((await ui.find({ type: 'Text', text: /Open the PR/ }))?.text).toBe('◌ Open the PR')
+    const done = await ui.find({ type: 'Text', text: /Read the code/ })
+    const current = await ui.find({ type: 'Text', text: /Write the mod/ })
+    const pending = await ui.find({ type: 'Text', text: /Open the PR/ })
+    expect([done?.text, current?.text, pending?.text]).toEqual(['✓ Read the code', '▸ Write the mod', '○ Open the PR'])
+    // Done and pending recede; the current step stands out, its glyph in the section's color
+    expect([done?.props.dimColor, current?.props.dimColor, pending?.props.color]).toEqual([true, false, 'subtle'])
+    expect(current?.props.color).toBeUndefined()
+    expect((await ui.find({ type: 'Text', text: /^▸$/ }))?.props.color).toBe('inactive')
+    // Above the buttons
+    const order = (await ui.findAll({})).map(el => el.key ?? el.text)
+    expect(order.indexOf('○ Open the PR')).toBeGreaterThan(-1)
+    expect(order.indexOf('○ Open the PR')).toBeLessThan(order.indexOf('local_a:tasks'))
     await ui.press({ key: 'local_a:tasks' })
     expect(await ui.find({ type: 'Text', text: /Write the mod/ })).toBeFalsy()
     await ui.unmount()
@@ -347,7 +365,7 @@ test('the task list is collapsed, its count in the header; Tasks expands it', as
 test('no task list: no count and no Tasks button', async ($, on) => {
   await start($, on, ok([worker({})]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A · idle')
+  expect((await ui.find({ type: 'Text', text: /Worker A/ }))?.text).toBe('● Worker A')
   await unfold(ui)
   expect(await ui.find({ key: 'local_a:tasks' })).toBeFalsy()
   await ui.unmount()
@@ -359,8 +377,8 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
     worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'needs you', statusText: 'allow Bash: rm -rf bin', since: '5m' }),
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const titles = (await ui.findAll({ type: 'Text', text: /^● / })).map(t => t.text)
-  expect(titles).toEqual(['● Worker B · needs you · allow Bash: rm -rf bin · 5m', '● Worker A · working · 12m'])
+  const rows = (await ui.findAll({ type: 'Text', text: /^(● |allow|needs you|working|\d+m$)/ })).map(t => t.text)
+  expect(rows).toEqual(['● Worker B', '5m', 'allow Bash: rm -rf bin', '● Worker A', '12m'])
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 2 workers · 2 busy')
@@ -370,7 +388,7 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
 test('a waiting worker says on what and for how long', async ($, on) => {
   await start($, on, ok([worker({ status: 'waiting', statusText: 'Auto-fix: PR #80', since: '4m' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Worker A · waiting · Auto-fix: PR #80 · 4m')
+  expect((await ui.findAll({ type: 'Text', text: /^(● |waiting|Auto-fix|4m)/ })).map(t => t.text)).toEqual(['● Worker A', '4m', 'Auto-fix: PR #80'])
   await ui.unmount()
 })
 
@@ -616,7 +634,11 @@ test('idle and stopped tiles fold to one line; the rest stay open', async ($, on
     expect((await ui.find({ key: `${id}:fold` }))?.props.label).toBe('▾')
     expect(await ui.find({ key: `${id}:nudge` })).toBeTruthy()
   }
-  expect((await ui.find({ type: 'Text', text: /^● Idle/ }))?.text).toBe('● Idle · idle')
+  expect((await ui.find({ type: 'Text', text: /^● Idle/ }))?.text).toBe('● Idle')
+  // Dimmed once, by a theme color; an open title not at all
+  const name = await ui.find({ type: 'Text', text: /^Idle$/ })
+  expect([name?.props.color, name?.props.dimColor]).toEqual(['subtle', undefined])
+  expect((await ui.find({ type: 'Text', text: /^Waiting$/ }))?.props.color).toBeUndefined()
   await ui.unmount()
 })
 
@@ -635,7 +657,7 @@ test('an idle tile with a health note opens; folded by the person, it ends in �
 test('a status this mod does not know shows under Working, open', async ($, on) => {
   await start($, on, ok([worker({ state: 'busy', status: 'paused' as Worker['status'] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.findAll({ type: 'Text', text: /^(● |WORKING \d)/ })).map(t => t.text)).toEqual(['WORKING 1', '● Worker A · paused'])
+  expect((await ui.findAll({ type: 'Text', text: /^(● |WORKING$|paused)/ })).map(t => t.text)).toEqual(['WORKING', '● Worker A', 'paused'])
   expect(await ui.find({ key: 'local_a:nudge' })).toBeTruthy()
   await ui.unmount()
 })
@@ -676,26 +698,32 @@ test('sections group the workers by status, with counts, needs you first; empty 
   let workers = BY_STATUS
   const { clock } = await start($, on, () => ok(workers))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const rows = async () => (await ui.findAll({ type: 'Text', text: /^(● |NEEDS YOU \d|WORKING \d|WAITING \d|IDLE \d)/ })).map(t => t.text.split(' · ')[0])
+  const rows = async () => (await ui.findAll({ type: 'Text', text: /^(● |NEEDS YOU$|WORKING$|WAITING$|IDLE$|\d+$)/ })).map(t => t.text.split(' · ')[0])
   expect(await rows()).toEqual([
-    'NEEDS YOU 1',
+    'NEEDS YOU',
+    '1',
     '● Needs',
-    'WORKING 3',
+    'WORKING',
+    '3',
     '● Working',
     '● Stuck',
     '● Limited',
-    'WAITING 3',
+    'WAITING',
+    '3',
     '● Waiting',
     '● Review',
     '● Blocked',
-    'IDLE 2',
+    'IDLE',
+    '2',
     '● Idle',
     '● Stopped',
   ])
+  // The count beside its header, not in the header's color
+  expect((await ui.find({ type: 'Text', text: /^2$/ }))?.props.color).toBe('subtle')
 
   workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
   await clock.advance(2000)
-  expect(await rows()).toEqual(['WORKING 1', '● Working', 'IDLE 1', '● Idle'])
+  expect(await rows()).toEqual(['WORKING', '1', '● Working', 'IDLE', '1', '● Idle'])
   await ui.unmount()
 })
 
@@ -711,5 +739,87 @@ test('a message being typed keeps its tile open as the worker goes idle; folding
   expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
   await ui.press({ key: 'local_a:fold' })
   expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a verdict the status says, with no detail, shows no line', async ($, on) => {
+  await start($, on, ok([worker({ state: 'blocked', status: 'blocked', verdict: 'blocked' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.findAll({ type: 'Text', text: /blocked/ })).map(t => t.text)).toEqual(['blocked'])
+  await ui.unmount()
+})
+
+test('Open is the main button for Needs you and Waiting; Copy id is plain, last in the row', async ($, on) => {
+  await start($, on, ok([...BY_STATUS, worker({ id: 'local_p', title: 'Delivered', prs: [OPEN_PR] })]), { delivered: DELIVERED })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui, 'local_i')
+  await unfold(ui, 'local_p')
+  const variant = async (id: string) => (await ui.find({ key: `${id}:open` }))?.props.variant
+  expect(await Promise.all(['local_n', 'local_w', 'local_b', 'local_k', 'local_i'].map(variant))).toEqual(['primary', 'primary', 'primary', undefined, undefined])
+  const copy = await ui.find({ key: 'local_i:copy' })
+  expect(copy?.props.plain).toBe(true)
+  expect(copy?.props.dimColor).toBeFalsy()
+  // After Archive too (shown for a delivered worker not busy with a PR)
+  const lastButton = async (id: string) => (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith(`${id}:`)).at(-1)?.key
+  expect(await lastButton('local_i')).toBe('local_i:copy')
+  expect(await lastButton('local_p')).toBe('local_p:copy')
+  expect(await ui.find({ key: 'local_p:archive' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test("a reply's last lines drop their inline markdown, code kept as is", async ($, on) => {
+  const lines = ['- Grant **full-screen** control (`request_full_control`)', '* keep `__init__` as is, __bold__', '**Done**: src/**/*.ts', '```']
+  await start($, on, ok([worker({ state: 'busy', status: 'working', lastLines: lines })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  // The closing fence is skipped, so the two lines before it show
+  expect(await ui.find({ type: 'Text', text: /^Grant/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^keep/ }))?.text).toBe('keep __init__ as is, bold')
+  expect((await ui.find({ type: 'Text', text: /^Done/ }))?.text).toBe('Done: src/**/*.ts')
+  await ui.unmount()
+})
+
+test('a list line drops its marker and bold, code kept as is', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', lastLines: ['- Grant **full-screen** control (`request_full_control`)'] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^Grant/ }))?.text).toBe('Grant full-screen control (request_full_control)')
+  await ui.unmount()
+})
+
+test('a time of 0m reads now', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', since: '0m' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^now$/ }))?.text).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /0m/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below their content', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', statusText: 'Bash' }), worker({ id: 'local_b', title: 'Worker B' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const id of ['local_a', 'local_b']) {
+    expect((await ui.find({ key: id }))?.props).toMatchObject({ flexDirection: 'column', minWidth: 0 })
+  }
+  const boxes = await ui.findAll({ type: 'Box' })
+  // The open tile's rule box, its header row, title cell and status row; the folded row and its cut text
+  const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || b.props.paddingLeft === 2 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
+  expect(shrinking.length).toBe(6)
+  expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
+  // The title is cut; its progress and time never shrink
+  expect((await ui.find({ type: 'Text', text: /^● Worker A$/ }))?.props.wrap).toBe('truncate-end')
+  expect(boxes.filter(b => b.props.flexShrink === 0).length).toBe(1)
+  await ui.unmount()
+})
+
+test("a review-ready tile says its detail once, on the status row", async ($, on) => {
+  await start($, on, ok([worker({ status: 'review ready', statusText: 'PR #80 green', verdict: 'review_ready', detail: 'PR #80 green' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.findAll({ type: 'Text', text: /review|green/ })).map(t => t.text)).toEqual(['review ready · PR #80 green'])
+  await ui.unmount()
+})
+
+test("a folded tile's status and time follow its title, split by ·", async ($, on) => {
+  await start($, on, ok([worker({ title: 'Stopped', state: 'stopped', status: 'stopped', since: '5m' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Stopped · stopped · 5m')
   await ui.unmount()
 })
