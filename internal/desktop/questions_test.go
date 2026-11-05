@@ -422,8 +422,8 @@ func TestBoardWrapUpListening(t *testing.T) {
 	}
 }
 
-// A running worker whose last turn ended blocked on a wrap_up ask with three reply actions (the first live
-// test's) shows a listening reply with the two buttons the app draws.
+// A running worker whose last turn ended blocked on a wrap_up ask with three reply actions shows a listening
+// reply with the two buttons the app draws.
 func TestBoardWrapUpBlockedRunning(t *testing.T) {
 	p := fixture(t)
 	p.Questions = filepath.Join(t.TempDir(), "questions")

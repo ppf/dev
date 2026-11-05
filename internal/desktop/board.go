@@ -214,10 +214,13 @@ func staleMod(dir string, lives []live, boss string) error {
 				return err
 			}
 			info, err := d.Info()
-			if err == nil && info.ModTime().After(newest) {
+			if err != nil {
+				return err
+			}
+			if info.ModTime().After(newest) {
 				newest = info.ModTime()
 			}
-			return err
+			return nil
 		})
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
