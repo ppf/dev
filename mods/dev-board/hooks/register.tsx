@@ -18,6 +18,8 @@ const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stop
 // The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
+// The sections whose tiles ask to be looked at: only they take their color on the card and a main Open button
+const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   'needs you': 'Needs you',
   working: 'Working',
@@ -96,6 +98,10 @@ const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false
 const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-2' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+const NOT_DESKTOP = 'Not a desktop app session: CLAUDE_CODE_HOST_SESSION_ID is unset.'
+// What `dev desktop board` starts each stderr line with, which the pane's ⚠ says
+const WARNING_PREFIX = /^⚠\s*(dev desktop board:\s*)?/
 
 /** Runs `dev desktop board` once: its workers with its stderr as warnings, or its error text. */
 async function poll(run: Run, boss: string): Promise<Board> {
@@ -208,6 +214,12 @@ function bandLine(workers: Worker[]): string {
   return parts.join(' · ')
 }
 
+/** The pane's title, e.g. `Workers · 3 · 1 needs you`. */
+function paneTitle(workers: Worker[]): string {
+  const needsYou = workers.filter(w => w.status === NEEDS_YOU).length
+  return ['Workers', ...(workers.length > 0 ? [`${workers.length}`] : []), ...(needsYou > 0 ? [`${needsYou} needs you`] : [])].join(' · ')
+}
+
 /** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
 const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked'
 
@@ -248,14 +260,15 @@ function repeatsTile(line: string, w: Worker): boolean {
 }
 
 /**
- * The verdict on its last turn and its detail; where the status says the verdict (`review_ready`), or a waiting worker's own
- * marker says it is not done, only a detail the status row lacks.
+ * The verdict on its last turn in words (`review ready`) and its detail; where the status says the verdict, or a waiting
+ * worker's own marker says it is not done, only a detail the status row lacks.
  */
 function verdictLine(w: Worker): string {
   if (w.verdict === '') return ''
-  if (w.verdict.replaceAll('_', ' ') === w.status || w.status === 'waiting') return w.detail === w.statusText ? '' : w.detail
-  if (w.detail === '') return w.verdict
-  return `${w.verdict}: ${w.detail}`
+  const verdict = w.verdict.replaceAll('_', ' ')
+  if (verdict === w.status || w.status === 'waiting') return w.detail === w.statusText ? '' : w.detail
+  if (w.detail === '') return verdict
+  return `${verdict}: ${w.detail}`
 }
 
 /** An open PR's checks summed up; none while not read, unreadable, or with no checks. */
@@ -302,8 +315,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'board', description: "Show this boss session's workers in a pane" })
     const boss = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
     if (!boss) {
-      const error = 'Not a desktop app session: CLAUDE_CODE_HOST_SESSION_ID is unset.'
-      await update($, board, () => ({ workers: [], error, warnings: '' }))
+      await update($, board, () => ({ workers: [], error: NOT_DESKTOP, warnings: '' }))
       return next(e)
     }
     await listenForReplies($, boss)
@@ -367,6 +379,16 @@ export const register: Register = on => {
           }
           await update($, board, () => polled)
           last = json
+          // An open pane's title follows the counts (an open id only retitles); a failed poll keeps the last
+          if (polled.error === '') {
+            const title = paneTitle(polled.workers)
+            void $.ui
+              .panes()
+              .then(async panes => {
+                if (panes.some(p => p.id === PANE && p.title !== title)) await $.ui.open({ id: PANE, title })
+              })
+              .catch((err: unknown) => $.ui.toast(`pane not retitled: ${errorText(err)}`))
+          }
           // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
           const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
           if (polled.error === '') {
@@ -421,7 +443,7 @@ export const register: Register = on => {
   // Whether a boss prompt waits on its timer; a reload cancels both
   let isAskingBoss = false
   on('command.run', { command: 'board' }, async $ => {
-    const opened = await $.ui.open({ id: PANE, title: 'Workers' })
+    const opened = await $.ui.open({ id: PANE, title: paneTitle((await read($, board))?.workers ?? []) })
     // Sent from a timer: one sent from this hook would wait on the turn the command holds, and the host refuses it.
     // Marked as the timer fires, so a timer that never fires leaves it to the next /board; a refused prompt is not retried
     if (!isAskingBoss && (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) && !(await read($, bossAsked))) {
@@ -441,9 +463,23 @@ export const register: Register = on => {
     // The mobile app draws no field
     const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
+    /** The pane's one message in place of tiles: a glyph, its text and a dim hint, centred. */
+    const notice = (key: string, text: string, glyph?: { mark: string; color: string }, hint?: string) => (
+      <Box key={key} flexDirection="column" alignItems="center" paddingY="md" minWidth={0}>
+        {glyph && <Text color={glyph.color}>{glyph.mark}</Text>}
+        <Text size="footnote" color="subtle" wrap="wrap">
+          {text}
+        </Text>
+        {hint !== undefined && (
+          <Text size="footnote" dimColor wrap="wrap">
+            {hint}
+          </Text>
+        )}
+      </Box>
+    )
     const b = await read($, board)
     if (b === null) {
-      return <Text dimColor>Loading workers…</Text>
+      return notice('loading', 'Loading workers…')
     }
     const v = await read($, view)
     const checksRead = await read($, checks)
@@ -565,7 +601,7 @@ export const register: Register = on => {
       }
 
       return (
-        <Box key={`${w.id}:ask`} flexDirection="column" rowGap="xs" marginTop="xs" minWidth={0}>
+        <Box key={`${w.id}:ask`} flexDirection="column" rowGap="xs" minWidth={0}>
           {a.questions.map((q, qi) => {
             const chosen = held?.picks[q.question] ?? []
             const mark = (isChosen: boolean) => {
@@ -700,7 +736,7 @@ export const register: Register = on => {
       const cells = Math.round((done / w.plan.length) * BAR_CELLS)
       const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: atHand ? [atHand] : [], more: 0 }
       return (
-        <Box key={`${w.id}:plan`} flexDirection="column" marginTop="xs" minWidth={0}>
+        <Box key={`${w.id}:plan`} flexDirection="column" minWidth={0}>
           {/* The label lines up with the steps' marks; the toggle, a button the surface pads, ends the row */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Text size="footnote" color="subtle">
@@ -742,8 +778,9 @@ export const register: Register = on => {
       const isExpanded = v.expanded.includes(w.id)
       const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
       const verdict = verdictLine(w)
+      const isAttention = ATTENTION_GROUPS.includes(group)
       const foldButton = (
-        <Button key={`${w.id}:fold`} label={`${isOpen ? 'Fold' : 'Unfold'} ${w.title || w.name}`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
+        <Button key={`${w.id}:fold`} label={`${isOpen ? 'Fold' : 'Unfold'} ${label(w)}`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
           {isOpen ? '▾' : '▸'}
         </Button>
       )
@@ -752,7 +789,7 @@ export const register: Register = on => {
       // Text of plain strings, the dot left outside it
       const name = (
         <Text weight="semibold" color={isOpen ? undefined : 'subtle'} wrap="truncate-end">
-          {w.title || w.name}
+          {label(w)}
         </Text>
       )
       const progress = w.plan.length > 0 && (
@@ -762,7 +799,12 @@ export const register: Register = on => {
       )
       const statusText = plainLine(statusLine(w, group))
       const status = statusText !== '' && (
-        <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'} wrap="truncate-end">
+        <Text
+          size="footnote"
+          color={group === 'Needs you' ? 'error' : isOpen ? 'text' : 'subtle'}
+          weight={group === 'Needs you' ? 'semibold' : isOpen ? 'medium' : 'regular'}
+          wrap="truncate-end"
+        >
           {isOpen ? statusText : `· ${statusText}`}
         </Text>
       )
@@ -799,98 +841,116 @@ export const register: Register = on => {
         )
       }
 
+      const lastLines = w.lastLines.filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w)).slice(-(verdict === '' ? MAX_LAST_LINES : 1))
+      // Working and Idle tiles ask nothing of the person: their buttons recede to text
+      const quiet = isAttention ? {} : ({ plain: true, dimColor: true } as const)
+
       return (
-        <Box flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="quote" borderColor={color} paddingLeft={1} minWidth={0}>
+        <Box
+          flexDirection="row"
+          alignItems="flex-start"
+          columnGap={1}
+          borderStyle="quote"
+          borderColor={isAttention ? color : 'inactive'}
+          borderDimColor={!isAttention}
+          paddingLeft={1}
+          paddingY="xs"
+          minWidth={0}
+        >
           {foldButton}
           {dot}
-          <Box key={`${w.id}:rows`} flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-            {/* Never wraps: the title is cut, its time kept at the right */}
-            <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {name}
+          {/* Four blocks one gap apart: the title, what it does, its tasks, its buttons */}
+          <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
+              {/* Never wraps: the title is cut, its time kept at the right */}
+              <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  {name}
+                </Box>
+                <Box flexShrink={0}>{since}</Box>
               </Box>
-              <Box flexShrink={0}>{since}</Box>
+              {w.name !== '' && w.title !== '' && w.title !== w.name && (
+                <Text key={`${w.id}:title`} size="caption" color="subtle" wrap="truncate-end">
+                  {w.title}
+                </Text>
+              )}
             </Box>
-            {w.ask ? questionRows(w, w.ask, color) : status}
-            {(w.branch !== '' || w.context !== null) && (
-              // The branch cut at its start, so its unique end shows; the context use pinned right
-              <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
-                {w.branch !== '' && (
-                  <Box flexShrink={1} minWidth={0}>
-                    <Text size="caption" color="subtle" mono wrap="truncate-start">
-                      {w.branch}
-                    </Text>
-                  </Box>
-                )}
-                {w.context !== null && (
-                  <Box flexShrink={0}>
-                    <Text size="caption" color="subtle" tabular>
-                      {`context ${w.context}%`}
-                    </Text>
-                  </Box>
-                )}
-              </Box>
-            )}
-            {w.prs.map(pr => prRow(w, pr))}
-            {verdict !== '' && (
-              <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
-                {w.state === 'busy' ? 'last turn: ' : ''}
-                {verdict}
-              </Text>
-            )}
-            {showsNeeds(w) && (
-              <Text size="footnote" color="warning" weight="medium">
-                needs: {w.needsAction}
-              </Text>
-            )}
-            {delivery?.isDelivered === false && (
-              <Text size="footnote" color="subtle">
-                not delivered: {delivery.why}
-              </Text>
-            )}
-            {w.notes.map(n => (
-              <Text key={n.key} size="footnote" color="warning" weight="medium">
-                {n.kind}: {n.text}
-              </Text>
-            ))}
-            {w.lastLines
-              .filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w))
-              .slice(-MAX_LAST_LINES)
-              .map((line, i) => (
-                <Text key={`${w.id}:line${i}`} size="footnote" dimColor italic wrap="truncate-end">
+            <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
+              {w.ask ? questionRows(w, w.ask, color) : status}
+              {(w.branch !== '' || w.context !== null) && (
+                // The branch cut at its start, so its unique end shows; the context use pinned right
+                <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
+                  {w.branch !== '' && (
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text size="caption" color="subtle" mono wrap="truncate-start">
+                        {w.branch}
+                      </Text>
+                    </Box>
+                  )}
+                  {w.context !== null && (
+                    <Box flexShrink={0}>
+                      <Text size="caption" color="subtle" tabular>
+                        {`context ${w.context}%`}
+                      </Text>
+                    </Box>
+                  )}
+                </Box>
+              )}
+              {w.prs.map(pr => prRow(w, pr))}
+              {verdict !== '' && (
+                <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
+                  {w.state === 'busy' ? 'last turn: ' : ''}
+                  {verdict}
+                </Text>
+              )}
+              {showsNeeds(w) && (
+                <Text size="footnote" color="warning" weight="medium">
+                  needs: {w.needsAction}
+                </Text>
+              )}
+              {delivery?.isDelivered === false && (
+                <Text size="footnote" color="subtle">
+                  not delivered: {delivery.why}
+                </Text>
+              )}
+              {w.notes.map(n => (
+                <Text key={n.key} size="footnote" color="warning" weight="medium">
+                  {n.kind}: {n.text}
+                </Text>
+              ))}
+              {lastLines.map((line, i) => (
+                <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
                   {plainLine(line)}
                 </Text>
               ))}
-            {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
-            <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop="xs">
-              <Button
-                key={`${w.id}:open`}
-                label="Open"
-                variant={group === 'Needs you' || group === 'Waiting' ? 'primary' : undefined}
-                onPress={() => void openSession(w)}
-              />
-              {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
-              {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
             </Box>
-            {Input !== undefined && v.composing === w.id && (
-              <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} marginTop="xs" minWidth={0}>
-                {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
-                <Input
-                  key={`${w.id}:draft`}
-                  label={`Message ${label(w)}`}
-                  value={v.unsent[w.id]}
-                  autoFocus
-                  onInput={(text, input) => {
-                    drafts.set(`${input.surface}:${w.id}`, text)
-                    // A given-back text follows the person's edits, so a redraw never puts the refused one back
-                    if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
-                  }}
-                  onSubmit={text => void message(w, text)}
-                />
-                <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
-                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
+            {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
+            <Box key={`${w.id}:actions`} flexDirection="column" rowGap="xs" minWidth={0}>
+              <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+                <Button key={`${w.id}:open`} label="Open" variant={isAttention ? 'primary' : undefined} {...quiet} onPress={() => void openSession(w)} />
+                {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" {...quiet} onPress={() => void compose(w.id)} />}
+                {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
               </Box>
-            )}
+              {Input !== undefined && v.composing === w.id && (
+                <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+                  {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
+                  <Input
+                    key={`${w.id}:draft`}
+                    label={`Message ${label(w)}`}
+                    value={v.unsent[w.id]}
+                    autoFocus
+                    onInput={(text, input) => {
+                      drafts.set(`${input.surface}:${w.id}`, text)
+                      // A given-back text follows the person's edits, so a redraw never puts the refused one back
+                      if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
+                    }}
+                    onSubmit={text => void message(w, text)}
+                  />
+                  <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
+                  <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
+                </Box>
+              )}
+            </Box>
           </Box>
         </Box>
       )
@@ -901,9 +961,24 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" gap="md">
-        {b.error !== '' && <Text color="error">{b.error}</Text>}
-        {b.warnings !== '' && <Text color="warning">{b.warnings}</Text>}
-        {b.error === '' && b.workers.length === 0 && <Text dimColor>No workers.</Text>}
+        {b.error !== '' && notice('error', b.error, { mark: '⚠', color: 'error' }, b.error === NOT_DESKTOP ? undefined : `retries every ${PERIOD_MS / 1000} s`)}
+        {b.warnings !== '' && (
+          <Box key="warnings" flexDirection="column" minWidth={0}>
+            {b.warnings.split('\n').filter(line => line.trim() !== '').map((line, i) => (
+              <Box key={`warning${i}`} flexDirection="row" columnGap={1} minWidth={0}>
+                <Text size="footnote" color="warning">
+                  ⚠
+                </Text>
+                <Box flexShrink={1} minWidth={0}>
+                  <Text size="footnote" color="subtle" wrap="wrap">
+                    {line.replace(WARNING_PREFIX, '')}
+                  </Text>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        )}
+        {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => (
           <Box key={group} flexDirection="column" rowGap="xs">
             <Box flexDirection="row" columnGap={1}>

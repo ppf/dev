@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { On, UiPane } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
@@ -26,7 +26,7 @@ const BAND = {
 
 const worker = (fields: Partial<Worker>): Worker => ({
   id: 'local_a',
-  name: 'a',
+  name: '',
   title: 'Worker A',
   branch: 'feature/a',
   worktree: '/wt/a',
@@ -77,14 +77,16 @@ type OtherRun = { argv: readonly string[]; stdin?: string }
 
 /**
  * Starts the session with `dev desktop board` answering `answer()`'s run, or failing to start with that reason;
- * `others` answers the rest (gh's checks none, dev delivered exits 1, open passes by default); `env` adds to its environment.
+ * `others` answers the rest (gh's checks none, dev delivered exits 1, open passes by default); `env` adds to its environment;
+ * `panes` lists the mod's open panes (none by default).
  */
-async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}, env: Record<string, string> = {}) {
+async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}, env: Record<string, string> = {}, panes: () => UiPane[] = () => []) {
   const answer = typeof ran === 'function' ? ran : () => ran
   const runs: (readonly string[])[] = []
   const otherRuns: OtherRun[] = []
   on('command.register', () => ({ value: { command: 'board' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: panes() }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
     const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv')]
@@ -116,12 +118,18 @@ type Mounted = Pick<Awaited<ReturnType<Engine['ui']['mount']>>, 'find' | 'findAl
 /** A drawn element's children: strings and elements, as `FoundElement.children` holds them. */
 type Drawn = string | { type: string; children?: Drawn[] }
 
+const shown = (el: Drawn): string => (typeof el === 'string' ? el : (el.children ?? []).map(shown).join(''))
+const texts = (el: Drawn): string[] => (typeof el === 'string' ? [] : el.type === 'Text' ? [shown(el)] : (el.children ?? []).flatMap(texts))
+
+/** A keyed element's Texts as read, in order. */
+async function textsOf(ui: Mounted, key: string) {
+  const el = await ui.find({ key })
+  return el === undefined ? undefined : (el.children as Drawn[]).flatMap(texts)
+}
+
 /** A tile's header row as read: its Texts, split by a space; the fold button left out. */
 async function header(ui: Mounted, id = 'local_a') {
-  const shown = (el: Drawn): string => (typeof el === 'string' ? el : (el.children ?? []).map(shown).join(''))
-  const texts = (el: Drawn): string[] => (typeof el === 'string' ? [] : el.type === 'Text' ? [shown(el)] : (el.children ?? []).flatMap(texts))
-  const row = await ui.find({ key: `${id}:header` })
-  return row === undefined ? undefined : (row.children as Drawn[]).flatMap(texts).join(' ')
+  return (await textsOf(ui, `${id}:header`))?.join(' ')
 }
 
 /** Unfolds a worker's tile if folded (an idle worker's is, by default). */
@@ -176,14 +184,14 @@ test('the band is hidden with no workers', async ($, on) => {
   await ui.unmount()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await pane.find({ type: 'Text' }))?.text).toBe('No workers.')
+  expect(await textsOf(pane, 'empty')).toEqual(['○', 'No workers yet', 'start_session from this boss session adds one'])
   await pane.unmount()
 })
 
 test('a failed run shows its error in the pane', async ($, on) => {
   await start($, on, { exitCode: 1, stdout: '', stderr: '❌ no app session record for local_boss' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('❌ no app session record for local_boss')
+  expect(await textsOf(ui, 'error')).toEqual(['⚠', '❌ no app session record for local_boss', 'retries every 2 s'])
   await ui.unmount()
 })
 
@@ -194,10 +202,15 @@ test('a dev that cannot start shows why', async ($, on) => {
   await ui.unmount()
 })
 
-test('warnings show above the tiles', async ($, on) => {
-  await start($, on, ok(WORKERS, '⚠ dev desktop board: x.json: unexpected end of JSON input'))
+test('warnings show above the tiles, a row each: ⚠, then its line without dev\'s prefix', async ($, on) => {
+  await start($, on, ok(WORKERS, '⚠ dev desktop board: x.json: unexpected end of JSON input\n⚠ dev desktop board: dev-board mod changed 19:17, after this session started 17:27: start a new session to load it'))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /x\.json/ }))?.text).toMatch(/unexpected end/)
+  expect(await textsOf(ui, 'warnings')).toEqual([
+    '⚠',
+    'x.json: unexpected end of JSON input',
+    '⚠',
+    'dev-board mod changed 19:17, after this session started 17:27: start a new session to load it',
+  ])
   expect((await ui.find({ type: 'Text', text: /Worker B/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
@@ -216,7 +229,8 @@ test('outside the desktop app it says so and runs nothing', async ($, on) => {
   await clock.advance(10_000)
   expect(runs).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/Not a desktop app session/)
+  // Nothing polls: no retry to promise
+  expect(await textsOf(ui, 'error')).toEqual(['⚠', 'Not a desktop app session: CLAUDE_CODE_HOST_SESSION_ID is unset.'])
   await ui.unmount()
 })
 
@@ -299,7 +313,7 @@ test('each poll that changes the board redraws it', async ($, on) => {
 
   now = { exitCode: 1, stdout: '', stderr: 'boom' }
   await clock.advance(2000)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('boom')
+  expect((await textsOf(ui, 'error'))?.[1]).toBe('boom')
 
   now = ok(WORKERS)
   await clock.advance(2000)
@@ -319,7 +333,7 @@ test("a busy worker shows its last turn's verdict as the last turn's", async ($,
 test('output this mod does not read says so', async ($, on) => {
   await start($, on, { exitCode: 0, stdout: JSON.stringify([{ id: 'x' }]), stderr: '' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  expect((await textsOf(ui, 'error'))?.[1]).toMatch(/is dev up to date/)
   await ui.unmount()
 })
 
@@ -396,7 +410,7 @@ test('a dev without notes says so and sends nothing', async ($, on) => {
   const { notes: _, ...old } = worker({})
   await start($, on, { exitCode: 0, stdout: JSON.stringify([old]), stderr: '' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  expect((await textsOf(ui, 'error'))?.[1]).toMatch(/is dev up to date/)
   await ui.unmount()
   expect(texts.length).toBe(0)
 })
@@ -405,7 +419,7 @@ test('a dev without plans or statuses says so', async ($, on) => {
   const { plan: _, status: __, ...old } = worker({})
   await start($, on, { exitCode: 0, stdout: JSON.stringify([old]), stderr: '' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  expect((await textsOf(ui, 'error'))?.[1]).toMatch(/is dev up to date/)
   await ui.unmount()
 })
 
@@ -699,7 +713,7 @@ test('Archive shows once dev delivered passes, and asks the boss to archive', as
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
   await ui.press({ key: 'local_a:archive' })
-  expect(texts).toEqual(['dev-board: archive a (local_a): dev delivered exited 0'])
+  expect(texts).toEqual(['dev-board: archive Worker A (local_a): dev delivered exited 0'])
   await ui.unmount()
 })
 
@@ -729,7 +743,7 @@ test('Message… opens a field whose text the boss is asked to relay', async ($,
     expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
     await ui.unmount()
   }
-  expect(texts).toEqual(['dev-board: message a (local_a): add tests', 'dev-board: message a (local_a): add tests'])
+  expect(texts).toEqual(['dev-board: message Worker A (local_a): add tests', 'dev-board: message Worker A (local_a): add tests'])
 })
 
 test('an empty message closes the field and sends nothing', async ($, on) => {
@@ -760,7 +774,7 @@ test("Open opens the worker's session through the app's deep link", async ($, on
   await unfold(ui)
   await ui.press({ key: 'local_a:open' })
   expect(otherRuns.filter(r => r.argv[0] === 'open').map(r => r.argv)).toEqual([['open', 'claude://code/continue?session=local_a']])
-  expect(toasts).toEqual(['could not open a: no handler'])
+  expect(toasts).toEqual(['could not open Worker A: no handler'])
   await ui.unmount()
 })
 
@@ -785,7 +799,7 @@ test('Archive checks delivery again when pressed, and says why not', async ($, o
   delivery = { exitCode: 1, stdout: '', stderr: 'uncommitted changes to tracked files' }
   await ui.press({ key: 'local_a:archive' })
   expect(texts).toEqual([])
-  expect(toasts).toEqual(['a not archived: uncommitted changes to tracked files'])
+  expect(toasts).toEqual(['Worker A not archived: uncommitted changes to tracked files'])
   await ui.unmount()
 })
 
@@ -824,7 +838,7 @@ test('a dev without plans says so', async ($, on) => {
   const { plan: _, ...old } = worker({})
   await start($, on, { exitCode: 0, stdout: JSON.stringify([old]), stderr: '' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/is dev up to date/)
+  expect((await textsOf(ui, 'error'))?.[1]).toMatch(/is dev up to date/)
   await ui.unmount()
 })
 
@@ -841,7 +855,7 @@ test('Open that cannot run says so', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
   await ui.press({ key: 'local_a:open' })
-  expect(toasts).toEqual(['could not open a: dev-board: $.process.run: denied by a rule'])
+  expect(toasts).toEqual(['could not open Worker A: dev-board: $.process.run: denied by a rule'])
   await ui.unmount()
 })
 
@@ -903,6 +917,20 @@ test("only the newest reply's last two lines show", async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /^one$/ })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^two$/ }))?.text).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /^three$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('beside a verdict only the last reply line shows', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', verdict: 'completed', lastLines: ['one', 'two', 'three'] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await textsOf(ui, 'local_a:info'))?.slice(-2)).toEqual(['last turn: completed', 'three'])
+  await ui.unmount()
+})
+
+test('a verdict reads as words, not its snake_case', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', verdict: 'review_ready', detail: 'board ask fix' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^last turn: / }))?.text).toBe('last turn: review ready: board ask fix')
   await ui.unmount()
 })
 
@@ -995,6 +1023,13 @@ test('Open is the main button for Needs you and Waiting; the row is Open, Messag
   await unfold(ui, 'local_p')
   const variant = async (id: string) => (await ui.find({ key: `${id}:open` }))?.props.variant
   expect(await Promise.all(['local_n', 'local_w', 'local_b', 'local_k', 'local_i'].map(variant))).toEqual(['primary', 'primary', 'primary', undefined, undefined])
+  // Working and Idle tiles' Open and Message… are dim text; Archive keeps its pill
+  const looks = async (key: string) => {
+    const { plain, dimColor } = (await ui.find({ key }))?.props ?? {}
+    return [plain ?? false, dimColor ?? false]
+  }
+  const keys = ['local_n:open', 'local_w:message', 'local_k:open', 'local_k:message', 'local_i:open', 'local_i:message', 'local_p:archive']
+  expect(await Promise.all(keys.map(looks))).toEqual([[false, false], [false, false], [true, true], [true, true], [true, true], [true, true], [false, false]])
   // Archive shows for a delivered worker not busy with a PR
   const row = async (id: string) => (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith(`${id}:`) && k !== `${id}:fold`)
   expect(await row('local_i')).toEqual(['local_i:open', 'local_i:message'])
@@ -1223,7 +1258,7 @@ test('pressing an option answers the worker with that pick', async ($, on) => {
   const answers = otherRuns.filter(r => r.argv[2] === 'answer')
   expect(answers.map(r => r.argv)).toEqual([['dev', 'desktop', 'answer', 'local_a', 'tu1']])
   expect(JSON.parse(answers[0]?.stdin ?? '')).toEqual({ 'Which DB?': 'Mongo' })
-  expect(toasts).toEqual(['answered a: Mongo'])
+  expect(toasts).toEqual(['answered Worker A: Mongo'])
   // Sent: the options go until the worker's next poll drops the question
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^sent: Mongo; waiting for the worker$/ }))?.text).toBeTruthy()
@@ -1237,7 +1272,7 @@ test('a refused answer says why and keeps the options', async ($, on) => {
   })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'local_a:q0:o0:pick' })
-  expect(toasts).toEqual(['a not answered: local_a no longer waits on question tu1'])
+  expect(toasts).toEqual(['Worker A not answered: local_a no longer waits on question tu1'])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
   await ui.unmount()
 })
@@ -1327,7 +1362,7 @@ test("a worker's wrap_up ask shows its reply buttons; a press asks the boss to m
   expect(await ui.find({ type: 'Text', text: /opens it/ })).toBeFalsy()
   await ui.press({ key: 'local_a:q0:o1:pick' })
 
-  expect(texts).toEqual(['dev-board: message a (local_a): register.tsx'])
+  expect(texts).toEqual(['dev-board: message Worker A (local_a): register.tsx'])
   expect(otherRuns.filter(r => r.argv[2] === 'answer' || r.argv[0] === 'open')).toEqual([])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
@@ -1352,7 +1387,7 @@ test("a listening worker's reply goes to its reply file for its own mod, not thr
   expect(otherRuns.map(r => r.argv)).toContainEqual(['mv', '-f', `${path}.tmp`, path])
   expect(texts).toEqual([])
   expect(otherRuns.filter(r => r.argv[0] === 'open')).toEqual([])
-  expect(toasts).toEqual(['replied to a: register.tsx'])
+  expect(toasts).toEqual(['replied to Worker A: register.tsx'])
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
@@ -1366,7 +1401,7 @@ test("a reply the worker's mod has not taken 10 s on is offered again", async ($
   await clock.advance(8000)
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
   await clock.advance(2000)
-  expect(toasts).toEqual(['replied to a: register.tsx', 'a did not take the reply: press it again'])
+  expect(toasts).toEqual(['replied to Worker A: register.tsx', 'Worker A did not take the reply: press it again'])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
   await ui.unmount()
 })
@@ -1378,7 +1413,7 @@ test("a reply file not written says why and keeps the buttons, relaying nothing"
   await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true, listening: true })]), { mv: { exitCode: 1, stdout: '', stderr: 'EACCES' } }, { HOME: '/home' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'local_a:q0:o1:pick' })
-  expect(toasts).toEqual(['reply for a not sent: EACCES'])
+  expect(toasts).toEqual(['reply for Worker A not sent: EACCES'])
   expect(texts).toEqual([])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
   await ui.unmount()
@@ -1390,7 +1425,7 @@ test('a refused reply keeps the buttons', async ($, on) => {
   await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'local_a:q0:o0:pick' })
-  expect(toasts).toEqual(['answer for a not sent: blocked by a hook'])
+  expect(toasts).toEqual(['answer for Worker A not sent: blocked by a hook'])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
   await ui.unmount()
 })
@@ -1426,13 +1461,13 @@ test('a message not sent opens its field again, holding its text, until one is s
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'local_a:message' })
   await ui.input({ key: 'local_a:draft', text: 'use option B' })
-  expect(toasts.at(-1)).toBe('message for a not sent: blocked by a hook')
+  expect(toasts.at(-1)).toBe('message for Worker A not sent: blocked by a hook')
   expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option B')
 
   // Send, the person typing nothing more, sends it again
   refuse = false
   await ui.press({ key: 'local_a:send' })
-  expect(texts).toEqual(['dev-board: message a (local_a): use option B', 'dev-board: message a (local_a): use option B'])
+  expect(texts).toEqual(['dev-board: message Worker A (local_a): use option B', 'dev-board: message Worker A (local_a): use option B'])
 
   // Edited after a refusal, a redraw shows the edit, and Send sends it
   refuse = true
@@ -1442,7 +1477,7 @@ test('a message not sent opens its field again, holding its text, until one is s
   expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option C')
   refuse = false
   await ui.press({ key: 'local_a:send' })
-  expect(texts.at(-1)).toBe('dev-board: message a (local_a): use option C')
+  expect(texts.at(-1)).toBe('dev-board: message Worker A (local_a): use option C')
   expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
   await ui.press({ key: 'local_a:message' })
   expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBeUndefined()
@@ -1485,8 +1520,11 @@ test('reply lines drop turn-end markers and show a link as its text', async ($, 
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
-  const italic = async () => (await ui.findAll({ type: 'Text' })).filter(t => t.props.italic).map(t => t.text)
-  expect(await italic()).toEqual(['Pushed.', 'See RESULT.md, shot, Foo and [a](b).'])
+  // Each tile's info ends in its reply lines
+  expect((await textsOf(ui, 'local_b:info'))?.at(-1)).toBe('Pushed.')
+  expect((await textsOf(ui, 'local_a:info'))?.slice(-2)).toEqual(['feature/a', 'See RESULT.md, shot, Foo and [a](b).'])
+  // Dim, not italic: italic grey at that size reads as noise
+  expect((await ui.find({ type: 'Text', text: 'Pushed.' }))?.props.italic).toBeUndefined()
   expect((await ui.findAll({ type: 'Text', text: /IDLE|WAITING/ })).map(t => t.text)).toEqual(['WAITING', 'IDLE'])
   await ui.unmount()
 })
@@ -1580,4 +1618,99 @@ test('a failed poll does not make a pending question new: its tile stays folded'
   await clock.advance(2000)
   expect((await ui.find({ key: 'local_a:fold' }))?.text).toBe('▸')
   await ui.unmount()
+})
+
+test('a named worker is titled by its name, its long title a caption under it; folded, the name alone', async ($, on) => {
+  await start($, on, ok([
+    worker({ name: 'fix-login', title: 'Fix the login redirect loop', status: 'working', state: 'busy' }),
+    worker({ id: 'local_b', name: 'docs', title: 'docs', status: 'working', state: 'busy' }),
+    worker({ id: 'local_c', name: 'spike', title: 'An abandoned spike', status: 'idle' }),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await header(ui)).toBe('fix-login')
+  expect((await textsOf(ui, 'local_a:head'))?.at(-1)).toBe('Fix the login redirect loop')
+  // A title that is the name says nothing more
+  expect(await textsOf(ui, 'local_b:head')).toEqual(['docs'])
+  expect(await header(ui, 'local_c')).toBe('● spike')
+  expect(await ui.find({ type: 'Text', text: 'An abandoned spike' })).toBeFalsy()
+  expect((await ui.find({ key: 'local_a:fold' }))?.props.label).toBe('Fold fix-login')
+  await ui.unmount()
+})
+
+test('colour marks what asks for attention: Needs you and Waiting cards in theirs, Working and Idle grey', async ($, on) => {
+  await start($, on, ok(BY_STATUS.map(w => ({ ...w, statusText: 'on it' }))))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui, 'local_i')
+  const card = async (id: string) => {
+    const tile = (await ui.findAll({ type: 'Box' })).find(b => b.props.borderStyle === 'quote' && JSON.stringify(b.children).includes(`${id}:rows`))
+    return [tile?.props.borderColor, tile?.props.borderDimColor]
+  }
+  expect(await Promise.all(['local_n', 'local_w', 'local_k', 'local_i'].map(card))).toEqual([
+    ['error', false],
+    ['warning', false],
+    ['inactive', true],
+    ['inactive', true],
+  ])
+  // The status row, first in its info: red under Needs you, else the text's own color
+  const status = async (id: string) => {
+    const row = ((await ui.find({ key: `${id}:info` }))?.children as { props: Record<string, unknown> }[] | undefined)?.[0]?.props
+    return [row?.color, row?.weight]
+  }
+  expect(await Promise.all(['local_n', 'local_w', 'local_k', 'local_i'].map(status))).toEqual([
+    ['error', 'semibold'],
+    ['text', 'medium'],
+    ['text', 'medium'],
+    ['text', 'medium'],
+  ])
+  await ui.unmount()
+})
+
+test("an open tile is four blocks one gap apart: title, what it does, tasks, buttons; no margins of their own", async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', statusText: 'Bash', plan: [...PLAN] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const rows = await ui.find({ key: 'local_a:rows' })
+  expect(rows?.props.rowGap).toBe('xs')
+  expect((rows?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:head', 'local_a:info', 'local_a:plan', 'local_a:actions'])
+  expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.marginTop !== undefined)).toEqual([])
+  await ui.unmount()
+})
+
+test("the pane's title carries the counts while it is open, retitled only when they change", async ($, on) => {
+  const opens: unknown[] = []
+  let panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
+  on('ui.open', (_, e) => {
+    opens.push(e)
+    panes = panes.map(p => ({ ...p, title: e.title ?? p.title }))
+    return { value: { isPlaced: true } }
+  })
+  let now: Ran = ok(WORKERS)
+  const { clock } = await start($, on, () => now, {}, {}, () => panes)
+  await clock.settle()
+  expect(opens).toEqual([{ id: 'board', title: 'Workers · 3' }])
+  // A poll with the same counts retitles nothing
+  now = ok(WORKERS.map(w => ({ ...w, since: '9m' })))
+  await clock.advance(2000)
+  expect(opens.length).toBe(1)
+  now = ok([...WORKERS, worker({ id: 'local_n', status: 'needs you' })])
+  await clock.advance(2000)
+  expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers · 4 · 1 needs you' })
+  // /board opens it with them
+  await runBoard($)
+  expect(opens.at(-1)).toEqual({ id: 'board', title: 'Workers · 4 · 1 needs you' })
+  // A failed poll keeps the last
+  const opened = opens.length
+  now = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(2000)
+  expect(opens.length).toBe(opened)
+})
+
+test('a pane not open is not opened to retitle it', async ($, on) => {
+  const opens: unknown[] = []
+  on('ui.open', (_, e) => {
+    opens.push(e)
+    return { value: { isPlaced: true } }
+  })
+  const { clock } = await start($, on, ok(WORKERS))
+  await clock.advance(4000)
+  expect(opens).toEqual([])
 })

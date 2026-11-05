@@ -383,6 +383,10 @@ func TestBoardStaleMod(t *testing.T) {
 	if !stale() {
 		t.Errorf("a hook changed after the boss started: no warning")
 	}
+	// One short line for the pane's footnote: no folder in it
+	if _, warnings, _ := Board(p, boss, time.Now()); strings.Contains(fmt.Sprint(warnings), p.Mod) {
+		t.Errorf("warning names the mod's folder: %v", warnings)
+	}
 
 	// Older than the boss's start; the README and the engine's types are no part of what it loads
 	write(t, filepath.Join(p.Mod, ".claude-plugin", "types", "claude-code", "index.d.ts"), "")
