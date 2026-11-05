@@ -42,7 +42,41 @@ const STEP_LOOKS = {
 // An expanded list's rows at most, its count rows included; the progress bar's width in cells
 const MAX_STEPS = 7
 const BAR_CELLS = 10
-const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending: '⏳', skipping: '⏭', cancel: '⊘' }
+// A PR's CI checks summed up: any failed (or cancelled), else any still running, else passed (passed or skipped)
+type Rollup = 'failed' | 'running' | 'passed'
+const FAILED_BUCKETS = ['fail', 'cancel']
+const PASSED_BUCKETS = ['pass', 'skipping']
+// Icons are Svg (its alt read aloud) where the surface draws it, in hues that hold on light and dark; the terminal draws the glyph in the theme's color
+type Icon = { svg: string; glyph: string; color: string }
+const icon = (body: string, glyph: string, color: string): Icon => ({
+  svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">${body}</svg>`,
+  glyph,
+  color,
+})
+const stroke = (hex: string) => `fill="none" stroke="${hex}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`
+const PR_ICONS: Record<string, Icon> = {
+  OPEN: icon(
+    `<g ${stroke('#2DA44E')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V6.5a2 2 0 0 0-2-2H7.5M9.3 2.7 7.5 4.5l1.8 1.8"/></g>`,
+    '○',
+    'success',
+  ),
+  MERGED: icon(
+    `<g ${stroke('#8957E5')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="8.5" r="1.8"/><path d="M4 5.3v5.4M4 5.3c0 2.2 2.2 3.2 6.2 3.2"/></g>`,
+    '◆',
+    'merged',
+  ),
+  CLOSED: icon(
+    `<g ${stroke('#E5534B')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7.5M10.2 2.2l3.6 3.6M13.8 2.2l-3.6 3.6"/></g>`,
+    '✕',
+    'error',
+  ),
+}
+const CI_ICONS: Record<Rollup, Icon> = {
+  passed: icon('<circle cx="8" cy="8" r="7" fill="#2DA44E"/><path d="m4.8 8.2 2.2 2.2 4.2-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>', '✓', 'success'),
+  failed: icon('<circle cx="8" cy="8" r="7" fill="#E5534B"/><path d="m5.5 5.5 5 5m0-5-5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>', '✗', 'error'),
+  running: icon('<circle cx="8" cy="8" r="6.2" fill="none" stroke="#BF8700" stroke-width="1.6"/><path d="M8 4.6V8l2.4 1.6" fill="none" stroke="#BF8700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>', '…', 'warning'),
+}
+const ICON_PX = 13
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
@@ -224,11 +258,19 @@ function verdictLine(w: Worker): string {
   return `${w.verdict}: ${w.detail}`
 }
 
-/** A PR's CI line, e.g. `✅ build ❌ test`, or why it has none; '' for a PR not open or not read yet. */
-function ciLine(pr: PR, c: Checks | undefined): string {
-  if (pr.state !== 'OPEN' || c === undefined) return ''
-  if (c.error !== '') return c.error
-  return c.checks.map(k => `${CHECK_ICONS[k.bucket] ?? k.bucket} ${k.name}`).join(' ')
+/** An open PR's checks summed up; none while not read, unreadable, or with no checks. */
+function ciRollup(pr: PR, c: Checks | undefined): Rollup | undefined {
+  if (pr.state !== 'OPEN' || c === undefined || c.error !== '' || c.checks.length === 0) return undefined
+  if (c.checks.some(k => FAILED_BUCKETS.includes(k.bucket))) return 'failed'
+  if (c.checks.some(k => !PASSED_BUCKETS.includes(k.bucket))) return 'running'
+  return 'passed'
+}
+
+/** The names of the checks that make the rollup (the failed ones, the running ones, else all), e.g. `test lint`. */
+function ciNames(c: Checks, rollup: Rollup): string {
+  const makes = (bucket: string) =>
+    rollup === 'failed' ? FAILED_BUCKETS.includes(bucket) : rollup === 'running' ? !PASSED_BUCKETS.includes(bucket) && !FAILED_BUCKETS.includes(bucket) : true
+  return c.checks.filter(k => makes(k.bucket)).map(k => k.name).join(' ')
 }
 
 /** What an expanded list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
@@ -395,6 +437,7 @@ export const register: Register = on => {
     const { Box, Text, Link, Button } = ui
     // The mobile app draws no field
     const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
+    const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
     const b = await read($, board)
     if (b === null) {
       return <Text dimColor>Loading workers…</Text>
@@ -580,6 +623,56 @@ export const register: Register = on => {
       )
     }
 
+    /** An icon in a cell of its own: its Svg, named by `alt`, where the surface draws one, else its glyph. */
+    const iconCell = (key: string, i: Icon, alt: string) => (
+      <Box key={key} flexShrink={0}>
+        {Svg !== undefined ? (
+          <Svg source={i.svg} alt={alt} width={ICON_PX} height={ICON_PX} />
+        ) : (
+          <Text size="caption" color={i.color}>
+            {i.glyph}
+          </Text>
+        )}
+      </Box>
+    )
+
+    /** A PR's state icon and, while open, its CI rollup's (`PR #93 open`, `CI passed`). */
+    const prIcons = (w: Worker, pr: PR) => {
+      const state = PR_ICONS[pr.state]
+      const rollup = ciRollup(pr, checksRead[pr.url])
+      return [
+        state && iconCell(`${w.id}:pr${pr.number}:state`, state, `PR #${pr.number} ${pr.state.toLowerCase()}`),
+        rollup && iconCell(`${w.id}:pr${pr.number}:ci`, CI_ICONS[rollup], `CI ${rollup}`),
+      ]
+    }
+
+    /** A PR's row: its icons, link and state, then the names of the checks that make its CI icon, or why there are none, cut to fit. */
+    const prRow = (w: Worker, pr: PR) => {
+      const c = checksRead[pr.url]
+      const rollup = ciRollup(pr, c)
+      const why = pr.state === 'OPEN' && c !== undefined ? c.error : ''
+      const after = rollup && c ? ciNames(c, rollup) : why
+      const [state, ci] = prIcons(w, pr)
+      return (
+        <Box key={`${w.id}:pr${pr.number}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+          {state}
+          <Box flexShrink={0}>
+            <Text size="caption">
+              <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
+            </Text>
+          </Box>
+          {ci}
+          {after !== '' && (
+            <Box flexShrink={1} minWidth={0}>
+              <Text size="caption" color="subtle" dimColor={why !== ''} wrap="truncate-end">
+                {after}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      )
+    }
+
     /** A step's row: its mark and its text in cells of their own, the text cut to one line; a count of steps looks as they do. */
     const stepRow = (key: string, status: Step['status'], text: string, color: string) => {
       const look = STEP_LOOKS[status] ?? STEP_LOOKS.pending
@@ -606,8 +699,11 @@ export const register: Register = on => {
       const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: atHand ? [atHand] : [], more: 0 }
       return (
         <Box key={`${w.id}:plan`} flexDirection="column" marginTop="xs" minWidth={0}>
+          {/* The label lines up with the steps' marks; the toggle, a button the surface pads, ends the row */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
-            <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} plain dimColor onPress={() => void toggle(w.id)} />
+            <Text size="footnote" color="subtle">
+              Tasks
+            </Text>
             {e.surface === 'terminal' ? (
               // Whole cells: a fifth of a row would draw nothing
               <Box key={`${w.id}:bar`}>
@@ -624,9 +720,11 @@ export const register: Register = on => {
                 </Box>
               </Box>
             )}
-            <Text size="footnote" color="subtle" tabular>
-              {`${done}/${w.plan.length}`}
-            </Text>
+            <Button key={`${w.id}:tasks`} label={isExpanded ? 'Hide tasks' : 'Show tasks'} plain dimColor onPress={() => void toggle(w.id)}>
+              <Text size="footnote" tabular>
+                {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
+              </Text>
+            </Button>
           </Box>
           {earlier > 0 && stepRow(`${w.id}:earlier`, 'completed', `${earlier} done`, color)}
           {steps.map(s => stepRow(`${w.id}:step${w.plan.indexOf(s)}`, s.status, s.content, color))}
@@ -682,6 +780,7 @@ export const register: Register = on => {
             <Box flexShrink={1} minWidth={0}>
               {name}
             </Box>
+            {w.prs.flatMap(pr => prIcons(w, pr))}
             {progress && <Box flexShrink={0}>{progress}</Box>}
             {status && (
               <Box flexShrink={1} minWidth={0}>
@@ -712,34 +811,12 @@ export const register: Register = on => {
               <Box flexShrink={0}>{since}</Box>
             </Box>
             {w.ask ? questionRows(w, w.ask, color) : status}
-            {(meta !== '' || w.prs.length > 0) && (
-              // The branch and context cut to one line, as one Text of plain strings; the PRs wrap to the next row
-              <Box key={`${w.id}:meta`} flexDirection="row" flexWrap="wrap" minWidth={0}>
-                {meta !== '' && (
-                  <Box flexShrink={1} minWidth={0}>
-                    <Text size="caption" color="subtle" wrap="truncate-end">
-                      {meta}
-                    </Text>
-                  </Box>
-                )}
-                {w.prs.length > 0 && (
-                  <Text size="caption">
-                    {w.prs.map((pr, i) => {
-                      const c = checksRead[pr.url]
-                      const ci = ciLine(pr, c)
-
-                      return (
-                        <Text key={pr.url}>
-                          <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
-                          <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
-                          {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
-                        </Text>
-                      )
-                    })}
-                  </Text>
-                )}
-              </Box>
+            {meta !== '' && (
+              <Text size="caption" color="subtle" wrap="truncate-end">
+                {meta}
+              </Text>
             )}
+            {w.prs.map(pr => prRow(w, pr))}
             {verdict !== '' && (
               <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
                 {w.state === 'busy' ? 'last turn: ' : ''}
