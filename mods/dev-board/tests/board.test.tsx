@@ -453,7 +453,7 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     expect(row?.children.map(c => (c as { type?: string }).type)).toEqual(['Text', 'Box', 'Button'])
     expect(row?.children[0]?.props).toMatchObject({ size: 'footnote', color: 'subtle' })
     expect(row?.children[0]?.children).toEqual(['Tasks'])
-    expect((await ui.find({ key: 'local_a:tasks' }))?.props).toMatchObject({ plain: true, label: 'Show tasks' })
+    expect((await ui.find({ key: 'local_a:tasks' }))?.props).toMatchObject({ plain: true })
     expect((await ui.find({ type: 'Text', text: /^1\/3 ▸$/ }))?.props).toMatchObject({ size: 'footnote', tabular: true })
     // The bar: on the desktop a track, its done part grown by the steps done against those left; on the terminal whole cells
     const bar = await ui.find({ key: 'local_a:bar' })
@@ -468,7 +468,6 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     expect((await stepAt(ui, 'local_a:step1')).text).toBe('Write the mod')
     expect(await ui.find({ type: 'Text', text: 'Read the code' })).toBeFalsy()
     await ui.press({ key: 'local_a:tasks' })
-    expect((await ui.find({ key: 'local_a:tasks' }))?.props.label).toBe('Hide tasks')
     expect((await ui.find({ type: 'Text', text: /^1\/3 ▾$/ }))?.text).toBeTruthy()
     // A row per step: its mark and its text in cells of their own, the text cut to one line
     const steps = await Promise.all(PLAN.map((_, i) => stepAt(ui, `local_a:step${i}`)))
@@ -1564,11 +1563,13 @@ test('the branch and context line: the branch cut at its start, the context pinn
   await ui.unmount()
 })
 
-test("a fold button's name says what it does to which tile", async ($, on) => {
-  await start($, on, ok(WORKERS))
+test('the fold and Tasks buttons are labelled by their arrows: the desktop draws a label in their place', async ($, on) => {
+  await start($, on, ok([...WORKERS.slice(0, 2), worker({ id: 'local_c', title: 'Worker C', state: 'stopped', status: 'stopped', plan: [...PLAN] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ key: 'local_a:fold' }))?.props.label).toBe('Fold Worker A')
-  expect((await ui.find({ key: 'local_c:fold' }))?.props.label).toBe('Unfold Worker C')
+  expect((await ui.find({ key: 'local_a:fold' }))?.props.label).toBe('▾')
+  expect((await ui.find({ key: 'local_c:fold' }))?.props.label).toBe('▸')
+  await unfold(ui, 'local_c')
+  expect((await ui.find({ key: 'local_c:tasks' }))?.text).toBe('1/3 ▸')
   await ui.unmount()
 })
 
@@ -1633,7 +1634,6 @@ test('a named worker is titled by its name, its long title a caption under it; f
   expect(await textsOf(ui, 'local_b:head')).toEqual(['docs'])
   expect(await header(ui, 'local_c')).toBe('● spike')
   expect(await ui.find({ type: 'Text', text: 'An abandoned spike' })).toBeFalsy()
-  expect((await ui.find({ key: 'local_a:fold' }))?.props.label).toBe('Fold fix-login')
   await ui.unmount()
 })
 
@@ -1665,13 +1665,22 @@ test('colour marks what asks for attention: Needs you and Waiting cards in their
   await ui.unmount()
 })
 
-test("an open tile is four blocks one gap apart: title, what it does, tasks, buttons; no margins of their own", async ($, on) => {
+test("an open tile is blocks one gap apart: title, what it does, tasks, buttons; no margins of their own", async ($, on) => {
   await start($, on, ok([worker({ state: 'busy', status: 'working', statusText: 'Bash', plan: [...PLAN] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const rows = await ui.find({ key: 'local_a:rows' })
   expect(rows?.props.rowGap).toBe('xs')
   expect((rows?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:head', 'local_a:info', 'local_a:plan', 'local_a:actions'])
   expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.marginTop !== undefined)).toEqual([])
+  await ui.unmount()
+})
+
+test('a question is a block of its own, between the title and what the tile does', async ($, on) => {
+  const ask = { toolUseId: 'tu1', askedAt: 1, answerable: true, questions: [{ header: '', question: 'Ship it?', multiSelect: false, options: [{ label: 'Yes', description: '' }] }] }
+  await start($, on, ok([worker({ status: 'needs you', ask })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const rows = await ui.find({ key: 'local_a:rows' })
+  expect((rows?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:head', 'local_a:ask', 'local_a:info', 'local_a:actions'])
   await ui.unmount()
 })
 

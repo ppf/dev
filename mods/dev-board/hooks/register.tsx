@@ -758,7 +758,8 @@ export const register: Register = on => {
                 </Box>
               </Box>
             )}
-            <Button key={`${w.id}:tasks`} label={isExpanded ? 'Hide tasks' : 'Show tasks'} plain dimColor onPress={() => void toggle(w.id)}>
+            {/* No label: the desktop draws a label in place of the children */}
+            <Button key={`${w.id}:tasks`} plain dimColor onPress={() => void toggle(w.id)}>
               <Text size="footnote" tabular>
                 {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
               </Text>
@@ -779,8 +780,9 @@ export const register: Register = on => {
       const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
       const verdict = verdictLine(w)
       const isAttention = ATTENTION_GROUPS.includes(group)
+      // No label: the desktop draws a label in place of the children, the whole title instead of the arrow
       const foldButton = (
-        <Button key={`${w.id}:fold`} label={`${isOpen ? 'Fold' : 'Unfold'} ${label(w)}`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
+        <Button key={`${w.id}:fold`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
           {isOpen ? '▾' : '▸'}
         </Button>
       )
@@ -859,7 +861,7 @@ export const register: Register = on => {
         >
           {foldButton}
           {dot}
-          {/* Four blocks one gap apart: the title, what it does, its tasks, its buttons */}
+          {/* Blocks one gap apart: the title, its question, what it does, its tasks, its buttons */}
           <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
             <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
               {/* Never wraps: the title is cut, its time kept at the right */}
@@ -875,8 +877,9 @@ export const register: Register = on => {
                 </Text>
               )}
             </Box>
+            {w.ask && questionRows(w, w.ask, color)}
             <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
-              {w.ask ? questionRows(w, w.ask, color) : status}
+              {!w.ask && status}
               {(w.branch !== '' || w.context !== null) && (
                 // The branch cut at its start, so its unique end shows; the context use pinned right
                 <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
