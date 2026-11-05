@@ -484,6 +484,24 @@ func TestBoardWrapUpBlockedIdleWithPRs(t *testing.T) {
 	if w.Status != StatusNeedsYou || w.StatusText != question || len(w.PRs) != 2 || w.Ask == nil || !w.Ask.Reply || !reflect.DeepEqual(w.Ask.Questions, want) {
 		t.Errorf("worker = %s %q, %d PRs, ask %+v; want needs you, its question, 2 PRs and the reply ask", w.Status, w.StatusText, len(w.PRs), w.Ask)
 	}
+
+	// Answered, its next turn ends IDLE with no ask: idle again
+	f, err := os.OpenFile(filepath.Join(p.Projects, "-wt-pr", "cli-pr.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(lines(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "Merged now"}}, assistant("m", text("Exported.\n\nIDLE")))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if workers, _, err = Board(p, boss, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if w = workers[i]; w.Status != StatusIdle || w.Ask != nil {
+		t.Errorf("answered worker = %s, ask %+v; want idle, no ask", w.Status, w.Ask)
+	}
 }
 
 // The mod reads the field by this name.

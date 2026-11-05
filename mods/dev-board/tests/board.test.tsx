@@ -1485,8 +1485,31 @@ test('a new question opens a tile the person folded; folded again, it stays fold
   expect((await ui.find({ key: 'local_a:fold' }))?.text).toBe('▸')
   expect(await header(ui)).toBe(`● Worker A · ${FILE.question} · 1m ⚠`)
 
+  // Another worker's new question opens only its own tile
+  workers = [worker({ state: 'blocked', status: 'needs you', statusText: FILE.question, ask }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working' })]
+  await clock.advance(2000)
+  await ui.press({ key: 'local_b:fold' })
+  workers = [workers[0], worker({ id: 'local_b', title: 'Worker B', state: 'blocked', status: 'needs you', statusText: 'Really?', ask: { ...ask, toolUseId: 'w9' } })]
+  await clock.advance(2000)
+  expect([(await ui.find({ key: 'local_a:fold' }))?.text, (await ui.find({ key: 'local_b:fold' }))?.text]).toEqual(['▸', '▾'])
+
   workers = [worker({ state: 'blocked', status: 'needs you', statusText: 'Really?', ask: { ...ask, toolUseId: 'w2' } })]
   await clock.advance(2000)
   expect((await ui.find({ key: 'local_a:fold' }))?.text).toBe('▾')
+  await ui.unmount()
+})
+
+test('a failed poll does not make a pending question new: its tile stays folded', async ($, on) => {
+  const ask = { toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true }
+  const asking = ok([worker({ state: 'blocked', status: 'needs you', statusText: FILE.question, ask })])
+  let ran: Ran = asking
+  const { clock } = await start($, on, () => ran)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:fold' })
+  ran = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(2000)
+  ran = asking
+  await clock.advance(2000)
+  expect((await ui.find({ key: 'local_a:fold' }))?.text).toBe('▸')
   await ui.unmount()
 })
