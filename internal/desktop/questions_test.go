@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -444,6 +445,62 @@ func TestBoardWrapUpBlockedRunning(t *testing.T) {
 	want := agent.Ask{Question: "Which release should I describe?", Options: []agent.Choice{{Label: "v0.42.0"}, {Label: "v0.41.0"}}}
 	if w.State != StateBlocked || w.Ask == nil || w.Ask.ToolUseID != id || !w.Ask.Reply || w.Ask.Answerable || !w.Ask.Listening || !reflect.DeepEqual(w.Ask.Questions, []agent.Ask{want}) {
 		t.Errorf("blocked running worker = %s, ask %+v; want blocked, a listening reply to %s with v0.42.0 and v0.41.0", w.State, w.Ask, id)
+	}
+}
+
+// A running worker with PRs (one merged, one open in another repo) whose last turn ended on a blocked wrap_up ask
+// and its own IDLE marker needs you, the ask its tile's question with its reply button.
+func TestBoardWrapUpBlockedIdleWithPRs(t *testing.T) {
+	p := fixture(t)
+	p.Questions = filepath.Join(t.TempDir(), "questions")
+	writeJSON(t, filepath.Join(p.Records, "acct", "org", "local_pr.json"), map[string]any{
+		"sessionId": "local_pr", "cliSessionId": "cli-pr", "title": "PR one", "createdAt": time.Now().UnixMilli(),
+		"spawnedFrom": map[string]any{"sessionId": boss, "name": "pr", "sideSession": true},
+		"prs": []any{
+			map[string]any{"prNumber": 92, "repo": "o/dev", "url": "https://github.com/o/dev/pull/92", "state": "MERGED"},
+			map[string]any{"prNumber": 68, "repo": "o/terminal", "url": "https://github.com/o/terminal/pull/68", "state": "OPEN"},
+		},
+		"postTurnSummary": map[string]any{"status_category": "blocked", "status_detail": "waits on #68", "needs_action": "merge #68"},
+	})
+	writeJSON(t, filepath.Join(p.Live, "6.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-pr", "hostSessionId": "local_pr", "status": "idle"})
+	const question = "Merge o/terminal#68, then tell me to continue?"
+	write(t, filepath.Join(p.Projects, "-wt-pr", "cli-pr.jsonl"), lines(t,
+		assistant("m", map[string]any{"type": "tool_use", "id": "w1", "name": wrapUpTool, "input": map[string]any{
+			"recap": "r", "ask": question, "actions": []any{map[string]any{"label": "Merged now"}}, "blocked": true}}),
+		toolResult("w1"),
+		assistant("m", text("o/terminal#68 is still open.\n\nIDLE")),
+	))
+
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(workers, func(w Worker) bool { return w.ID == "local_pr" })
+	if i < 0 {
+		t.Fatalf("workers = %+v, want local_pr", workers)
+	}
+	w := workers[i]
+	want := []agent.Ask{{Question: question, Options: []agent.Choice{{Label: "Merged now"}}}}
+	if w.Status != StatusNeedsYou || w.StatusText != question || len(w.PRs) != 2 || w.Ask == nil || !w.Ask.Reply || !reflect.DeepEqual(w.Ask.Questions, want) {
+		t.Errorf("worker = %s %q, %d PRs, ask %+v; want needs you, its question, 2 PRs and the reply ask", w.Status, w.StatusText, len(w.PRs), w.Ask)
+	}
+
+	// Answered, its next turn ends IDLE with no ask: idle again
+	f, err := os.OpenFile(filepath.Join(p.Projects, "-wt-pr", "cli-pr.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(lines(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "Merged now"}}, assistant("m", text("Exported.\n\nIDLE")))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if workers, _, err = Board(p, boss, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if w = workers[i]; w.Status != StatusIdle || w.Ask != nil {
+		t.Errorf("answered worker = %s, ask %+v; want idle, no ask", w.Status, w.Ask)
 	}
 }
 

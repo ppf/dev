@@ -3,6 +3,8 @@ package desktop
 import (
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/agent"
 )
 
 func TestStatus(t *testing.T) {
@@ -10,6 +12,9 @@ func TestStatus(t *testing.T) {
 	reset := time.Date(2026, 11, 4, 18, 30, 0, 0, time.UTC).Unix()
 	asking := Hook{State: "waiting", WaitingFor: "permission_prompt", Question: "allow Bash: rm -rf bin"}
 	stuck := []Note{{Kind: "stuck", Text: "no progress for 17m"}}
+	ask := func(blocked bool) *Pending {
+		return &Pending{Questions: []agent.Ask{{Question: "Merge #68?"}}, Reply: true, Blocked: blocked}
+	}
 	tests := []struct {
 		name        string
 		w           Worker
@@ -38,6 +43,10 @@ func TestStatus(t *testing.T) {
 		{"the newest marker wins: IDLE after WAITING", Worker{State: StateIdle, LastLines: []string{"WAITING (CI)", "IDLE"}}, Hook{}, false, StatusIdle, ""},
 		{"the newest marker wins: WAITING after IDLE", Worker{State: StateIdle, LastLines: []string{"IDLE", "WAITING (CI)", "Back soon."}}, Hook{}, false, StatusWaiting, "CI"},
 		{"busy text mentioning WAITING is still work", Worker{State: StateBusy, Tool: "Bash", LastLines: []string{"WAITING (x)"}}, Hook{}, false, StatusWorking, "Bash"},
+		{"a blocked ask beats its own IDLE", Worker{State: StateBlocked, NeedsAction: "x", LastLines: []string{"IDLE"}, Ask: ask(true)}, Hook{}, false, StatusNeedsYou, "Merge #68?"},
+		{"a blocked ask beats WAITING", Worker{State: StateIdle, LastLines: []string{"WAITING (CI)"}, Ask: ask(true)}, Hook{}, false, StatusNeedsYou, "Merge #68?"},
+		{"an ask not blocked leaves IDLE be", Worker{State: StateIdle, LastLines: []string{"IDLE"}, Ask: ask(false)}, Hook{}, false, StatusIdle, ""},
+		{"stopped wins over a blocked ask", Worker{State: StateStopped, Ask: ask(true)}, Hook{}, false, StatusStopped, ""},
 		{"blocked", Worker{State: StateBlocked, NeedsAction: "pick one"}, Hook{}, false, StatusBlocked, "pick one"},
 		{"review ready", Worker{State: StateIdle, Verdict: "review_ready", Detail: "PR #80 green"}, Hook{}, false, StatusReviewReady, "PR #80 green"},
 		{"idle", Worker{State: StateIdle, Verdict: "completed"}, Hook{}, false, StatusIdle, ""},
