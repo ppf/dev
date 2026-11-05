@@ -37,7 +37,7 @@ const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending:
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
 // Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-4' })
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-5' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -167,8 +167,8 @@ function bandLine(workers: Worker[]): string {
 /** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
 const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked'
 
-/** Whether the tile shows the person something to act on: a health note or a need. */
-const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w)
+/** Whether the tile shows the person something to act on: a health note, a need or a question. */
+const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w) || w.ask != null
 
 /** The status and what it says, e.g. `blocked · pick one`; the status left out where its section says it (`allow Bash: rm -rf bin` under Needs you). */
 const statusLine = (w: Worker, group: (typeof GROUPS)[number]) =>
@@ -406,6 +406,13 @@ export const register: Register = on => {
       }
       if (answering.has(w.id)) return
       const answers = answersOf(a, p)
+      if (a.reply) {
+        // A wrap_up ask: the boss relays the pick as a message
+        answering.add(w.id)
+        const isSent = await send($, ask('message', w, Object.values(answers).join('; ')), `answer for ${label(w)}`).finally(() => answering.delete(w.id))
+        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } }))
+        return
+      }
       let why = ''
       answering.add(w.id)
       try {
@@ -467,7 +474,7 @@ export const register: Register = on => {
                 {q.options.map((o, oi) => {
                   const isChosen = chosen.includes(o.label)
                   // Without the worker's mod watching, only its own dialog answers: the option opens it
-                  const press = () => void (a.answerable ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
+                  const press = () => void (a.answerable || a.reply ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
 
                   return (
                     <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
@@ -487,9 +494,14 @@ export const register: Register = on => {
               </Box>
             )
           })}
-          {!a.answerable && (
+          {!a.answerable && !a.reply && (
             <Text size="footnote" color="subtle">
               answered in its session: an option opens it
+            </Text>
+          )}
+          {a.reply && a.questions.every(q => q.options.length === 0) && Input !== undefined && (
+            <Text size="footnote" color="subtle">
+              answer it with Message…
             </Text>
           )}
           {a.answerable && !isOnePress(a) && (

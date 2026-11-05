@@ -1169,6 +1169,52 @@ test('a second press while the answer is written sends nothing more', async ($, 
   await ui.unmount()
 })
 
+const FILE = { question: 'Which file should I describe?', header: '', multiSelect: false, options: [{ label: 'ask.ts', description: '' }, { label: 'register.tsx', description: '' }] }
+const replying = (ask: Worker['ask']) => worker({ state: 'blocked', status: 'blocked', statusText: 'pick which file', ask })
+
+test("a worker's wrap_up ask shows its reply buttons; a press asks the boss to message the worker that label", async ($, on) => {
+  const texts = submits(on)
+  const { otherRuns } = await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^Which file should I describe\?$/ }))?.text).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /pick which file/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /opens it/ })).toBeFalsy()
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+
+  expect(texts).toEqual(['dev-board: message a (local_a): register.tsx'])
+  expect(otherRuns.filter(r => r.argv[2] === 'answer' || r.argv[0] === 'open')).toEqual([])
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a refused reply keeps the buttons', async ($, on) => {
+  submits(on, () => ({ drop: 'blocked by a hook' }))
+  const toasts = collectToasts(on)
+  await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o0:pick' })
+  expect(toasts).toEqual(['dev-board: answer for a not sent: blocked by a hook'])
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a wrap_up ask without reply buttons shows the question, answered with Message…', async ($, on) => {
+  await start($, on, ok([replying({ toolUseId: 'w1', questions: [{ ...FILE, options: [] }], askedAt: 0, answerable: false, reply: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^Which file should I describe\?$/ }))?.text).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^answer it with Message…$/ }))?.text).toBeTruthy()
+  expect(await ui.find({ key: 'local_a:message' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('an idle tile asking a question is open', async ($, on) => {
+  await start($, on, ok([worker({ state: 'idle', status: 'idle', ask: { toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true } })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
+  await ui.unmount()
+})
+
 test('a dev printing a question this mod does not read says so', async ($, on) => {
   await start($, on, ok([{ ...asking(null), ask: { toolUseId: 'tu1' } as unknown as Worker['ask'] }]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })

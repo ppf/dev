@@ -28,6 +28,8 @@ type transcript struct {
 	tool    string
 	// ask is the newest unanswered tool use's questions when it is an AskUserQuestion, else nil
 	ask *Pending
+	// wrapAsk is the ask the newest wrap_up ended its turn on, nil once a prompt came after it or the call failed
+	wrapAsk *Pending
 	// answered holds the ids of the tool uses with a result
 	answered map[string]bool
 	model    string
@@ -150,8 +152,8 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			ops = append(ops, planOps(blocks)...)
 		}
 		if r.Type == "user" && !(isBlocks && slices.ContainsFunc(blocks, isToolResult)) {
-			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more
-			pending = nil
+			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more, a wrap_up ask is answered
+			pending, t.wrapAsk = nil, nil
 			continue
 		}
 		if !isBlocks {
@@ -168,9 +170,16 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 				t.lines = lastLines(b.Text)
 			case r.Type == "assistant" && b.Type == "tool_use":
 				pending = append(pending, b)
+				if p, ok := wrapUpAsk(b); ok {
+					t.wrapAsk = &p
+				}
 			case r.Type == "user" && b.Type == "tool_result":
 				pending = without(pending, b.ToolUseID)
 				t.answered[b.ToolUseID] = true
+				if b.IsError && t.wrapAsk != nil && t.wrapAsk.ToolUseID == b.ToolUseID {
+					// The app refused the box: no question showed
+					t.wrapAsk = nil
+				}
 			}
 		}
 	}

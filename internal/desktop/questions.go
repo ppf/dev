@@ -11,13 +11,16 @@ import (
 	"github.com/ppf/dev/internal/agent"
 )
 
-// Pending is the AskUserQuestion a worker waits on: its mod's <questions>/<app session id>.json (Answerable), else the transcript's unanswered tool use (its own dialog only).
+// Pending is the AskUserQuestion a worker waits on: its mod's <questions>/<app session id>.json (Answerable), else the transcript's unanswered tool use (its own dialog only);
+// or the ask its last turn's wrap_up ended on (Reply).
 type Pending struct {
 	ToolUseID string      `json:"toolUseId"`
 	Questions []agent.Ask `json:"questions"`
 	// AskedAt is when the mod wrote it, in milliseconds since the epoch; 0 from the transcript.
 	AskedAt    int64 `json:"askedAt"`
 	Answerable bool  `json:"answerable"`
+	// Reply marks a wrap_up ask: answered by a message to the worker, its options the reply buttons' labels.
+	Reply bool `json:"reply"`
 }
 
 // questionGrace is how long a question file of a session not seen running is kept: one that started after the
@@ -111,4 +114,28 @@ func askInput(b block) (Pending, bool) {
 		return Pending{}, false
 	}
 	return Pending{ToolUseID: b.ID, Questions: in.Questions}, true
+}
+
+// wrapUpAsk reads a wrap_up call's ask, its reply buttons the options (app actions, e.g. commit, are no reply); ok=false for another tool or a wrap_up without one.
+func wrapUpAsk(b block) (Pending, bool) {
+	if b.Name != wrapUpTool {
+		return Pending{}, false
+	}
+	var in struct {
+		Ask     string `json:"ask"`
+		Actions []struct {
+			Label  string `json:"label"`
+			Action string `json:"action"`
+		} `json:"actions"`
+	}
+	if json.Unmarshal(b.Input, &in) != nil || in.Ask == "" {
+		return Pending{}, false
+	}
+	q := agent.Ask{Question: in.Ask, Options: []agent.Choice{}}
+	for _, a := range in.Actions {
+		if a.Label != "" && a.Action == "" {
+			q.Options = append(q.Options, agent.Choice{Label: a.Label})
+		}
+	}
+	return Pending{ToolUseID: b.ID, Questions: []agent.Ask{q}, Reply: true}, true
 }
