@@ -22,30 +22,40 @@ export async function writeReply($: EngineInterface, id: string, toolUseId: stri
     // Written whole and moved in place, so the worker never reads half of it
     await $.fs.write(`${path}.tmp`, JSON.stringify({ toolUseId, text, writtenAt: await $.clock.now() } satisfies Reply))
     const moved = await $.process.run(['mv', '-f', `${path}.tmp`, path])
-    return moved.exitCode === 0 ? '' : moved.stderr.trim() || `mv exited ${moved.exitCode}`
+    if (moved.exitCode === 0) return ''
+    await $.process.run(['rm', '-f', `${path}.tmp`])
+    return moved.stderr.trim() || `mv exited ${moved.exitCode}`
   } catch (err) {
     return errorText(err)
   }
 }
 
-// Turns started on the main loop, so a reply taken just before another turn starts is not submitted behind it
+// Turns started on the main loop, so a reply taken as another turn starts is not submitted behind it
 let turns = 0
+
+function log($: EngineInterface, text: string) {
+  return $.ui.log(`dev-board: ${text}`, { to: 'debug' })
+}
 
 /** Keeps the wrap_up the main loop's last turn ended on, for listenForReplies. */
 export function registerReply(on: On): void {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       turns++
-      await update($, replyTo, () => '').catch((err: unknown) => $.ui.log(`dev-board: reply target not cleared: ${errorText(err)}`, { to: 'debug' }))
+      await update($, replyTo, () => '')
     }
+    return next(e)
+  }).catch(($, e, next) => {
+    log($, `reply target not cleared: ${next.error.message ?? next.error.kind}`)
     return next(e)
   })
 
-  // Never throws: a failed hook would fail the wrap_up call itself
+  // A failed hook would fail the wrap_up call itself: the catch lets it through
   on('tool.call', { tool: WRAP_UP }, async ($, e, next) => {
-    if (e.agentId === undefined) {
-      await update($, replyTo, () => e.tool_use_id).catch((err: unknown) => $.ui.log(`dev-board: wrap_up not kept for replies: ${errorText(err)}`, { to: 'debug' }))
-    }
+    if (e.agentId === undefined) await update($, replyTo, () => e.tool_use_id)
+    return next(e)
+  }).catch(($, e, next) => {
+    log($, `wrap_up not kept for replies: ${next.error.message ?? next.error.kind}`)
     return next(e)
   })
 }
@@ -60,15 +70,16 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
   let lastError = ''
   const say = (text: string) => {
     // Said once per error, not every period
-    if (text !== lastError) $.ui.log(`dev-board: ${(lastError = text)}`, { to: 'debug' })
+    if (text !== lastError) log($, (lastError = text))
   }
   $.clock.every(POLL_MS, async () => {
     if (isReading) return
     isReading = true
+    const turn = turns
     try {
       const now = await $.clock.now()
       if (now - beatAt >= BEAT_MS) {
-        await $.fs.write(listen, String(now))
+        await $.fs.write(listen, String(now)).catch((err: unknown) => say(`heartbeat not written: ${errorText(err)}`))
         beatAt = now
       }
       if (!(await $.fs.exists(replied))) return
@@ -79,17 +90,20 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
       const r = JSON.parse(text) as Partial<Reply>
       const to = await read($, replyTo)
       if (to === '' || r.toolUseId !== to || typeof r.text !== 'string' || r.text === '' || typeof r.writtenAt !== 'number' || now - r.writtenAt > REPLY_TTL_MS) {
-        return say(`reply for ${String(r.toolUseId)} dropped: this session's last turn ended on ${to || 'no wrap_up'}`)
+        return log($, `reply for ${String(r.toolUseId)} dropped: this session's last turn ended on ${to || 'no wrap_up'}`)
       }
       await update($, replyTo, () => '')
       const reply = r.text
-      const turn = turns
       // Sent from a timer of its own, as /board's prompt is
       $.clock.after(0, async () => {
-        if (turns !== turn) return say(`reply for ${to} dropped: a turn started before it was sent`)
+        if (turns !== turn) return log($, `reply for ${to} dropped: a turn started before it was sent`)
         const sent = await $.prompt.submit({ text: reply, asUser: true }).catch((err: unknown) => ({ drop: errorText(err) }))
-        if (sent.drop !== undefined) await $.ui.toast(`dev-board: the board's reply "${reply}" not sent: ${sent.drop}`)
+        if (sent.drop === undefined) return
+        // Still the ask the worker shows: a press again may answer it
+        if (turns === turn) await update($, replyTo, () => to)
+        await $.ui.toast(`dev-board: the board's reply "${reply}" not sent: ${sent.drop}`)
       })
+      lastError = ''
     } catch (err) {
       say(`reply not read: ${errorText(err)}`)
     } finally {

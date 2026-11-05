@@ -69,8 +69,8 @@ type Ran = { exitCode: number; stdout: string; stderr: string }
 const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 17m' }
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
-/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, pbcopy (by argv[0]/argv[1]/argv[2]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'pbcopy', Ran | string | (() => Ran | string)>>
+/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, pbcopy, mv (by argv[0]/argv[1]/argv[2]). */
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'pbcopy' | 'mv', Ran | string | (() => Ran | string)>>
 
 /** Every run of a command other than `dev desktop board`, with its stdin. */
 type OtherRun = { argv: readonly string[]; stdin?: string }
@@ -87,7 +87,7 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
-    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'pbcopy')]
+    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'pbcopy' | 'mv')]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
@@ -1288,6 +1288,19 @@ test("a listening worker's reply goes to its reply file for its own mod, not thr
   expect(texts).toEqual([])
   expect(toasts).toEqual(['dev-board: replied to a: register.tsx'])
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test("a reply file not written says why and keeps the buttons, relaying nothing", async ($, on) => {
+  const texts = submits(on)
+  const toasts = collectToasts(on)
+  on('fs.write', () => ({ value: undefined }))
+  await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true, listening: true })]), { mv: { exitCode: 1, stdout: '', stderr: 'EACCES' } }, { HOME: '/home' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+  expect(toasts).toEqual(['dev-board: reply for a not sent: EACCES'])
+  expect(texts).toEqual([])
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
   await ui.unmount()
 })
 

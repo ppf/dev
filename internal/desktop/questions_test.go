@@ -407,3 +407,14 @@ func TestBoardWrapUpListening(t *testing.T) {
 		t.Errorf("idle ask with a stale heartbeat = %+v, want not listening", a)
 	}
 }
+
+// The mod reads the field by this name.
+func TestPendingListeningJSON(t *testing.T) {
+	data, err := json.Marshal(Pending{Listening: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"listening":true`) {
+		t.Errorf("JSON = %s, want listening:true", data)
+	}
+}

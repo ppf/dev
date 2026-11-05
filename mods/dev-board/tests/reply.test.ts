@@ -7,8 +7,8 @@ const LISTEN = `${DIR}/local_w.listen`
 const REPLY = `${DIR}/local_w.reply.json`
 const WRAP_UP = 'mcp__ccd_turn__wrap_up'
 
-/** A worker session started on a disk in memory (the board's `dev desktop board` failing); its files, prompts and toasts, and the clock. */
-async function worker($: Engine, on: On, { submitted = (): { drop: string } | undefined => undefined } = {}) {
+/** A worker session started on a disk in memory (the board's `dev desktop board` failing; `removing` runs as a file is removed); its files, prompts and toasts, and the clock. */
+async function worker($: Engine, on: On, { submitted = (): { drop: string } | undefined => undefined, removing = async () => {} } = {}) {
   const files = new Map<string, string>()
   const prompts: { text: string; asUser: boolean }[] = []
   const toasts: string[] = []
@@ -22,8 +22,9 @@ async function worker($: Engine, on: On, { submitted = (): { drop: string } | un
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
   })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     const [cmd, , ...paths] = e.argv
+    if (cmd === 'rm') await removing()
     if (cmd === 'mv') {
       const [from, to] = paths
       files.set(to ?? '', files.get(from ?? '') ?? '')
@@ -123,4 +124,45 @@ test('a reply the app refuses says so in a toast', async ($, on) => {
   files.set(REPLY, reply('w1', 'Yes'))
   await clock.advance(1000)
   expect(toasts).toEqual(['dev-board: the board\'s reply "Yes" not sent: blocked by a hook'])
+})
+
+test('a reply taken as a turn starts is not submitted behind it', async ($, on) => {
+  let typed = false
+  const { files, prompts, clock } = await worker($, on, {
+    removing: async () => {
+      if (typed) await $.turn.start({ text: 'typed', turnId: 'turn-typed' })
+    },
+  })
+  await wrapUp($, 'w1')
+  typed = true
+  files.set(REPLY, reply('w1', 'Yes'))
+  await clock.advance(1000)
+  expect(files.has(REPLY)).toBe(false)
+  expect(prompts).toEqual([])
+})
+
+test('a broken reply file is dropped and the next one still taken', async ($, on) => {
+  const { files, prompts, clock } = await worker($, on)
+  await wrapUp($, 'w1')
+  files.set(REPLY, '{')
+  await clock.advance(1000)
+  expect(files.has(REPLY)).toBe(false)
+  files.set(REPLY, reply('w1', 'Yes', 1000))
+  await clock.advance(1000)
+  expect(prompts).toEqual([{ text: 'Yes', asUser: true }])
+})
+
+test('after a refused reply the ask still takes the next press', async ($, on) => {
+  let refuse = true
+  const { files, prompts, clock } = await worker($, on, { submitted: () => (refuse ? { drop: 'busy' } : undefined) })
+  await wrapUp($, 'w1')
+  files.set(REPLY, reply('w1', 'Yes'))
+  await clock.advance(1000)
+  refuse = false
+  files.set(REPLY, reply('w1', 'Yes', 1000))
+  await clock.advance(1000)
+  expect(prompts).toEqual([
+    { text: 'Yes', asUser: true },
+    { text: 'Yes', asUser: true },
+  ])
 })
