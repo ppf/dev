@@ -234,8 +234,7 @@ func staleMod(dir string, lives []live, boss string) error {
 	if newest.YearDay() != started.YearDay() || newest.Year() != started.Year() {
 		layout = "Jan 2 15:04"
 	}
-	return fmt.Errorf("the dev-board mod in %s changed at %s, after this session started (%s): this board runs the older copy; start a new session (or restart the app) to load it",
-		dir, newest.Format(layout), started.Format(layout))
+	return fmt.Errorf("dev-board mod changed %s, after this session started %s: start a new session to load it", newest.Format(layout), started.Format(layout))
 }
 
 // records reads the app records spawned from boss and not archived; one that fails to read is a warning.
