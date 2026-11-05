@@ -18,8 +18,31 @@ func newDesktopCmd() *cobra.Command {
 		Use:   "desktop",
 		Short: "Commands for a boss session in the Claude desktop app",
 	}
-	cmd.AddCommand(newDesktopBoardCmd())
+	cmd.AddCommand(newDesktopBoardCmd(), newDesktopAnswerCmd())
 	return cmd
+}
+
+func newDesktopAnswerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "answer <local_id> <tool_use_id>",
+		Short: "Answer a desktop worker's open question with the person's pick",
+		Long: `Write the person's answers to a desktop worker's open AskUserQuestion, for its dev-board mod to
+return as the answer: stdin is a JSON object of question text to the chosen label (a multi-select's
+labels comma-joined). Refused once the worker no longer waits on that tool use (answered in its own
+dialog, or another question asked since).`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var answers map[string]string
+			if err := json.NewDecoder(cmd.InOrStdin()).Decode(&answers); err != nil {
+				return fmt.Errorf("answers on stdin: %w", err)
+			}
+			hooks, err := desktop.HookDir()
+			if err != nil {
+				return err
+			}
+			return desktop.WriteAnswer(desktop.QuestionsDir(hooks), args[0], args[1], answers)
+		},
+	}
 }
 
 func newDesktopBoardCmd() *cobra.Command {
@@ -31,8 +54,9 @@ func newDesktopBoardCmd() *cobra.Command {
 		Long: `List the unarchived sessions a Claude desktop app session started (its workers): live state
 (busy, blocked, idle, stopped), title, branch, PRs and the share of the context window in use. --json adds
 the app's verdict on the last turn and what it needs, the last lines of the newest assistant text, the
-tool in flight, a finer status (needs you, rate-limited, stuck, working, waiting, blocked, review ready,
-idle, stopped) and what it says, how long it has been in its state, its task list (update_plan) and health
+tool in flight, the question its open dialog asks (from its dev-board mod's questions/ file, which dev
+desktop answer answers, else its transcript), a finer status (needs you, rate-limited, stuck, working,
+waiting, blocked, review ready, idle, stopped) and what it says, how long it has been in its state, its task list (update_plan) and health
 notes, each with a key that stays the same while its condition holds: stuck (busy,
 no progress for 15 min), a decision unanswered for 3 min, context at 80% or more, a rate limit, and its
 resume once the limit reset. Reads the app's session records, ~/.claude/sessions, the transcripts, Claude
@@ -54,6 +78,7 @@ dev's state directory); a file that fails to parse is reported on stderr.`,
 			if p.Hooks, err = desktop.HookDir(); err != nil {
 				return err
 			}
+			p.Questions = desktop.QuestionsDir(p.Hooks)
 			workers, warnings, err := desktop.Board(p, boss, time.Now())
 			for _, w := range warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev desktop board: "+w.Error())

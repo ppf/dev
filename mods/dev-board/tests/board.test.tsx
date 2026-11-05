@@ -69,8 +69,8 @@ type Ran = { exitCode: number; stdout: string; stderr: string }
 const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 17m' }
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
-/** What the other commands the mod runs answer: gh pr checks, dev delivered, open, pbcopy (by argv[0]/argv[1]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'open' | 'pbcopy', Ran | string | (() => Ran | string)>>
+/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, pbcopy (by argv[0]/argv[1]/argv[2]). */
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'pbcopy', Ran | string | (() => Ran | string)>>
 
 /** Every run of a command other than `dev desktop board`, with its stdin. */
 type OtherRun = { argv: readonly string[]; stdin?: string }
@@ -86,8 +86,8 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('command.register', () => ({ value: { command: 'board' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
-    const isBoard = e.argv[1] === 'desktop'
-    const other = others[e.argv[1] === 'delivered' ? 'delivered' : (e.argv[0] as 'gh' | 'open' | 'pbcopy')]
+    const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
+    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'pbcopy')]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
@@ -1045,5 +1045,133 @@ test('Message… opens one row: a short field, Send and Cancel', async ($, on) =
     await ui.press({ key: 'local_a:cancel' })
   }
   expect(texts).toEqual(['dev-board: message demo-waiting (local_a): add tests'])
+  await ui.unmount()
+})
+
+const DB = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: 'relational' }, { label: 'Mongo', description: '' }] }
+const FEATURES = { question: 'Which features?', header: 'Features', multiSelect: true, options: [{ label: 'Auth', description: 'sign-in' }, { label: 'Search', description: 'full text' }] }
+const asking = (ask: Worker['ask']) => worker({ state: 'busy', status: 'needs you', statusText: 'Which DB? (Postgres / Mongo)', ask })
+
+test('a question shows on its tile: header and question, each option a button with its description', async ($, on) => {
+  await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /^DB$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /^Which DB\?$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('Postgres')
+    expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('Mongo')
+    expect((await ui.find({ type: 'Text', text: /^relational$/ }))?.text).toBeTruthy()
+    // The question replaces the status row that says it in one line; one press answers it, so no Send
+    expect(await ui.find({ type: 'Text', text: /Postgres \/ Mongo/ })).toBeFalsy()
+    expect(await ui.find({ key: 'local_a:answer' })).toBeFalsy()
+    await ui.unmount()
+  }
+})
+
+test('pressing an option answers the worker with that pick', async ($, on) => {
+  const toasts = collectToasts(on)
+  const { otherRuns } = await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+
+  const answers = otherRuns.filter(r => r.argv[2] === 'answer')
+  expect(answers.map(r => r.argv)).toEqual([['dev', 'desktop', 'answer', 'local_a', 'tu1']])
+  expect(JSON.parse(answers[0]?.stdin ?? '')).toEqual({ 'Which DB?': 'Mongo' })
+  expect(toasts).toEqual(['dev-board: answered a: Mongo'])
+  // Sent: the options go until the worker's next poll drops the question
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^sent: Mongo; waiting for the worker$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a refused answer says why and keeps the options', async ($, on) => {
+  const toasts = collectToasts(on)
+  await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]), {
+    answer: { exitCode: 1, stdout: '', stderr: 'local_a no longer waits on question tu1' },
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o0:pick' })
+  expect(toasts).toEqual(['dev-board: a not answered: local_a no longer waits on question tu1'])
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a multi-select or several questions take toggles, then Send', async ($, on) => {
+  const toasts = collectToasts(on)
+  const { otherRuns } = await start($, on, ok([asking({ toolUseId: 'tu2', questions: [DB, FEATURES], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('○ Postgres')
+  expect((await ui.find({ key: 'local_a:q1:o0:pick' }))?.props.label).toBe('☐ Auth')
+
+  // Not every question picked: nothing sent
+  await ui.press({ key: 'local_a:q1:o0:pick' })
+  await ui.press({ key: 'local_a:answer' })
+  expect(toasts).toEqual(['dev-board: pick an answer to "Which DB?" first'])
+  expect(otherRuns.filter(r => r.argv[2] === 'answer')).toEqual([])
+
+  await ui.press({ key: 'local_a:q0:o0:pick' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+  await ui.press({ key: 'local_a:q1:o1:pick' })
+  expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('◉ Mongo')
+  expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('○ Postgres')
+  expect((await ui.find({ key: 'local_a:q1:o0:pick' }))?.props.label).toBe('☑ Auth')
+  await ui.press({ key: 'local_a:answer' })
+  const sent = otherRuns.filter(r => r.argv[2] === 'answer')
+  expect(sent.map(r => r.argv[4])).toEqual(['tu2'])
+  expect(JSON.parse(sent[0]?.stdin ?? '')).toEqual({ 'Which DB?': 'Mongo', 'Which features?': 'Auth, Search' })
+  await ui.unmount()
+})
+
+test('a question its mod does not watch: the options open its session, and say so', async ($, on) => {
+  const { otherRuns } = await start($, on, ok([asking({ toolUseId: 'tu3', questions: [DB], askedAt: 0, answerable: false })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^answered in its session: an option opens it$/ }))?.text).toBeTruthy()
+  await ui.press({ key: 'local_a:q0:o0:pick' })
+  expect(otherRuns.map(r => r.argv)).toContainEqual(['open', 'claude://code/continue?session=local_a'])
+  expect(otherRuns.filter(r => r.argv[2] === 'answer')).toEqual([])
+  await ui.unmount()
+})
+
+test('picks for a question no longer asked go', async ($, on) => {
+  let workers = [asking({ toolUseId: 'tu2', questions: [DB, FEATURES], askedAt: 1, answerable: true })]
+  const { clock } = await start($, on, () => ok(workers))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+  expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('◉ Mongo')
+
+  workers = [asking({ toolUseId: 'tu4', questions: [DB, FEATURES], askedAt: 2, answerable: true })]
+  await clock.advance(2000)
+  expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('○ Mongo')
+  await ui.unmount()
+})
+
+test('two quick picks both count, and a failed poll keeps them', async ($, on) => {
+  let ran: Ran = ok([asking({ toolUseId: 'tu2', questions: [DB, FEATURES], askedAt: 1, answerable: true })])
+  const { clock } = await start($, on, () => ran)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await Promise.all([ui.press({ key: 'local_a:q1:o0:pick' }), ui.press({ key: 'local_a:q1:o1:pick' })])
+  expect((await ui.find({ key: 'local_a:q1:o0:pick' }))?.props.label).toBe('☑ Auth')
+  expect((await ui.find({ key: 'local_a:q1:o1:pick' }))?.props.label).toBe('☑ Search')
+
+  ran = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(2000)
+  ran = ok([asking({ toolUseId: 'tu2', questions: [DB, FEATURES], askedAt: 1, answerable: true })])
+  await clock.advance(2000)
+  expect((await ui.find({ key: 'local_a:q1:o1:pick' }))?.props.label).toBe('☑ Search')
+  await ui.unmount()
+})
+
+test('a second press while the answer is written sends nothing more', async ($, on) => {
+  const { otherRuns } = await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await Promise.all([ui.press({ key: 'local_a:q0:o0:pick' }), ui.press({ key: 'local_a:q0:o1:pick' })])
+  expect(otherRuns.filter(r => r.argv[2] === 'answer').length).toBe(1)
+  await ui.unmount()
+})
+
+test('a dev printing a question this mod does not read says so', async ($, on) => {
+  await start($, on, ok([{ ...asking(null), ask: { toolUseId: 'tu1' } as unknown as Worker['ask'] }]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /does not read/ }))?.text).toBeTruthy()
   await ui.unmount()
 })

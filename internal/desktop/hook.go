@@ -59,7 +59,7 @@ func RecordState(dir, state string, input []byte, now time.Time) error {
 	e := agent.ParseHook(input)
 	var pruneErr error
 	if e.Event == "SessionStart" {
-		pruneErr = prune(dir, now)
+		pruneErr = prune(dir, "*.json", now)
 	}
 	// The hook's own session id, not $CLAUDE_CODE_SESSION_ID: a claude -p run from a worker's shell inherits that
 	id := agent.HookSession(input).ID
@@ -193,8 +193,8 @@ func update(path string, f func(*Hook) (remove bool)) error {
 }
 
 // prune removes dir's hook files (and their locks) not written for staleHooks.
-func prune(dir string, now time.Time) error {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.json"))
+func prune(dir, pattern string, now time.Time) error {
+	paths, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil {
 		return err
 	}

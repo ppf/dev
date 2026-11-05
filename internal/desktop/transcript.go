@@ -26,8 +26,12 @@ type transcript struct {
 	written time.Time
 	lines   []string
 	tool    string
-	model   string
-	tokens  int
+	// ask is the newest unanswered tool use's questions when it is an AskUserQuestion, else nil
+	ask *Pending
+	// answered holds the ids of the tool uses with a result
+	answered map[string]bool
+	model    string
+	tokens   int
 	// plan is the task list its update_plan and wrap_up calls leave
 	plan []Step
 	// broken counts rows that failed to parse, but for a last one still being written
@@ -121,7 +125,7 @@ func tail(path string, n int64) ([]byte, int64, error) {
 // without a result, and the task list calls. A line that does not parse is skipped, and counted unless it is
 // the last, unended one (being written).
 func parseTranscript(data []byte) (transcript, []planOp) {
-	t := transcript{lines: []string{}}
+	t := transcript{lines: []string{}, answered: map[string]bool{}}
 	var pending []block
 	var ops []planOp
 	lines := bytes.Split(data, []byte{'\n'})
@@ -166,11 +170,16 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 				pending = append(pending, b)
 			case r.Type == "user" && b.Type == "tool_result":
 				pending = without(pending, b.ToolUseID)
+				t.answered[b.ToolUseID] = true
 			}
 		}
 	}
 	if len(pending) > 0 {
-		t.tool = pending[len(pending)-1].Name
+		last := pending[len(pending)-1]
+		t.tool = last.Name
+		if p, ok := askInput(last); ok {
+			t.ask = &p
+		}
 	}
 	return t, ops
 }

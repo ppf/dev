@@ -129,3 +129,28 @@ func TestDesktopBoardReadsHookFiles(t *testing.T) {
 		t.Errorf("stdout = %s\nstderr = %s\nwant the rate-limited note from the hook file", stdout, stderr)
 	}
 }
+
+func TestDesktopAnswer(t *testing.T) {
+	desktopHome(t)
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "desktop", "questions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	question := `{"toolUseId":"tu1","questions":[{"question":"Which DB?","header":"DB","options":[{"label":"Postgres"},{"label":"Mongo"}],"multiSelect":false}]}`
+	if err := os.WriteFile(filepath.Join(dir, "local_w.json"), []byte(question), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := execute(t, `{"Which DB?":"Mongo"}`, "desktop", "answer", "local_w", "tu0"); err == nil {
+		t.Error("another tool use: want an error")
+	}
+	if _, _, err := execute(t, `not json`, "desktop", "answer", "local_w", "tu1"); err == nil {
+		t.Error("bad stdin: want an error")
+	}
+	if _, _, err := execute(t, `{"Which DB?":"Mongo"}`, "desktop", "answer", "local_w", "tu1"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "local_w.answer.json"))
+	if err != nil || !strings.Contains(string(data), `"Mongo"`) || !strings.Contains(string(data), `"tu1"`) {
+		t.Errorf("answer file %s (err %v)", data, err)
+	}
+}

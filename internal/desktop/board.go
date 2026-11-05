@@ -32,6 +32,8 @@ type Paths struct {
 	Models string
 	// Hooks holds the sessions' hook files (Hook), <session id>.json; "" for none.
 	Hooks string
+	// Questions holds the open questions the sessions' mods write (Pending), <app session id>.json; "" for none.
+	Questions string
 }
 
 // DefaultPaths are the macOS locations under home and Claude's config directory (~/.claude when "").
@@ -99,6 +101,8 @@ type Worker struct {
 	Since string `json:"since"`
 	// Plan is its task list (update_plan), in order.
 	Plan []Step `json:"plan"`
+	// Ask is the question its open dialog asks, nil for none.
+	Ask *Pending `json:"ask"`
 }
 
 type record struct {
@@ -151,13 +155,21 @@ func Board(p Paths, boss string, now time.Time) (workers []Worker, warnings []er
 	}
 	lives, liveWarnings := liveSessions(p.Live)
 	warnings = append(warnings, liveWarnings...)
+	if p.Questions != "" {
+		// Any session's, a boss's or the person's own too, once gone that long
+		if err := prune(p.Questions, "*", now); err != nil {
+			warnings = append(warnings, err)
+		}
+	}
+	// A live file that failed to read may be a running worker's: no question file is removed on this read
+	canPrune := len(liveWarnings) == 0
 	windows, err := contextWindows(p.Models)
 	if err != nil {
 		warnings = append(warnings, err)
 	}
 	workers = make([]Worker, 0, len(recs))
 	for _, r := range recs {
-		w, err := worker(p, r, lives, windows, now)
+		w, err := worker(p, r, lives, windows, canPrune, now)
 		if err != nil {
 			warnings = append(warnings, err)
 		}
@@ -283,7 +295,7 @@ func alive(l live) bool {
 }
 
 // worker joins r with its live session, transcript and hook file; the error is what it could not read of them.
-func worker(p Paths, r record, lives []live, windows map[string]int, now time.Time) (Worker, error) {
+func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bool, now time.Time) (Worker, error) {
 	w := Worker{
 		ID:             r.SessionID,
 		Name:           r.SpawnedFrom.Name,
@@ -327,9 +339,19 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	if sinceAt > 0 {
 		w.Since = inbox.Span(now.Sub(time.UnixMilli(sinceAt)))
 	}
+	var askErr error
+	var asked Pending
+	var hasAsked bool
+	if p.Questions != "" {
+		asked, hasAsked, askErr = readPending(p.Questions, w.ID)
+		if hasAsked && !running && canPrune {
+			// A session gone mid-question left its file: no dialog waits on it
+			askErr, hasAsked = removePending(p.Questions, w.ID, asked.ToolUseID), false
+		}
+	}
 	if cli == "" {
 		w.Status, w.StatusText = status(w, Hook{}, r.InterruptedAwaitingPerson, now)
-		return w, nil
+		return w, askErr
 	}
 	var h Hook
 	var hookErr error
@@ -370,7 +392,19 @@ func worker(p Paths, r record, lives []live, windows map[string]int, now time.Ti
 	}
 	w.Notes = notes(w, cli, h, seen, now)
 	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
-	return w, errors.Join(err, hookErr)
+	// Asked before its idle stretch began: that turn is over (a question asked since that read is the next poll's)
+	endedSince := w.State != StateBusy && asked.AskedAt < l.StatusUpdatedAt
+	switch {
+	case hasAsked && w.State == StateBusy && !t.answered[asked.ToolUseID]:
+		w.Ask = &asked
+	case hasAsked && canPrune && (endedSince || t.answered[asked.ToolUseID]):
+		// The mod's own cleanup never ran (a reload, a crash)
+		askErr = errors.Join(askErr, removePending(p.Questions, w.ID, asked.ToolUseID))
+	}
+	if w.Ask == nil && w.State == StateBusy && t.ask != nil {
+		w.Ask = t.ask
+	}
+	return w, errors.Join(err, hookErr, askErr)
 }
 
 func findLive(lives []live, r record) (live, bool) {
