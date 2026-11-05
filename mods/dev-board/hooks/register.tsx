@@ -13,7 +13,7 @@ const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const NUDGE = 'Continue where you left off'
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stopped: 'inactive' } as const
-// The pane's sections, in order; an Idle tile is folded until the person unfolds it
+// The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
@@ -131,6 +131,9 @@ function bandLine(workers: Worker[]): string {
   }
   return parts.join(' · ')
 }
+
+/** Whether the tile shows the person something to act on: a health note, or what a worker not running needs. */
+const asksForPerson = (w: Worker) => w.notes.length > 0 || (w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked')
 
 /** The status and what it says, e.g. `needs you · allow Bash: rm -rf bin`. */
 const statusLine = (w: Worker) => (w.statusText === '' ? w.status : `${w.status} · ${w.statusText}`)
@@ -286,7 +289,7 @@ export const register: Register = on => {
       await send(ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
-    /** One worker's tile: a header row (folded, all it shows), a meta row, its last turn, notes, buttons. */
+    /** One worker's tile: a header row (folded, all it shows), a meta row, its last turn and what it needs, notes, its reply's last lines, buttons. */
     const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
       const color = GROUP_COLORS[group]
       const done = w.plan.filter(s => s.status === 'completed').length
@@ -312,6 +315,12 @@ export const register: Register = on => {
             {w.since !== '' && (
               <Text size="footnote" color="subtle" tabular>
                 {` · ${w.since}`}
+              </Text>
+            )}
+            {/* Folded by the person, it still says it asks for them */}
+            {!isOpen && asksForPerson(w) && (
+              <Text size="footnote" color="warning">
+                {' · ⚠'}
               </Text>
             )}
           </Text>
@@ -418,8 +427,7 @@ export const register: Register = on => {
               </Text>
             </Text>
             {workers.map(w => (
-              // An Idle tile with a health note opens: the note is for the person
-              <Box key={w.id}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || w.notes.length > 0))}</Box>
+              <Box key={w.id}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || asksForPerson(w)))}</Box>
             ))}
           </Box>
         ))}

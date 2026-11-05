@@ -574,7 +574,6 @@ test('a dev without plans says so', async ($, on) => {
 test("a needs-action of a worker not blocked still shows", async ($, on) => {
   await start($, on, ok([worker({ status: 'idle', verdict: 'blocked', needsAction: 'pick one' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await unfold(ui)
   expect((await ui.find({ type: 'Text', text: /^needs:/ }))?.text).toBe('needs: pick one')
   await ui.unmount()
 })
@@ -621,10 +620,31 @@ test('idle and stopped tiles fold to one line; the rest stay open', async ($, on
   await ui.unmount()
 })
 
-test('an idle tile with a health note opens', async ($, on) => {
-  await start($, on, ok([worker({ state: 'stopped', status: 'stopped', notes: [RESUME] })]))
+test('an idle tile with a health note opens; folded by the person, it ends in ⚠', async ($, on) => {
+  const { clock } = await start($, on, ok([worker({ state: 'stopped', status: 'stopped', notes: [RESUME] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Text', text: /^resume due:/ }))?.text).toBe('resume due: rate limit reset 18:05: resume it')
+  await ui.press({ key: 'local_a:fold' })
+  await clock.advance(2000)
+  expect(await ui.find({ type: 'Text', text: /^resume due:/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toBe('● Worker A · stopped · ⚠')
+  await ui.unmount()
+})
+
+test('a status this mod does not know shows under Working, open', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'paused' as Worker['status'] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.findAll({ type: 'Text', text: /^(● |WORKING \d)/ })).map(t => t.text)).toEqual(['WORKING 1', '● Worker A · paused'])
+  expect(await ui.find({ key: 'local_a:nudge' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test("only the newest reply's last two lines show", async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', lastLines: ['one', 'two', 'three'] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^one$/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^two$/ }))?.text).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^three$/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
 
@@ -637,12 +657,18 @@ test("a fold or unfold sticks across polls and status changes, per worker", asyn
   await ui.press({ key: 'local_b:fold' })
   expect([await label('local_a'), await label('local_b'), await label('local_c')]).toEqual(['▸', '▾', '▸'])
 
-  workers = [worker({ since: '3m' }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working', since: '1m' }), worker({ id: 'local_c', title: 'Worker C', since: '9m' })]
+  // Defaults now the other way: open for A, folded for B; the choices stand
+  workers = [worker({ status: 'waiting', since: '3m' }), worker({ id: 'local_b', title: 'Worker B', state: 'stopped', status: 'stopped', since: '1m' }), worker({ id: 'local_c', title: 'Worker C', since: '9m' })]
   await clock.advance(4000)
   expect([await label('local_a'), await label('local_b'), await label('local_c')]).toEqual(['▸', '▾', '▸'])
   expect(await ui.find({ key: 'local_b:nudge' })).toBeTruthy()
   expect(await ui.find({ key: 'local_a:nudge' })).toBeFalsy()
   await ui.unmount()
+
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await again.find({ key: 'local_a:fold' }))?.props.label).toBe('▸')
+  expect((await again.find({ key: 'local_b:fold' }))?.props.label).toBe('▾')
+  await again.unmount()
 })
 
 test('sections group the workers by status, with counts, needs you first; empty ones hidden', async ($, on) => {

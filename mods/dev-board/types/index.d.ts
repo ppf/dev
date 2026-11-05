@@ -46,7 +46,7 @@ export type Checks = { at: number; checks: Check[]; error: string }
 /** Whether `dev delivered` last passed (`at`, the clock's ms) for a worker's worktree, else why not. */
 export type Delivered = { at: number; isDelivered: boolean; why: string }
 
-/** The pane's own state: expanded task lists, the worker messaged, tiles the person (un)folded (true open; beats the default). */
+/** The pane's own state: expanded task lists, the worker a message is being typed for, tiles the person (un)folded (true open; beats the default). */
 export type View = { expanded: string[]; composing: string; tiles: Record<string, boolean> }
 
 declare module 'claude-code' {

@@ -4,11 +4,11 @@ A Claude Code mod for a boss session in the Claude desktop app: a live board of 
 
 - `/board` opens the **Workers** pane (the desktop app docks it in the right side panel), its tiles in sections by status, each with its count, empty ones hidden: **Needs you** (red), **Working** (working, stuck, rate-limited; accent), **Waiting** (waiting, blocked, review ready; amber), **Idle** (idle, stopped; muted). A section's color marks its header, its open tiles' left rule and their status; colors are the app theme's, so light and dark both work.
 - A tile:
-  - header row: ▾/▸ (fold), state dot (● busy, blocked, idle, stopped), title, task list progress (`3/7`), status and what it says (`needs you · allow Bash: …`, `working · Bash`, `waiting · Auto-fix: PR #80`, `rate-limited · resumes 18:05`, `stuck · no progress for 17m`), time in that state (`12m`);
+  - header row: ▾/▸ (fold), state dot (● busy, blocked, idle, stopped), title, task list progress (`3/7`), status and what it says (`needs you · allow Bash: …`, `working · Bash`, `waiting · Auto-fix: PR #80`, `rate-limited · resumes 18:05`, `stuck · no progress for 17m`), time in its state (busy or idle; since its last activity once stopped: `12m`);
   - meta row: branch · context use · PRs with their state (click to open) and an open PR's CI checks (✅ ❌ ⏳, from `gh pr checks`);
-  - the app's verdict on its last turn and the last two lines of its newest reply, each cut to one row; health notes; buttons.
+  - the app's verdict on its last turn and what it needs (`needs: …`), health notes, the last two lines of its newest reply, each line cut to one row; buttons.
 
-  Idle tiles are folded to their header row, unless they carry a health note; the rest are open. **▸**/**▾** folds or unfolds one; that choice sticks across polls and status changes for the session.
+  Idle tiles are folded to their header row, unless they have a health note or a `needs: …`; the rest are open. **▸**/**▾** folds or unfolds one; that choice sticks across polls and status changes for the session. A folded tile with a note or a need ends in ⚠.
 - Buttons per tile:
   - **Tasks** expands the task list (✅ done, 🔄 current, ◌ pending).
   - **Open** opens the worker's session in the app (`claude://code/continue?session=<id>`).
@@ -21,7 +21,7 @@ A Claude Code mod for a boss session in the Claude desktop app: a live board of 
 - Health notes (stuck, a decision unanswered, high context, rate-limited, resume due) show on their tile. A note the boss hasn't had yet goes to it as one prompt per poll for all new ones, e.g. `dev-board: fix-login stuck: no progress for 17m; docs-api resume due: rate limit reset 18:05: resume it`, which starts a boss turn once it is idle. The keys sent are kept in the session's state, so a reload of the mod sends none again; a prompt the app refuses shows as a toast and isn't retried.
 - The band above the prompt sums them up, e.g. `1 needs you · 3 workers · 1 busy · 1 blocked · PR #78 open` (red while one needs you); hidden when there are none (or while a survey shows).
 
-Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`; `gh pr checks` per open PR and `dev delivered` per worker not busy with a PR run at most once a minute each. Without `gh` on the app's `PATH` the PR row says why. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs no `dev`; the pane says why.
+Every 2 s it runs `dev desktop board --json --boss $CLAUDE_CODE_HOST_SESSION_ID`; `gh pr checks` per open PR and `dev delivered` per worker not busy with a PR run at most once a minute each. Without `gh` on the app's `PATH` the PR's entry in the meta row says why. A failure (no `dev`, an old `dev` without the command, no app record for the session) shows its error in the pane; files `dev` could not read show as warnings above the tiles. Outside a desktop app session (no `CLAUDE_CODE_HOST_SESSION_ID`) it runs no `dev`; the pane says why.
 
 ## Load it
 
