@@ -17,9 +17,7 @@ A Claude Code mod for a boss session in the Claude desktop app: a live board of 
 - Buttons per tile:
   - **Open** opens the worker's session in the app (`claude://code/continue?session=<id>`); the main button for Needs you and Waiting tiles.
   - **Message…** opens a field (labelled `Message <name>`) with **Send** and **Cancel**; Enter or Send asks the boss to relay its text: `dev-board: message <name> (<id>): <text>`; a message the app refuses opens the field again, holding its text.
-  - **Nudge** asks the boss to relay `Continue where you left off`: `dev-board: nudge <name> (<id>): Continue where you left off`.
   - **Archive**, shown once `dev delivered <worktree>` exits 0 for a worker not busy with a PR and a worktree (else the tile says `not delivered: <why>`), checks it again and asks the boss to archive it: `dev-board: archive <name> (<id>): dev delivered exited 0`. A worker going busy drops its last check.
-  - **Copy id**, last and plain, copies the worker's `local_…` id.
 
   The prompts wait for the boss to go idle; a toast says each was queued, or why not. A worker's permission prompt can't be answered here: answer it in its session (**Open**).
 - A worker's question (AskUserQuestion) shows on its tile in place of the status row: each question's header and text, each option a button with its description dim beside it. One question with one pick: pressing an option answers it. A multi-select (☐/☑) or several questions (○/◉ each): pick, then **Send**, which says which question still lacks a pick. The answer is the person's pick, as the dialog would send it (a multi-select's labels comma-joined), and the engine aborts the worker's own dialog; a pick there first wins instead, and the board's answer is refused. The tile then says `sent: …; waiting for the worker` until the question is gone.

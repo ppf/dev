@@ -69,15 +69,15 @@ type Ran = { exitCode: number; stdout: string; stderr: string }
 const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 17m' }
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
-/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, pbcopy, mv (by argv[0]/argv[1]/argv[2]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'pbcopy' | 'mv', Ran | string | (() => Ran | string)>>
+/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, mv (by argv[0]/argv[1]/argv[2]). */
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'mv', Ran | string | (() => Ran | string)>>
 
 /** Every run of a command other than `dev desktop board`, with its stdin. */
 type OtherRun = { argv: readonly string[]; stdin?: string }
 
 /**
  * Starts the session with `dev desktop board` answering `answer()`'s run, or failing to start with that reason;
- * `others` answers the rest (gh's checks none, dev delivered exits 1, open and pbcopy pass by default); `env` adds to its environment.
+ * `others` answers the rest (gh's checks none, dev delivered exits 1, open passes by default); `env` adds to its environment.
  */
 async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}, env: Record<string, string> = {}) {
   const answer = typeof ran === 'function' ? ran : () => ran
@@ -87,7 +87,7 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
-    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'pbcopy' | 'mv')]
+    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv')]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
@@ -618,18 +618,6 @@ test('no Archive while not delivered, nor dev delivered run for a busy worker or
   await ui.unmount()
 })
 
-test('Nudge asks the boss to relay "Continue where you left off"', async ($, on) => {
-  const texts = submits(on)
-  const toasts = collectToasts(on)
-  await start($, on, ok([worker({})]))
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await unfold(ui)
-  await ui.press({ key: 'local_a:nudge' })
-  expect(texts).toEqual(['dev-board: nudge a (local_a): Continue where you left off'])
-  expect(toasts).toEqual(['nudge for a queued for the boss'])
-  await ui.unmount()
-})
-
 test('Message… opens a field whose text the boss is asked to relay', async ($, on) => {
   const texts = submits(on)
   await start($, on, ok([worker({})]))
@@ -663,23 +651,7 @@ test('the mobile app, with no field, has no Message…', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
   await unfold(ui)
   expect(await ui.find({ key: 'local_a:message' })).toBeFalsy()
-  expect(await ui.find({ key: 'local_a:nudge' })).toBeTruthy()
-  await ui.unmount()
-})
-
-test("Copy id copies on the surface, else with the Mac's pbcopy", async ($, on) => {
-  const toasts = collectToasts(on)
-  let copied: boolean = true
-  on('ui.copy', () => ({ value: copied ? { isCopied: true as const } : { isCopied: false as const, reason: 'no-clipboard' as const } }))
-  const { otherRuns } = await start($, on, ok([worker({})]))
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await unfold(ui)
-  await ui.press({ key: 'local_a:copy' })
-  expect(otherRuns.filter(r => r.argv[0] === 'pbcopy')).toEqual([])
-  copied = false
-  await ui.press({ key: 'local_a:copy' })
-  expect(otherRuns.filter(r => r.argv[0] === 'pbcopy')).toEqual([{ argv: ['pbcopy'], stdin: 'local_a' }])
-  expect(toasts).toEqual(['Copied local_a', 'Copied local_a'])
+  expect(await ui.find({ key: 'local_a:open' })).toBeTruthy()
   await ui.unmount()
 })
 
@@ -765,18 +737,13 @@ test("a needs-action of a worker not blocked still shows", async ($, on) => {
   await ui.unmount()
 })
 
-test('Open and Copy id that cannot run say so', async ($, on) => {
+test('Open that cannot run says so', async ($, on) => {
   const toasts = collectToasts(on)
-  on('ui.copy', () => ({ value: { isCopied: false as const, reason: 'no-clipboard' as const } }))
-  await start($, on, ok([worker({})]), { open: 'denied by a rule', pbcopy: 'denied by a rule' })
+  await start($, on, ok([worker({})]), { open: 'denied by a rule' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
   await ui.press({ key: 'local_a:open' })
-  await ui.press({ key: 'local_a:copy' })
-  expect(toasts).toEqual([
-    'could not open a: dev-board: $.process.run: denied by a rule',
-    'could not copy local_a: dev-board: $.process.run: denied by a rule',
-  ])
+  expect(toasts).toEqual(['could not open a: dev-board: $.process.run: denied by a rule'])
   await ui.unmount()
 })
 
@@ -797,11 +764,11 @@ test('idle and stopped tiles fold to one line; the rest stay open', async ($, on
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   for (const id of ['local_i', 'local_s']) {
     expect((await ui.find({ key: `${id}:fold` }))?.text).toBe('▸')
-    expect(await ui.find({ key: `${id}:nudge` })).toBeFalsy()
+    expect(await ui.find({ key: `${id}:open` })).toBeFalsy()
   }
   for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
     expect((await ui.find({ key: `${id}:fold` }))?.text).toBe('▾')
-    expect(await ui.find({ key: `${id}:nudge` })).toBeTruthy()
+    expect(await ui.find({ key: `${id}:open` })).toBeTruthy()
   }
   expect(await header(ui, 'local_i')).toBe('● Idle')
   // Dimmed once, by a theme color; an open title not at all
@@ -828,7 +795,7 @@ test('a status this mod does not know shows under Working, open', async ($, on) 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.findAll({ type: 'Text', text: /^(WORKING$|paused)/ })).map(t => t.text)).toEqual(['WORKING', 'paused'])
   expect(await header(ui)).toBe('Worker A')
-  expect(await ui.find({ key: 'local_a:nudge' })).toBeTruthy()
+  expect(await ui.find({ key: 'local_a:open' })).toBeTruthy()
   await ui.unmount()
 })
 
@@ -854,8 +821,8 @@ test("a fold or unfold sticks across polls and status changes, per worker", asyn
   workers = [worker({ status: 'waiting', since: '3m' }), worker({ id: 'local_b', title: 'Worker B', state: 'stopped', status: 'stopped', since: '1m' }), worker({ id: 'local_c', title: 'Worker C', since: '9m' })]
   await clock.advance(4000)
   expect([await label('local_a'), await label('local_b'), await label('local_c')]).toEqual(['▸', '▾', '▸'])
-  expect(await ui.find({ key: 'local_b:nudge' })).toBeTruthy()
-  expect(await ui.find({ key: 'local_a:nudge' })).toBeFalsy()
+  expect(await ui.find({ key: 'local_b:open' })).toBeTruthy()
+  expect(await ui.find({ key: 'local_a:open' })).toBeFalsy()
   await ui.unmount()
 
   const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -923,21 +890,17 @@ test('a verdict the status says, with no detail, shows no line', async ($, on) =
   await ui.unmount()
 })
 
-test('Open is the main button for Needs you and Waiting; Copy id is plain, last in the row', async ($, on) => {
+test('Open is the main button for Needs you and Waiting; the row is Open, Message…, then Archive', async ($, on) => {
   await start($, on, ok([...BY_STATUS, worker({ id: 'local_p', title: 'Delivered', prs: [OPEN_PR] })]), { delivered: DELIVERED })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui, 'local_i')
   await unfold(ui, 'local_p')
   const variant = async (id: string) => (await ui.find({ key: `${id}:open` }))?.props.variant
   expect(await Promise.all(['local_n', 'local_w', 'local_b', 'local_k', 'local_i'].map(variant))).toEqual(['primary', 'primary', 'primary', undefined, undefined])
-  const copy = await ui.find({ key: 'local_i:copy' })
-  expect(copy?.props.plain).toBe(true)
-  expect(copy?.props.dimColor).toBeFalsy()
-  // After Archive too (shown for a delivered worker not busy with a PR)
-  const lastButton = async (id: string) => (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith(`${id}:`)).at(-1)?.key
-  expect(await lastButton('local_i')).toBe('local_i:copy')
-  expect(await lastButton('local_p')).toBe('local_p:copy')
-  expect(await ui.find({ key: 'local_p:archive' })).toBeTruthy()
+  // Archive shows for a delivered worker not busy with a PR
+  const row = async (id: string) => (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith(`${id}:`) && k !== `${id}:fold`)
+  expect(await row('local_i')).toEqual(['local_i:open', 'local_i:message'])
+  expect(await row('local_p')).toEqual(['local_p:open', 'local_p:message', 'local_p:archive'])
   await ui.unmount()
 })
 

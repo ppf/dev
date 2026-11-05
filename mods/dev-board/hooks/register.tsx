@@ -13,7 +13,6 @@ const PERIOD_MS = 2000
 // PR checks and `dev delivered` (a git fetch, gh) are read at most this often per PR or worker
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
-const NUDGE = 'Continue where you left off'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
 const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stopped: 'inactive' } as const
 // The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
@@ -120,8 +119,8 @@ async function send($: EngineInterface, text: string, what: string): Promise<boo
   }
 }
 
-/** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
-const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
+/** What a button asks the boss, e.g. `dev-board: message fix-login (local_1): rebase on main`. */
+const ask = (verb: 'message' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
 
 /** The answers `dev desktop answer` takes: question text to its picks, a multi-select's comma-joined as the dialog joins them. */
 const answersOf = (a: Ask, p: Picks) => Object.fromEntries(a.questions.map(q => [q.question, (p.picks[q.question] ?? []).join(', ')]))
@@ -414,15 +413,6 @@ export const register: Register = on => {
       await update($, view, s => ({ ...s, composing: '', unsent: Object.fromEntries(Object.entries(s.unsent).filter(([id]) => id !== w.id)) }))
       if (text.trim() === '' || (await send($, ask('message', w, text.trim()), `message for ${label(w)}`))) return
       await update($, view, s => ({ ...s, composing: s.composing === '' ? w.id : s.composing, unsent: { ...s.unsent, [w.id]: text } }))
-    }
-    const copy = async (id: string, surface: typeof e.surface) => {
-      try {
-        // A remote surface (the desktop app) has no clipboard path yet: the Mac's then
-        const copied = (await $.ui.copy({ text: id, surface })).isCopied || (await $.process.run(['pbcopy'], { stdin: id })).exitCode === 0
-        await $.ui.toast(copied ? `Copied ${id}` : `could not copy ${id}`)
-      } catch (err) {
-        await $.ui.toast(`could not copy ${id}: ${errorText(err)}`)
-      }
     }
     const openSession = async (w: Worker) => {
       try {
@@ -769,9 +759,7 @@ export const register: Register = on => {
                 onPress={() => void openSession(w)}
               />
               {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
-              <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send($, ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
               {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
-              <Button key={`${w.id}:copy`} label="Copy id" plain onPress={press => void copy(w.id, press.surface)} />
             </Box>
             {Input !== undefined && v.composing === w.id && (
               <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} marginTop="xs" minWidth={0}>
