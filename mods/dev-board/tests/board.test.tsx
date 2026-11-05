@@ -414,7 +414,16 @@ const PLAN = [
   { content: 'Open the PR', status: 'pending' },
 ] as const
 
-test('the task list is collapsed, its count in the header; Tasks expands it', async ($, on) => {
+type Cell = { props: Record<string, unknown>; children: { props: Record<string, unknown>; children: string[] }[] }
+
+/** A drawn step row: its mark and text, each with the props of its Text, and its cells' flexShrink. */
+async function stepAt(ui: Mounted, key: string) {
+  const cells = ((await ui.find({ key }))?.children ?? []) as Cell[]
+  const [mark, text] = cells.map(c => c.children[0])
+  return { mark: mark?.children.join(''), markProps: mark?.props, text: text?.children.join(''), textProps: text?.props, shrink: cells.map(c => c.props.flexShrink) }
+}
+
+test('the task list: Tasks, a bar and its count above the steps; collapsed, the step at hand', async ($, on) => {
   await start($, on, ok([worker({ plan: [...PLAN] })]))
   const folded = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await header(folded)).toBe('● Worker A 1/3')
@@ -422,26 +431,99 @@ test('the task list is collapsed, its count in the header; Tasks expands it', as
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await unfold(ui)
-    expect((await ui.find({ type: 'Text', text: /^1\/3$/ }))?.text).toBeTruthy()
-    expect(await ui.find({ type: 'Text', text: /Write the mod/ })).toBeFalsy()
-    expect((await ui.find({ key: 'local_a:tasks' }))?.props.plain).toBe(true)
+    // Open, the count moves from the header to the list
+    expect(await header(ui)).toBe('Worker A')
+    expect((await ui.find({ key: 'local_a:tasks' }))?.props).toMatchObject({ plain: true, label: 'Tasks ▸' })
+    expect((await ui.find({ type: 'Text', text: /^1\/3$/ }))?.props.tabular).toBe(true)
+    // The bar: on the desktop a track, its done part grown by the steps done against those left; on the terminal whole cells
+    const bar = await ui.find({ key: 'local_a:bar' })
+    if (surface === 'terminal') {
+      expect(((bar?.children[0] as Cell | undefined)?.children ?? []).map(c => [c.props.color, c.children.join('')])).toEqual([['success', '━━━'], ['inactive', '━━━━━━━']])
+    } else {
+      const track = bar?.children[0] as Cell | undefined
+      expect(track?.props.backgroundColor).toBe('inactive')
+      expect(track?.children.map(c => [c.props.flexGrow, c.props.backgroundColor])).toEqual([[1, 'success'], [2, undefined]])
+    }
+    // Collapsed, only the step at hand
+    expect((await stepAt(ui, 'local_a:step1')).text).toBe('Write the mod')
+    expect(await ui.find({ type: 'Text', text: 'Read the code' })).toBeFalsy()
     await ui.press({ key: 'local_a:tasks' })
-    const done = await ui.find({ type: 'Text', text: /Read the code/ })
-    const current = await ui.find({ type: 'Text', text: /Write the mod/ })
-    const pending = await ui.find({ type: 'Text', text: /Open the PR/ })
-    expect([done?.text, current?.text, pending?.text]).toEqual(['✓ Read the code', '▸ Write the mod', '○ Open the PR'])
-    // Done and pending recede; the current step stands out, its glyph in the section's color
-    expect([done?.props.dimColor, current?.props.dimColor, pending?.props.color]).toEqual([true, false, 'subtle'])
-    expect(current?.props.color).toBeUndefined()
-    expect((await ui.find({ type: 'Text', text: /^▸$/ }))?.props.color).toBe('inactive')
+    expect((await ui.find({ key: 'local_a:tasks' }))?.props.label).toBe('Tasks ▾')
+    // A row per step: its mark and its text in cells of their own, the text cut to one line
+    const steps = await Promise.all(PLAN.map((_, i) => stepAt(ui, `local_a:step${i}`)))
+    expect(steps.map(s => s.shrink)).toEqual([[0, 1], [0, 1], [0, 1]])
+    expect(steps.map(s => [s.mark, s.text])).toEqual([['●', 'Read the code'], ['◐', 'Write the mod'], ['○', 'Open the PR']])
+    expect(steps.every(s => s.textProps?.wrap === 'truncate-end')).toBe(true)
+    // Done recedes, the current step stands out in the section's color, pending stays quiet
+    expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', true], ['inactive', false], ['subtle', false]])
+    expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['inactive', 'regular', true], ['text', 'medium', false], ['subtle', 'regular', false]])
     // Above the buttons
     const order = (await ui.findAll({})).map(el => el.key ?? el.text)
-    expect(order.indexOf('○ Open the PR')).toBeGreaterThan(-1)
-    expect(order.indexOf('○ Open the PR')).toBeLessThan(order.indexOf('local_a:tasks'))
+    expect(order.indexOf('local_a:plan')).toBeGreaterThan(-1)
+    expect(order.indexOf('local_a:plan')).toBeLessThan(order.indexOf('local_a:open'))
     await ui.press({ key: 'local_a:tasks' })
-    expect(await ui.find({ type: 'Text', text: /Write the mod/ })).toBeFalsy()
+    expect(await ui.find({ type: 'Text', text: 'Read the code' })).toBeFalsy()
     await ui.unmount()
   }
+})
+
+test('a long task list folds the done steps but the last into a count, and those past the room into more', async ($, on) => {
+  const plan = Array.from({ length: 12 }, (_, i) => ({ content: `Step ${i}`, status: i < 6 ? 'completed' : i === 6 ? 'in_progress' : 'pending' }) as const)
+  await start($, on, ok([worker({ state: 'busy', status: 'working', plan })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:tasks' })
+  const rows = ((await ui.find({ key: 'local_a:plan' }))?.children ?? []).slice(1) as { props: { key?: string } }[]
+  const shown = await Promise.all(rows.map(r => stepAt(ui, r.props.key ?? '')))
+  expect(shown.map(s => `${s.mark} ${s.text}`)).toEqual(['● 5 done', '● Step 5', '◐ Step 6', '○ Step 7', '○ Step 8', '○ Step 9', '○ 2 more'])
+  await ui.unmount()
+})
+
+test('a long task list by its shape: the count rows only where steps fold', async ($, on) => {
+  const plan = (n: number, done: number, current: number | null) =>
+    Array.from({ length: n }, (_, i) => ({ content: `S${i}`, status: i < done ? 'completed' : i === current ? 'in_progress' : 'pending' }) as const)
+  const cases = [
+    { plan: plan(7, 0, null), rows: ['○ S0', '○ S1', '○ S2', '○ S3', '○ S4', '○ S5', '○ S6'] },
+    { plan: plan(8, 0, null), rows: ['○ S0', '○ S1', '○ S2', '○ S3', '○ S4', '○ S5', '○ 2 more'] },
+    { plan: plan(10, 0, 0), rows: ['◐ S0', '○ S1', '○ S2', '○ S3', '○ S4', '○ S5', '○ 4 more'] },
+    { plan: plan(10, 7, 7), rows: ['● 6 done', '● S6', '◐ S7', '○ S8', '○ S9'] },
+    { plan: plan(9, 9, null), rows: ['● 8 done', '● S8'] },
+  ]
+  await start($, on, ok(cases.map((c, i) => worker({ id: `local_${i}`, state: 'busy', status: 'working', plan: [...c.plan] }))))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const [i, c] of cases.entries()) {
+    await ui.press({ key: `local_${i}:tasks` })
+    const rows = ((await ui.find({ key: `local_${i}:plan` }))?.children ?? []).slice(1) as { props: { key?: string } }[]
+    const shown = await Promise.all(rows.map(r => stepAt(ui, r.props.key ?? '')))
+    expect(shown.map(s => `${s.mark} ${s.text}`)).toEqual(c.rows)
+  }
+  await ui.unmount()
+})
+
+test('a collapsed task list with no step in progress shows the next pending one', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', plan: [PLAN[0], { content: 'Write the mod', status: 'pending' }, PLAN[2]] })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const rows = ((await ui.find({ key: 'local_a:plan' }))?.children ?? []).slice(1) as { props: { key?: string } }[]
+  expect(await Promise.all(rows.map(async r => (await stepAt(ui, r.props.key ?? '')).text))).toEqual(['Write the mod'])
+  await ui.unmount()
+})
+
+test('a current step past the room of a long task list still shows, in the last row', async ($, on) => {
+  const plan = Array.from({ length: 10 }, (_, i) => ({ content: `Step ${i}`, status: i < 3 ? 'completed' : i === 9 ? 'in_progress' : 'pending' }) as const)
+  await start($, on, ok([worker({ state: 'busy', status: 'working', plan })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:tasks' })
+  const rows = ((await ui.find({ key: 'local_a:plan' }))?.children ?? []).slice(1) as { props: { key?: string } }[]
+  const shown = await Promise.all(rows.map(r => stepAt(ui, r.props.key ?? '')))
+  expect(shown.map(s => `${s.mark} ${s.text}`)).toEqual(['● 2 done', '● Step 2', '○ Step 3', '○ Step 4', '○ Step 5', '◐ Step 9', '○ 3 more'])
+  await ui.unmount()
+})
+
+test('a collapsed task list with every step done shows no step under its bar', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', plan: PLAN.map(s => ({ ...s, status: 'completed' as const })) })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^3\/3$/ }))?.text).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /Read the code|Write the mod|Open the PR/ })).toBeFalsy()
+  await ui.unmount()
 })
 
 test('no task list: no count and no Tasks button', async ($, on) => {

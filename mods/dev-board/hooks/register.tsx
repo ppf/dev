@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Worker } from '../types'
+import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Step, Worker } from '../types'
 import { registerAsk } from './ask'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
@@ -31,7 +31,15 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
 }
 const MAX_LAST_LINES = 2
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
-const STEP_ICONS: Record<string, string> = { completed: '✓', in_progress: '▸', pending: '○' }
+// One glyph family so the marks line up: done recedes, the current step takes the section's color, pending stays quiet
+const STEP_LOOKS = {
+  completed: { mark: '●', markColor: 'success', color: 'inactive', weight: 'regular', isDim: true },
+  in_progress: { mark: '◐', markColor: undefined, color: 'text', weight: 'medium', isDim: false },
+  pending: { mark: '○', markColor: 'subtle', color: 'subtle', weight: 'regular', isDim: false },
+} as const
+// An expanded list's rows at most, its count rows included; the progress bar's width in cells
+const MAX_STEPS = 7
+const BAR_CELLS = 10
 const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending: '⏳', skipping: '⏭', cancel: '⊘' }
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
@@ -207,6 +215,21 @@ function ciLine(pr: PR, c: Checks | undefined): string {
   if (pr.state !== 'OPEN' || c === undefined) return ''
   if (c.error !== '') return c.error
   return c.checks.map(k => `${CHECK_ICONS[k.bucket] ?? k.bucket} ${k.name}`).join(' ')
+}
+
+/** What an expanded list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
+function shownSteps(plan: Step[]): { earlier: number; steps: Step[]; more: number } {
+  if (plan.length <= MAX_STEPS) return { earlier: 0, steps: plan, more: 0 }
+  const open = plan.findIndex(s => s.status !== 'completed')
+  const earlier = Math.max(0, (open === -1 ? plan.length : open) - 1)
+  const rest = plan.slice(earlier)
+  const room = MAX_STEPS - (earlier > 0 ? 1 : 0)
+  if (rest.length <= room) return { earlier, steps: rest, more: 0 }
+  // A current step past the room takes the last row, so it always shows
+  const cut = rest.slice(0, room - 1)
+  const current = rest.slice(room - 1).find(s => s.status === 'in_progress')
+  const steps = current ? [...cut.slice(0, -1), current] : cut
+  return { earlier, steps, more: rest.length - steps.length }
 }
 
 export const register: Register = on => {
@@ -513,6 +536,61 @@ export const register: Register = on => {
       )
     }
 
+    /** A step's row: its mark and its text in cells of their own, the text cut to one line; a count of steps looks as they do. */
+    const stepRow = (key: string, status: Step['status'], text: string, color: string) => {
+      const look = STEP_LOOKS[status] ?? STEP_LOOKS.pending
+      return (
+        <Box key={key} flexDirection="row" columnGap={1} minWidth={0}>
+          <Box flexShrink={0}>
+            <Text size="footnote" color={look.markColor ?? color} dimColor={look.isDim}>
+              {look.mark}
+            </Text>
+          </Box>
+          <Box flexShrink={1} minWidth={0}>
+            <Text size="footnote" color={look.color} weight={look.weight} dimColor={look.isDim} wrap="truncate-end">
+              {text}
+            </Text>
+          </Box>
+        </Box>
+      )
+    }
+
+    /** The task list: its toggle, a progress bar and count; collapsed, only the step at hand under it; expanded, the steps. */
+    const taskList = (w: Worker, color: string, done: number, isExpanded: boolean) => {
+      const atHand = w.plan.find(s => s.status === 'in_progress') ?? w.plan.find(s => s.status === 'pending')
+      const cells = Math.round((done / w.plan.length) * BAR_CELLS)
+      const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: atHand ? [atHand] : [], more: 0 }
+      return (
+        <Box key={`${w.id}:plan`} flexDirection="column" marginTop="xs" minWidth={0}>
+          <Box flexDirection="row" alignItems="center" columnGap={1}>
+            <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} plain dimColor onPress={() => void toggle(w.id)} />
+            {e.surface === 'terminal' ? (
+              // Whole cells: a fifth of a row would draw nothing
+              <Box key={`${w.id}:bar`}>
+                <Text>
+                  <Text color="success">{'━'.repeat(cells)}</Text>
+                  <Text color="inactive">{'━'.repeat(BAR_CELLS - cells)}</Text>
+                </Text>
+              </Box>
+            ) : (
+              <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
+                <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor="inactive">
+                  <Box flexGrow={done} backgroundColor="success" />
+                  <Box flexGrow={w.plan.length - done} />
+                </Box>
+              </Box>
+            )}
+            <Text size="footnote" color="subtle" tabular>
+              {`${done}/${w.plan.length}`}
+            </Text>
+          </Box>
+          {earlier > 0 && stepRow(`${w.id}:earlier`, 'completed', `${earlier} done`, color)}
+          {steps.map(s => stepRow(`${w.id}:step${w.plan.indexOf(s)}`, s.status, s.content, color))}
+          {more > 0 && stepRow(`${w.id}:more`, 'pending', `${more} more`, color)}
+        </Box>
+      )
+    }
+
     /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the title. */
     const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
       const color = GROUP_COLORS[group]
@@ -578,15 +656,12 @@ export const register: Register = on => {
           {foldButton}
           {dot}
           <Box key={`${w.id}:rows`} flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-            {/* Never wraps: the title is cut, its progress and time kept at the right */}
+            {/* Never wraps: the title is cut, its time kept at the right */}
             <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {name}
               </Box>
-              <Box flexShrink={0} columnGap={1}>
-                {progress}
-                {since}
-              </Box>
+              <Box flexShrink={0}>{since}</Box>
             </Box>
             {w.ask ? questionRows(w, w.ask, color) : status}
             {(meta !== '' || w.prs.length > 0) && (
@@ -635,17 +710,8 @@ export const register: Register = on => {
                   {plainLine(line)}
                 </Text>
               ))}
-            {isExpanded && (
-              <Box flexDirection="column" marginTop="xs" minWidth={0}>
-                {w.plan.map(s => (
-                  <Text size="footnote" dimColor={s.status === 'completed'} color={s.status === 'pending' ? 'subtle' : undefined}>
-                    <Text color={s.status === 'in_progress' ? color : undefined}>{STEP_ICONS[s.status] ?? '○'}</Text> {s.content}
-                  </Text>
-                ))}
-              </Box>
-            )}
+            {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
             <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop="xs">
-              {w.plan.length > 0 && <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} plain dimColor onPress={() => void toggle(w.id)} />}
               <Button
                 key={`${w.id}:open`}
                 label="Open"
