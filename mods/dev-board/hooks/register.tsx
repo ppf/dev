@@ -199,7 +199,7 @@ const plainLine = (line: string) =>
   line
     .replace(/^\s*[-*]\s+/, '')
     .split('`')
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/!?\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, '$1').replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
     .join('')
 
 /**

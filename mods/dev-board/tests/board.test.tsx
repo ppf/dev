@@ -1419,13 +1419,13 @@ test('a working tile keeps its status row between tools, so its height holds', a
 
 test('reply lines drop turn-end markers and show a link as its text', async ($, on) => {
   await start($, on, ok([
-    worker({ status: 'idle', lastLines: ['See [RESULT.md](RESULT.md) and `[a](b)`.', '**IDLE**'] }),
+    worker({ status: 'idle', lastLines: ['See [RESULT.md](RESULT.md), ![shot](a.png), [Foo](https://w/Foo_(bar)) and `[a](b)`.', '**IDLE**'] }),
     worker({ id: 'local_b', title: 'Worker B', status: 'waiting', statusText: 'CI on PR #80', lastLines: ['Pushed.', 'WAITING (CI on PR #80)'] }),
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
   const italic = async () => (await ui.findAll({ type: 'Text' })).filter(t => t.props.italic).map(t => t.text)
-  expect(await italic()).toEqual(['Pushed.', 'See RESULT.md and [a](b).'])
+  expect(await italic()).toEqual(['Pushed.', 'See RESULT.md, shot, Foo and [a](b).'])
   expect((await ui.findAll({ type: 'Text', text: /IDLE|WAITING/ })).map(t => t.text)).toEqual(['WAITING', 'IDLE'])
   await ui.unmount()
 })
