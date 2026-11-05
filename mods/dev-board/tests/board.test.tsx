@@ -1291,6 +1291,20 @@ test("a listening worker's reply goes to its reply file for its own mod, not thr
   await ui.unmount()
 })
 
+test("a reply the worker's mod has not taken 10 s on is offered again", async ($, on) => {
+  const toasts = collectToasts(on)
+  on('fs.write', () => ({ value: undefined }))
+  const { clock } = await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true, listening: true })]), {}, { HOME: '/home' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+  await clock.advance(8000)
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
+  await clock.advance(2000)
+  expect(toasts).toEqual(['dev-board: replied to a: register.tsx', 'dev-board: a did not take the reply: press it again'])
+  expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
+  await ui.unmount()
+})
+
 test("a reply file not written says why and keeps the buttons, relaying nothing", async ($, on) => {
   const texts = submits(on)
   const toasts = collectToasts(on)

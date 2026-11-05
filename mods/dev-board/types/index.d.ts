@@ -19,8 +19,8 @@ export type Question = { question: string; header: string; options: { label: str
  */
 export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean; reply?: boolean; listening?: boolean }
 
-/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` (for a reply, the worker's reply file or the boss) took them. */
-export type Picks = { toolUseId: string; picks: Record<string, string[]>; isSent: boolean }
+/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` (for a reply, the worker's reply file or the boss) took them, `sentAt` (the clock's ms) when it went to the reply file. */
+export type Picks = { toolUseId: string; picks: Record<string, string[]>; isSent: boolean; sentAt?: number }
 
 /** One object of `dev desktop board --json`. */
 export type Worker = {

@@ -60,12 +60,13 @@ export function registerReply(on: On): void {
   })
 }
 
-/** Rewrites questions/<session>.listen every BEAT_MS and submits the board's reply to the last turn's wrap_up ask as the person's own, once; any other is dropped. */
+/** Rewrites questions/<session>.listen (the wrap_up it answers) every BEAT_MS and submits the board's reply to the last turn's wrap_up ask as the person's own, once; any other is dropped. */
 export async function listenForReplies($: EngineInterface, session: string): Promise<void> {
   const dir = await questionsDir($)
   const listen = `${dir}/${session}.listen`
   const replied = `${dir}/${session}.reply.json`
   let beatAt = -Infinity
+  let beatTarget = ''
   let isReading = false
   let lastError = ''
   const say = (text: string) => {
@@ -78,9 +79,12 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
     const turn = turns
     try {
       const now = await $.clock.now()
-      if (now - beatAt >= BEAT_MS) {
-        await $.fs.write(listen, String(now)).catch((err: unknown) => say(`heartbeat not written: ${errorText(err)}`))
+      // Names the wrap_up a reply may answer, so the board routes none here for an ask this copy never saw
+      const target = await read($, replyTo)
+      if (now - beatAt >= BEAT_MS || target !== beatTarget) {
+        await $.fs.write(listen, target).catch((err: unknown) => say(`heartbeat not written: ${errorText(err)}`))
         beatAt = now
+        beatTarget = target
       }
       if (!(await $.fs.exists(replied))) return
       const text = await $.fs.read(replied)
@@ -99,7 +103,7 @@ export async function listenForReplies($: EngineInterface, session: string): Pro
         if (turns !== turn) return log($, `reply for ${to} dropped: a turn started before it was sent`)
         const sent = await $.prompt.submit({ text: reply, asUser: true }).catch((err: unknown) => ({ drop: errorText(err) }))
         if (sent.drop === undefined) return
-        // Still the ask the worker shows: a press again may answer it
+        // Still the ask the worker shows: the board offers it again
         if (turns === turn) await update($, replyTo, () => to)
         await $.ui.toast(`dev-board: the board's reply "${reply}" not sent: ${sent.drop}`)
       })

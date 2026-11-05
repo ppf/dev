@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
@@ -21,7 +22,7 @@ type Pending struct {
 	Answerable bool  `json:"answerable"`
 	// Reply marks a wrap_up ask: answered by a message to the worker, its options the reply buttons' labels.
 	Reply bool `json:"reply"`
-	// Listening marks a Reply whose worker's mod takes the reply as its next prompt: <questions>/<id>.listen written within listenFresh.
+	// Listening marks a Reply whose worker's mod takes the reply as its next prompt: <questions>/<id>.listen names it, written within listenFresh.
 	Listening bool `json:"listening"`
 }
 
@@ -38,10 +39,15 @@ func writtenBefore(path string, t time.Time) bool {
 	return err == nil && info.ModTime().Before(t)
 }
 
-// isListening is whether session id's mod wrote its heartbeat within listenFresh of now.
-func isListening(dir, id string, now time.Time) bool {
-	info, err := os.Stat(filepath.Join(dir, id+".listen"))
-	return err == nil && now.Sub(info.ModTime()) < listenFresh
+// isListening is whether session id's mod wrote its heartbeat within listenFresh of now, naming toolUseID as the wrap_up it takes a reply to.
+func isListening(dir, id, toolUseID string, now time.Time) bool {
+	path := filepath.Join(dir, id+".listen")
+	info, err := os.Stat(path)
+	if err != nil || now.Sub(info.ModTime()) >= listenFresh {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	return err == nil && strings.TrimSpace(string(data)) == toolUseID
 }
 
 // QuestionsDir is where the mods keep the questions and answers: hooks' questions/ (HookDir).

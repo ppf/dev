@@ -11,8 +11,10 @@ const WRAP_UP = 'mcp__ccd_turn__wrap_up'
 async function worker($: Engine, on: On, { submitted = (): { drop: string } | undefined => undefined, removing = async () => {} } = {}) {
   const files = new Map<string, string>()
   const prompts: { text: string; asUser: boolean }[] = []
+  const beats: string[] = []
   const toasts: string[] = []
   on('fs.write', (_, e) => {
+    if (e.path === LISTEN) beats.push(e.text)
     files.set(e.path, e.text)
     return { value: undefined }
   })
@@ -49,7 +51,7 @@ async function worker($: Engine, on: On, { submitted = (): { drop: string } | un
   const clock = mock.clock(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
-  return { files, prompts, toasts, clock }
+  return { files, prompts, toasts, beats, clock }
 }
 
 /** The board's reply, as writeReply writes it. */
@@ -61,14 +63,18 @@ async function wrapUp($: Engine, id: string, agentId?: string) {
   await $.tool.call({ tool: WRAP_UP, tool_use_id: id, recap: 'done', ask: 'Which?', ...(agentId === undefined ? {} : { agentId }) })
 }
 
-test('a running session writes its heartbeat every 2 s', async ($, on) => {
-  const { files, clock } = await worker($, on)
+test('a running session writes its heartbeat every 2 s, and at once when the wrap_up it answers changes', async ($, on) => {
+  const { beats, clock } = await worker($, on)
   await clock.advance(1000)
-  expect(files.get(LISTEN)).toBe('1000')
   await clock.advance(1000)
-  expect(files.get(LISTEN)).toBe('1000')
   await clock.advance(1000)
-  expect(files.get(LISTEN)).toBe('3000')
+  expect(beats).toEqual(['', ''])
+  await wrapUp($, 'w1')
+  await clock.advance(1000)
+  expect(beats).toEqual(['', '', 'w1'])
+  await $.turn.start({ text: 'typed', turnId: 'turn-typed' })
+  await clock.advance(1000)
+  expect(beats).toEqual(['', '', 'w1', ''])
 })
 
 test("the board's reply to the wrap_up the turn ended on is submitted once, as the person's own", async ($, on) => {

@@ -413,7 +413,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	// Its turn over, the ask it ended on waits for a message
 	if w.Ask == nil && w.State != StateBusy && t.wrapAsk != nil {
 		w.Ask = t.wrapAsk
-		w.Ask.Listening = running && p.Questions != "" && isListening(p.Questions, w.ID, now)
+		w.Ask.Listening = running && p.Questions != "" && isListening(p.Questions, w.ID, w.Ask.ToolUseID, now)
 	}
 	return w, errors.Join(err, hookErr, askErr)
 }

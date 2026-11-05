@@ -31,6 +31,8 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   stopped: 'Idle',
 }
 const MAX_LAST_LINES = 2
+// A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
+const RETAKE_MS = 10_000
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 // One glyph family so the marks line up: done recedes, the current step takes the section's color, pending stays quiet
 const STEP_LOOKS = {
@@ -58,7 +60,7 @@ const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [],
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
-const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-1' })
+const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-2' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -309,6 +311,16 @@ export const register: Register = on => {
             await update($, picks, m => Object.fromEntries(Object.entries(m).filter(([id, p]) => asked.get(id) === p.toolUseId)))
           }
         }
+        const now = await $.clock.now()
+        const untaken = Object.entries(await read($, picks)).filter(([id, p]) => {
+          const a = polled.workers.find(w => w.id === id)?.ask
+          return p.sentAt !== undefined && now - p.sentAt >= RETAKE_MS && a?.listening === true && a.toolUseId === p.toolUseId
+        })
+        if (untaken.length > 0) {
+          const ids = new Set(untaken.map(([id]) => id))
+          await update($, picks, m => Object.fromEntries(Object.entries(m).map(([id, p]) => [id, ids.has(id) ? { ...p, isSent: false, sentAt: undefined } : p])))
+          for (const w of polled.workers.filter(w => ids.has(w.id))) await $.ui.toast(`dev-board: ${label(w)} did not take the reply: press it again`)
+        }
         void refresh(polled.workers).catch((err: unknown) => $.ui.toast(`dev-board: PR checks not read: ${errorText(err)}`))
         const notes = unsent(polled.workers, await read($, sent))
         if (notes.text !== '') {
@@ -437,7 +449,8 @@ export const register: Register = on => {
         answering.add(w.id)
         const text = Object.values(answers).join('; ')
         const isSent = await (a.listening ? replyDirect(w, a, text) : send($, ask('message', w, text), `answer for ${label(w)}`)).finally(() => answering.delete(w.id))
-        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } })).catch((err: unknown) => $.ui.toast(`dev-board: reply not marked sent: ${errorText(err)}`))
+        const sentAt = a.listening ? await $.clock.now() : undefined
+        if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true, sentAt } })).catch((err: unknown) => $.ui.toast(`dev-board: reply not marked sent: ${errorText(err)}`))
         return
       }
       let why = ''
