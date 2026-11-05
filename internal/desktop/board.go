@@ -271,11 +271,16 @@ func liveSessions(dir string) ([]live, []error) {
 		if l.Kind != "" && l.Kind != "interactive" {
 			continue
 		}
-		// Fields renamed or a status this board doesn't know: every worker would show the wrong state
-		if l.PID <= 0 || l.SessionID == "" || (l.Status != StateBusy && l.Status != StateIdle && l.Status != liveWaiting) {
+		// Fields renamed: every worker would show the wrong state
+		if l.PID <= 0 || l.SessionID == "" {
 			warnings = append(warnings, fmt.Errorf("%s: unexpected live session (pid %d, session %q, status %q)",
 				path, l.PID, l.SessionID, l.Status))
 			continue
+		}
+		// Still running, so kept: worker shows it busy
+		if l.Status != StateBusy && l.Status != StateIdle && l.Status != liveWaiting {
+			warnings = append(warnings, fmt.Errorf("%s: live session %s has a status this board doesn't know (%q): shown busy",
+				path, l.SessionID, l.Status))
 		}
 		if alive(l) {
 			lives = append(lives, l)
@@ -322,8 +327,9 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		cli = l.SessionID
 	}
 	switch {
-	// Waiting on a dialog is still mid-turn
-	case running && (l.Status == StateBusy || l.Status == liveWaiting):
+	// Waiting on a dialog is still mid-turn; a status this board doesn't know is taken as one, so a running
+	// worker never shows stopped (nor offers Archive)
+	case running && l.Status != StateIdle:
 		w.State = StateBusy
 	case w.Verdict == StateBlocked:
 		w.State = StateBlocked

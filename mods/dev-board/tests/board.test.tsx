@@ -1175,3 +1175,52 @@ test('a dev printing a question this mod does not read says so', async ($, on) =
   expect((await ui.find({ type: 'Text', text: /does not read/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
+
+test('a message not sent opens its field again, holding its text, until one is sent', async ($, on) => {
+  let refuse = true
+  const texts = submits(on, text => (refuse ? { drop: 'blocked by a hook' } : { text }))
+  const toasts = collectToasts(on)
+  await start($, on, ok([worker({ state: 'busy', status: 'working' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:message' })
+  await ui.input({ key: 'local_a:draft', text: 'use option B' })
+  expect(toasts.at(-1)).toBe('dev-board: message for a not sent: blocked by a hook')
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option B')
+
+  // Send, the person typing nothing more, sends it again
+  refuse = false
+  await ui.press({ key: 'local_a:send' })
+  expect(texts).toEqual(['dev-board: message a (local_a): use option B', 'dev-board: message a (local_a): use option B'])
+
+  // Edited after a refusal, a redraw shows the edit, and Send sends it
+  refuse = true
+  await ui.press({ key: 'local_a:message' })
+  await ui.input({ key: 'local_a:draft', text: 'use option B' })
+  await ui.input({ key: 'local_a:draft', text: 'use option C', kind: 'change' })
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option C')
+  refuse = false
+  await ui.press({ key: 'local_a:send' })
+  expect(texts.at(-1)).toBe('dev-board: message a (local_a): use option C')
+  expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
+  await ui.press({ key: 'local_a:message' })
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBeUndefined()
+  await ui.unmount()
+})
+
+test("a message not sent leaves another tile's open field alone, its text kept for its own", async ($, on) => {
+  let release = () => {}
+  on('prompt.submit', () => new Promise(resolve => (release = () => resolve({ drop: 'blocked by a hook' }))))
+  await start($, on, ok([worker({ state: 'busy', status: 'working' }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:message' })
+  const sent = ui.input({ key: 'local_a:draft', text: 'use option B' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  await ui.press({ key: 'local_b:message' })
+  release()
+  await sent
+  expect(await ui.find({ key: 'local_a:draft' })).toBeFalsy()
+  expect(await ui.find({ key: 'local_b:draft' })).toBeTruthy()
+  await ui.press({ key: 'local_a:message' })
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option B')
+  await ui.unmount()
+})

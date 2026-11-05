@@ -45,7 +45,7 @@ const MAX_SENT = 500
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
-const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {} }, { shape: 'view-2' })
+const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {}, unsent: {} }, { shape: 'view-3' })
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
@@ -97,12 +97,17 @@ async function prChecks(run: Run, url: string): Promise<Omit<Checks, 'at'>> {
 
 const label = (w: Worker) => w.name || w.title
 
-/** Sends the boss a prompt, saying in a toast whether it was queued. */
-const send = ($: EngineInterface, text: string, what: string) =>
-  $.prompt.submit({ text }).then(
-    r => $.ui.toast(r.drop === undefined ? `dev-board: ${what} queued for the boss` : `dev-board: ${what} not sent: ${r.drop}`),
-    (err: unknown) => $.ui.toast(`dev-board: ${what} not sent: ${errorText(err)}`),
-  )
+/** Sends the boss a prompt, saying in a toast whether it was queued; whether it was. */
+async function send($: EngineInterface, text: string, what: string): Promise<boolean> {
+  try {
+    const r = await $.prompt.submit({ text })
+    await $.ui.toast(r.drop === undefined ? `dev-board: ${what} queued for the boss` : `dev-board: ${what} not sent: ${r.drop}`)
+    return r.drop === undefined
+  } catch (err) {
+    await $.ui.toast(`dev-board: ${what} not sent: ${errorText(err)}`)
+    return false
+  }
+}
 
 /** What a button asks the boss, e.g. `dev-board: nudge fix-login (local_1): Continue where you left off`. */
 const ask = (verb: 'message' | 'nudge' | 'archive', w: Worker, text: string) => `dev-board: ${verb} ${label(w)} (${w.id}): ${text}`
@@ -345,19 +350,20 @@ export const register: Register = on => {
     }
     // Typed before a reload of the mod, a field's text never reached it: kept open for Enter rather than dropped
     const sendDraft = async (w: Worker, surface: typeof e.surface) => {
-      const text = drafts.get(`${surface}:${w.id}`)
+      // A message given back after a refusal is the field's text until the person types
+      const text = drafts.get(`${surface}:${w.id}`) ?? (await read($, view)).unsent[w.id]
       if (text === undefined) {
         await $.ui.toast(`dev-board: no text read for ${label(w)}: press Enter in the field to send it`)
         return
       }
-      message(w, text)
+      await message(w, text)
     }
-    const message = (w: Worker, text: string) => {
+    /** Closes the field and sends its text; a message not sent opens it again, holding the text (kept for its next opening while another field is open). */
+    const message = async (w: Worker, text: string) => {
       forgetDrafts(w.id)
-      void update($, view, s => ({ ...s, composing: '' }))
-      if (text.trim() !== '') {
-        void send($, ask('message', w, text.trim()), `message for ${label(w)}`)
-      }
+      await update($, view, s => ({ ...s, composing: '', unsent: Object.fromEntries(Object.entries(s.unsent).filter(([id]) => id !== w.id)) }))
+      if (text.trim() === '' || (await send($, ask('message', w, text.trim()), `message for ${label(w)}`))) return
+      await update($, view, s => ({ ...s, composing: s.composing === '' ? w.id : s.composing, unsent: { ...s.unsent, [w.id]: text } }))
     }
     const copy = async (id: string, surface: typeof e.surface) => {
       try {
@@ -642,9 +648,20 @@ export const register: Register = on => {
             {Input !== undefined && v.composing === w.id && (
               <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} marginTop="xs" minWidth={0}>
                 {/* A short placeholder: a one-line field does not grow on the desktop, so its own width must hold it */}
-                <Input key={`${w.id}:draft`} placeholder="Message…" autoFocus onInput={(text, input) => drafts.set(`${input.surface}:${w.id}`, text)} onSubmit={text => message(w, text)} />
+                <Input
+                  key={`${w.id}:draft`}
+                  placeholder="Message…"
+                  value={v.unsent[w.id]}
+                  autoFocus
+                  onInput={(text, input) => {
+                    drafts.set(`${input.surface}:${w.id}`, text)
+                    // A given-back text follows the person's edits, so a redraw never puts the refused one back
+                    if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
+                  }}
+                  onSubmit={text => void message(w, text)}
+                />
                 <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
-                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => message(w, '')} />
+                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
               </Box>
             )}
           </Box>

@@ -345,12 +345,15 @@ func TestBoardWarnings(t *testing.T) {
 	p := fixture(t)
 	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "thinking"})
 	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), lines(t, assistant("claude-new-6", text("Hi."))))
-	_, warnings, err := Board(p, boss, time.Now())
+	workers, warnings, err := Board(p, boss, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	if workers[0].State != StateBusy || workers[0].Status != StatusWorking {
+		t.Errorf("worker with an unknown live status = %s/%s, want busy/working: it still runs", workers[0].State, workers[0].Status)
+	}
 	got := fmt.Sprint(warnings)
-	for _, want := range []string{`status "thinking"`, "no context window for model claude-new-6", "local_broken.json"} {
+	for _, want := range []string{`status this board doesn't know ("thinking")`, "no context window for model claude-new-6", "local_broken.json"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("warnings = %s, want one naming %s", got, want)
 		}
@@ -513,7 +516,7 @@ func TestBoardLiveWaiting(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := fmt.Sprint(warnings); strings.Contains(got, "unexpected live session") {
+		if got := fmt.Sprint(warnings); strings.Contains(got, "live session") {
 			t.Errorf("warnings = %s, want none for a waiting live session", got)
 		}
 		return workers[0]
