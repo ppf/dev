@@ -66,17 +66,17 @@ const PR_ICONS: Record<string, Icon> = {
     'merged',
   ),
   CLOSED: icon(
-    `<g ${stroke('#E5534B')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7.5M10.2 2.2l3.6 3.6M13.8 2.2l-3.6 3.6"/></g>`,
+    `<g ${stroke('#E5484D')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7.5M10.2 2.2l3.6 3.6M13.8 2.2l-3.6 3.6"/></g>`,
     '✕',
     'error',
   ),
 }
 const CI_ICONS: Record<Rollup, Icon> = {
   passed: icon('<circle cx="8" cy="8" r="7" fill="#2DA44E"/><path d="m4.8 8.2 2.2 2.2 4.2-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>', '✓', 'success'),
-  failed: icon('<circle cx="8" cy="8" r="7" fill="#E5534B"/><path d="m5.5 5.5 5 5m0-5-5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>', '✗', 'error'),
+  failed: icon('<circle cx="8" cy="8" r="7" fill="#E5484D"/><path d="m5.5 5.5 5 5m0-5-5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>', '✗', 'error'),
   running: icon('<circle cx="8" cy="8" r="6.2" fill="none" stroke="#BF8700" stroke-width="1.6"/><path d="M8 4.6V8l2.4 1.6" fill="none" stroke="#BF8700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>', '…', 'warning'),
 }
-const ICON_PX = 13
+const ICON_PX = 12
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
@@ -628,7 +628,7 @@ export const register: Register = on => {
 
     /** An icon in a cell of its own: its Svg, named by `alt`, where the surface draws one, else its glyph. */
     const iconCell = (key: string, i: Icon, alt: string) => (
-      <Box key={key} flexShrink={0}>
+      <Box key={key} flexShrink={0} alignSelf="center">
         {Svg !== undefined ? (
           <Svg source={i.svg} alt={alt} width={ICON_PX} height={ICON_PX} />
         ) : (
@@ -640,24 +640,23 @@ export const register: Register = on => {
     )
 
     /** A PR's state icon and, while open, its CI rollup's (`PR #93 open`, `CI passed`). */
-    const prIcons = (w: Worker, pr: PR) => {
+    const prIcons = (w: Worker, pr: PR, rollup = ciRollup(pr, checksRead[pr.url])) => {
       const state = PR_ICONS[pr.state]
-      const rollup = ciRollup(pr, checksRead[pr.url])
       return [
-        state && iconCell(`${w.id}:pr${pr.number}:state`, state, `PR #${pr.number} ${pr.state.toLowerCase()}`),
-        rollup && iconCell(`${w.id}:pr${pr.number}:ci`, CI_ICONS[rollup], `CI ${rollup}`),
+        state && iconCell(`${w.id}:${pr.url}:state`, state, `PR #${pr.number} ${pr.state.toLowerCase()}`),
+        rollup && iconCell(`${w.id}:${pr.url}:ci`, CI_ICONS[rollup], `CI ${rollup}`),
       ]
     }
 
-    /** A PR's row: its icons, link and state, then the names of the checks that make its CI icon, or why there are none, cut to fit. */
+    /** A PR's row: its state icon, link and state, its CI icon, then the names of the checks that make it, or why they could not be read, cut to fit. */
     const prRow = (w: Worker, pr: PR) => {
       const c = checksRead[pr.url]
       const rollup = ciRollup(pr, c)
       const why = pr.state === 'OPEN' && c !== undefined ? c.error : ''
       const after = rollup && c ? ciNames(c, rollup) : why
-      const [state, ci] = prIcons(w, pr)
+      const [state, ci] = prIcons(w, pr, rollup)
       return (
-        <Box key={`${w.id}:pr${pr.number}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+        <Box key={`${w.id}:${pr.url}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
           {state}
           <Box flexShrink={0}>
             <Text size="caption">
@@ -695,7 +694,7 @@ export const register: Register = on => {
       )
     }
 
-    /** The task list: its toggle, a progress bar and count; collapsed, only the step at hand under it; expanded, the steps. */
+    /** The task list: its label, a progress bar and the toggle with its count; collapsed, only the step at hand under it; expanded, the steps. */
     const taskList = (w: Worker, color: string, done: number, isExpanded: boolean) => {
       const atHand = w.plan.find(s => s.status === 'in_progress') ?? w.plan.find(s => s.status === 'pending')
       const cells = Math.round((done / w.plan.length) * BAR_CELLS)
@@ -742,7 +741,6 @@ export const register: Register = on => {
       const done = w.plan.filter(s => s.status === 'completed').length
       const isExpanded = v.expanded.includes(w.id)
       const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
-      const meta = [w.branch, w.context === null ? '' : `context ${w.context}%`].filter(s => s !== '').join(' · ')
       const verdict = verdictLine(w)
       const foldButton = (
         <Button key={`${w.id}:fold`} label={`${isOpen ? 'Fold' : 'Unfold'} ${w.title || w.name}`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
@@ -814,10 +812,24 @@ export const register: Register = on => {
               <Box flexShrink={0}>{since}</Box>
             </Box>
             {w.ask ? questionRows(w, w.ask, color) : status}
-            {meta !== '' && (
-              <Text size="caption" color="subtle" wrap="truncate-end">
-                {meta}
-              </Text>
+            {(w.branch !== '' || w.context !== null) && (
+              // The branch cut at its start, so its unique end shows; the context use pinned right
+              <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
+                {w.branch !== '' && (
+                  <Box flexShrink={1} minWidth={0}>
+                    <Text size="caption" color="subtle" mono wrap="truncate-start">
+                      {w.branch}
+                    </Text>
+                  </Box>
+                )}
+                {w.context !== null && (
+                  <Box flexShrink={0}>
+                    <Text size="caption" color="subtle" tabular>
+                      {`context ${w.context}%`}
+                    </Text>
+                  </Box>
+                )}
+              </Box>
             )}
             {w.prs.map(pr => prRow(w, pr))}
             {verdict !== '' && (

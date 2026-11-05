@@ -143,7 +143,8 @@ test('the pane shows a tile per worker, on every surface', async ($, on) => {
     // Its status left out: the Working section says it
     expect((await ui.find({ type: 'Text', text: /^Bash$/ }))?.text).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /^working/ })).toBeFalsy()
-    expect((await ui.find({ type: 'Text', text: /^feature\/a · context 42%$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /^feature\/a$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /^context 42%$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Running the tests/ }))?.text).toBe('Running the tests.')
     expect((await ui.find({ type: 'Text', text: /last turn: completed/ }))?.text).toBe('last turn: completed')
     expect(await header(ui, 'local_b')).toBe('Worker B')
@@ -573,8 +574,8 @@ const CHECKS: Ran = {
   stderr: '',
 }
 
-/** A PR's row as read: its Texts and its icons, an Svg by its alt (desktop), a glyph by itself and its color (terminal). */
-async function prRow(ui: Mounted, key = 'local_a:pr80') {
+/** A PR's row as read: its Texts and its icons, an Svg by its alt (desktop), a glyph as its text (terminal). */
+async function prRow(ui: Mounted, key = `local_a:${OPEN_PR.url}`) {
   type El = string | { type: string; props?: Record<string, unknown>; children?: El[] }
   const text = (el: El): string => (typeof el === 'string' ? el : el.type === 'Link' ? String(el.props?.label) : (el.children ?? []).map(text).join(''))
   const read = (el: El): string[] => {
@@ -596,8 +597,8 @@ test("an open PR's row: its icon, link and state, then its CI icon and the check
   // A failed check outweighs a running one
   expect(await prRow(ui)).toEqual(['[PR #80 open]', 'PR #80 open', '[CI failed]', 'lint'])
   // One line: the PR never wraps, its check names cut
-  expect((await ui.find({ key: 'local_a:pr80' }))?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
-  expect((await ui.find({ key: 'local_a:pr80' }))?.props.flexWrap).toBeUndefined()
+  expect((await ui.find({ key: `local_a:${OPEN_PR.url}` }))?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
+  expect((await ui.find({ key: `local_a:${OPEN_PR.url}` }))?.props.flexWrap).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: 'lint' }))?.props.wrap).toBe('truncate-end')
   await ui.unmount()
   const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -616,41 +617,63 @@ const checksOf = (...buckets: string[]): Ran => ({
   stderr: '',
 })
 
-const ROLLUPS: [string, Ran, string[]][] = [
-  ['passed or skipped', checksOf('pass', 'skipping'), ['[CI passed]', 'c0 c1']],
-  ['any running, none failed', checksOf('pass', 'pending', 'pending'), ['[CI running]', 'c1 c2']],
-  ['any failed or cancelled', checksOf('pass', 'cancel', 'pending'), ['[CI failed]', 'c1']],
-  ['no checks: no icon', checksOf(), []],
+const ROLLUPS: [string, Ran, string[], string[]][] = [
+  ['passed or skipped', checksOf('pass', 'skipping'), ['[CI passed]', 'c0 c1'], ['✓', 'c0 c1']],
+  ['any running, none failed', checksOf('pass', 'pending', 'pending'), ['[CI running]', 'c1 c2'], ['…', 'c1 c2']],
+  ['a bucket it does not know, as running', checksOf('pass', 'queued'), ['[CI running]', 'c1'], ['…', 'c1']],
+  ['any failed or cancelled', checksOf('pass', 'cancel', 'pending'), ['[CI failed]', 'c1'], ['✗', 'c1']],
+  ['every failed one named', checksOf('fail', 'cancel', 'pending'), ['[CI failed]', 'c0 c1'], ['✗', 'c0 c1']],
+  ['no checks: no icon', checksOf(), [], []],
 ]
-for (const [name, gh, ci] of ROLLUPS) {
+for (const [name, gh, desktop, terminal] of ROLLUPS) {
   test(`the CI icon sums up the checks: ${name}`, async ($, on) => {
     await start($, on, ok([worker({ state: 'busy', status: 'working', prs: [OPEN_PR] })]), { gh })
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-    expect(await prRow(ui)).toEqual(['[PR #80 open]', 'PR #80 open', ...ci])
-    await ui.unmount()
+    for (const [surface, ci, state] of [['desktop', desktop, '[PR #80 open]'], ['terminal', terminal, '○']] as const) {
+      const ui = await $.ui.mount({ ...PANE, surface })
+      expect(await prRow(ui)).toEqual([state, 'PR #80 open', ...ci])
+      await ui.unmount()
+    }
   })
 }
 
+const CLOSED_PR = { ...OPEN_PR, number: 81, url: 'https://github.com/o/r/pull/81', state: 'CLOSED' }
+
 test('a merged or closed PR shows its own icon and no CI icon', async ($, on) => {
-  await start($, on, ok([worker({ state: 'busy', status: 'working', prs: [{ ...OPEN_PR, state: 'MERGED' }, { ...OPEN_PR, number: 81, url: 'https://github.com/o/r/pull/81', state: 'CLOSED' }] })]))
+  await start($, on, ok([worker({ state: 'busy', status: 'working', prs: [{ ...OPEN_PR, state: 'MERGED' }, CLOSED_PR] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await prRow(ui)).toEqual(['[PR #80 merged]', 'PR #80 merged'])
-  expect(await prRow(ui, 'local_a:pr81')).toEqual(['[PR #81 closed]', 'PR #81 closed'])
+  expect(await prRow(ui, `local_a:${CLOSED_PR.url}`)).toEqual(['[PR #81 closed]', 'PR #81 closed'])
   // Each its own shape, not one recolored
-  const sources = (await ui.findAll({ type: 'Svg' })).map(s => String(s.props.source))
+  const sources = (await ui.findAll({ type: 'Svg' })).map(s => String(s.props.source).replace(/#[0-9A-F]{6}/gi, ''))
   expect(new Set(sources).size).toBe(2)
+  await ui.unmount()
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await prRow(terminal)).toEqual(['◆', 'PR #80 merged'])
+  expect(await prRow(terminal, `local_a:${CLOSED_PR.url}`)).toEqual(['✕', 'PR #81 closed'])
+  expect((await terminal.findAll({ type: 'Text', text: /^[◆✕]$/ })).map(t => t.props.color)).toEqual(['merged', 'error'])
+  await terminal.unmount()
+})
+
+test('checks read while a PR was open show no more once it merged', async ($, on) => {
+  let prs = [OPEN_PR]
+  const { clock } = await start($, on, () => ok([worker({ state: 'busy', status: 'working', prs })]), { gh: CHECKS })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await prRow(ui)).toEqual(['[PR #80 open]', 'PR #80 open', '[CI failed]', 'lint'])
+  prs = [{ ...OPEN_PR, state: 'MERGED' }]
+  await clock.advance(2000)
+  expect(await prRow(ui)).toEqual(['[PR #80 merged]', 'PR #80 merged'])
   await ui.unmount()
 })
 
-test("a folded tile shows its PRs' icons in its header", async ($, on) => {
-  await start($, on, ok([worker({ state: 'idle', status: 'idle', prs: [OPEN_PR] })]), { gh: checksOf('pass') })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const header = (await ui.find({ key: 'local_a:header' }))?.children as Drawn[]
-  const alts = (await ui.findAll({ type: 'Svg' })).map(s => s.props.alt)
-  expect(alts).toEqual(['PR #80 open', 'CI passed'])
-  expect(header.length).toBeGreaterThan(0)
-  expect(await ui.find({ key: 'local_a:pr80' })).toBeFalsy()
-  await ui.unmount()
+test("a folded tile shows its PRs' icons in its header, in order", async ($, on) => {
+  await start($, on, ok([worker({ state: 'idle', status: 'idle', prs: [OPEN_PR, CLOSED_PR] })]), { gh: checksOf('pass') })
+  for (const [surface, icons] of [['desktop', ['[PR #80 open]', '[CI passed]', '[PR #81 closed]']], ['terminal', ['○', '✓', '✕']]] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const header = await prRow(ui, 'local_a:header')
+    expect(header?.filter(t => icons.includes(t as never))).toEqual([...icons])
+    expect(await ui.find({ key: `local_a:${OPEN_PR.url}` })).toBeFalsy()
+    await ui.unmount()
+  }
 })
 
 test('checks that could not be read say why', async ($, on) => {
@@ -1012,9 +1035,9 @@ test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below t
     expect((await ui.find({ key: id }))?.props).toMatchObject({ flexDirection: 'column', minWidth: 0 })
   }
   const boxes = await ui.findAll({ type: 'Box' })
-  // The open tile's rule box, its rows, header row and title cell; the folded row and its title cell
+  // The open tile's rule box, its rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
   const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || b.props.paddingLeft === 2 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
-  expect(shrinking.length).toBe(6)
+  expect(shrinking.length).toBe(8)
   expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
   // The titles are cut; the open one's progress and time never shrink
   for (const title of ['Worker A', 'Worker B']) {
@@ -1103,7 +1126,7 @@ test("an open tile's rows all start under its title, the fold button and dot bes
   const rows = await ui.find({ key: 'local_a:rows' })
   expect(rows?.props.flexDirection).toBe('column')
   const shown = JSON.stringify(rows?.children)
-  for (const row of ['pick one', 'feature/a · context 10%', 'Done.', 'Write the mod', 'local_a:open']) {
+  for (const row of ['pick one', 'local_a:meta', 'feature/a', 'context 10%', 'Done.', 'Write the mod', 'local_a:open']) {
     expect(shown).toContain(row)
   }
   expect(shown).not.toContain('local_a:fold')
@@ -1488,13 +1511,18 @@ test("a waiting tile shows no verdict its own marker overrides, only a detail it
   await ui.unmount()
 })
 
-test('the branch and context line is cut to one row, the PR on a row of its own under it', async ($, on) => {
+test('the branch and context line: the branch cut at its start, the context pinned right; the PR on a row of its own under it', async ($, on) => {
   await start($, on, ok([worker({ state: 'busy', status: 'working', context: 16, branch: 'feature/board-test-pass-801d74', prs: [OPEN_PR] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /^feature\/board-test-pass-801d74 · context 16%$/ }))?.props.wrap).toBe('truncate-end')
+  // The branch cut at its start, its unique end kept, in the mono face; the context use pinned right, never cut
+  expect((await ui.find({ type: 'Text', text: 'feature/board-test-pass-801d74' }))?.props).toMatchObject({ mono: true, wrap: 'truncate-start' })
+  expect((await ui.find({ type: 'Text', text: 'context 16%' }))?.props.tabular).toBe(true)
+  const meta = await ui.find({ key: 'local_a:meta' })
+  expect(meta?.props).toMatchObject({ flexDirection: 'row', justifyContent: 'space-between', minWidth: 0 })
+  expect((meta?.children as { props: Record<string, unknown> }[]).map(c => c.props.flexShrink)).toEqual([1, 0])
   const order = (await ui.findAll({})).map(el => el.key ?? el.text)
-  expect(order.indexOf('feature/board-test-pass-801d74 · context 16%')).toBeGreaterThan(-1)
-  expect(order.indexOf('feature/board-test-pass-801d74 · context 16%')).toBeLessThan(order.indexOf('local_a:pr80'))
+  expect(order.indexOf('local_a:meta')).toBeGreaterThan(-1)
+  expect(order.indexOf('local_a:meta')).toBeLessThan(order.indexOf(`local_a:${OPEN_PR.url}`))
   await ui.unmount()
 })
 
