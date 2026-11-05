@@ -1025,7 +1025,7 @@ test('a verdict the status says, with no detail, shows no line', async ($, on) =
   await ui.unmount()
 })
 
-test('Open is the main button for Needs you and Waiting; the row is Open, Message…, then Archive', async ($, on) => {
+test('Open is the main button for Needs you and Waiting tiles without a question to press; the row is Open, Message…, then Archive', async ($, on) => {
   await start($, on, ok([...BY_STATUS, worker({ id: 'local_p', title: 'Delivered', prs: [OPEN_PR] })]), { delivered: DELIVERED })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui, 'local_i')
@@ -1043,6 +1043,18 @@ test('Open is the main button for Needs you and Waiting; the row is Open, Messag
   const row = async (id: string) => (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith(`${id}:`) && k !== `${id}:fold`)
   expect(await row('local_i')).toEqual(['local_i:open', 'local_i:message'])
   expect(await row('local_p')).toEqual(['local_p:open', 'local_p:message', 'local_p:archive'])
+  await ui.unmount()
+})
+
+test("on a tile asking a question, Open and Message… are dim text: the question's options are its buttons", async ($, on) => {
+  await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const looks = async (key: string) => {
+    const { plain, dimColor, variant } = (await ui.find({ key }))?.props ?? {}
+    return [plain, dimColor, variant]
+  }
+  expect(await looks('local_a:open')).toEqual([true, true, undefined])
+  expect(await looks('local_a:message')).toEqual([true, true, undefined])
   await ui.unmount()
 })
 
@@ -1117,8 +1129,9 @@ test('the status row is one cut line, without inline markdown', async ($, on) =>
   const status = await ui.find({ type: 'Text', text: /^blocked · / })
   expect(status?.text).toBe('blocked · run dev delivered on feature/a, then merge PR #80 once its checks pass and the review is in')
   expect(status?.props.wrap).toBe('truncate-end')
-  // Folded, cut in its own shrinking cell
-  expect((await ui.find({ type: 'Text', text: /^· stopped · a dialog/ }))?.props.wrap).toBe('truncate-end')
+  // Folded, cut in its own shrinking cell, the size of the row it sits in
+  const folded = (await ui.find({ type: 'Text', text: /^· stopped · a dialog/ }))?.props
+  expect([folded?.wrap, folded?.size, folded?.color]).toEqual(['truncate-end', 'footnote', 'subtle'])
   await ui.unmount()
 })
 
@@ -1242,15 +1255,24 @@ const DB = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [
 const FEATURES = { question: 'Which features?', header: 'Features', multiSelect: true, options: [{ label: 'Auth', description: 'sign-in' }, { label: 'Search', description: 'full text' }] }
 const asking = (ask: Worker['ask']) => worker({ state: 'busy', status: 'needs you', statusText: 'Which DB? (Postgres / Mongo)', ask })
 
-test('a question shows on its tile: header and question, each option a button with its description', async ($, on) => {
+test('a question shows on its tile: header and question, its options buttons in one wrapping row, the first leading, their descriptions a caption under it', async ($, on) => {
   await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /^DB$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /^Which DB\?$/ }))?.text).toBeTruthy()
-    expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('Postgres')
-    expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('Mongo')
-    expect((await ui.find({ type: 'Text', text: /^relational$/ }))?.text).toBeTruthy()
+    const options = await ui.find({ key: 'local_a:q0:options' })
+    expect([options?.props.flexDirection, options?.props.flexWrap]).toEqual(['row', 'wrap'])
+    expect((options?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:q0:o0:pick', 'local_a:q0:o1:pick'])
+    const pick = async (oi: number) => {
+      const { label, variant } = (await ui.find({ key: `local_a:q0:o${oi}:pick` }))?.props ?? {}
+      return [label, variant]
+    }
+    expect(await pick(0)).toEqual(['Postgres', 'primary'])
+    expect(await pick(1)).toEqual(['Mongo', undefined])
+    // An option without a description is left out of the caption
+    const about = await ui.find({ type: 'Text', text: /relational/ })
+    expect([about?.text, about?.props.size, about?.props.color]).toEqual(['Postgres: relational', 'caption', 'subtle'])
     // The question replaces the status row that says it in one line; one press answers it, so no Send
     expect(await ui.find({ type: 'Text', text: /Postgres \/ Mongo/ })).toBeFalsy()
     expect(await ui.find({ key: 'local_a:answer' })).toBeFalsy()
@@ -1292,6 +1314,8 @@ test('a multi-select or several questions take toggles, then Send', async ($, on
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('○ Postgres')
   expect((await ui.find({ key: 'local_a:q1:o0:pick' }))?.props.label).toBe('☐ Auth')
+  // Toggles lead with what is picked, not the first option
+  expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.variant).toBeUndefined()
 
   // Not every question picked: nothing sent
   await ui.press({ key: 'local_a:q1:o0:pick' })
@@ -1302,6 +1326,7 @@ test('a multi-select or several questions take toggles, then Send', async ($, on
   await ui.press({ key: 'local_a:q0:o0:pick' })
   await ui.press({ key: 'local_a:q0:o1:pick' })
   await ui.press({ key: 'local_a:q1:o1:pick' })
+  expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.variant).toBe('primary')
   expect((await ui.find({ key: 'local_a:q0:o1:pick' }))?.props.label).toBe('◉ Mongo')
   expect((await ui.find({ key: 'local_a:q0:o0:pick' }))?.props.label).toBe('○ Postgres')
   expect((await ui.find({ key: 'local_a:q1:o0:pick' }))?.props.label).toBe('☑ Auth')
@@ -1375,6 +1400,8 @@ test("a worker's wrap_up ask shows its reply buttons; a press asks the boss to m
   expect(otherRuns.filter(r => r.argv[2] === 'answer' || r.argv[0] === 'open')).toEqual([])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
+  // Its options gone, Open is the main button again
+  expect((await ui.find({ key: 'local_a:open' }))?.props.variant).toBe('primary')
   await ui.unmount()
 })
 
@@ -1444,7 +1471,10 @@ test('a wrap_up ask without reply buttons shows the question, answered with Mess
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Text', text: /^Which file should I describe\?$/ }))?.text).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /^answer it with Message…$/ }))?.text).toBeTruthy()
-  expect(await ui.find({ key: 'local_a:message' })).toBeTruthy()
+  // No options to press: Message… answers it, so the buttons keep their weight
+  const { plain, dimColor } = (await ui.find({ key: 'local_a:message' }))?.props ?? {}
+  expect([plain, dimColor]).toEqual([undefined, undefined])
+  expect((await ui.find({ key: 'local_a:open' }))?.props.variant).toBe('primary')
   await ui.unmount()
 })
 
@@ -1661,16 +1691,16 @@ test('colour marks what asks for attention: Needs you and Waiting cards in their
     ['inactive', true],
     ['inactive', true],
   ])
-  // The status row, first in its info: red under Needs you, else the text's own color
+  // The status row, first in its info: a caption under the title, red under Needs you, else muted
   const status = async (id: string) => {
     const row = ((await ui.find({ key: `${id}:info` }))?.children as { props: Record<string, unknown> }[] | undefined)?.[0]?.props
-    return [row?.color, row?.weight]
+    return [row?.size, row?.color, row?.weight]
   }
   expect(await Promise.all(['local_n', 'local_w', 'local_k', 'local_i'].map(status))).toEqual([
-    ['error', 'semibold'],
-    ['text', 'medium'],
-    ['text', 'medium'],
-    ['text', 'medium'],
+    ['caption', 'error', 'semibold'],
+    ['caption', 'subtle', 'regular'],
+    ['caption', 'subtle', 'regular'],
+    ['caption', 'subtle', 'regular'],
   ])
   await ui.unmount()
 })
