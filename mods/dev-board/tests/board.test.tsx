@@ -77,9 +77,9 @@ type OtherRun = { argv: readonly string[]; stdin?: string }
 
 /**
  * Starts the session with `dev desktop board` answering `answer()`'s run, or failing to start with that reason;
- * `others` answers the rest (gh's checks none, dev delivered exits 1, open and pbcopy pass by default).
+ * `others` answers the rest (gh's checks none, dev delivered exits 1, open and pbcopy pass by default); `env` adds to its environment.
  */
-async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}) {
+async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}, env: Record<string, string> = {}) {
   const answer = typeof ran === 'function' ? ran : () => ran
   const runs: (readonly string[])[] = []
   const otherRuns: OtherRun[] = []
@@ -102,7 +102,7 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
     }
     return { value: { ...now, isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  mock.env(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_boss' })
+  mock.env(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_boss', ...env })
   const clock = mock.clock(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
@@ -1266,6 +1266,27 @@ test("a worker's wrap_up ask shows its reply buttons; a press asks the boss to m
   expect(texts).toEqual(['dev-board: message a (local_a): register.tsx'])
   expect(otherRuns.filter(r => r.argv[2] === 'answer' || r.argv[0] === 'open')).toEqual([])
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test("a listening worker's reply goes to its reply file for its own mod, not through the boss", async ($, on) => {
+  const texts = submits(on)
+  const toasts = collectToasts(on)
+  const written = new Map<string, string>()
+  on('fs.write', (_, e) => {
+    written.set(e.path, e.text)
+    return { value: undefined }
+  })
+  const { otherRuns } = await start($, on, ok([replying({ toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true, listening: true })]), {}, { HOME: '/home' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_a:q0:o1:pick' })
+
+  const path = '/home/.local/state/dev/desktop/questions/local_a.reply.json'
+  expect(JSON.parse(written.get(`${path}.tmp`) ?? 'null')).toEqual({ toolUseId: 'w1', text: 'register.tsx', writtenAt: 0 })
+  expect(otherRuns.map(r => r.argv)).toContainEqual(['mv', '-f', `${path}.tmp`, path])
+  expect(texts).toEqual([])
+  expect(toasts).toEqual(['dev-board: replied to a: register.tsx'])
   expect((await ui.find({ type: 'Text', text: /^sent: register.tsx; waiting for the worker$/ }))?.text).toBeTruthy()
   await ui.unmount()
 })

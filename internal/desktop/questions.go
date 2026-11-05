@@ -21,7 +21,12 @@ type Pending struct {
 	Answerable bool  `json:"answerable"`
 	// Reply marks a wrap_up ask: answered by a message to the worker, its options the reply buttons' labels.
 	Reply bool `json:"reply"`
+	// Listening marks a Reply whose worker's mod takes the reply as its next prompt: <questions>/<id>.listen written within listenFresh.
+	Listening bool `json:"listening"`
 }
+
+// listenFresh is how recently a worker's mod must have written its <id>.listen heartbeat (every 2 s) to be taken as listening.
+const listenFresh = 10 * time.Second
 
 // questionGrace is how long a question file of a session not seen running is kept: one that started after the
 // live files were read may have just written it.
@@ -31,6 +36,12 @@ const questionGrace = time.Minute
 func writtenBefore(path string, t time.Time) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.ModTime().Before(t)
+}
+
+// isListening is whether session id's mod wrote its heartbeat within listenFresh of now.
+func isListening(dir, id string, now time.Time) bool {
+	info, err := os.Stat(filepath.Join(dir, id+".listen"))
+	return err == nil && now.Sub(info.ModTime()) < listenFresh
 }
 
 // QuestionsDir is where the mods keep the questions and answers: hooks' questions/ (HookDir).

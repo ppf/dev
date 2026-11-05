@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Step, Worker } from '../types'
 import { registerAsk } from './ask'
+import { listenForReplies, registerReply, writeReply } from './reply'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
 const DEV_BIN = 'dev'
@@ -45,7 +46,7 @@ const CHECK_ICONS: Record<string, string> = { pass: '✅', fail: '❌', pending:
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
 // Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-5' })
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-6' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -234,6 +235,7 @@ function shownSteps(plan: Step[]): { earlier: number; steps: Step[]; more: numbe
 
 export const register: Register = on => {
   registerAsk(on)
+  registerReply(on)
   // What each open message field holds, by surface and worker id (each surface's field holds its own), for its Send button
   const drafts = new Map<string, string>()
   // The workers whose answer is being written: a second press waits for it
@@ -246,6 +248,7 @@ export const register: Register = on => {
       await update($, board, () => ({ workers: [], error, warnings: '' }))
       return next(e)
     }
+    await listenForReplies($, boss)
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
@@ -430,9 +433,10 @@ export const register: Register = on => {
       if (answering.has(w.id)) return
       const answers = answersOf(a, p)
       if (a.reply) {
-        // A wrap_up ask: the boss relays the pick as a message
+        // A wrap_up ask: the worker's own mod submits the pick as the person's reply, else the boss relays it as a message
         answering.add(w.id)
-        const isSent = await send($, ask('message', w, Object.values(answers).join('; ')), `answer for ${label(w)}`).finally(() => answering.delete(w.id))
+        const text = Object.values(answers).join('; ')
+        const isSent = await (a.listening ? replyDirect(w, a, text) : send($, ask('message', w, text), `answer for ${label(w)}`)).finally(() => answering.delete(w.id))
         if (isSent) await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } })).catch((err: unknown) => $.ui.toast(`dev-board: reply not marked sent: ${errorText(err)}`))
         return
       }
@@ -452,6 +456,12 @@ export const register: Register = on => {
       }
       await $.ui.toast(`dev-board: answered ${label(w)}: ${Object.values(answers).join('; ')}`)
       await update($, picks, m => ({ ...m, [w.id]: { ...p, isSent: true } }))
+    }
+    /** Hands the reply to the worker's mod; whether it was written. */
+    const replyDirect = async (w: Worker, a: Ask, text: string) => {
+      const why = await writeReply($, w.id, a.toolUseId, text)
+      await $.ui.toast(why === '' ? `dev-board: replied to ${label(w)}: ${text}` : `dev-board: reply for ${label(w)} not sent: ${why}`)
+      return why === ''
     }
     const archive = async (w: Worker) => {
       // Checked again: the last check may be a minute old

@@ -15,11 +15,11 @@ export type Question = { question: string; header: string; options: { label: str
 
 /**
  * The question a busy worker waits on: from its mod's file (`answerable` from the board), else its transcript (its own dialog only);
- * or the wrap_up ask its last turn ended on (`reply`: answered by a message, its options the reply buttons; absent from a dev older than this mod).
+ * or the wrap_up ask its last turn ended on (`reply`: answered by a message, its options the reply buttons; `listening` while the worker's mod takes the reply as its next prompt; both absent from a dev older than this mod).
  */
-export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean; reply?: boolean }
+export type Ask = { toolUseId: string; questions: Question[]; askedAt: number; answerable: boolean; reply?: boolean; listening?: boolean }
 
-/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` (or the boss, for a reply) took them. */
+/** The person's picks on a worker's question, by question text; `isSent` once `dev desktop answer` (for a reply, the worker's reply file or the boss) took them. */
 export type Picks = { toolUseId: string; picks: Record<string, string[]>; isSent: boolean }
 
 /** One object of `dev desktop board --json`. */
@@ -73,6 +73,7 @@ declare module 'claude-code' {
       view: Shaped<View>
       bossAsked: Shaped<boolean>
       picks: Shaped<Record<string, Picks>>
+      replyTo: Shaped<string>
     }
   }
 }
