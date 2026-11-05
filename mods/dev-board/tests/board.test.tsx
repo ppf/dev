@@ -1753,13 +1753,17 @@ test('a pane not placed yet is retitled again next tick; a failed retitle says s
   expect(failed[0]).toMatch(/no surface/)
 })
 
-test('a pane not open is not opened to retitle it', async ($, on) => {
+test('a pane not open is not opened to retitle it; opened with older counts, it is retitled next tick', async ($, on) => {
   const opens: unknown[] = []
   on('ui.open', (_, e) => {
     opens.push(e)
     return { value: { isPlaced: true } }
   })
-  const { clock } = await start($, on, ok(WORKERS))
+  let panes: UiPane[] = []
+  const { clock } = await start($, on, ok(WORKERS), {}, {}, () => panes)
   await clock.advance(4000)
   expect(opens).toEqual([])
+  panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
+  await clock.advance(2000)
+  expect(opens).toEqual([{ id: 'board', title: 'Workers · 3' }])
 })

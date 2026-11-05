@@ -327,13 +327,16 @@ export const register: Register = on => {
     let last = ''
     // The title the open pane was last given, or found with
     let titled: string | undefined
-    /** Gives an open pane the title (an open id only retitles); one not placed yet is tried again next tick, a failure said once per title. */
+    /**
+     * Gives an open pane the title (an open id only retitles); one not open, or not placed yet, is looked at again next
+     * tick (a /board between a poll and its look may open it with the last counts); a failure is said once per title.
+     */
     const retitle = async (title: string) => {
       if (title === titled) return
       try {
         const pane = (await $.ui.panes()).find(p => p.id === PANE)
-        // Not open: /board opens it with the title then
-        if (pane === undefined || pane.title === title || (await $.ui.open({ id: PANE, title })).isPlaced) titled = title
+        if (pane === undefined) return
+        if (pane.title === title || (await $.ui.open({ id: PANE, title })).isPlaced) titled = title
       } catch (err) {
         titled = title
         await $.ui.toast(`pane not retitled: ${errorText(err)}`)
