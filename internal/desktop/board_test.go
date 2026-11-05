@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/inbox"
 )
 
 const boss = "local_boss"
@@ -490,6 +492,59 @@ func TestBoardStatusChangeIsProgress(t *testing.T) {
 		if got := len(workers[0].Notes) == 1; got != stuck {
 			t.Errorf("status changed %v ago: notes = %+v, want stuck %v", changed, workers[0].Notes, stuck)
 		}
+	}
+}
+
+// A live session waiting on a dialog needs you: its hook's question, else the live file's waitingFor, else that it
+// waits; unanswered, a decision note, never a stuck one.
+func TestBoardLiveWaiting(t *testing.T) {
+	p := fixture(t)
+	p.Hooks = t.TempDir()
+	now := time.Now()
+	writeJSON(t, filepath.Join(p.Hooks, "cli-idle.json"), Hook{State: "idle"})
+	board := func(changed time.Duration, extra map[string]any) Worker {
+		t.Helper()
+		live := map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "waiting", "kind": "interactive",
+			"statusUpdatedAt": now.Add(-changed).UnixMilli()}
+		maps.Copy(live, extra)
+		writeJSON(t, filepath.Join(p.Live, "1.json"), live)
+		workers, warnings, err := Board(p, boss, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(warnings); strings.Contains(got, "unexpected live session") {
+			t.Errorf("warnings = %s, want none for a waiting live session", got)
+		}
+		return workers[0]
+	}
+	asked := func(w Worker) string { return fmt.Sprintf("%s/%s %q", w.State, w.Status, w.StatusText) }
+
+	// Its hook lags: still working, an old dialog's question left over
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "working", Question: "old", Since: now.Unix(), Active: now.Unix()})
+	w := board(time.Minute, nil)
+	if got, want := asked(w), `busy/needs you "waiting for you"`; got != want {
+		t.Errorf("waiting, hook working = %s, want %s", got, want)
+	}
+	if len(w.Notes) != 0 {
+		t.Errorf("waiting 1m notes = %+v, want none", w.Notes)
+	}
+	if w = board(20*time.Minute, nil); len(w.Notes) != 1 || w.Notes[0].Kind != inbox.Decision {
+		t.Errorf("waiting 20m notes = %+v, want an unanswered decision", w.Notes)
+	}
+
+	if got, want := asked(board(time.Minute, map[string]any{"waitingFor": "input needed"})), `busy/needs you "input needed"`; got != want {
+		t.Errorf("waiting for input, hook working = %s, want %s", got, want)
+	}
+
+	// Its hook still on Claude's idle reminder, no dialog
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "waiting", WaitingFor: "idle_prompt", Since: now.Unix()})
+	if got, want := asked(board(time.Minute, nil)), `busy/needs you "waiting for you"`; got != want {
+		t.Errorf("waiting, hook on the idle reminder = %s, want %s", got, want)
+	}
+
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "waiting", WaitingFor: "elicitation_dialog", Question: "pick one", Since: now.Unix()})
+	if got, want := asked(board(time.Minute, map[string]any{"waitingFor": "input needed"})), `busy/needs you "pick one"`; got != want {
+		t.Errorf("waiting, hook deciding = %s, want %s", got, want)
 	}
 }
 

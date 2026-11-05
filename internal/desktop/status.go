@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"cmp"
 	"strings"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 
 // Worker statuses, finer than its state: the first that holds names the tile.
 const (
-	// StatusNeedsYou: a dialog waits on the person (a permission prompt, a question), or did when the app quit
-	// and the worker hasn't run a turn since.
+	// StatusNeedsYou: a dialog waits on the person (a permission prompt, a question; its hook file or live session
+	// says so), or did when the app quit and the worker hasn't run a turn since.
 	StatusNeedsYou = "needs you"
 	// StatusRateLimited: a rate limit stopped its last turn.
 	StatusRateLimited = "rate-limited"
@@ -35,8 +36,11 @@ const (
 // is gone with it.
 const interruptedNote = "a dialog was open when the app quit"
 
+// waitingNote is what a needs-you status says when what the dialog asks is unknown.
+const waitingNote = "waiting for you"
+
 // status is w's status and what it says (the question, the tool, what it waits on); w has its state, verdict,
-// last lines, tool and notes. h is its hook file, interrupted the app record's interruptedAwaitingPerson.
+// last lines, tool and notes. h is its hook file (or what the live file says while a dialog waits), interrupted the app record's interruptedAwaitingPerson.
 func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) {
 	if w.State == StateStopped {
 		if interrupted {
@@ -48,7 +52,7 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 	switch {
 	// A dismissed dialog fires no hook but ends the turn: only a busy worker still waits on it
 	case busy && agent.Deciding(h.State, h.WaitingFor):
-		return StatusNeedsYou, h.Question
+		return StatusNeedsYou, cmp.Or(h.Question, waitingNote)
 	// A busy worker runs a turn: whatever the app recorded at its quit is over
 	case !busy && interrupted:
 		return StatusNeedsYou, interruptedNote

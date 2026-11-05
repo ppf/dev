@@ -163,6 +163,15 @@ const plainLine = (line: string) =>
     .map((part, i) => (i % 2 === 1 ? part : part.replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
     .join('')
 
+/** Whether a reply line says what the status does (`Blocked: pick one` beside `blocked · pick one`): their first 40 characters alike, case, inline markdown, end punctuation and a leading `<status>:` aside. */
+function repeatsStatus(line: string, w: Worker): boolean {
+  const said = (s: string) => plainLine(s).trim().toLowerCase().replace(/[.!…]+$/, '')
+  const text = said(line)
+  const rest = text.startsWith(`${w.status}:`) ? text.slice(w.status.length + 1).trimStart() : text
+  const what = said(w.statusText)
+  return what !== '' && rest.slice(0, 40) === what.slice(0, 40)
+}
+
 /** The verdict on its last turn and its detail; where the status says the verdict (`review_ready`), only a detail the status row lacks. */
 function verdictLine(w: Worker): string {
   if (w.verdict === '') return ''
@@ -179,6 +188,8 @@ function ciLine(pr: PR, c: Checks | undefined): string {
 }
 
 export const register: Register = on => {
+  // What each open message field holds, by surface and worker id (each surface's field holds its own), for its Send button
+  const drafts = new Map<string, string>()
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: "Show this boss session's workers in a pane" })
     const boss = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
@@ -298,7 +309,29 @@ export const register: Register = on => {
     // Folding drops the tile's message field rather than keep it hidden
     const fold = (id: string, isOpen: boolean) =>
       update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen }, composing: !isOpen && s.composing === id ? '' : s.composing }))
-    const compose = (id: string) => update($, view, s => ({ ...s, composing: s.composing === id ? '' : id }))
+    const forgetDrafts = (id: string) => {
+      for (const key of drafts.keys()) if (key.endsWith(`:${id}`)) drafts.delete(key)
+    }
+    const compose = (id: string) => {
+      forgetDrafts(id)
+      return update($, view, s => ({ ...s, composing: s.composing === id ? '' : id }))
+    }
+    // Typed before a reload of the mod, a field's text never reached it: kept open for Enter rather than dropped
+    const sendDraft = async (w: Worker, surface: typeof e.surface) => {
+      const text = drafts.get(`${surface}:${w.id}`)
+      if (text === undefined) {
+        await $.ui.toast(`dev-board: no text read for ${label(w)}: press Enter in the field to send it`)
+        return
+      }
+      message(w, text)
+    }
+    const message = (w: Worker, text: string) => {
+      forgetDrafts(w.id)
+      void update($, view, s => ({ ...s, composing: '' }))
+      if (text.trim() !== '') {
+        void send($, ask('message', w, text.trim()), `message for ${label(w)}`)
+      }
+    }
     const copy = async (id: string, surface: typeof e.surface) => {
       try {
         // A remote surface (the desktop app) has no clipboard path yet: the Mac's then
@@ -329,7 +362,7 @@ export const register: Register = on => {
       await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
-    /** One worker's tile: folded, one row; open, a header row, a status row, a meta row, its last turn and what it needs, notes, its reply's last lines, its tasks, buttons. */
+    /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the title. */
     const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
       const color = GROUP_COLORS[group]
       const done = w.plan.filter(s => s.status === 'completed').length
@@ -339,41 +372,46 @@ export const register: Register = on => {
       const verdict = verdictLine(w)
       const foldButton = <Button key={`${w.id}:fold`} label={isOpen ? '▾' : '▸'} plain dimColor onPress={() => void fold(w.id, !isOpen)} />
       const dot = <Text color={STATE_COLORS[w.state]}>●</Text>
+      // A Text nested in a cut one wraps on the desktop (each Text sets its own white-space): what may be cut is one
+      // Text of plain strings, the dot left outside it
       const name = (
-        <Text weight="semibold" color={isOpen ? undefined : 'subtle'}>
+        <Text weight="semibold" color={isOpen ? undefined : 'subtle'} wrap="truncate-end">
           {w.title || w.name}
         </Text>
       )
       const progress = w.plan.length > 0 && (
         <Text size="footnote" color="subtle" tabular>
-          {isOpen ? `${done}/${w.plan.length}` : ` ${done}/${w.plan.length}`}
+          {`${done}/${w.plan.length}`}
         </Text>
       )
-      const statusText = statusLine(w, group)
+      const statusText = plainLine(statusLine(w, group))
       const status = statusText !== '' && (
-        <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'}>
-          {isOpen ? statusText : ` · ${statusText}`}
+        <Text size="footnote" color={color} weight={group === 'Needs you' ? 'semibold' : 'regular'} wrap="truncate-end">
+          {isOpen ? statusText : `· ${statusText}`}
         </Text>
       )
       const sinceText = w.since === '0m' ? 'now' : w.since
       const since = sinceText !== '' && (
         <Text size="footnote" color="subtle" tabular>
-          {isOpen ? sinceText : ` · ${sinceText}`}
+          {isOpen ? sinceText : `· ${sinceText}`}
         </Text>
       )
       if (!isOpen) {
-        // Lined up with an open tile's title, past its rule
+        // Lined up with an open tile's title, past its rule; the title and status are cut, the rest kept
         return (
-          <Box flexDirection="row" columnGap={1} paddingLeft={2} minWidth={0}>
+          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} paddingLeft={2} minWidth={0}>
             {foldButton}
+            {dot}
             <Box flexShrink={1} minWidth={0}>
-              <Text wrap="truncate-end">
-                {dot} {name}
-                {progress}
-                {status}
-                {since}
-              </Text>
+              {name}
             </Box>
+            {progress && <Box flexShrink={0}>{progress}</Box>}
+            {status && (
+              <Box flexShrink={1} minWidth={0}>
+                {status}
+              </Box>
+            )}
+            {since && <Box flexShrink={0}>{since}</Box>}
             {/* Outside the cut text, so truncation never hides it */}
             {asksForPerson(w) && (
               <Text size="footnote" color="warning">
@@ -385,108 +423,98 @@ export const register: Register = on => {
       }
 
       return (
-        <Box flexDirection="column" borderStyle="quote" borderColor={color} paddingLeft={1} minWidth={0}>
-          {/* Never wraps: the title is cut, its progress and time kept at the right */}
-          <Box flexDirection="row" columnGap={1} minWidth={0}>
-            {foldButton}
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text wrap="truncate-end">
-                {dot} {name}
-              </Text>
+        <Box flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="quote" borderColor={color} paddingLeft={1} minWidth={0}>
+          {foldButton}
+          {dot}
+          <Box key={`${w.id}:rows`} flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            {/* Never wraps: the title is cut, its progress and time kept at the right */}
+            <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                {name}
+              </Box>
+              <Box flexShrink={0} columnGap={1}>
+                {progress}
+                {since}
+              </Box>
             </Box>
-            <Box flexShrink={0} columnGap={1}>
-              {progress}
-              {since}
-            </Box>
-          </Box>
-          {/* Under the title, past the fold button */}
-          {statusText !== '' && (
-            <Box flexDirection="column" paddingLeft={2} minWidth={0}>
-              {status}
-            </Box>
-          )}
-          {(meta !== '' || w.prs.length > 0) && (
-            <Text size="caption">
-              <Text color="subtle">{meta}</Text>
-              {w.prs.map((pr, i) => {
-                const c = checksRead[pr.url]
-                const ci = ciLine(pr, c)
+            {status}
+            {(meta !== '' || w.prs.length > 0) && (
+              <Text size="caption">
+                <Text color="subtle">{meta}</Text>
+                {w.prs.map((pr, i) => {
+                  const c = checksRead[pr.url]
+                  const ci = ciLine(pr, c)
 
-                return (
-                  <Text key={pr.url}>
-                    <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
-                    <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
-                    {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
-                  </Text>
-                )
-              })}
-            </Text>
-          )}
-          {verdict !== '' && (
-            <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
-              {w.state === 'busy' ? 'last turn: ' : ''}
-              {verdict}
-            </Text>
-          )}
-          {showsNeeds(w) && (
-            <Text size="footnote" color="warning" weight="medium">
-              needs: {w.needsAction}
-            </Text>
-          )}
-          {delivery?.isDelivered === false && (
-            <Text size="footnote" color="subtle">
-              not delivered: {delivery.why}
-            </Text>
-          )}
-          {w.notes.map(n => (
-            <Text key={n.key} size="footnote" color="warning" weight="medium">
-              {n.kind}: {n.text}
-            </Text>
-          ))}
-          {w.lastLines
-            .filter(line => !isFence(line))
-            .slice(-MAX_LAST_LINES)
-            .map(line => (
-              <Text size="footnote" dimColor italic wrap="truncate-end">
-                {plainLine(line)}
+                  return (
+                    <Text key={pr.url}>
+                      <Text color="subtle">{meta !== '' || i > 0 ? ' · ' : ''}</Text>
+                      <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
+                      {ci !== '' && <Text dimColor={c?.error !== ''}>{` ${ci}`}</Text>}
+                    </Text>
+                  )
+                })}
+              </Text>
+            )}
+            {verdict !== '' && (
+              <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
+                {w.state === 'busy' ? 'last turn: ' : ''}
+                {verdict}
+              </Text>
+            )}
+            {showsNeeds(w) && (
+              <Text size="footnote" color="warning" weight="medium">
+                needs: {w.needsAction}
+              </Text>
+            )}
+            {delivery?.isDelivered === false && (
+              <Text size="footnote" color="subtle">
+                not delivered: {delivery.why}
+              </Text>
+            )}
+            {w.notes.map(n => (
+              <Text key={n.key} size="footnote" color="warning" weight="medium">
+                {n.kind}: {n.text}
               </Text>
             ))}
-          {isExpanded && (
-            <Box flexDirection="column" paddingLeft={2} marginTop="xs" minWidth={0}>
-              {w.plan.map(s => (
-                <Text size="footnote" dimColor={s.status === 'completed'} color={s.status === 'pending' ? 'subtle' : undefined}>
-                  <Text color={s.status === 'in_progress' ? color : undefined}>{STEP_ICONS[s.status] ?? '○'}</Text> {s.content}
+            {w.lastLines
+              .filter(line => !isFence(line) && !repeatsStatus(line, w))
+              .slice(-MAX_LAST_LINES)
+              .map(line => (
+                <Text size="footnote" dimColor italic wrap="truncate-end">
+                  {plainLine(line)}
                 </Text>
               ))}
+            {isExpanded && (
+              <Box flexDirection="column" marginTop="xs" minWidth={0}>
+                {w.plan.map(s => (
+                  <Text size="footnote" dimColor={s.status === 'completed'} color={s.status === 'pending' ? 'subtle' : undefined}>
+                    <Text color={s.status === 'in_progress' ? color : undefined}>{STEP_ICONS[s.status] ?? '○'}</Text> {s.content}
+                  </Text>
+                ))}
+              </Box>
+            )}
+            <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop="xs">
+              {w.plan.length > 0 && <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} plain dimColor onPress={() => void toggle(w.id)} />}
+              <Button
+                key={`${w.id}:open`}
+                label="Open"
+                variant={group === 'Needs you' || group === 'Waiting' ? 'primary' : undefined}
+                onPress={() => void openSession(w)}
+              />
+              {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
+              <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send($, ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
+              {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
+              <Button key={`${w.id}:copy`} label="Copy id" plain onPress={press => void copy(w.id, press.surface)} />
             </Box>
-          )}
-          <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop="xs">
-            {w.plan.length > 0 && <Button key={`${w.id}:tasks`} label={isExpanded ? 'Tasks ▾' : 'Tasks ▸'} plain dimColor onPress={() => void toggle(w.id)} />}
-            <Button
-              key={`${w.id}:open`}
-              label="Open"
-              variant={group === 'Needs you' || group === 'Waiting' ? 'primary' : undefined}
-              onPress={() => void openSession(w)}
-            />
-            {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" onPress={() => void compose(w.id)} />}
-            <Button key={`${w.id}:nudge`} label="Nudge" onPress={() => void send($, ask('nudge', w, NUDGE), `nudge for ${label(w)}`)} />
-            {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
-            <Button key={`${w.id}:copy`} label="Copy id" plain onPress={press => void copy(w.id, press.surface)} />
+            {Input !== undefined && v.composing === w.id && (
+              <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} marginTop="xs" minWidth={0}>
+                {/* A short placeholder: a one-line field does not grow on the desktop, so its own width must hold it */}
+                <Input key={`${w.id}:draft`} placeholder="Message…" autoFocus onInput={(text, input) => drafts.set(`${input.surface}:${w.id}`, text)} onSubmit={text => message(w, text)} />
+                <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
+                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => message(w, '')} />
+              </Box>
+            )}
           </Box>
-          {Input !== undefined && v.composing === w.id && (
-            <Input
-              key={`${w.id}:draft`}
-              placeholder={`Message to ${label(w)}, relayed by the boss`}
-              submitLabel="send"
-              autoFocus
-              onSubmit={text => {
-                void update($, view, s => ({ ...s, composing: '' }))
-                if (text.trim() !== '') {
-                  void send($, ask('message', w, text.trim()), `message for ${label(w)}`)
-                }
-              }}
-            />
-          )}
         </Box>
       )
     }

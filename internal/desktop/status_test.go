@@ -18,6 +18,7 @@ func TestStatus(t *testing.T) {
 		want, text  string
 	}{
 		{"a dialog open while busy", Worker{State: StateBusy, Tool: "Bash"}, asking, false, StatusNeedsYou, "allow Bash: rm -rf bin"},
+		{"a dialog whose question was not read", Worker{State: StateBusy, Tool: "Bash"}, Hook{State: "waiting", WaitingFor: "permission_prompt"}, false, StatusNeedsYou, waitingNote},
 		{"a dismissed dialog ended the turn", Worker{State: StateIdle}, asking, false, StatusIdle, ""},
 		{"Claude's idle reminder is no dialog", Worker{State: StateBusy, Tool: "Read"}, Hook{State: "waiting", WaitingFor: "idle_prompt"}, false, StatusWorking, "Read"},
 		{"the app quit on a dialog", Worker{State: StateIdle}, Hook{}, true, StatusNeedsYou, interruptedNote},
