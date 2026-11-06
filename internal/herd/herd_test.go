@@ -3,6 +3,7 @@ package herd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/sidebar"
@@ -400,7 +402,7 @@ func TestDialogKeys(t *testing.T) {
 		return next.(Model), cmd
 	}
 	// b is selected and not waiting
-	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg.text, "isn't waiting") {
+	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg.text, "b has neither") {
 		t.Errorf("1 on a worker that isn't waiting: msg %q", m.msg.text)
 	}
 	m.selected = "a"
@@ -411,6 +413,56 @@ func TestDialogKeys(t *testing.T) {
 	cmd()
 	if !slices.Equal(ran, []string{"send-keys -t %5 -l 2"}) {
 		t.Errorf("2 on the waiting worker ran %q", ran)
+	}
+}
+
+// 1-9 on an asks card whose reply read options send that option as its reply, as m does; the hint says so.
+func TestAskOptionKeys(t *testing.T) {
+	var ran, pasted []string
+	m := twoTiles()
+	m.width = 60
+	m.snap.tiles[1] = tile{sess: sidebar.Session{Name: "b", Agent: "Claude", State: agent.Idle}, pane: "%6",
+		note: "asks: Which DB?", tail: desktop.Tail{Lines: []string{"Intro.", "Which **DB**?", "- `Postgres`", "- SQLite", "3. Both"}}}
+	kept := replyBox{session: "b", pane: "%6"}
+	kept.ed.set("kept")
+	m.drafts = map[string]replyBox{"b": kept}
+	m.c = tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-panes":
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", ""), nil
+		case "has-session":
+			return "", nil
+		case "display-message":
+			return tmux.FormatRow("claude", "idle", "claude", "3", "", "", "", ""), nil
+		case "load-buffer":
+			b, err := os.ReadFile(args[len(args)-1])
+			pasted = append(pasted, string(b))
+			return "", err
+		}
+		ran = append(ran, args[0]+" "+args[len(args)-1])
+		return "", nil
+	})
+	press := func(m Model, k string) (Model, tea.Cmd) {
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		return next.(Model), cmd
+	}
+	if got := strings.TrimSpace(ansi.Strip(m.bottom()[0])); !strings.HasPrefix(got, "1-9 answer  j/k select") {
+		t.Errorf("asks card hint %q", got)
+	}
+	if m, cmd := press(m, "4"); cmd != nil || m.msg.text != "b's question has 3 options" {
+		t.Errorf("4 of 3 options: msg %q", m.msg.text)
+	}
+	m, cmd := press(m, "1")
+	if cmd == nil || m.box.session != "" || m.drafts["b"].ed.String() != "kept" {
+		t.Fatalf("1: cmd %v, box %q, draft %q", cmd != nil, m.box.session, m.drafts["b"].ed.String())
+	}
+	if msg := cmd().(actionMsg); msg.msg.text != "Sent to b" || !slices.Equal(pasted, []string{"Postgres"}) || !slices.Contains(ran, "paste-buffer %6") {
+		t.Errorf("1 sent %q, pasted %q, ran %q", msg.msg.text, pasted, ran)
+	}
+	pasted = nil
+	_, cmd = press(m, "3")
+	if cmd(); !slices.Equal(pasted, []string{"Both"}) {
+		t.Errorf("3 pasted %q", pasted)
 	}
 }
 

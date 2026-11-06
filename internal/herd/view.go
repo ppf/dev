@@ -84,7 +84,7 @@ func (m Model) bottom() []string {
 	if sel < len(tiles) {
 		// o only offers what openPR does: the PR, or why its lookup failed
 		switch s := tiles[sel].sess; {
-		case s.State == agent.Waiting:
+		case s.State == agent.Waiting || len(tiles[sel].options()) > 0:
 			hint = "1-9 answer  " + hint
 		case s.PR.Number != 0 || s.PR.Err != "":
 			hint = "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
