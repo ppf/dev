@@ -157,13 +157,15 @@ func (m *Model) fold(t tile) {
 	m.folds[t.sess.Name] = !t.folded(m.folds)
 }
 
-// toggleExpand shows half the pane of t's screen on its card, or screenRows again; a folded card unfolds.
+// toggleExpand shows half the pane of t's screen on its card, or screenRows again; a folded card unfolds,
+// expanded.
 func (m *Model) toggleExpand(t tile) {
 	if m.expands == nil {
 		m.expands = map[string]bool{}
 	}
-	m.expands[t.sess.Name] = !m.expands[t.sess.Name]
-	if m.expands[t.sess.Name] && t.folded(m.folds) {
+	folded := t.folded(m.folds)
+	m.expands[t.sess.Name] = folded || !m.expands[t.sess.Name]
+	if folded {
 		m.fold(t)
 	}
 }

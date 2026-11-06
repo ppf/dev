@@ -255,6 +255,12 @@ func TestExpand(t *testing.T) {
 	if m = next.(Model); m.snap.tiles[3].folded(m.folds) || !m.expands["old-spike"] {
 		t.Errorf("v on a folded card: folded %v, expanded %v", m.snap.tiles[3].folded(m.folds), m.expands["old-spike"])
 	}
+	// Expanded, then folded: v unfolds it expanded
+	m.fold(m.snap.tiles[3])
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m = next.(Model); m.snap.tiles[3].folded(m.folds) || !m.expands["old-spike"] {
+		t.Errorf("v on an expanded folded card: folded %v, expanded %v", m.snap.tiles[3].folded(m.folds), m.expands["old-spike"])
+	}
 }
 
 // A refresh captures the selected card first, then the deciding ones, then the other open ones; folded
