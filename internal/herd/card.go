@@ -54,6 +54,7 @@ type liveLookups struct {
 	*sidebar.Lookups
 	mu    sync.Mutex
 	tails map[string]cachedTail
+	cis   *ciCache
 }
 
 // cachedTail is a transcript's tail as read at its size and modification time.
@@ -64,8 +65,11 @@ type cachedTail struct {
 }
 
 func newLookups(c *tmux.Client) *liveLookups {
-	return &liveLookups{Lookups: sidebar.NewLookups(c), tails: map[string]cachedTail{}}
+	return &liveLookups{Lookups: sidebar.NewLookups(c), tails: map[string]cachedTail{}, cis: newCICache()}
 }
+
+// CI is the checks of the PR at url as last read, read again at most every ciTTL.
+func (l *liveLookups) CI(url string) ci { return l.cis.get(url) }
 
 // Tail is the end of the transcript at path; none written yet is no error. A failed read isn't kept, so the
 // next refresh tries again.

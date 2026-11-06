@@ -229,7 +229,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
 	}
 	if pr := t.sess.PR; pr.Number != 0 {
-		text(sidebar.PRColour(pr.State), prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State)
+		rows = append(rows, line(in+sidebar.PRColour(pr.State)+prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State+reset+ciText(t.ci)))
 	}
 	for _, l := range said(t) {
 		text(rule, l)
@@ -402,6 +402,13 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		}
 		if pr := t.sess.PR; pr.Number != 0 {
 			left += "  " + sidebar.PRColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
+			if icon := ciIcon(t.ci.state); icon != "" {
+				left += " " + icon
+			}
+			if t.ci.err != "" {
+				// Its checks couldn't be read again: the icon may be stale
+				left += sidebar.Muted + "?" + reset
+			}
 		}
 		if len(warnings(t)) > 0 {
 			left += " " + sidebar.Gold + "⚠" + reset
@@ -547,4 +554,32 @@ func (m Model) screenRows(t tile) []string {
 		n = max(n, m.height/2)
 	}
 	return tail(t.body, n)
+}
+
+// ciIcon is a CI state's glyph in its colour: ✓ passed, ✗ failed, ◷ running; "" for none.
+func ciIcon(state string) string {
+	switch state {
+	case ciPassed:
+		return sidebar.Green + "✓" + reset
+	case ciFailed:
+		return sidebar.Red + "✗" + reset
+	case ciRunning:
+		return sidebar.Gold + "◷" + reset
+	}
+	return ""
+}
+
+// ciText is what a PR row says of its checks after the PR: the icon and the checks that make it as last
+// read; after a failed read the icon (if any) and why, first, so a narrow row keeps it.
+func ciText(c ci) string {
+	icon := ciIcon(c.state)
+	switch {
+	case c.err != "" && icon != "":
+		return "  " + icon + " " + sidebar.Muted + "CI unknown: " + c.err + reset
+	case c.err != "":
+		return "  " + sidebar.Muted + "CI unknown: " + c.err + reset
+	case icon != "":
+		return "  " + icon + " " + sidebar.Muted + strings.Join(c.names, ", ") + reset
+	}
+	return ""
 }

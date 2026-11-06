@@ -171,16 +171,25 @@ type fakeLookups struct {
 	prs   int
 	args  []string // the last PR call's
 	tails map[string]desktop.Tail
-	read  []string // the transcripts Tail read
+	read  []string   // the transcripts Tail read
+	cis   []string   // the PRs CI read
+	pr    sidebar.PR // what PR returns; #1 open when zero
 }
 
 func (f *fakeLookups) Branch(path string) string { return "br-" + path }
 func (f *fakeLookups) PR(pane, stored, gen, path, branch string) sidebar.PR {
 	f.prs++
 	f.args = []string{pane, stored, gen, path, branch}
+	if f.pr.Number != 0 {
+		return f.pr
+	}
 	return sidebar.PR{Number: 1, State: "open"}
 }
 func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
+func (f *fakeLookups) CI(url string) ci {
+	f.cis = append(f.cis, url)
+	return ci{state: ciRunning, names: []string{"test"}}
+}
 func (f *fakeLookups) Tail(path string) (desktop.Tail, error) {
 	f.read = append(f.read, path)
 	t, ok := f.tails[path]
