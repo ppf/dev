@@ -228,31 +228,31 @@ func TestBoardScroll(t *testing.T) {
 func TestExpand(t *testing.T) {
 	m := board4()
 	m.height = 10
-	if got := m.screenRows(m.snap.tiles[1], nil, 80); len(got) != screenRows {
+	if got := m.screenRows(m.snap.tiles[1], nil); len(got) != screenRows {
 		t.Errorf("screen rows %d, want %d", len(got), screenRows)
 	}
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	m = next.(Model)
 	m.snap.tiles[1].body = append(m.snap.tiles[1].body, "7", "8")
-	if got := m.screenRows(m.snap.tiles[1], nil, 80); len(got) != screenRows {
+	if got := m.screenRows(m.snap.tiles[1], nil); len(got) != screenRows {
 		t.Errorf("expanded in a 10-row pane: %d rows, want %d", len(got), screenRows)
 	}
 	m.height = 40
-	if got := m.screenRows(m.snap.tiles[1], nil, 80); len(got) != 8 {
+	if got := m.screenRows(m.snap.tiles[1], nil); len(got) != 8 {
 		t.Errorf("expanded: %d rows, want all 8 (up to 20)", len(got))
 	}
-	if got := m.screenRows(m.snap.tiles[2], nil, 80); len(got) != 0 {
+	if got := m.screenRows(m.snap.tiles[2], nil); len(got) != 0 {
 		t.Errorf("an uncaptured card shows %q", got)
 	}
 	m.snap.tiles[0].body = slices.Repeat([]string{"x"}, 8)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
-	if m = next.(Model); m.selected != "fix-login" || len(m.screenRows(m.snap.tiles[0], nil, 80)) != screenRows || len(m.screenRows(m.snap.tiles[1], nil, 80)) != 8 {
-		t.Errorf("after k: fix-login %d rows, docs-api %d", len(m.screenRows(m.snap.tiles[0], nil, 80)), len(m.screenRows(m.snap.tiles[1], nil, 80)))
+	if m = next.(Model); m.selected != "fix-login" || len(m.screenRows(m.snap.tiles[0], nil)) != screenRows || len(m.screenRows(m.snap.tiles[1], nil)) != 8 {
+		t.Errorf("after k: fix-login %d rows, docs-api %d", len(m.screenRows(m.snap.tiles[0], nil)), len(m.screenRows(m.snap.tiles[1], nil)))
 	}
 	m.selected = "docs-api"
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
-	if m = next.(Model); len(m.screenRows(m.snap.tiles[1], nil, 80)) != screenRows {
-		t.Errorf("v again: %d rows, want %d", len(m.screenRows(m.snap.tiles[1], nil, 80)), screenRows)
+	if m = next.(Model); len(m.screenRows(m.snap.tiles[1], nil)) != screenRows {
+		t.Errorf("v again: %d rows, want %d", len(m.screenRows(m.snap.tiles[1], nil)), screenRows)
 	}
 	m.selected = "old-spike"
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
@@ -405,26 +405,26 @@ func TestScreenTrim(t *testing.T) {
 	m := board4()
 	tl := m.snap.tiles[1]
 	tl.body = []string{"", "  ", "\x1b[0m", "", "✻ Working… (3s)"}
-	if got := m.screenRows(tl, nil, 80); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
+	if got := m.screenRows(tl, nil); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
 		t.Errorf("blank lines kept: %q", got)
 	}
 	tl.body = []string{"", "\x1b[1m⏺\x1b[0m Tests  next.", "", "✻ Working… (3s)"}
-	if got := m.screenRows(tl, said(tl), 80); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
+	if got := m.screenRows(tl, said(tl)); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
 		t.Errorf("said line kept: %q", got)
 	}
 	long := strings.Repeat("word ", 28) + "end."
 	tl.tail.Lines = []string{long}
 	tl.body = []string{"⏺ " + long[:60], "  " + long[60:], "", "✻ Working… (3s)"}
-	if got := m.screenRows(tl, said(tl), 80); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
+	if got := m.screenRows(tl, said(tl)); !slices.Equal(got, []string{"✻ Working… (3s)"}) {
 		t.Errorf("wrapped said line kept: %q", got)
 	}
 	tl.body = []string{"⏺ " + long[:60], "  something else", "✻ Working… (3s)"}
-	if got := m.screenRows(tl, said(tl), 80); len(got) != 3 {
+	if got := m.screenRows(tl, said(tl)); len(got) != 3 {
 		t.Errorf("a line starting like a said one dropped: %q", got)
 	}
 	tl.tail.Lines = board4().snap.tiles[1].tail.Lines
 	tl.body = []string{"Tests next. Then docs.", "✻ Working… (3s)"}
-	if got := m.screenRows(tl, said(tl), 80); len(got) != 2 {
+	if got := m.screenRows(tl, said(tl)); len(got) != 2 {
 		t.Errorf("a different line dropped: %q", got)
 	}
 }
@@ -474,7 +474,8 @@ func TestAsksCard(t *testing.T) {
 	}
 }
 
-// An asks card says a question longer than a board line once: its last lines stop above it.
+// An asks card says a question longer than a board line once, in its status from its start: its last lines and
+// its screen stop above the question's first wrapped row.
 func TestAsksCardLongQuestion(t *testing.T) {
 	ask := "Should I also move the CI cache settings into the shared workflow file, so `herd`, `sidebar` and `inbox` " +
 		"all reuse one Go module cache keyed on go.sum, or keep each job's own cache as it is now, given the shared " +
@@ -503,25 +504,37 @@ func TestAsksCardLongQuestion(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "cache", Agent: "Claude", State: agent.Idle, Branch: "ci-cache"},
 		note: note.Summary(), tail: read}
 	// The screen wraps the reply at 120 columns
-	tl.body = []string{"⏺ Pushed the cache change to the branch.", ""}
+	tl.body = []string{"⏺ Bash(go test ./...)", "  ⎿  ok  github.com/ppf/dev/internal/herd", "", "⏺ Pushed the cache change to the branch.", ""}
+	var asked []string
 	prefix, rowText := "⏺ ", ""
 	for _, w := range strings.Fields(strings.ReplaceAll(ask, "`", "")) {
 		if len(rowText)+1+len(w) > 118 {
-			tl.body = append(tl.body, prefix+rowText)
+			asked = append(asked, prefix+rowText)
 			prefix, rowText = "  ", ""
 		}
 		rowText = strings.TrimPrefix(rowText+" "+w, " ")
 	}
-	tl.body = append(tl.body, prefix+rowText, "", "✻ Worked for 6s · done 13:36")
+	asked = append(asked, prefix+rowText)
+	if len(asked) < 3 {
+		t.Fatalf("question wraps to %d rows, want 3 or more", len(asked))
+	}
+	tl.body = append(append(tl.body, asked...), "", "✻ Worked for 6s · done 13:36")
 	if got := said(tl); slices.ContainsFunc(got, func(l string) bool { return strings.Contains(l, "CI cache") }) {
 		t.Errorf("said = %q, want the question left to the status", got)
 	}
 	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
 	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
-	// Its status, cut to its end, doesn't fit, so the screen keeps the whole question
-	above, screen, _ := strings.Cut(got, "┄ screen")
-	if strings.Contains(above, "Should I also move") || !strings.Contains(screen, "Should I also move") {
-		t.Errorf("question's start not on the screen alone:\n%s", got)
+	if n := strings.Count(got, "Should I also move"); n != 1 || !strings.Contains(got, "│    Should I also move the CI cache") {
+		t.Errorf("question's start shown %d times, want once in the status:\n%s", n, got)
+	}
+	_, screen, ok := strings.Cut(got, "┄ screen")
+	if !ok || !strings.Contains(screen, "ok  github.com/ppf/dev/internal/herd") {
+		t.Fatalf("screen not the rows above the question:\n%s", got)
+	}
+	for _, r := range asked {
+		if strings.Contains(screen, strings.TrimSpace(strings.TrimPrefix(r, "⏺"))) {
+			t.Errorf("question's row %q on screen:\n%s", r, got)
+		}
 	}
 }
 
@@ -579,14 +592,14 @@ func TestNeedsYouDropsExpand(t *testing.T) {
 	next, _ := m.Update(refreshMsg{snap: snap})
 	m = next.(Model)
 	spike := m.snap.tiles[index(m.snap.tiles, "old-spike")]
-	if got := len(m.screenRows(spike, nil, 80)); got != screenRows || !m.expands["docs-api"] {
+	if got := len(m.screenRows(spike, nil)); got != screenRows || !m.expands["docs-api"] {
 		t.Errorf("entering Needs you: %d rows, want %d; docs-api expanded %v", got, screenRows, m.expands["docs-api"])
 	}
 	m.selected = "old-spike"
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	next, _ = next.(Model).Update(refreshMsg{snap: snap})
-	if m = next.(Model); len(m.screenRows(spike, nil, 80)) != m.height/2 {
-		t.Errorf("v under Needs you: %d rows, want %d", len(m.screenRows(spike, nil, 80)), m.height/2)
+	if m = next.(Model); len(m.screenRows(spike, nil)) != m.height/2 {
+		t.Errorf("v under Needs you: %d rows, want %d", len(m.screenRows(spike, nil)), m.height/2)
 	}
 }
 
@@ -639,20 +652,23 @@ func TestAsksOptions(t *testing.T) {
 			if got := said(tl); !slices.Equal(got, tt.said) {
 				t.Errorf("said = %q, want %q", got, tt.said)
 			}
-			if got := (Model{height: 40}).screenRows(tl, said(tl), 80); !slices.Equal(got, tt.screen) {
+			if got := (Model{height: 40}).screenRows(tl, said(tl)); !slices.Equal(got, tt.screen) {
 				t.Errorf("screen = %q, want %q", got, tt.screen)
 			}
 		})
 	}
 }
 
-// An asks card with its status cut keeps its question and options on screen, the only place they show whole.
+// An asks card with its status cut still says its question and options only there, from the question's start.
 func TestAsksStatusCut(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Which DB? - Postgres - SQLite",
-		tail: desktop.Tail{Lines: []string{"Intro.", "Which DB?", "- Postgres", "- SQLite"}},
-		body: []string{"⏺ Intro.", "", "  Which DB?", "", "  - Postgres", "  - SQLite"}}
-	if got := (Model{}).screenRows(tl, said(tl), 20); !slices.Contains(got, "  - SQLite") {
-		t.Errorf("options cropped though the status is cut: %q", got)
+		tail: desktop.Tail{Lines: []string{"Intro.", "Which **DB**?", "- `Postgres`", "- SQLite"}},
+		body: []string{"⏺ Ran 1 shell command", "", "⏺ Intro.", "", "  Which DB?", "", "  - Postgres", "  - SQLite"}}
+	if got := statusText(tl, needsYouSection); got != "Which DB? - Postgres - SQLite" {
+		t.Errorf("status = %q, want the reply's question and options", got)
+	}
+	if got := (Model{}).screenRows(tl, said(tl)); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
+		t.Errorf("screen = %q, want the rows above the question though the status is cut", got)
 	}
 }
 
