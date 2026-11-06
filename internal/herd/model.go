@@ -100,7 +100,7 @@ type Model struct {
 	clk           control.Clock
 	host          string          // hostname, tmux's default pane title: a title that says nothing
 	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
-	expand        bool            // the selected card shows more of its screen
+	expands       map[string]bool // by session: its card shows more of its screen (v)
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
@@ -172,10 +172,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selected = m.validSelection()
 			m.syncPick()
-			for name := range m.folds {
-				if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
-					// A new session of that name starts from its section's default
-					delete(m.folds, name)
+			for _, byName := range []map[string]bool{m.folds, m.expands} {
+				for name := range byName {
+					if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
+						// A new session of that name starts from its section's default
+						delete(byName, name)
+					}
 				}
 			}
 		}
