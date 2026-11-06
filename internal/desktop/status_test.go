@@ -61,3 +61,22 @@ func TestStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestMarker(t *testing.T) {
+	tests := []struct {
+		lines  []string
+		status string
+		what   string
+		ok     bool
+	}{
+		{nil, "", "", false},
+		{[]string{"Done."}, "", "", false},
+		{[]string{"**WAITING (CI)**", "Back soon."}, StatusWaiting, "CI", true},
+		{[]string{"WAITING (CI)", "`IDLE`"}, StatusIdle, "", true},
+	}
+	for _, tt := range tests {
+		if st, what, ok := Marker(tt.lines); st != tt.status || what != tt.what || ok != tt.ok {
+			t.Errorf("Marker(%q) = %q %q %v, want %q %q %v", tt.lines, st, what, ok, tt.status, tt.what, tt.ok)
+		}
+	}
+}

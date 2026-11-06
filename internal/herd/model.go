@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -44,6 +46,9 @@ type row struct {
 	PRGen        string `tmux:"@dev_pr_gen"`
 	Question     string `tmux:"@agent_question"`
 	Note         string `tmux:"@dev_boss_note"`
+	Transcript   string `tmux:"@agent_transcript"`
+	Context      string `tmux:"@agent_context"`
+	Since        string `tmux:"@agent_since"`
 }
 
 // tile is one worker session's preview.
@@ -55,6 +60,10 @@ type tile struct {
 	body     []string       // the pane's last screen lines; nil when not captured this tick
 	pick     *pick          // the dialog a deciding agent shows; nil when none or not captured
 	note     string         // its latest boss inbox note (inbox.OptNote), which the compact view shows
+	since    time.Time      // when its state began (@agent_since); zero when unknown
+	context  string         // @agent_context, its context window's use in whole percent; "" when unknown
+	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
+	tailErr  error          // why its transcript could not be read
 }
 
 // snapshot is what one refresh saw.
@@ -93,6 +102,7 @@ type lookups interface {
 	Branch(path string) string
 	PR(pane, stored, gen, path, branch string) sidebar.PR
 	OpenPR(url string) error
+	Tail(path string) (desktop.Tail, error)
 }
 
 type tickMsg struct{}
@@ -119,7 +129,7 @@ func Run(c *tmux.Client, pane string) error {
 // newModel is the previews in pane, in the view its boss session keeps (OptView); one it can't read starts
 // full, with the error on the bottom row.
 func newModel(c *tmux.Client, pane string) Model {
-	m := Model{c: c, pane: pane, look: sidebar.NewLookups(c), clk: control.RealClock}
+	m := Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock}
 	view, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptView+"}")
 	if err != nil {
 		// Closing the previews would end the boss
@@ -319,19 +329,19 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		if a.CostOK && !sidebar.CostHidden(rs[0].CostOpt) {
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
-		if s.visible {
-			i := slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })
-			sess.PR = look.PR(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
+		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
+		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context}
+		if sec, err := strconv.ParseInt(r.Since, 10, 64); err == nil {
+			t.since = time.Unix(sec, 0)
 		}
-		sessions = append(sessions, sess)
-		t := tile{pane: a.Pane.ID}
-		for _, r := range rs {
-			if r.ID == a.Pane.ID {
-				t.deciding = agent.Deciding(a.State, r.WaitingFor)
-				t.question, _ = agent.ParseQuestion(r.Question)
-				t.note = r.Note
+		t.question, _ = agent.ParseQuestion(r.Question)
+		if s.visible {
+			sess.PR = look.PR(a.Pane.ID, r.PR, r.PRGen, a.Pane.Path, sess.Branch)
+			if r.Transcript != "" {
+				t.tail, t.tailErr = look.Tail(r.Transcript)
 			}
 		}
+		sessions = append(sessions, sess)
 		meta[name] = t
 	}
 	for _, sess := range sidebar.Order(sessions) {

@@ -98,6 +98,28 @@ func readTranscript(projects, id string) (transcript, error) {
 	return t, scanErr
 }
 
+// Tail is what a transcript's end says, for a tmux worker's card: the newest reply's last lines, the tool
+// call in flight ("" for none) and what it says it does ("" for none, or a tool not in describedTools), and
+// how many rows did not parse.
+type Tail struct {
+	Lines           []string
+	Tool            string
+	ToolDescription string
+	Broken          int
+}
+
+// ReadTail reads the end of the transcript at path, as the board does but without its task list: no scan
+// before the tail, so it is cheap enough to read every second. The error is the read's; rows that don't
+// parse are counted in Broken.
+func ReadTail(path string) (Tail, error) {
+	data, _, err := tail(path, tailBytes)
+	if err != nil {
+		return Tail{}, err
+	}
+	t, _ := parseTranscript(data)
+	return Tail{Lines: t.lines, Tool: t.tool, ToolDescription: t.toolDescription, Broken: t.broken}, nil
+}
+
 // tail reads the whole lines in the last n bytes of path and where they start; none when no whole line fits.
 func tail(path string, n int64) ([]byte, int64, error) {
 	f, err := os.Open(path)
