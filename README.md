@@ -243,3 +243,4 @@ When the [GitHub CLI](https://cli.github.com) (`gh`) is installed and signed in,
 ## License
 
 Apache-2.0
+<!-- board demo 2026-11-06 -->
