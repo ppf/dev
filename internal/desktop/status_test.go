@@ -35,6 +35,7 @@ func TestStatus(t *testing.T) {
 		{"rate-limited, no reset read", Worker{State: StateIdle}, Hook{RateLimited: true}, false, StatusRateLimited, "no reset time read"},
 		{"stuck", Worker{State: StateBusy, Tool: "Bash", Notes: stuck}, Hook{}, false, StatusStuck, "no progress for 17m"},
 		{"working", Worker{State: StateBusy, Tool: "Bash"}, Hook{}, false, StatusWorking, "Bash"},
+		{"working, saying what its call does", Worker{State: StateBusy, Tool: "Bash", ToolDescription: "Count hook files"}, Hook{}, false, StatusWorking, "Count hook files"},
 		{"waiting on Auto-fix", Worker{State: StateIdle, LastLines: []string{"PR open.", "WAITING (Auto-fix: PR #80)"}}, Hook{}, false, StatusWaiting, "Auto-fix: PR #80"},
 		{"waiting, in bold", Worker{State: StateBlocked, LastLines: []string{"**WAITING (background: CI, ~5 min)**"}}, Hook{}, false, StatusWaiting, "background: CI, ~5 min"},
 		{"IDLE says nothing runs", Worker{State: StateBlocked, NeedsAction: "x", LastLines: []string{"`IDLE`"}}, Hook{}, false, StatusIdle, ""},

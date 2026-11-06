@@ -26,6 +26,8 @@ type transcript struct {
 	written time.Time
 	lines   []string
 	tool    string
+	// toolDescription is what the newest unanswered tool use says it does (a describedTools input's description), else ""
+	toolDescription string
 	// ask is the newest unanswered tool use's questions when it is an AskUserQuestion, else nil
 	ask *Pending
 	// wrapAsk is the ask the newest wrap_up ended its turn on, nil once a prompt came after it or the call failed
@@ -196,12 +198,22 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 	if len(pending) > 0 {
 		last := pending[len(pending)-1]
 		t.tool = last.Name
+		var in struct {
+			Description string `json:"description"`
+		}
+		if describedTools[last.Name] && json.Unmarshal(last.Input, &in) == nil {
+			t.toolDescription = cut(strings.Join(strings.Fields(in.Description), " "))
+		}
 		if p, ok := askInput(last); ok {
 			t.ask = &p
 		}
 	}
 	return t, ops
 }
+
+// describedTools are the tools whose input's description says what the call does; others' (an MCP tool's issue
+// body) may be content.
+var describedTools = map[string]bool{"Bash": true, "Agent": true, "Task": true}
 
 func isToolResult(b block) bool { return b.Type == "tool_result" }
 
