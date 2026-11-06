@@ -1,7 +1,10 @@
 package herd
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -59,7 +62,7 @@ type tile struct {
 	question agent.Question // @agent_question, what its dialog asks
 	body     []string       // the pane's last screen lines; nil when not captured this tick
 	pick     *pick          // the dialog a deciding agent shows; nil when none or not captured
-	note     string         // its latest boss inbox note (inbox.OptNote), which the compact view shows
+	note     string         // its latest boss inbox note (inbox.OptNote)
 	since    time.Time      // when its state began (@agent_since); zero when unknown
 	context  string         // @agent_context, its context window's use in whole percent; "" when unknown
 	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
@@ -94,7 +97,9 @@ type Model struct {
 	answering     string              // the session an answer's keys go to, until its outcome; one at a time
 	history       []string            // replies sent, oldest first
 	clk           control.Clock
-	compact       bool // the list view instead of the tiles
+	host          string          // hostname, tmux's default pane title: a title that says nothing
+	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
+	expand        bool            // the selected card shows more of its screen
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
@@ -126,26 +131,17 @@ func Run(c *tmux.Client, pane string) error {
 	return nil
 }
 
-// newModel is the previews in pane, in the view its boss session keeps (OptView); one it can't read starts
-// full, with the error on the bottom row.
+// newModel is the previews in pane.
 func newModel(c *tmux.Client, pane string) Model {
-	m := Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock}
-	view, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptView+"}")
-	if err != nil {
-		// Closing the previews would end the boss
-		m.msg = "❌ view: " + err.Error()
-	}
-	m.compact = strings.TrimSpace(view) == compactView
-	return m
+	// Without it only a title naming the host shows
+	host, _ := os.Hostname()
+	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host}
 }
 
-// Init starts the first refresh; a compact view kept from before narrows the pane again.
+// Init starts the first refresh and fits the pane to its share of the window, also for a boss restored, or
+// one an older dev left wider or narrower.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.refresh(), m.watchLater()}
-	if m.compact {
-		cmds = append(cmds, m.applyView())
-	}
-	return tea.Batch(cmds...)
+	return tea.Batch(m.refresh(), m.watchLater(), m.action(func() error { return fitWidth(m.c, m.pane) }))
 }
 
 // watchLater runs inbox.Watch after watchInterval.
@@ -174,6 +170,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selected = m.validSelection()
 			m.syncPick()
+			for name := range m.folds {
+				if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
+					// A new session of that name starts from its section's default
+					delete(m.folds, name)
+				}
+			}
 		}
 		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tea.WindowSizeMsg:
@@ -219,11 +221,12 @@ func (m Model) validSelection() string {
 	return ""
 }
 
-// refresh lists panes and clients (two tmux calls), and while a client shows this window captures the
-// tiles on the selected page (one call each, at most maxTiles); the compact view captures only the deciding
-// ones, for their dialogs.
+// refresh lists panes and clients (two tmux calls), and while a client shows this window captures the open
+// cards' panes and the deciding ones', for their dialogs (one call each, at most maxCaptures, the selected
+// card's first).
 func (m Model) refresh() tea.Cmd {
-	width, height, selected, compact, inputs := m.width, m.gridHeight(), m.selected, m.compact, m.inputs
+	selected, inputs, host := m.selected, m.inputs, m.host
+	folds := maps.Clone(m.folds)
 	return func() tea.Msg {
 		rows, err := tmux.Query[row](m.c, "list-panes", "-a")
 		if err != nil {
@@ -233,31 +236,17 @@ func (m Model) refresh() tea.Cmd {
 		if err != nil {
 			return refreshMsg{err: err}
 		}
-		snap, err := buildSnapshot(rows, clients, m.pane, m.look)
+		snap, err := buildSnapshot(rows, clients, m.pane, host, m.look)
 		if err != nil {
 			return refreshMsg{err: err}
 		}
 		if !snap.visible {
 			return refreshMsg{snap: snap, inputs: inputs}
 		}
-		g := layout(len(snap.tiles), width, height)
-		var captures []int
-		if compact {
-			for i, t := range snap.tiles {
-				if t.deciding {
-					captures = append(captures, i)
-				}
-			}
-		} else {
-			from, to := g.page(index(snap.tiles, selected))
-			for i := from; i < min(to, len(snap.tiles)); i++ {
-				captures = append(captures, i)
-			}
-		}
-		for _, i := range captures {
+		for _, i := range captures(snap.tiles, selected, folds) {
 			out, err := m.c.Run("capture-pane", "-p", "-e", "-t", snap.tiles[i].pane)
 			if err != nil {
-				// The pane may have closed since list-panes; its tile goes with the next refresh
+				// The pane may have closed since list-panes; its card goes with the next refresh
 				snap.tiles[i].body = []string{err.Error()}
 				continue
 			}
@@ -277,17 +266,48 @@ func (m Model) refresh() tea.Cmd {
 					t.sess.State = st.Trusted()
 				}
 			}
-			if !compact {
-				t.body = tail(previewLines(out, *t), g.tileH-1)
-			}
+			t.body = previewLines(out, *t)
 		}
+		// A dialog found gone moves its card out of Needs you
+		sortBySection(snap.tiles)
 		return refreshMsg{snap: snap, inputs: inputs}
 	}
 }
 
-// buildSnapshot turns the rows into tiles in sidebar order, keeping only agent sessions this boss
-// started. PRs are only looked up while visible.
-func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look lookups) (snapshot, error) {
+// maxCaptures caps the captures per refresh.
+const maxCaptures = 12
+
+// captures are the indexes of the tiles whose panes a refresh captures: the selected one when open, then the
+// deciding ones, then the other open ones nearest the selected one (in view, as the board scrolls to it), at
+// most maxCaptures.
+func captures(tiles []tile, selected string, folds map[string]bool) []int {
+	var first, deciding, open []int
+	sel := index(tiles, selected)
+	for i, t := range tiles {
+		switch {
+		case t.sess.Name == selected && (t.deciding || !t.folded(folds)):
+			first = append(first, i)
+		case t.deciding:
+			deciding = append(deciding, i)
+		case !t.folded(folds):
+			open = append(open, i)
+		}
+	}
+	slices.SortStableFunc(open, func(a, b int) int { return cmp.Compare(abs(a-sel), abs(b-sel)) })
+	all := slices.Concat(first, deciding, open)
+	return all[:min(len(all), maxCaptures)]
+}
+
+func abs(n int) int { return max(n, -n) }
+
+// sortBySection puts tiles in section order, keeping their order within one.
+func sortBySection(tiles []tile) {
+	slices.SortStableFunc(tiles, func(a, b tile) int { return cmp.Compare(a.section(), b.section()) })
+}
+
+// buildSnapshot turns the rows into tiles by section, in sidebar order within one, keeping only agent sessions
+// this boss started. PRs and transcripts are only read while visible.
+func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look lookups) (snapshot, error) {
 	var s snapshot
 	own := false
 	var names []string
@@ -325,7 +345,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 			continue
 		}
 		sess := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), Agent: a.Label, State: a.State,
-			Branch: look.Branch(a.Pane.Path)}
+			Branch: look.Branch(a.Pane.Path), Title: sidebar.PaneTitle(a.Label, a.Pane.Title, name, host)}
 		if a.CostOK && !sidebar.CostHidden(rs[0].CostOpt) {
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
@@ -349,6 +369,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane string, look looku
 		t.sess = sess
 		s.tiles = append(s.tiles, t)
 	}
+	sortBySection(s.tiles)
 	return s, nil
 }
 

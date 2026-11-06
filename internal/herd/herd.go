@@ -26,16 +26,10 @@ const (
 	OptStartedOutside = "@dev_started_outside"
 )
 
-// OptView is the boss session option holding the previews' view: compactView, else the full tiles.
-const OptView = "@dev_boss_view"
-
-const compactView = "compact"
-
-// The previews pane's share of the window's width: the full view's, and the compact view's (at least
-// minTileW columns, at most half the window).
+// The previews pane's share of the window's width, at least minCardsW columns and at most half the window.
 const (
-	fullPct    = 55
-	compactPct = 30
+	previewsPct = 40
+	minCardsW   = 60
 )
 
 // OptPane is the pane option holding a boss pane's role, which the resurrect save records.
@@ -146,7 +140,7 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)
 	}
-	previews := run("split-window", "-t", claude, "-h", "-l", strconv.Itoa(fullPct)+"%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
+	previews := run("split-window", "-t", claude, "-h", "-l", strconv.Itoa(previewsPct)+"%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
 	if err == nil {
 		err = bind(c, target, exe, claude, previews)
 	}
@@ -212,8 +206,8 @@ func bind(c *tmux.Client, target, exe, claude, previews string) error {
 	return err
 }
 
-// setView records the view on pane's session and resizes pane, the previews, to its share of the window.
-func setView(c *tmux.Client, pane string, compact bool) error {
+// fitWidth resizes pane, the previews, to its share of the window.
+func fitWidth(c *tmux.Client, pane string) error {
 	out, err := c.Run("display-message", "-p", "-t", pane, "#{window_width}")
 	if err != nil {
 		return err
@@ -222,13 +216,7 @@ func setView(c *tmux.Client, pane string, compact bool) error {
 	if err != nil {
 		return fmt.Errorf("window width %q: %w", out, err)
 	}
-	set := []string{"set-option", "-u", "-t", pane, OptView}
-	cols := w * fullPct / 100
-	if compact {
-		set = []string{"set-option", "-t", pane, OptView, compactView}
-		cols = min(max(w*compactPct/100, minTileW), w/2)
-	}
-	_, err = c.Run(append(set, ";", "resize-pane", "-t", pane, "-x", strconv.Itoa(cols))...)
+	_, err = c.Run("resize-pane", "-t", pane, "-x", strconv.Itoa(min(max(w*previewsPct/100, minCardsW), w/2)))
 	return err
 }
 

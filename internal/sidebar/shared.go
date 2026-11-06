@@ -73,3 +73,27 @@ func HintRow(text string, width int) string {
 func AlertRow(msg string, width int) string {
 	return " " + red + truncate(strings.Join(strings.Fields(msg), " "), width-1) + reset
 }
+
+// The sidebar's colours, for views drawn in its style (the boss previews' cards).
+const (
+	Gold  = gold
+	Green = green
+	Red   = red
+	Muted = muted
+	Faint = faint
+	// SelectedBG is the selected row's background.
+	SelectedBG = selectedBG
+)
+
+// PRColour is a PR tag's colour by state.
+func PRColour(state string) string { return prColour(state) }
+
+// PaneTitle is an agent pane's title as the sidebar shows it: cleaned, Codex's rewritten, "" when it says
+// nothing about session (host is the hostname tmux gives new panes as their title).
+func PaneTitle(label, title, session, host string) string {
+	title = cleanTitle(title)
+	if isGenericTitle(title, session, host) {
+		return ""
+	}
+	return agentTitle(label, title)
+}

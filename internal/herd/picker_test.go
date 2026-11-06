@@ -305,35 +305,37 @@ func ansiStrip(lines []string) []string {
 	return out
 }
 
-// Behind an open reply box its tile is framed in its accent (header background, the rules beside and
-// under it) and the others are dimmed; a selected tile without the box keeps the selection background.
+// The reply box's card is framed in its state's accent, as the selected card is, and so is the box's rule.
 func TestBoundTile(t *testing.T) {
-	m := Model{width: 61, height: 14, selected: "b", snap: snapshot{tiles: []tile{
-		{sess: sidebar.Session{Name: "a", Agent: "Claude", State: "idle"}, body: []string{"\x1b[32mgreen\x1b[0m"}},
-		{sess: sidebar.Session{Name: "b", Agent: "Claude", State: "waiting"}, body: []string{"\x1b[31mred\x1b[0m"}},
+	m := Model{width: 61, height: 30, selected: "a", snap: snapshot{tiles: []tile{
+		{sess: sidebar.Session{Name: "b", Agent: "Claude", State: "waiting"}, deciding: true, body: []string{"\x1b[31mred\x1b[0m"}},
 		{sess: sidebar.Session{Name: "c", Agent: "Claude", State: "working"}, body: []string{"x"}},
+		{sess: sidebar.Session{Name: "a", Agent: "Claude", State: "idle"}, note: "failed: boom", body: []string{"\x1b[32mgreen\x1b[0m"}},
 	}}}
-	const redBG = "\x1b[48;2;228;104;118m"
+	frame := func(lines []string, name string) string {
+		for i, l := range lines {
+			if strings.Contains(ansi.Strip(l), "● "+name+" ") {
+				return lines[i-1]
+			}
+		}
+		return ""
+	}
 	plain := m.render()
-	if !strings.HasPrefix(plain[0], "\x1b[48;2;30;30;38m") || !strings.Contains(plain[0], "\x1b[48;2;42;42;55m") || strings.Contains(strings.Join(plain, ""), redBG) {
-		t.Errorf("no box: a plain, b selected, no accent:\n%q", plain[0])
+	if f := frame(plain, "a"); !strings.Contains(f, "\x1b[38;2;152;187;108m╭") {
+		t.Errorf("selected a framed in green:\n%q", f)
 	}
-	m.open(m.snap.tiles[1])
+	if f := frame(plain, "b"); !strings.Contains(f, rule+"╭") {
+		t.Errorf("b framed faint:\n%q", f)
+	}
+	m.open(m.snap.tiles[0])
 	got := m.render()
-	// 3 tiles of 30 columns: a b on top, c under a
-	if !strings.Contains(got[0], red+"│"+reset+redBG+ink+bold+" ● b Claude · waiting") {
-		t.Errorf("b's header on its accent, the rule left of it red:\n%q", got[0])
+	if f := frame(got, "b"); !strings.Contains(f, red+"╭") {
+		t.Errorf("b's card in its accent:\n%q", f)
 	}
-	if !strings.HasPrefix(got[0], headerBG+rule+" ● a") || !strings.Contains(got[1], rule+"green") {
-		t.Errorf("a dimmed:\n%q\n%q", got[0], got[1])
+	if f := frame(got, "a"); !strings.Contains(f, rule+"╭") {
+		t.Errorf("a no longer selected:\n%q", f)
 	}
-	gh := m.gridHeight()
-	g := layout(3, 61, gh)
-	div := got[g.tileH]
-	if !strings.Contains(div, red+"┴"+red+strings.Repeat("─", 30)) || !strings.HasPrefix(div, rule+strings.Repeat("─", 30)) {
-		t.Errorf("divider under b red, under a faint:\n%q", div)
-	}
-	if !strings.HasPrefix(got[gh], red+"─"+reset) {
+	if gh := m.boardHeight(); !strings.HasPrefix(got[gh], red+"─"+reset) {
 		t.Errorf("box rule in b's accent: %q", got[gh])
 	}
 }

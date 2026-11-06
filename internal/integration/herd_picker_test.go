@@ -79,14 +79,14 @@ func TestHerdPicker(t *testing.T) {
 	_, errOut, status := devAgent(env, "", "prompt", "w1", "ask")
 	check(t, "prompt", status+errOut, "0")
 	waitFor(t, "w1 waiting with its question", func() bool {
-		return d.T("show-option", "-pqv", "-t", w1, "@agent_question") != "" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "w1 Claude · waiting")
+		return d.T("show-option", "-pqv", "-t", w1, "@agent_question") != "" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "▾ ● w1")
 	})
 	d.T("send-keys", "-t", previews, "i")
 	waitPane(t, d, previews, "the picker", func(screen string) bool {
 		return strings.Contains(screen, "▎ Bash  rm -rf build") && strings.Contains(screen, "▎ ❯ 1. Yes") && strings.Contains(screen, "▎   2. No")
 	})
-	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, "48;2;228;104;118") {
-		t.Errorf("❌ w1's tile header isn't on its red accent:\n%s", styled)
+	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, "38;2;228;104;118m┃╭") {
+		t.Errorf("❌ w1's card isn't framed in its red accent:\n%s", styled)
 	}
 
 	d.T("send-keys", "-t", previews, "2")
@@ -120,18 +120,18 @@ func waitPane(t *testing.T, d *devServer, pane, desc string, cond func(screen st
 	t.Fatalf("❌ timeout waiting for: %s; screen:\n%s", desc, screen)
 }
 
-// A click on a tile opens its reply box, framed in the tile's accent; focus moving to the coordinator closes
+// A click on a card opens its reply box, its rule in the card's accent; focus moving to the coordinator closes
 // it back to the hint row, and focus coming back doesn't reopen it.
 func TestHerdReplyBlur(t *testing.T) {
 	d, _, coord, previews := herdServer(t, "set -g mouse on\n")
 	d.T("select-pane", "-t", coord)
-	waitPane(t, d, previews, "w1's tile", func(screen string) bool { return strings.Contains(screen, "w1 Claude · idle") })
-	const accent = "48;2;152;187;108" // idle green as a background
-	actClick(d, previews, 2, 0)
+	waitPane(t, d, previews, "w1's card", func(screen string) bool { return strings.Contains(screen, "▸ ● w1") })
+	const accent = "38;2;152;187;108m─" // the box's rule in idle green
+	actClick(d, previews, 8, 1)
 	waitPane(t, d, previews, "the reply box", func(screen string) bool { return strings.Contains(screen, "esc cancel") })
 	check(t, "the click focused the previews", d.T("display", "-t", previews, "-p", "#{pane_active}"), "1")
 	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, accent) {
-		t.Errorf("❌ w1's tile header isn't on its accent:\n%s", styled)
+		t.Errorf("❌ the box's rule isn't in w1's accent:\n%s", styled)
 	}
 
 	d.T("select-pane", "-t", coord)
@@ -139,7 +139,7 @@ func TestHerdReplyBlur(t *testing.T) {
 		return !strings.Contains(screen, "esc cancel") && strings.Contains(screen, "i reply")
 	})
 	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); strings.Contains(styled, accent) {
-		t.Errorf("❌ w1's tile header still on its accent:\n%s", styled)
+		t.Errorf("❌ the box's rule still drawn:\n%s", styled)
 	}
 
 	d.T("select-pane", "-t", previews)

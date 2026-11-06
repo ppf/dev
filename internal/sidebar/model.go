@@ -231,11 +231,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
 			StartedBy: rs[0].StartedBy}
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
-			title := cleanTitle(a.Pane.Title)
-			if isGenericTitle(title, name, host) {
-				title = ""
-			}
-			sess.Agent, sess.State, sess.Title = a.Label, a.State, agentTitle(a.Label, title)
+			sess.Agent, sess.State, sess.Title = a.Label, a.State, PaneTitle(a.Label, a.Pane.Title, name, host)
 			if a.CostOK && !CostHidden(rs[0].CostOpt) {
 				sess.Cost = FormatCost(a.Cost)
 			}

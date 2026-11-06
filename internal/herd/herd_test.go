@@ -15,35 +15,6 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-func TestLayout(t *testing.T) {
-	tests := []struct {
-		n, w, h int
-		want    grid
-	}{
-		{0, 100, 40, grid{}},
-		{1, 100, 40, grid{cols: 1, rows: 1, tileW: 100, tileH: 40, perPage: 1}},
-		{2, 100, 40, grid{cols: 2, rows: 1, tileW: 49, tileH: 40, perPage: 2}},
-		{2, 60, 40, grid{cols: 1, rows: 2, tileW: 60, tileH: 19, perPage: 2}},
-		{4, 100, 40, grid{cols: 2, rows: 2, tileW: 49, tileH: 19, perPage: 4}},
-		{5, 100, 40, grid{cols: 3, rows: 2, tileW: 32, tileH: 19, perPage: 5}},
-		// Too short for 4 rows of 5: paged
-		{8, 40, 17, grid{cols: 1, rows: 3, tileW: 40, tileH: 5, perPage: 3}},
-		// Capped at maxTiles
-		{20, 400, 100, grid{cols: 6, rows: 2, tileW: 65, tileH: 49, perPage: 12}},
-	}
-	for _, tt := range tests {
-		if got := layout(tt.n, tt.w, tt.h); got != tt.want {
-			t.Errorf("layout(%d, %d, %d) = %+v, want %+v", tt.n, tt.w, tt.h, got, tt.want)
-		}
-	}
-	g := grid{perPage: 3}
-	for i, want := range [][2]int{{0, 3}, {0, 3}, {0, 3}, {3, 6}, {6, 9}} {
-		if from, to := g.page([]int{0, 1, 2, 3, 7}[i]); from != want[0] || to != want[1] {
-			t.Errorf("page %d = %d,%d, want %v", i, from, to, want)
-		}
-	}
-}
-
 func TestLastLines(t *testing.T) {
 	capture := "one\n\x1b]8;;http://x\x1b\\two\x1b]8;;\x1b\\\nthree\n  \n\x1b[0m\n"
 	if got := lastLines(capture, 2); !slices.Equal(got, []string{"two", "three"}) {
@@ -66,80 +37,11 @@ func twoTiles() Model {
 	}}}
 }
 
-// Golden: two stacked 40×5 tiles split by a faint rule; the waiting one in red on a red-tinted header,
-// the selected one on the selection background, a body line cropped with its colour reset.
-func TestRenderGolden(t *testing.T) {
-	want := []string{
-		waitingBG + " " + red + "●" + reset + waitingBG + " \x1b[1m" + red + "a" + reset + waitingBG + " " + red + "Claude · waiting · $1.20" + reset + waitingBG + "           " + reset,
-		reset + "\x1b[31mred line that is far too long to fit\x1b[0m" + reset + "    ",
-		strings.Repeat(" ", 40),
-		strings.Repeat(" ", 40),
-		strings.Repeat(" ", 40),
-		rule + strings.Repeat("─", 40) + reset,
-		"\x1b[48;2;42;42;55m " + muted + "●" + reset + "\x1b[48;2;42;42;55m \x1b[1m" + muted + "b" + reset + "\x1b[48;2;42;42;55m " + muted + "Codex" + reset + "\x1b[48;2;42;42;55m \x1b[38;2;152;187;108m#3 open" + reset + "\x1b[48;2;42;42;55m \x1b[38;2;84;84;109mfix" + reset + "\x1b[48;2;42;42;55m                  " + reset,
-		reset + "x" + reset + strings.Repeat(" ", 39),
-		strings.Repeat(" ", 40),
-		strings.Repeat(" ", 40),
-		strings.Repeat(" ", 40),
-		" \x1b[38;2;84;84;109mj/k ⏎ switch  v view  i reply  o PR  x…" + reset,
-	}
-	got := twoTiles().render()
-	for i := range max(len(got), len(want)) {
-		if i >= len(got) || i >= len(want) || got[i] != want[i] {
-			t.Fatalf("line %d:\n got %q\nwant %q", i, at(got, i), at(want, i))
-		}
-	}
-	for i, l := range got[:11] {
-		if ansi.StringWidth(l) != 40 {
-			t.Errorf("line %d is %d wide", i, ansi.StringWidth(l))
-		}
-	}
-}
-
 func at(s []string, i int) string {
 	if i < len(s) {
 		return s[i]
 	}
 	return "<none>"
-}
-
-func TestRenderSideBySideAndPaging(t *testing.T) {
-	m := twoTiles()
-	m.width = 80
-	got := m.render()
-	if !strings.Contains(got[0], "a") || !strings.Contains(ansi.Strip(got[0]), " b ") || ansi.StringWidth(got[0]) != 79 {
-		t.Errorf("side by side header %q", ansi.Strip(got[0]))
-	}
-	m.snap.tiles = append(m.snap.tiles, m.snap.tiles[1], m.snap.tiles[1])
-	m.snap.tiles[2].sess.Name, m.snap.tiles[3].sess.Name = "c", "d"
-	m.height = 24
-	got = m.render()
-	if s := ansi.Strip(got[1]); []rune(s)[39] != '│' || ansi.StringWidth(got[1]) != 79 {
-		t.Errorf("2x2 body row %q", s)
-	}
-	if !strings.HasPrefix(got[12], headerBG) {
-		t.Errorf("unselected header off the faint band %q", got[12])
-	}
-	if s := ansi.Strip(got[11]); s != strings.Repeat("─", 39)+"┼"+strings.Repeat("─", 39) {
-		t.Errorf("2x2 rule %q", s)
-	}
-	m.snap.tiles = m.snap.tiles[:3]
-	if s := ansi.Strip(m.render()[11]); s != strings.Repeat("─", 39)+"┴"+strings.Repeat("─", 39) {
-		t.Errorf("rule over a short row %q", s)
-	}
-	m = twoTiles()
-	m.width, m.height = 40, 7 // room for one tile: paged
-	got = m.render()
-	if s := ansi.Strip(got[0]); !strings.HasPrefix(s, " ● b ") {
-		t.Errorf("page of the selection shows %q", s)
-	}
-	if s := ansi.Strip(got[6]); !strings.HasPrefix(s, " 2/2  ") {
-		t.Errorf("bottom row %q", s)
-	}
-	m.snap.tiles = nil
-	if s := ansi.Strip(m.render()[0]); !strings.Contains(s, "No worker sessions") {
-		t.Errorf("empty state %q", s)
-	}
 }
 
 func TestSelectionAndClicks(t *testing.T) {
@@ -170,20 +72,20 @@ func TestSelectionAndClicks(t *testing.T) {
 	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
 	// Tall enough for both tiles with the box open
 	m.height = 14
-	// A click answers in place: it selects the tile and opens the reply box for it, never switching
-	m, cmd := click(m, 3, 1)
+	// Both in the Idle section, so folded under one header: a click answers in place: it selects the card and opens the reply
+	// box for it, never switching
+	m, cmd := click(m, 8, 1)
 	if m.selected != "a" || m.box.session != "a" || m.box.pane != "%5" || cmd != nil || len(ran) != 0 {
 		t.Errorf("click on tile a: selected %q reply %q pane %q, ran %q", m.selected, m.box.session, m.box.pane, ran)
 	}
-	// With the box open the tiles are 5 rows: the gap is row 5
-	if next, cmd := click(m, 3, 5); cmd != nil || next.box.session != "a" {
-		t.Error("click on the gap row does something")
+	if next, cmd := click(m, 8, 0); cmd != nil || next.box.session != "a" {
+		t.Error("click on the section header does something")
 	}
 	m.box.ed.set("half")
-	if m, _ = click(m, 3, 1); m.box.ed.String() != "half" {
+	if m, _ = click(m, 8, 1); m.box.ed.String() != "half" {
 		t.Errorf("click on the same tile drops the draft: %q", m.box.ed.String())
 	}
-	if m, _ = click(m, 3, 6); m.box.session != "b" || m.box.pane != "%6" || m.box.ed.String() != "" {
+	if m, _ = click(m, 8, 2); m.box.session != "b" || m.box.pane != "%6" || m.box.ed.String() != "" {
 		t.Errorf("click on tile b: reply %q pane %q draft %q", m.box.session, m.box.pane, m.box.ed.String())
 	}
 	if len(ran) != 0 {
@@ -204,7 +106,7 @@ func TestBlurClosesBox(t *testing.T) {
 		return next.(Model)
 	}
 	click := func(m Model) Model {
-		next, _ := m.Update(tea.MouseMsg{X: 3, Y: 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+		next, _ := m.Update(tea.MouseMsg{X: 8, Y: 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 		return next.(Model)
 	}
 	m = click(m)
@@ -335,7 +237,7 @@ func TestRefresh(t *testing.T) {
 	for _, active := range []bool{true, false} {
 		rows := []row{{Session: "herd", SessionID: "$1", WindowActive: true, Active: !active, ID: "%1"},
 			{Session: "herd", SessionID: "$1", WindowActive: true, Active: active, ID: "%2"}}
-		if s, err := buildSnapshot(rows, nil, "%2", &fakeLookups{}); err != nil || s.focused != active {
+		if s, err := buildSnapshot(rows, nil, "%2", "", &fakeLookups{}); err != nil || s.focused != active {
 			t.Errorf("pane_active %v: focused %v, %v", active, s.focused, err)
 		}
 	}
@@ -381,33 +283,6 @@ func TestRefreshDialogGone(t *testing.T) {
 		} else if !tl.deciding || tl.pick == nil || slices.Contains(ran, "display-message") {
 			t.Errorf("dialog open: deciding %v, pick %v, ran %q", tl.deciding, tl.pick != nil, ran)
 		}
-	}
-}
-
-// The last page, partly filled, captures only the tiles on it.
-func TestRefreshLastPage(t *testing.T) {
-	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "")
-	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "", "", "", "")
-	}
-	var captured []string
-	c := tmux.NewFake(func(args []string) (string, error) {
-		switch args[0] {
-		case "list-panes":
-			return rows, nil
-		case "list-clients":
-			return r("/dev/ttys1", "herd", "5"), nil
-		}
-		captured = append(captured, args[len(args)-1])
-		return "x\n", nil
-	})
-	m := Model{c: c, pane: "%1", look: &fakeLookups{}, width: 40, height: 13, selected: "w3"}
-	if msg := m.refresh()().(refreshMsg); msg.err != nil {
-		t.Fatal(msg.err)
-	}
-	if !slices.Equal(captured, []string{"%w3"}) {
-		t.Errorf("captured %q", captured)
 	}
 }
 
@@ -527,5 +402,21 @@ func TestReplyPasteAndQuit(t *testing.T) {
 func TestTmuxQuote(t *testing.T) {
 	if got, want := tmuxQuote(`'/a b/#x"$y\z' '$3'`), `"'/a b/##x\"\$y\\z' '\$3'"`; got != want {
 		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// The previews take 40% of the window, at least 60 columns, at most half.
+func TestFitWidth(t *testing.T) {
+	for window, want := range map[string]string{"100": "50", "140": "60", "200": "80"} {
+		var resized string
+		c := tmux.NewFake(func(args []string) (string, error) {
+			if args[0] == "resize-pane" {
+				resized = args[len(args)-1]
+			}
+			return window + "\n", nil
+		})
+		if err := fitWidth(c, "%2"); err != nil || resized != want {
+			t.Errorf("window %s: resized to %q (%v), want %s", window, resized, err, want)
+		}
 	}
 }

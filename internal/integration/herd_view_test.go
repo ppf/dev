@@ -10,10 +10,9 @@ import (
 	"testing"
 )
 
-// v in the previews switches to the compact list (each worker's header and latest note, no screen), records
-// it on the boss session and narrows the pane to 30% of the window; v again restores the tiles at 55%. A
-// previews pane started in a boss session keeping the compact view starts compact and narrows itself.
-func TestHerdCompactView(t *testing.T) {
+// The previews fit to 40% of the window and show a card per worker: an idle one folded to its row, f opens it
+// on its screen's end, f again folds it.
+func TestHerdCards(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_notify off\n")
 	stubs := filepath.SplitList(d.path)[0]
 	if err := os.Remove(filepath.Join(stubs, "claude")); err != nil {
@@ -35,28 +34,19 @@ func TestHerdCompactView(t *testing.T) {
 	worker := d.T("display", "-t", "=app:", "-p", "#{pane_id}")
 	note := func() string { return d.T("show-option", "-pqv", "-t", worker, "@dev_boss_note") }
 	waitFor(t, "worker's note on its pane", func() bool { return note() == "finished" })
-	waitFor(t, "app tile with its screen", func() bool {
-		return strings.Contains(d.T("capture-pane", "-p", "-t", previews), "got: hello")
+	waitPane(t, d, previews, "app's card folded", func(screen string) bool {
+		return strings.Contains(screen, "IDLE 1") && strings.Contains(screen, "▸ ● app  finished") && !strings.Contains(screen, "got: hello")
 	})
-	width := func() string { return d.T("display", "-p", "-t", previews, "#{pane_width}") }
-	view := func() string { return d.T("show-option", "-qv", "-t", "=boss:", "@dev_boss_view") }
-	check(t, "full view at 55%", width(), "110")
+	check(t, "previews at 40%", d.T("display", "-p", "-t", previews, "#{pane_width}"), "80")
 
-	d.T("send-keys", "-t", previews, "v")
-	waitFor(t, "compact list", func() bool {
-		screen := d.T("capture-pane", "-p", "-t", previews)
-		return strings.Contains(screen, "● app Claude · idle") && strings.Contains(screen, "\n   finished") && !strings.Contains(screen, "got: hello")
+	d.T("send-keys", "-t", previews, "f")
+	waitPane(t, d, previews, "app's card open on its screen", func(screen string) bool {
+		return strings.Contains(screen, "▾ ● app") && strings.Contains(screen, "┄ screen") && strings.Contains(screen, "got: hello")
 	})
-	waitFor(t, "compact recorded on the boss at 30%", func() bool { return view() == "compact" && width() == "60" })
-	if screen := d.T("capture-pane", "-p", "-t", previews); !strings.Contains(screen, "v view") {
-		t.Errorf("❌ no v in the key hints:\n%s", screen)
-	}
-
-	d.T("send-keys", "-t", previews, "v")
-	waitFor(t, "tiles back", func() bool {
-		return strings.Contains(d.T("capture-pane", "-p", "-t", previews), "got: hello")
+	d.T("send-keys", "-t", previews, "f")
+	waitPane(t, d, previews, "app's card folded again", func(screen string) bool {
+		return strings.Contains(screen, "▸ ● app") && !strings.Contains(screen, "got: hello")
 	})
-	waitFor(t, "full recorded on the boss at 55%", func() bool { return view() == "" && width() == "110" })
 
 	// A new prompt clears the last turn's note; with the inbox off the next one is still recorded
 	_, errOut, status = devAgent(env, "", "prompt", "app", "slow")
@@ -68,12 +58,11 @@ func TestHerdCompactView(t *testing.T) {
 	check(t, "ask prompt", status+errOut, "0")
 	waitFor(t, "decision note with the inbox off", func() bool { return note() == "needs a decision" })
 
-	// A reopened previews pane keeps its session's view: a hand-made boss (no pane-died binding)
+	// A previews pane started at another width (an older dev's 55%) fits itself: a hand-made boss (no pane-died binding)
 	d.T("new-session", "-d", "-s", "boss2", "-x", "200", "-y", "50", "sleep 600")
 	d.T("set-option", "-t", "=boss2:", "@dev_herd", "1")
-	d.T("set-option", "-t", "=boss2:", "@dev_boss_view", "compact")
 	again := d.T("split-window", "-t", "=boss2:", "-h", "-l", "55%", "-PF", "#{pane_id}", devBin, "boss", "--previews")
-	waitFor(t, "reopened previews narrow to compact", func() bool {
-		return d.T("display", "-p", "-t", again, "#{pane_width}") == "60"
+	waitFor(t, "reopened previews fit to 40%", func() bool {
+		return d.T("display", "-p", "-t", again, "#{pane_width}") == "80"
 	})
 }

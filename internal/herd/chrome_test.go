@@ -212,7 +212,7 @@ func TestSnapshotDeciding(t *testing.T) {
 		rows = append(rows, row{Session: w.name, SessionID: "$" + w.name, ID: "%" + w.name, Window: 1, Command: "claude",
 			State: w.state, StateCmd: "claude", WaitingFor: w.waitingFor, StartedBy: "$1"})
 	}
-	s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+	s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestSnapshotMine(t *testing.T) {
 		rows = append(rows, row{Session: w.name, SessionID: "$" + w.name, ID: "%" + w.name, Window: 1, Command: "claude",
 			State: agent.Idle, StateCmd: "claude", StartedBy: w.startedBy})
 	}
-	s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+	s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestSnapshotCostOff(t *testing.T) {
 	} {
 		rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", CostOpt: tc.boss},
 			{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", Cost: "1.5", CostOpt: tc.worker, StartedBy: "boss"}}
-		s, err := buildSnapshot(rows, nil, "%1", &fakeLookups{})
+		s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
 		if err != nil {
 			t.Fatal(err)
 		}

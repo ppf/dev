@@ -51,7 +51,7 @@ func TestSnapshotCard(t *testing.T) {
 		{Session: "gone", SessionID: "$4", ID: "%4", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1", Transcript: "/t/gone.jsonl"}}
 	clients := []sidebar.Client{{TTY: "/dev/ttys1", Session: "boss"}}
 	look := &fakeLookups{tails: map[string]desktop.Tail{"/t/w.jsonl": {Lines: []string{"Done."}}}}
-	s, err := buildSnapshot(rows, clients, "%1", look)
+	s, err := buildSnapshot(rows, clients, "%1", "", look)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSnapshotCard(t *testing.T) {
 		t.Errorf("read %q, want w's and gone's transcripts: fresh has none yet", look.read)
 	}
 	look.read = nil
-	s, err = buildSnapshot(rows, nil, "%1", look)
+	s, err = buildSnapshot(rows, nil, "%1", "", look)
 	if err != nil || len(look.read) > 0 || !s.tiles[index(s.tiles, "w")].since.Equal(time.Unix(1700000000, 0)) {
 		t.Errorf("hidden boss read %q (%v), want none, and since still read", look.read, err)
 	}

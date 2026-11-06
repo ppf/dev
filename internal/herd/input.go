@@ -114,7 +114,8 @@ func (m Model) waiting(p *pick) bool {
 }
 
 // handleKey: j/k/↓/↑ move (wrapping), ⏎ switch to the worker, i reply to it here, 1-9 answer a waiting
-// worker's dialog, o open its PR, x kill (asks y/n), v toggle the compact view, ctrl+c quit.
+// worker's dialog, o open its PR, x kill (asks y/n), v show more of the selected card's screen, f fold or
+// unfold its card, ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -165,25 +166,32 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirm = m.snap.tiles[i].sess.Name
 	case "v":
-		m.compact = !m.compact
-		return m, m.applyView()
+		m.expand = !m.expand
+	case "f":
+		if len(m.snap.tiles) > 0 {
+			m.fold(m.snap.tiles[i])
+		}
 	case "ctrl+c":
 		return m, tea.Quit
 	}
 	return m, nil
 }
 
-// handleMouse: a left click on a tile selects it and opens the reply box for it, so the worker is answered
-// in place (⏎ without a reply open switches to it).
+// handleMouse: a left click on a card's ▸/▾ folds or unfolds it; elsewhere on a card it selects it and opens
+// the reply box for it, so the worker is answered in place (⏎ without a reply open switches to it).
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	i := m.tileAt(ms.X, ms.Y)
-	if i < 0 {
+	h, ok := m.hitAt(ms.X, ms.Y)
+	if !ok {
 		return m, nil
 	}
-	if t := m.snap.tiles[i]; t.sess.Name != m.box.session {
+	if h.kind == hitFold {
+		m.fold(m.snap.tiles[h.tile])
+		return m, nil
+	}
+	if t := m.snap.tiles[h.tile]; t.sess.Name != m.box.session {
 		// A click on another tile moves the reply box there; one on the same keeps the draft
 		m.open(t)
 	}
@@ -197,12 +205,6 @@ func (m Model) move(i, dir int) string {
 		return ""
 	}
 	return m.snap.tiles[((i+dir)%n+n)%n].sess.Name
-}
-
-// applyView records the view on the boss session and resizes the pane to it.
-func (m Model) applyView() tea.Cmd {
-	compact := m.compact
-	return m.action(func() error { return setView(m.c, m.pane, compact) })
 }
 
 // switchTo switches the client viewing the herd to session.
