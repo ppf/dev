@@ -346,6 +346,12 @@ func TestQuestionCard(t *testing.T) {
 	if got := ansi.Strip(strings.Join(m.board().lines, "\n")); !strings.Contains(got, "waiting for you") || !strings.Contains(got, "Which color") {
 		t.Errorf("unknown dialog's note dropped:\n%s", got)
 	}
+	// A menu without a title: its note says what it asks
+	menu := pick{d: dialog{opts: []option{{num: 1, label: "Postgres"}, {num: 2, label: "SQLite"}}, cursor: -1}, cur: -1, other: -1}
+	m.snap.tiles[0].pick = &menu
+	if got := ansi.Strip(strings.Join(m.board().lines, "\n")); !strings.Contains(got, "Which color") {
+		t.Errorf("untitled menu's note dropped:\n%s", got)
+	}
 	m.snap.tiles[0].question = ask
 	for _, f := range []string{"claude-permission-bash", "claude-ask-review"} {
 		p := goldenPick(t, f, colors)
@@ -382,5 +388,22 @@ func TestScreenTrim(t *testing.T) {
 	tl.body = []string{"Tests next. Then docs.", "✻ Working… (3s)"}
 	if got := m.screenRows(tl, said(tl)); len(got) != 2 {
 		t.Errorf("a different line dropped: %q", got)
+	}
+}
+
+// A reply line cut short on its card keeps its rows on screen, which show the rest.
+func TestScreenKeepsCutReply(t *testing.T) {
+	m := board4()
+	tl := &m.snap.tiles[1]
+	long := strings.Repeat("word ", 20) + "end."
+	tl.tail.Lines = []string{long}
+	tl.body = []string{"⏺ " + long[:60], "  " + long[60:], "✻ Working… (3s)"}
+	if got := ansi.Strip(strings.Join(m.board().lines, "\n")); !strings.Contains(got, "word end.") {
+		t.Errorf("the rest of a cut reply line dropped:\n%s", got)
+	}
+	tl.tail.Lines = []string{"Short reply."}
+	tl.body = []string{"⏺ Short reply.", "✻ Working… (3s)"}
+	if got := ansi.Strip(strings.Join(m.board().lines, "\n")); strings.Count(got, "Short reply.") != 1 {
+		t.Errorf("a whole reply line repeated on screen:\n%s", got)
 	}
 }

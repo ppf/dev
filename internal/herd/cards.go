@@ -238,8 +238,10 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	for _, n := range warnings(t) {
 		text(sidebar.Gold, "⚠ "+n)
 	}
+	// Only a reply line shown whole stands in for its rows on screen
+	whole := slices.DeleteFunc(slices.Clone(lines), func(l string) bool { return ansi.StringWidth(l) > iw-len(in) })
 	// A question's chips replace its screen, which shows only the conversation above it
-	if shown := m.screenRows(t, lines); len(shown) > 0 && !(sec == needsYouSection && t.pick.question()) {
+	if shown := m.screenRows(t, whole); len(shown) > 0 && !(sec == needsYouSection && t.pick.question()) {
 		rows = append(rows, line(in+rule+"┄ screen "+strings.Repeat("┄", max(0, iw-len(in)-10))+reset))
 		for _, l := range shown {
 			rows = append(rows, line(in+reset+l+reset))
@@ -520,8 +522,10 @@ func said(t tile) []string {
 			lines = append(lines, strip.Replace(l))
 		}
 	}
-	// Its status says the question, but for a dialog neither its screen nor its hook told
-	asked := t.section() == needsYouSection && (t.pick != nil || t.question.Tool != "" || !t.deciding)
+	// Its dialog or status says the question, but for a dialog without a title or tool, or one neither its
+	// screen nor its hook told
+	asked := t.section() == needsYouSection && (t.pick != nil && (t.pick.d.title != "" || t.pick.tool != "") ||
+		t.pick == nil && (t.question.Tool != "" || !t.deciding))
 	if len(lines) == 0 && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) && !asked {
 		if _, text, ok := strings.Cut(t.note, ": "); ok {
 			lines = []string{text}
@@ -552,7 +556,7 @@ func warnings(t tile) []string {
 }
 
 // screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane for the
-// selected card while expanded, without the blank rows or the lines its card shows as said (lines) it
+// selected card while expanded, without the blank rows or the reply lines its card shows whole (lines) it
 // starts with; none when not captured.
 func (m Model) screenRows(t tile, lines []string) []string {
 	n := screenRows
