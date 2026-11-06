@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -713,5 +714,22 @@ func TestBoardStatusWiring(t *testing.T) {
 	idle := workers[2]
 	if idle.ID != "local_idle" || idle.Status != StatusNeedsYou || idle.StatusText != interruptedNote {
 		t.Errorf("running idle worker the app quit on = %s %s %q, want needs you", idle.ID, idle.Status, idle.StatusText)
+	}
+}
+
+// ReadTail reads the reply and the call in flight, counting an ended row that doesn't parse; a missing file is
+// an error.
+func TestReadTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := lines(t, assistant("claude-opus-5-5", text("Pushed.\nWAITING (CI)")), assistant("claude-opus-5-5", described("d", "Bash", "Watch CI"))) + "{\"type\":\"assistant\",oops\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadTail(path)
+	if err != nil || !slices.Equal(got.Lines, []string{"Pushed.", "WAITING (CI)"}) || got.Tool != "Bash" || got.ToolDescription != "Watch CI" || got.Broken != 1 {
+		t.Errorf("ReadTail = %+v, %v, want the reply's lines, the Bash call with its description and 1 broken row", got, err)
+	}
+	if _, err := ReadTail(filepath.Join(t.TempDir(), "none.jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("err = %v, want not exist", err)
 	}
 }

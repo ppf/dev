@@ -74,15 +74,8 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 	if w.Ask != nil && w.Ask.Blocked {
 		return StatusNeedsYou, w.Ask.Questions[0].Question
 	}
-	// The marker may have a short sentence after it: the newest marker line wins
-	for _, l := range slices.Backward(w.LastLines) {
-		l = strings.Trim(l, "*_` ")
-		if what, ok := strings.CutPrefix(l, "WAITING ("); ok {
-			return StatusWaiting, strings.TrimSuffix(what, ")")
-		}
-		if l == "IDLE" {
-			return StatusIdle, ""
-		}
+	if st, what, ok := Marker(w.LastLines); ok {
+		return st, what
 	}
 	switch {
 	case w.State == StateBlocked:
@@ -91,4 +84,20 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 		return StatusReviewReady, w.Detail
 	}
 	return StatusIdle, ""
+}
+
+// Marker is the turn-end marker among a reply's last lines: StatusWaiting and what it waits on for
+// `WAITING (…)`, StatusIdle for `IDLE`; ok false for none. It may have a short sentence after it: the newest
+// marker line wins.
+func Marker(lines []string) (status, what string, ok bool) {
+	for _, l := range slices.Backward(lines) {
+		l = strings.Trim(l, "*_` ")
+		if what, ok := strings.CutPrefix(l, "WAITING ("); ok {
+			return StatusWaiting, strings.TrimSuffix(what, ")"), true
+		}
+		if l == "IDLE" {
+			return StatusIdle, "", true
+		}
+	}
+	return "", "", false
 }

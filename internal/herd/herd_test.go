@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -265,8 +266,10 @@ func TestKill(t *testing.T) {
 }
 
 type fakeLookups struct {
-	prs  int
-	args []string // the last PR call's
+	prs   int
+	args  []string // the last PR call's
+	tails map[string]desktop.Tail
+	read  []string // the transcripts Tail read
 }
 
 func (f *fakeLookups) Branch(path string) string { return "br-" + path }
@@ -276,15 +279,23 @@ func (f *fakeLookups) PR(pane, stored, gen, path, branch string) sidebar.PR {
 	return sidebar.PR{Number: 1, State: "open"}
 }
 func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
+func (f *fakeLookups) Tail(path string) (desktop.Tail, error) {
+	f.read = append(f.read, path)
+	t, ok := f.tails[path]
+	if !ok {
+		return desktop.Tail{}, errors.New("no transcript " + path)
+	}
+	return t, nil
+}
 
 // One refresh: list-panes, list-clients, then one capture per tile only while the herd window is shown.
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "") +
-			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "") +
-			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "", "", "", "") +
+			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -337,8 +348,8 @@ func TestRefreshDialogGone(t *testing.T) {
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, open} {
 		var ran []string
 		state := "waiting"
@@ -376,9 +387,9 @@ func TestRefreshDialogGone(t *testing.T) {
 // The last page, partly filled, captures only the tiles on it.
 func TestRefreshLastPage(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "")
 	for _, w := range []string{"w1", "w2", "w3"} {
-		rows += r(w, "$"+w, "1", "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "")
+		rows += r(w, "$"+w, "1", "1", "1", "%"+w, "/"+w, "", "codex", "", "", "", "", "", "", "herd", "", "", "", "", "", "", "", "", "")
 	}
 	var captured []string
 	c := tmux.NewFake(func(args []string) (string, error) {
