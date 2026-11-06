@@ -474,7 +474,8 @@ func TestAsksCard(t *testing.T) {
 	}
 }
 
-// An asks card says a question longer than a board line once: its last lines stop above it.
+// An asks card says a question longer than a board line once, in its status from its start: its last lines and
+// its screen stop above the question's first wrapped row.
 func TestAsksCardLongQuestion(t *testing.T) {
 	ask := "Should I also move the CI cache settings into the shared workflow file, so `herd`, `sidebar` and `inbox` " +
 		"all reuse one Go module cache keyed on go.sum, or keep each job's own cache as it is now, given the shared " +
@@ -503,25 +504,37 @@ func TestAsksCardLongQuestion(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "cache", Agent: "Claude", State: agent.Idle, Branch: "ci-cache"},
 		note: note.Summary(), tail: read}
 	// The screen wraps the reply at 120 columns
-	tl.body = []string{"⏺ Pushed the cache change to the branch.", ""}
+	tl.body = []string{"⏺ Bash(go test ./...)", "  ⎿  ok  github.com/ppf/dev/internal/herd", "", "⏺ Pushed the cache change to the branch.", ""}
+	var asked []string
 	prefix, rowText := "⏺ ", ""
 	for _, w := range strings.Fields(strings.ReplaceAll(ask, "`", "")) {
 		if len(rowText)+1+len(w) > 118 {
-			tl.body = append(tl.body, prefix+rowText)
+			asked = append(asked, prefix+rowText)
 			prefix, rowText = "  ", ""
 		}
 		rowText = strings.TrimPrefix(rowText+" "+w, " ")
 	}
-	tl.body = append(tl.body, prefix+rowText, "", "✻ Worked for 6s · done 13:36")
+	asked = append(asked, prefix+rowText)
+	if len(asked) < 3 {
+		t.Fatalf("question wraps to %d rows, want 3 or more", len(asked))
+	}
+	tl.body = append(append(tl.body, asked...), "", "✻ Worked for 6s · done 13:36")
 	if got := said(tl); slices.ContainsFunc(got, func(l string) bool { return strings.Contains(l, "CI cache") }) {
 		t.Errorf("said = %q, want the question left to the status", got)
 	}
 	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
 	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
-	// Its status, cut to its end, doesn't fit, so the screen keeps the whole question
-	above, screen, _ := strings.Cut(got, "┄ screen")
-	if strings.Contains(above, "Should I also move") || !strings.Contains(screen, "Should I also move") {
-		t.Errorf("question's start not on the screen alone:\n%s", got)
+	if n := strings.Count(got, "Should I also move"); n != 1 || !strings.Contains(got, "│    Should I also move the CI cache") {
+		t.Errorf("question's start shown %d times, want once in the status:\n%s", n, got)
+	}
+	_, screen, ok := strings.Cut(got, "┄ screen")
+	if !ok || !strings.Contains(screen, "ok  github.com/ppf/dev/internal/herd") {
+		t.Fatalf("screen not the rows above the question:\n%s", got)
+	}
+	for _, r := range asked {
+		if strings.Contains(screen, strings.TrimSpace(strings.TrimPrefix(r, "⏺"))) {
+			t.Errorf("question's row %q on screen:\n%s", r, got)
+		}
 	}
 }
 
@@ -642,17 +655,40 @@ func TestAsksOptions(t *testing.T) {
 			if got := (Model{height: 40}).screenRows(tl, said(tl), 80); !slices.Equal(got, tt.screen) {
 				t.Errorf("screen = %q, want %q", got, tt.screen)
 			}
+			if got := statusText(tl, needsYouSection); inbox.IsOption(got) {
+				t.Errorf("status = %q, want the question", got)
+			}
 		})
 	}
 }
 
-// An asks card with its status cut keeps its question and options on screen, the only place they show whole.
-func TestAsksStatusCut(t *testing.T) {
+// An asks card with only its options read and its note cut keeps the options on screen, the only place they
+// show whole.
+func TestAsksOptionsNoteCut(t *testing.T) {
+	tl := tile{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: …" + strings.Repeat("word ", 40) + "ok? 1. Move",
+		tail: desktop.Tail{Lines: []string{"1. Move", "2. Keep", "3. Both"}},
+		body: []string{"⏺ Intro.", "", "  " + strings.Repeat("word ", 40) + "ok?", "", "  1. Move", "  2. Keep", "  3. Both"}}
+	if got := (Model{}).screenRows(tl, said(tl), 80); !slices.Contains(got, "  3. Both") {
+		t.Errorf("screen = %q, want the options", got)
+	}
+}
+
+// An asks card's status says the reply's question and options from its start; its screen stops above the
+// question whatever the status's width.
+func TestAsksStatusFromReply(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Which DB? - Postgres - SQLite",
-		tail: desktop.Tail{Lines: []string{"Intro.", "Which DB?", "- Postgres", "- SQLite"}},
-		body: []string{"⏺ Intro.", "", "  Which DB?", "", "  - Postgres", "  - SQLite"}}
-	if got := (Model{}).screenRows(tl, said(tl), 20); !slices.Contains(got, "  - SQLite") {
-		t.Errorf("options cropped though the status is cut: %q", got)
+		tail: desktop.Tail{Lines: []string{"Intro.", "Which **DB**?", "- `Postgres`", "- SQLite"}},
+		body: []string{"⏺ Ran 1 shell command", "", "⏺ Intro.", "", "  Which DB?", "", "  - Postgres", "  - SQLite"}}
+	if got := statusText(tl, needsYouSection); got != "Which DB? - Postgres - SQLite" {
+		t.Errorf("status = %q, want the reply's question and options", got)
+	}
+	listed := tl
+	listed.tail.Lines = []string{"Intro.", "- Should I push?"}
+	if got := statusText(listed, needsYouSection); got != "- Should I push?" {
+		t.Errorf("status = %q, want the reply's question written as a list item", got)
+	}
+	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
+		t.Errorf("screen = %q, want the rows above the question though the status is cut", got)
 	}
 }
 

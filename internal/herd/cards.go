@@ -483,6 +483,10 @@ func statusText(t tile, sec section) string {
 			return "waiting for you"
 		}
 		_, ask, _ := strings.Cut(t.note, ": ")
+		// The note keeps only a long question's end: the reply read says it from its start
+		if _, _, asked := reply(t); len(asked) > 0 {
+			ask = strings.Join(asked, " ")
+		}
 		return clean(cmp.Or(ask, "asks"))
 	case workingSection:
 		return clean(cmp.Or(t.tail.ToolDescription, t.tail.Tool, "working"))
@@ -553,7 +557,7 @@ const lastSaid = 2
 // options; with no reply read, its note when that isn't a warning, nor the question a Needs you card's
 // status already shows.
 func said(t tile) []string {
-	read, _ := reply(t)
+	read, _, _ := reply(t)
 	lines := slices.DeleteFunc(slices.Clone(read), tableRow)
 	// Its dialog or status says the question, but for a dialog without a title or tool, or one neither its
 	// screen nor its hook told
@@ -568,9 +572,9 @@ func said(t tile) []string {
 }
 
 // reply is the last lines of t's newest reply without backticks, bold or a turn-end marker line; on an asks
-// card it stops at the question and options: ask is the question, or the first option when the question is
-// above the lines read.
-func reply(t tile) (lines []string, ask string) {
+// card it stops at the question: ask is the question, asked it and its options; or ask is the first option
+// (asked nil) when the question is above the lines read.
+func reply(t tile) (lines []string, ask string, asked []string) {
 	strip := strings.NewReplacer("**", "", "`", "")
 	for _, l := range t.tail.Lines {
 		if _, _, marker := desktop.Marker([]string{l}); !marker {
@@ -579,16 +583,22 @@ func reply(t tile) (lines []string, ask string) {
 	}
 	if t.asks() {
 		if i := inbox.QuestionAt(lines); i >= 0 {
-			// An italic question shows without its * or _
-			lines, ask = lines[:i], strings.Trim(strip.Replace(lines[i]), "*_ ")
+			lines, asked = lines[:i], lines[i:]
 		} else if len(lines) > 0 && !slices.ContainsFunc(lines, func(l string) bool { return !inbox.IsOption(l) }) {
 			lines, ask = nil, strip.Replace(lines[0])
 		}
 	}
-	for i, l := range lines {
-		lines[i] = strip.Replace(l)
+	for _, ls := range [][]string{lines, asked} {
+		for i, l := range ls {
+			ls[i] = strip.Replace(l)
+		}
 	}
-	return lines, ask
+	if len(asked) > 0 {
+		// An italic question shows without its * or _
+		asked[0] = strings.Trim(asked[0], "*_ ")
+		ask = asked[0]
+	}
+	return lines, ask, asked
 }
 
 // tableRow reports a reply line that is a table's row or rule, markdown or box-drawn, or a "---" break: cut
@@ -620,15 +630,15 @@ func warnings(t tile) []string {
 }
 
 // screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane while expanded,
-// without blank rows or the leading lines shown whole; on an asks card whose status fits room, only the rows
-// above its question.
+// without blank rows or the leading lines shown whole; on an asks card, only the rows above its question, but
+// with only its options read, only when its status (then the note) fits room.
 func (m Model) screenRows(t tile, lines []string, room int) []string {
 	n := screenRows
 	if m.expands[t.sess.Name] {
 		n = max(n, m.height/2)
 	}
 	shown := t.body
-	if _, ask := reply(t); ask != "" && ansi.StringWidth(statusText(t, needsYouSection)) <= room {
+	if _, ask, asked := reply(t); ask != "" && (len(asked) > 0 || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
 		shown = aboveSaid(shown, lines, ask)
 	}
 	shown = tail(shown, n)
