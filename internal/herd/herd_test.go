@@ -348,8 +348,8 @@ func TestReply(t *testing.T) {
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeySpace})
 	m, _ = key(m, runes("itx"))
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeyBackspace})
-	if got := m.render(); ansi.Strip(got[10]) != "─ ● b Codex #3 open fix "+strings.Repeat("─", 16) || ansi.Strip(got[11]) != "▎ fix it " {
-		t.Errorf("reply box %q", got[10:])
+	if got := m.render(); ansi.Strip(got[9]) != " ╭─ Message ● b Codex #3 open fix ─────╮" || ansi.Strip(got[10]) != " │ fix it                              │" {
+		t.Errorf("reply box %q", got[9:])
 	}
 	// Keys go to the draft while typing: j doesn't move the selection
 	if m, _ = key(m, runes("j")); m.selected != "b" || m.box.ed.String() != "fix itj" {
@@ -420,7 +420,7 @@ func TestReplyPasteAndQuit(t *testing.T) {
 	m, _ = key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line one\r\nline two\x1b[31m"), Paste: true})
 	got := m.render()
 	// The box grows a row per line
-	if len(got) != m.height || ansi.Strip(got[10]) != "▎ line one" || ansi.Strip(got[11]) != "▎ line two⏎[31m " {
+	if len(got) != m.height || ansi.Strip(got[9]) != " │ line one                            │" || ansi.Strip(got[10]) != " │ line two⏎[31m                       │" {
 		t.Errorf("pasted reply: %d lines, rows %q", len(got), got[9:])
 	}
 	if m.box.ed.String() != "line one\nline two\x1b[31m" {
@@ -450,5 +450,50 @@ func TestFitWidth(t *testing.T) {
 		if err := fitWidth(c, "%2"); err != nil || resized != want {
 			t.Errorf("window %s: resized to %q (%v), want %s", window, resized, err, want)
 		}
+	}
+}
+
+// The reply box is boxed like the card it writes to, in its colour: its target on the top border, its keys on
+// the bottom one; the card's Message… lights up.
+func TestReplyBoxLooks(t *testing.T) {
+	m := twoTiles()
+	m.width, m.height, m.folds = 60, 16, map[string]bool{"b": false}
+	m.history = []string{"older"}
+	m.open(m.snap.tiles[1])
+	got := m.render()
+	// go test -run TestReplyBoxLooks -v prints the board with its box
+	t.Log("\n" + strings.Join(ansiStrip(got), "\n"))
+	want := []string{
+		" ╭─ Message ● b Codex #3 open fix ─────────────────────────╮",
+		" │  type a message                                         │",
+		" ╰─────────── ⏎ send · esc cancel · ⇧⏎ newline · ↑ recent ─╯",
+	}
+	if box := ansiStrip(got[13:]); !slices.Equal(box, want) {
+		t.Errorf("box:\n%s", strings.Join(box, "\n"))
+	}
+	accent := sidebar.StateColour("Codex", "")
+	if !strings.HasPrefix(got[13], " "+accent+"╭─") || !strings.Contains(got[15], accent+"─╯") {
+		t.Errorf("box frame not in the card's colour: %q", got[13:])
+	}
+	if card := strings.Join(got[:13], "\n"); !strings.Contains(card, accent+bold+"Message…") {
+		t.Errorf("Message… not lit:\n%q", card)
+	}
+	m, _ = press(m, runes("fix it"))
+	if got := ansiStrip(m.render()); got[14] != " │ fix it "+strings.Repeat(" ", 49)+"│" || got[15] != want[2] {
+		t.Errorf("draft keeps its keys under it: %q", got[13:])
+	}
+	// Only the bound card's Message… lights up
+	m.folds["a"] = false
+	if n := strings.Count(strings.Join(m.render(), "\n"), bold+"Message…"); n != 1 {
+		t.Errorf("%d cards' Message… lit", n)
+	}
+	// A message takes the keys' place; an alert goes under the box
+	m.msg = "⏳ answering b…"
+	if got := ansiStrip(m.render()); !strings.HasSuffix(got[15], "─ ⏳ answering b… ─╯") {
+		t.Errorf("message: %q", got[13:])
+	}
+	m.msg = "❌ b: nope"
+	if got := ansiStrip(m.render()); got[14] != want[2] || got[15] != " ❌ b: nope" {
+		t.Errorf("alert: %q", got[12:])
 	}
 }

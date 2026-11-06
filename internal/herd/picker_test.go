@@ -164,7 +164,7 @@ func TestPickerKeys(t *testing.T) {
 		"┃│    Green: Calm                      │",
 		"┃│    Blue: Cool and safe              │",
 	}
-	if !slices.Equal(got[3:11], want) || got[22] != "─ ● a Claude · waiting · $1.20 ─────────" || got[23] != " ←→ move · ⏎ pick · 1-9 · esc close" {
+	if !slices.Equal(got[3:11], want) || got[22] != " ╭─ Answer ● a Claude · waiting · $1… ─╮" || got[23] != " ╰─ ←→ move · ⏎ pick · 1-9 · esc clo… ─╯" {
 		t.Errorf("picker:\n%s", strings.Join(got, "\n"))
 	}
 	if m, _ := press(m, tea.KeyMsg{Type: tea.KeyRight}); !strings.Contains(ansi.Strip(m.render()[5]), "[2 Green]") {
@@ -205,7 +205,7 @@ func TestPickerKeys(t *testing.T) {
 func TestPickerMulti(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q2-checked", colors)
 	got := ansiStrip(m.render())
-	if got[5] != "┃│    [1 ☑ Tests]  2 ☐ Docs   3 ☑ Lint │" || got[7] != "┃│     5 Chat about this   Submit ⏎    │" || got[23] != " ←→ move · space toggle · ⏎ next · 1-9 …" {
+	if got[5] != "┃│    [1 ☑ Tests]  2 ☐ Docs   3 ☑ Lint │" || got[7] != "┃│     5 Chat about this   Submit ⏎    │" || got[23] != " ╰─ ←→ move · space toggle · ⏎ next … ─╯" {
 		t.Errorf("multi picker:\n%s", strings.Join(got, "\n"))
 	}
 	// space and digits toggle, ⏎ goes on; "Chat about this" answers at once
@@ -235,7 +235,7 @@ func TestPickerMulti(t *testing.T) {
 		t.Fatal("4 doesn't open the free text")
 	}
 	m, _ = press(m, runes("ci"))
-	if row := ansi.Strip(m.render()[22]); row != "▎ Type something: ci " {
+	if row := ansi.Strip(m.render()[22]); row != " │ Type something: ci                  │" {
 		t.Errorf("typing row %q", row)
 	}
 	c, sent := screens(t, "claude-ask-q2-checked", "")
@@ -307,7 +307,7 @@ func ansiStrip(lines []string) []string {
 	return out
 }
 
-// The reply box's card is framed in its state's accent, as the selected card is, and so is the box's rule.
+// The reply box's card is framed in its state's accent, as the selected card is, and so is the box's frame.
 func TestBoundTile(t *testing.T) {
 	m := Model{width: 61, height: 30, selected: "a", snap: snapshot{tiles: []tile{
 		{sess: sidebar.Session{Name: "b", Agent: "Claude", State: "waiting"}, deciding: true, body: []string{"\x1b[31mred\x1b[0m"}},
@@ -337,8 +337,8 @@ func TestBoundTile(t *testing.T) {
 	if f := frame(got, "a"); !strings.Contains(f, rule+"╭") {
 		t.Errorf("a no longer selected:\n%q", f)
 	}
-	if gh := m.boardHeight(); !strings.HasPrefix(got[gh], red+"─"+reset) {
-		t.Errorf("box rule in b's accent: %q", got[gh])
+	if gh := m.boardHeight(); !strings.HasPrefix(got[gh], " "+red+"╭─"+reset) {
+		t.Errorf("box frame in b's accent: %q", got[gh])
 	}
 }
 
@@ -384,13 +384,13 @@ func TestReplyEditing(t *testing.T) {
 	if m.box.ed.String() != "one\ntwo" {
 		t.Fatalf("draft %q", m.box.ed.String())
 	}
-	if got := ansiStrip(m.bottom()); len(got) != 3 || got[1] != "▎ one" || got[2] != "▎ two " {
+	if got := ansiStrip(m.bottom()); len(got) != 4 || got[1] != " │ one"+strings.Repeat(" ", 53)+"│" || got[2] != " │ two "+strings.Repeat(" ", 52)+"│" {
 		t.Errorf("a two-line draft grows the box: %q", got)
 	}
 	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m.history = append(m.history, "older")
 	m, _ = press(m, runes("i"))
-	if got := ansi.Strip(m.bottom()[1]); got != "▎  ⏎ send · esc cancel · ⇧⏎ newline · ↑ recent" {
+	if got := ansi.Strip(m.bottom()[1]); got != " │  type a message"+strings.Repeat(" ", 41)+"│" {
 		t.Errorf("placeholder %q", got)
 	}
 	// ↑ recalls the newest, then older; ↓ comes back, then to an empty draft
@@ -704,7 +704,7 @@ func TestBoxInShortPane(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
 	for _, h := range []int{1, 2, 3} {
 		m.height = h
-		if got := m.render(); len(got) != h || !strings.Contains(ansi.Strip(got[h-1]), "esc close") {
+		if got := m.render(); len(got) != h || !strings.HasPrefix(ansi.Strip(got[h-1]), " ╰─ ←→ move") {
 			t.Errorf("height %d: %q", h, got)
 		}
 	}
