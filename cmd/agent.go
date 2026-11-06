@@ -16,7 +16,6 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/herd"
-	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
@@ -334,7 +333,7 @@ Prints the agent like get.`,
 			if err != nil {
 				return err
 			}
-			c, session := tmux.New(), open.SessionName(args[0], wt)
+			c, session := tmux.New(), sidebar.SessionName(args[0], wt)
 			pane, err := callerPane(c, boss)
 			if err != nil {
 				return err
