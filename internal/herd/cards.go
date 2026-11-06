@@ -244,7 +244,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
 	}
 	if pr := t.sess.PR; pr.Number != 0 {
-		rows = append(rows, line(in+sidebar.PRColour(pr.State)+prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State+reset+ciText(t.ci)))
+		rows = append(rows, line(in+prColour(pr.State)+prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State+reset+ciText(t.ci)))
 	}
 	for _, l := range said(t) {
 		text(rule, l)
@@ -416,7 +416,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 			left += "  " + sidebar.Muted + s + reset
 		}
 		if pr := t.sess.PR; pr.Number != 0 {
-			left += "  " + sidebar.PRColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
+			left += "  " + prColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
 			if icon := ciIcon(t.ci.state); icon != "" {
 				left += " " + icon
 			}
@@ -519,6 +519,14 @@ func prIcon(state string) string {
 	return "○"
 }
 
+// prColour is a PR's colour by state as sidebar gives it, but a draft's at the card's muted level: sidebar's faint is too dim on a card.
+func prColour(state string) string {
+	if state == "draft" {
+		return sidebar.Muted
+	}
+	return sidebar.PRColour(state)
+}
+
 // lastSaid is how many of its newest reply's lines a card shows.
 const lastSaid = 2
 
@@ -571,7 +579,7 @@ func (m Model) screenRows(t tile) []string {
 	return tail(t.body, n)
 }
 
-// ciIcon is a CI state's glyph in its colour: ✓ passed, ✗ failed, ◷ running; "" for none.
+// ciIcon is a CI state's glyph in its colour: ✓ passed, ✗ failed, ● running (◷ draws half height in some terminals); "" for none.
 func ciIcon(state string) string {
 	switch state {
 	case ciPassed:
@@ -579,7 +587,7 @@ func ciIcon(state string) string {
 	case ciFailed:
 		return sidebar.Red + "✗" + reset
 	case ciRunning:
-		return sidebar.Gold + "◷" + reset
+		return sidebar.Gold + "●" + reset
 	}
 	return ""
 }
