@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -123,7 +124,7 @@ func (m Model) waiting(p *pick) bool {
 }
 
 // handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
-// here, 1-9 answer its dialog, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
+// here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
 // fold or unfold it, ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
@@ -157,8 +158,19 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		t := m.snap.tiles[i]
+		if opts := t.options(); len(opts) > 0 && t.sess.State != agent.Waiting {
+			n := int(key[0] - '1')
+			if n >= len(opts) {
+				m.msg = info(fmt.Sprintf("%s's question has %d options", t.sess.Name, len(opts)))
+				return m, nil
+			}
+			// As a typed reply, without touching a draft kept for t
+			m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1}
+			m.box.ed.set(opts[n])
+			return m.sendReply()
+		}
 		if t.sess.State != agent.Waiting {
-			m.msg = info("1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (m to reply)")
+			m.msg = info("1-9 answer a waiting worker's dialog or a question's options; " + t.sess.Name + " has neither (m to reply)")
 			return m, nil
 		}
 		if t.pick != nil {
