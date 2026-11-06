@@ -144,6 +144,9 @@ var option = regexp.MustCompile(`^\s*([-*•]|\d+[.)]|[A-Za-z][.)])\s`)
 // IsOption reports a list item line, as a question's options are.
 func IsOption(l string) bool { return option.MatchString(l) }
 
+// OptionText is option line l without its list marker.
+func OptionText(l string) string { return strings.TrimSpace(l[len(option.FindString(l)):]) }
+
 // question is the question msg ends on (see QuestionAt) and its options after it; "" when none.
 func question(msg string) (ask, options string) {
 	var lines []string
