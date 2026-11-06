@@ -19,7 +19,7 @@ func previewLines(capture string, t tile) []string {
 	}
 	switch t.sess.Agent {
 	case "Claude":
-		return cropInput(lines)
+		return squeezeBlank(cropInput(lines))
 	case "Codex":
 		return squeezeBlank(cropCodexInput(lines))
 	case "Grok":
@@ -28,8 +28,8 @@ func previewLines(capture string, t tile) []string {
 	return lines
 }
 
-// squeezeBlank drops leading blank lines and collapses each run of blank lines to one: Codex and Grok
-// leave long blank gaps on screen, as between a short conversation and the spinner at the bottom.
+// squeezeBlank drops leading blank lines and collapses each run of blank lines to one: agents leave long blank
+// gaps on screen, as between a short conversation and the spinner at the bottom.
 func squeezeBlank(lines []string) []string {
 	var out []string
 	blank := true

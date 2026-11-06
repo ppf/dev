@@ -605,6 +605,38 @@ func TestAsksCardLiveDemos(t *testing.T) {
 	}
 }
 
+// A working card running a long Bash call shows its tool rows with their elapsed times on screen, though
+// Claude pins its spinner far below them, over its input box.
+func TestWorkingCardToolRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	data, err := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]any{{
+		"type": "tool_use", "name": "Bash", "input": map[string]any{
+			"command": "python3 -c 'import time; time.sleep(100)'", "description": "Waiting 100 seconds via Python (run 2 of 4)"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read, err := desktop.ReadTail(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl := tile{sess: sidebar.Session{Name: "busy", Agent: "Claude", State: agent.Working, Branch: "demo-busy"}, tail: read}
+	tl.body = previewLines(screenGolden(t, "claude-working-bash"), tl)
+	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
+	if !strings.Contains(got, "│    Waiting 100 seconds via Python (run 2 of 4)") {
+		t.Errorf("status not the tool's description:\n%s", got)
+	}
+	_, screen, _ := strings.Cut(got, "┄ screen")
+	for _, s := range []string{"Waiting 100 seconds via Python (run 2 of 4) · 11s", "⎿  $ python3 -c 'import time; time.sleep(100)' (9s)", "✶ Beaming… (15s"} {
+		if !strings.Contains(screen, s) {
+			t.Errorf("%q not on screen:\n%s", s, got)
+		}
+	}
+}
+
 // The same reply on a card not asking it keeps its question as a last line.
 func TestSaidKeepsQuestionNotAsked(t *testing.T) {
 	tl := asksTile(t)

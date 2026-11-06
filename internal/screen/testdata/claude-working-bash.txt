@@ -1,0 +1,65 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.319\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mHaiku 5.5 with medium effort · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m/…/scratchpad/live/proj · \x1b[38;5;114m\x1b]8;id=udwm8i;https://claude.ai/code/session_x?from=cli\x1b\/rc\x1b[39m\x1b]8;;\x1b\
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mRun this Bash command once, in the foreground, with description 'Waiting 100 seconds via Python (run 2 of 4)': python3\x1b[39m
+  \x1b[38;5;231m-c 'import time; time.sleep(100)'  then reply DONE.\x1b[39m
+
+\x1b[38;5;246m\x1b[49m \x1b[39m Waiting 100 seconds via Python (run 2 of 4)\x1b[38;5;246m · 11s\x1b[39m
+\x1b[38;5;246m  ⎿  $ python3 -c 'import time; time.sleep(100)' (9s)\x1b[39m
+     \x1b[38;5;246m(ctrl+b ctrl+b (twice) to run in background)\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[38;5;174m✶\x1b[39m \x1b[38;5;216mBeaming…\x1b[38;5;174m \x1b[38;5;246m(15s · ↓\x1b[39m \x1b[38;5;246m107 tokens)\x1b[39m
+
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[38;5;246m❯ \x1b[39m
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m~/PhpstormProjects/ppf/dev/.claude/worktrees/demo-busy\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
