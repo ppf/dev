@@ -194,6 +194,13 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// A click is no y to a kill asked before it
 	m.msg, m.confirm = "", ""
 	switch h.kind {
+	case hitCard:
+		// An open reply box would take the keys meant for the card; one whose answer is out keeps its wait
+		if t.sess.Name != m.box.session || m.answering != m.box.session && m.box.sent == "" {
+			m.blur()
+		}
+		m.selected = t.sess.Name
+		return m, nil
 	case hitFold:
 		m.fold(t)
 		return m, nil
@@ -207,14 +214,6 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Its y would go into a draft, and the box hides the question; a typed reply waits for its box
 		m.blur()
 		m.selected, m.confirm = t.sess.Name, t.sess.Name
-		return m, nil
-	}
-	if h.kind == hitCard {
-		// A reply box bound to another card would take the keys meant for this one
-		if t.sess.Name != m.box.session {
-			m.blur()
-		}
-		m.selected = t.sess.Name
 		return m, nil
 	}
 	answers := h.kind == hitOption || h.kind == hitSubmit

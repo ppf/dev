@@ -191,7 +191,6 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	if selected {
 		frame = sidebar.StateColour(t.sess.Agent, t.sess.State)
 	}
-	// The arrow, a cell wider each side so it's easy to hit
 	// The selected card's name row is on the selection band
 	band := func(row string) string {
 		if !selected {
@@ -199,6 +198,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		}
 		return sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
 	}
+	// The arrow, a cell wider each side so it's easy to hit
 	if t.folded(m.folds) {
 		return []string{gutter + band(m.headRow(t, sec, true, w-1))}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
 	}

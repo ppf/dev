@@ -83,11 +83,17 @@ func TestSelectionAndClicks(t *testing.T) {
 	if m = key(m, "m"); m.box.session != "a" || m.box.pane != "%5" {
 		t.Errorf("m on tile a: reply %q pane %q", m.box.session, m.box.pane)
 	}
+	// A click closes the box, so the keys reach the card it selects; its draft waits, and an answer going out
+	// keeps it
 	m.box.ed.set("half")
-	if m, _ = click(m, 8, 1); m.box.session != "a" || m.box.ed.String() != "half" {
-		t.Errorf("click on the box's tile: reply %q draft %q", m.box.session, m.box.ed.String())
+	if m, _ = click(m, 8, 1); m.box.session != "" || m.drafts["a"].ed.String() != "half" {
+		t.Errorf("click on the box's tile: reply %q drafts %v", m.box.session, m.drafts)
 	}
-	// Away from the box's tile: the box closes, so the keys reach the newly selected card; its draft waits
+	m = key(m, "m")
+	m.box.sent = "key"
+	if m, _ = click(m, 8, 1); m.box.session != "a" {
+		t.Error("click on the box's tile closed it while its answer is on screen")
+	}
 	if m, _ = click(m, 8, 2); m.selected != "b" || m.box.session != "" || m.drafts["a"].ed.String() != "half" {
 		t.Errorf("click on tile b: selected %q reply %q drafts %v", m.selected, m.box.session, m.drafts)
 	}
