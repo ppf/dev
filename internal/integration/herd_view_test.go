@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// The previews fit to 40% of the window and show a card per worker: an idle one folded to its row, f opens it
-// on its screen's end, f again folds it.
+// The previews stay collapsed until the first worker, then fit to 40% of the window and show a card per worker:
+// an idle one folded to its row, f opens it on its screen's end, f again folds it; closing the last collapses them.
 func TestHerdCards(t *testing.T) {
 	d := newDevServer(t, "set -g @dev_notify off\n")
 	stubs := filepath.SplitList(d.path)[0]
@@ -27,6 +27,10 @@ func TestHerdCards(t *testing.T) {
 	}
 	panes := strings.Fields(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id}"))
 	coordinator, previews := panes[1], panes[2]
+	collapsed := func(pane string) func() bool {
+		return func() bool { return d.T("display", "-p", "-t", pane, "#{pane_width}") == "1" }
+	}
+	waitFor(t, "previews collapsed without workers", collapsed(previews))
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
@@ -57,12 +61,19 @@ func TestHerdCards(t *testing.T) {
 	_, errOut, status = devAgent(env, "", "prompt", "app", "ask")
 	check(t, "ask prompt", status+errOut, "0")
 	waitFor(t, "decision note with the inbox off", func() bool { return note() == "needs a decision" })
+	d.T("kill-session", "-t", "=app")
+	waitFor(t, "previews collapsed after the last worker", collapsed(previews))
 
-	// A previews pane started at another width (an older dev's 55%) fits itself: a hand-made boss (no pane-died binding)
+	// A previews pane started at another width (an older dev's 55%) on a boss with a worker fits to 40%; once the
+	// worker goes it collapses, handing the focus split-window gave it to the pane on its left: a hand-made boss
+	// (no pane-died binding)
 	d.T("new-session", "-d", "-s", "boss2", "-x", "200", "-y", "50", "sleep 600")
 	d.T("set-option", "-t", "=boss2:", "@dev_herd", "1")
+	_, errOut, status = devAgent(append(env, "TMUX_PANE="+d.T("display", "-p", "-t", "=boss2:", "#{pane_id}")), "", "start", "app", "--timeout", "30s")
+	check(t, "start from boss2", status+errOut, "0")
 	again := d.T("split-window", "-t", "=boss2:", "-h", "-l", "55%", "-PF", "#{pane_id}", devBin, "boss", "--previews")
-	waitFor(t, "reopened previews fit to 40%", func() bool {
-		return d.T("display", "-p", "-t", again, "#{pane_width}") == "80"
-	})
+	waitFor(t, "reopened previews fit to 40%", func() bool { return d.T("display", "-p", "-t", again, "#{pane_width}") == "80" })
+	d.T("kill-session", "-t", "=app")
+	waitFor(t, "reopened previews collapsed", collapsed(again))
+	check(t, "focus handed left", d.T("display", "-p", "-t", "=boss2:", "#{pane_active}#{pane_index}"), "11")
 }

@@ -26,10 +26,12 @@ const (
 	OptStartedOutside = "@dev_started_outside"
 )
 
-// The previews pane's share of the window's width, at least minCardsW columns and at most half the window.
+// The previews pane's share of the window's width, at least minCardsW columns and at most half the window;
+// collapsedW while the boss has no workers, so the coordinator gets the window.
 const (
 	previewsPct = 40
 	minCardsW   = 60
+	collapsedW  = 1
 )
 
 // OptPane is the pane option holding a boss pane's role, which the resurrect save records.
@@ -217,6 +219,16 @@ func fitWidth(c *tmux.Client, pane string) error {
 		return fmt.Errorf("window width %q: %w", out, err)
 	}
 	_, err = c.Run("resize-pane", "-t", pane, "-x", strconv.Itoa(min(max(w*previewsPct/100, minCardsW), w/2)))
+	return err
+}
+
+// collapse narrows pane, the previews, to collapsedW; a focused pane hands the focus to the coordinator on its left.
+func collapse(c *tmux.Client, pane string, focused bool) error {
+	args := []string{"resize-pane", "-t", pane, "-x", strconv.Itoa(collapsedW)}
+	if focused {
+		args = append(args, ";", "select-pane", "-t", pane, "-L")
+	}
+	_, err := c.Run(args...)
 	return err
 }
 

@@ -52,6 +52,7 @@ type row struct {
 	Transcript   string `tmux:"@agent_transcript"`
 	Context      string `tmux:"@agent_context"`
 	Since        string `tmux:"@agent_since"`
+	Zoomed       bool   `tmux:"window_zoomed_flag"`
 }
 
 // tile is one worker session's preview.
@@ -77,6 +78,7 @@ type snapshot struct {
 	name    string // own session's name
 	visible bool   // a client shows own window
 	focused bool   // own pane is its window's active pane
+	zoomed  bool   // own window is zoomed
 	client  string // tty of the client viewing own session; "" lets tmux pick
 }
 
@@ -101,7 +103,18 @@ type Model struct {
 	host          string          // hostname, tmux's default pane title: a title that says nothing
 	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
 	expands       map[string]bool // by session: its card shows more of its screen (v)
+	size          paneSize        // how fit last sized the pane
 }
+
+// paneSize is how fit last sized the previews pane.
+type paneSize int
+
+const (
+	unlisted  paneSize = iota // before the first refresh, which tells fit the workers
+	unsized                   // not yet, or that fit failed or a resize undid it
+	collapsed                 // collapsedW
+	shared                    // its share of the window
+)
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
 type lookups interface {
@@ -140,10 +153,34 @@ func newModel(c *tmux.Client, pane string) Model {
 	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host}
 }
 
-// Init starts the first refresh and fits the pane to its share of the window, also for a boss restored, or
-// one an older dev left wider or narrower.
+// Init starts the first refresh, which sizes the pane (see fit).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), m.watchLater(), m.action(func() error { return fitWidth(m.c, m.pane) }))
+	return tea.Batch(m.refresh(), m.watchLater())
+}
+
+// fit sizes the pane once the first refresh is in: collapsed while it has nothing to show, else its share of the
+// window; only when that changes, so a pane the user resized keeps its width while it shows something. A
+// collapsed pane hands the focus back to the coordinator; a zoomed window waits, as resizing would unzoom it.
+// It runs in Update, so fits apply in order.
+func (m *Model) fit() {
+	want := shared
+	if len(m.snap.tiles) == 0 && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+		want = collapsed
+	}
+	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
+		return
+	}
+	var err error
+	if want == collapsed {
+		err = collapse(m.c, m.pane, m.focused)
+		m.focused = false
+	} else {
+		err = fitWidth(m.c, m.pane)
+	}
+	if m.size = want; err != nil {
+		// Shown at the pane's share, tried again on the next message
+		m.size, m.msg = unsized, alert("❌ "+err.Error())
+	}
 }
 
 // watchLater runs inbox.Watch after watchInterval.
@@ -153,12 +190,23 @@ func (m Model) watchLater() tea.Cmd {
 	})
 }
 
-// Update routes refreshes, size and input.
+// Update routes refreshes, size and input, then fits the pane.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	n := next.(Model)
+	n.fit()
+	return n, cmd
+}
+
+// update is Update before the fit.
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, m.refresh()
 	case refreshMsg:
+		if m.size == unlisted {
+			m.size = unsized
+		}
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
@@ -191,6 +239,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// A window resize spreads its columns over every pane, a collapsed one too; a user's drag is undone too
+		if m.size == collapsed && msg.Width > collapsedW {
+			m.size = unsized
+		}
 		return m, nil
 	case tea.KeyMsg:
 		m.focused, m.inputs = true, m.inputs+1
@@ -347,7 +399,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	panes := map[string][]row{}
 	for _, r := range rows {
 		if r.ID == pane {
-			s.self, s.name, s.focused, own = r.SessionID, r.Session, r.Active, true
+			s.self, s.name, s.focused, s.zoomed, own = r.SessionID, r.Session, r.Active, r.Zoomed, true
 			_, viewed := sidebar.ActiveClient(clients, r.Session)
 			s.visible = viewed && r.WindowActive
 		}
