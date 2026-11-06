@@ -68,8 +68,8 @@ func newLookups(c *tmux.Client) *liveLookups {
 	return &liveLookups{Lookups: sidebar.NewLookups(c), tails: map[string]cachedTail{}, cis: newCICache()}
 }
 
-// CI is the checks of the PR at url as last read, read again at most every ciTTL or once gen moved on.
-func (l *liveLookups) CI(url, gen string) ci { return l.cis.get(url, gen) }
+// CI is the checks of the PR at url as last read for pane, read again at most every ciTTL or once gen moved on.
+func (l *liveLookups) CI(url, pane, gen string) ci { return l.cis.get(url, pane, gen) }
 
 // Tail is the end of the transcript at path; none written yet is no error. A failed read isn't kept, so the
 // next refresh tries again.

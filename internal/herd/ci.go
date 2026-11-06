@@ -17,12 +17,14 @@ const (
 	ciRunning = "running"
 )
 
-// ciTTL is how long a PR's checks are kept before gh is asked again, ciEmptyTTL while it has none (a PR just
-// opened or pushed, its checks not started yet); ciReads caps the reads running at once; a PR not looked at for
-// ciForget is forgotten (merged, closed, its worker gone).
+// ciTTL is how long a PR's checks are kept before gh is asked again; ciEmptyTTL while none were read yet, for
+// ciEmptyFor after it was first looked at or its pane's @dev_pr_gen moved on (a PR just opened, its checks not
+// started yet; a repo without CI stays at ciTTL after); ciReads caps the reads running at once; a PR not looked
+// at for ciForget is forgotten (merged, closed, its worker gone).
 const (
 	ciTTL      = time.Minute
 	ciEmptyTTL = 10 * time.Second
+	ciEmptyFor = 2 * time.Minute
 	ciReads    = 2
 	ciForget   = 10 * time.Minute
 )
@@ -92,9 +94,9 @@ func parseRollup(out []byte) (ci, error) {
 	return ci{}, nil
 }
 
-// ciCache reads PRs' checks with gh in the background: a refresh gets the last read at once and starts a
-// read for a PR not read yet, read over ciTTL ago (ciEmptyTTL when it had no checks) or before its pane's
-// @dev_pr_gen moved on, whose result the next refresh shows.
+// ciCache reads PRs' checks with gh in the background, per pane, since each has its own @dev_pr_gen: a
+// refresh gets the last read at once and starts a read for a PR not read yet, read over ciTTL ago (ciEmptyTTL
+// while it had no checks) or before the pane's @dev_pr_gen moved on, whose result the next refresh shows.
 type ciCache struct {
 	// gh runs gh args; tests replace it.
 	gh      func(args ...string) ([]byte, error)
@@ -102,53 +104,61 @@ type ciCache struct {
 	sem     chan struct{}
 	wg      sync.WaitGroup // running reads, so tests can wait for them
 	mu      sync.Mutex
-	entries map[string]ciEntry
+	entries map[ciKey]ciEntry
 }
+
+// ciKey is a PR's URL and the agent pane showing it.
+type ciKey struct{ url, pane string }
 
 // ciEntry is a PR's last read.
 type ciEntry struct {
 	ci      ci
 	read    time.Time
 	gen     string    // the pane's @dev_pr_gen when the read started
+	since   time.Time // first looked at, or looked at under a new @dev_pr_gen
 	seen    time.Time // last looked at
 	pending bool      // a read is running
 }
 
 func newCICache() *ciCache {
 	gh := func(args ...string) ([]byte, error) { return sidebar.RunGH("", args...) }
-	return &ciCache{gh: gh, now: time.Now, sem: make(chan struct{}, ciReads), entries: map[string]ciEntry{}}
+	return &ciCache{gh: gh, now: time.Now, sem: make(chan struct{}, ciReads), entries: map[ciKey]ciEntry{}}
 }
 
-// get is the checks of the PR at url as last read, starting a read when due; gen is its pane's @dev_pr_gen.
-func (c *ciCache) get(url, gen string) ci {
+// get is the checks of the PR at url as last read for pane, whose @dev_pr_gen is gen, starting a read when due.
+func (c *ciCache) get(url, pane, gen string) ci {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	for u, e := range c.entries {
+	for k, e := range c.entries {
 		if !e.pending && now.Sub(e.seen) >= ciForget {
-			delete(c.entries, u)
+			delete(c.entries, k)
 		}
 	}
-	e, ok := c.entries[url]
+	k := ciKey{url, pane}
+	e, ok := c.entries[k]
 	e.seen = now
+	if !ok || e.gen != gen {
+		e.since = now
+	}
 	ttl := ciTTL
-	if e.ci.state == "" && e.ci.err == "" {
+	if e.ci.state == "" && now.Sub(e.since) < ciEmptyFor {
 		ttl = ciEmptyTTL
 	}
 	if !e.pending && (!ok || e.gen != gen || now.Sub(e.read) >= ttl) {
 		e.pending = true
 		c.wg.Add(1)
-		go c.fetch(url, gen)
+		go c.fetch(k, gen)
 	}
-	c.entries[url] = e
+	c.entries[k] = e
 	return e.ci
 }
 
-// fetch reads url's checks under gen; a failure keeps the last ones read, with why.
-func (c *ciCache) fetch(url, gen string) {
+// fetch reads k's checks under gen; a failure keeps the last ones read, with why.
+func (c *ciCache) fetch(k ciKey, gen string) {
 	defer c.wg.Done()
 	c.sem <- struct{}{}
-	args := []string{"pr", "view", url, "--json", "statusCheckRollup"}
+	args := []string{"pr", "view", k.url, "--json", "statusCheckRollup"}
 	out, err := c.gh(args...)
 	<-c.sem
 	var got ci
@@ -157,11 +167,11 @@ func (c *ciCache) fetch(url, gen string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e := c.entries[url]
+	e := c.entries[k]
 	if err != nil {
 		got = e.ci
 		// The reason only: a card's row would cut it off behind the call gh's errors start with
 		got.err = strings.TrimPrefix(err.Error(), "gh "+strings.Join(args, " ")+": ")
 	}
-	c.entries[url] = ciEntry{ci: got, read: c.now(), gen: gen, seen: e.seen}
+	c.entries[k] = ciEntry{ci: got, read: c.now(), gen: gen, since: e.since, seen: e.seen}
 }

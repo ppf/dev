@@ -63,101 +63,107 @@ func TestCICache(t *testing.T) {
 		}
 		return []byte(out), nil
 	}
-	if got := c.get(url, "1"); got.state != "" {
+	if got := c.get(url, "%1", "1"); got.state != "" {
 		t.Errorf("first get = %+v, want nothing yet", got)
 	}
 	// While it runs, another get starts none
-	c.get(url, "1")
+	c.get(url, "%1", "1")
 	close(release)
 	c.wg.Wait()
-	if got := c.get(url, "1"); got.state != ciPassed || len(calls) != 1 || calls[0] != "pr view "+url+" --json statusCheckRollup" {
+	if got := c.get(url, "%1", "1"); got.state != ciPassed || len(calls) != 1 || calls[0] != "pr view "+url+" --json statusCheckRollup" {
 		t.Errorf("after the read: %+v, calls %q", got, calls)
 	}
 	now = now.Add(ciTTL - time.Second)
-	c.get(url, "1")
+	c.get(url, "%1", "1")
 	c.wg.Wait()
 	if len(calls) != 1 {
 		t.Errorf("read again within ciTTL: %d calls", len(calls))
 	}
 	now = now.Add(time.Second)
 	fail = true
-	c.get(url, "1")
+	c.get(url, "%1", "1")
 	c.wg.Wait()
-	if got := c.get(url, "1"); got.state != ciPassed || got.err != "HTTP 401: Bad credentials" || len(calls) != 2 {
+	if got := c.get(url, "%1", "1"); got.state != ciPassed || got.err != "HTTP 401: Bad credentials" || len(calls) != 2 {
 		t.Errorf("after a failed read: %+v, calls %d", got, len(calls))
 	}
 	now = now.Add(ciTTL)
 	fail = false
-	c.get(url, "1")
+	c.get(url, "%1", "1")
 	c.wg.Wait()
-	if got := c.get(url, "1"); got.state != ciPassed || got.err != "" {
+	if got := c.get(url, "%1", "1"); got.state != ciPassed || got.err != "" {
 		t.Errorf("after a good read: %+v", got)
 	}
 	now = now.Add(ciForget)
-	c.get("other", "1")
+	c.get("other", "%1", "1")
 	c.wg.Wait()
-	if _, ok := c.entries[url]; ok {
+	if _, ok := c.entries[ciKey{url, "%1"}]; ok {
 		t.Error("a PR not looked at for ciForget is kept")
 	}
 }
 
-// A PR without checks yet (just opened or pushed) is read again after ciEmptyTTL, one with checks after ciTTL;
-// a newer @dev_pr_gen (the worker ran a gh command that changed the PR) reads it at once, and a read started
-// under an older one is read again once done.
+// A PR without checks yet is read again after ciEmptyTTL while just looked at (for ciEmptyFor after it was
+// first, or under a newer @dev_pr_gen; a failed read too), else after ciTTL; a newer @dev_pr_gen (the worker
+// ran a gh command that changed the PR) reads it at once, and a read started under an older one is read again
+// once done. Each pane keeps its own gen, so two showing one PR don't make each other read it.
 func TestCICacheRereads(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	calls := 0
-	out := `{"statusCheckRollup":[]}`
+	out, fail := `{"statusCheckRollup":[]}`, false
+	var block chan struct{}
 	const url = "https://github.com/o/r/pull/1"
-	release := make(chan struct{}, 10)
 	c := newCICache()
 	c.now = func() time.Time { return now }
 	c.gh = func(args ...string) ([]byte, error) {
-		<-release
+		if block != nil {
+			<-block
+		}
 		calls++
+		if fail {
+			return nil, errors.New("offline")
+		}
 		return []byte(out), nil
 	}
-	read := func(gen string) ci {
-		release <- struct{}{}
-		c.get(url, gen)
+	get := func(pane, gen string) ci {
+		c.get(url, pane, gen)
 		c.wg.Wait()
-		return c.get(url, gen)
+		return c.get(url, pane, gen)
 	}
-	if got := read("1"); got.state != "" || calls != 1 {
-		t.Fatalf("first read: %+v, calls %d", got, calls)
+	expect := func(what string, got ci, state string, n int) {
+		t.Helper()
+		if got.state != state || calls != n {
+			t.Errorf("%s: %+v, %d calls; want %q, %d calls", what, got, calls, state, n)
+		}
 	}
+	fail = true
+	expect("first read fails", get("%1", "1"), "", 1)
+	fail = false
 	now = now.Add(ciEmptyTTL - time.Second)
-	c.get(url, "1")
-	c.wg.Wait()
-	if calls != 1 {
-		t.Errorf("no checks: read again within ciEmptyTTL: %d calls", calls)
-	}
+	expect("no checks, within ciEmptyTTL", get("%1", "1"), "", 1)
 	now = now.Add(time.Second)
-	out = `{"statusCheckRollup":[{"name":"test","status":"IN_PROGRESS"}]}`
-	if got := read("1"); got.state != ciRunning || calls != 2 {
-		t.Errorf("no checks: not read again after ciEmptyTTL: %+v, calls %d", got, calls)
-	}
+	expect("no checks, after ciEmptyTTL", get("%1", "1"), "", 2)
+	now = now.Add(ciEmptyFor)
+	expect("no checks, ciEmptyFor on", get("%1", "1"), "", 3)
 	now = now.Add(ciEmptyTTL)
-	c.get(url, "1")
-	c.wg.Wait()
-	if calls != 2 {
-		t.Errorf("checks: read again after ciEmptyTTL: %d calls", calls)
+	expect("no checks after ciEmptyFor: ciTTL", get("%1", "1"), "", 3)
+	out = `{"statusCheckRollup":[{"name":"test","status":"IN_PROGRESS"}]}`
+	expect("newer gen", get("%1", "2"), ciRunning, 4)
+	now = now.Add(ciEmptyTTL)
+	expect("checks: ciTTL", get("%1", "2"), ciRunning, 4)
+	expect("another pane", get("%2", "7"), ciRunning, 5)
+	for range 3 {
+		get("%1", "2")
+		get("%2", "7")
 	}
-	out = `{"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}`
-	if got := read("2"); got.state != ciPassed || calls != 3 {
-		t.Errorf("newer gen: not read at once: %+v, calls %d", got, calls)
-	}
+	expect("two panes on one PR", c.get(url, "%1", "2"), ciRunning, 5)
 	// A gen bump while a read runs: that read is under the older gen, so the next get reads again
 	now = now.Add(ciTTL)
-	c.get(url, "2")
-	if got := c.get(url, "3"); got.state != ciPassed {
-		t.Errorf("while a read runs: %+v", got)
-	}
-	release <- struct{}{}
+	block = make(chan struct{})
+	c.get(url, "%1", "2")
+	expect("while a read runs", c.get(url, "%1", "3"), ciRunning, 5)
+	close(block)
 	c.wg.Wait()
-	if got := read("3"); got.state != ciPassed || calls != 5 {
-		t.Errorf("read under an older gen: not read again: %+v, calls %d", got, calls)
-	}
+	block = nil
+	expect("read under an older gen", get("%1", "3"), ciRunning, 7)
 }
 
 // An open PR's row shows its checks' icon and names, a folded card the icon after the PR (a draft's at the
@@ -198,7 +204,7 @@ func TestCardCI(t *testing.T) {
 	} {
 		look := &fakeLookups{pr: tt.pr}
 		s, err := buildSnapshot(rows, tt.clients, "%1", "", look)
-		if err != nil || slices.Equal(look.cis, []string{"u 3"}) != tt.read || (s.tiles[0].ci.state != "") != tt.read {
+		if err != nil || slices.Equal(look.cis, []string{"u %2 3"}) != tt.read || (s.tiles[0].ci.state != "") != tt.read {
 			t.Errorf("%+v shown %v: read %q (%v), want read %v", tt.pr, tt.clients != nil, look.cis, err, tt.read)
 		}
 	}
