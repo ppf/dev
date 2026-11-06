@@ -247,7 +247,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	room := iw - len(in)
 	// Only a reply line shown whole stands in for its rows on screen
 	whole := slices.DeleteFunc(slices.Clone(lines), func(l string) bool { return ansi.StringWidth(l) > room })
-	shown := m.screenRows(t, whole)
+	shown := m.screenRows(t, whole, room)
 	// A question's chips replace its screen, which shows only the conversation above it
 	if sec == needsYouSection && t.pick.question() {
 		shown = nil
@@ -572,8 +572,8 @@ func said(t tile) []string {
 }
 
 // reply is the last lines of t's newest reply without backticks, bold or a turn-end marker line; on an asks
-// card it stops at the question and options: ask is the question, then its options, or the first option when
-// the question is above the lines read.
+// card it stops at the question: ask is the question and options the lines after it, or ask is the first
+// option (no options) when the question is above the lines read.
 func reply(t tile) (lines []string, ask string, options []string) {
 	strip := strings.NewReplacer("**", "", "`", "")
 	for _, l := range t.tail.Lines {
@@ -626,14 +626,15 @@ func warnings(t tile) []string {
 }
 
 // screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane while expanded,
-// without blank rows or the leading lines shown whole; on an asks card, only the rows above its question.
-func (m Model) screenRows(t tile, lines []string) []string {
+// without blank rows or the leading lines shown whole; on an asks card, only the rows above its question, but
+// with only its options read, only when its status (then the note) fits room.
+func (m Model) screenRows(t tile, lines []string, room int) []string {
 	n := screenRows
 	if m.expands[t.sess.Name] {
 		n = max(n, m.height/2)
 	}
 	shown := t.body
-	if _, ask, _ := reply(t); ask != "" {
+	if _, ask, _ := reply(t); ask != "" && (!inbox.IsOption(ask) || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
 		shown = aboveSaid(shown, lines, ask)
 	}
 	shown = tail(shown, n)
