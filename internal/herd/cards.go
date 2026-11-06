@@ -639,7 +639,7 @@ func (m Model) screenRows(t tile, lines []string, room int) []string {
 	}
 	shown := t.body
 	if _, ask, asked := reply(t); ask != "" && (len(asked) > 0 || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
-		shown = aboveSaid(shown, lines, ask)
+		shown = aboveSaid(shown, lines, ask, asked)
 	}
 	shown = tail(shown, n)
 	for len(shown) > 0 {
@@ -654,9 +654,10 @@ func (m Model) screenRows(t tile, lines []string, room int) []string {
 	return shown
 }
 
-// aboveSaid is rows above the wrapped ask, without blank rows and the lines shown whole just above; rows whole
-// when ask isn't on them. An option ask is cut with all options and the "?" paragraph above them.
-func aboveSaid(rows, lines []string, ask string) []string {
+// aboveSaid is rows above the wrapped ask, without blank rows and the lines shown whole or a copy of the
+// question asked and its options (a prompt quoting them) just above; rows whole when ask isn't on them. An
+// option ask is cut with all options and the "?" paragraph above them.
+func aboveSaid(rows, lines []string, ask string, asked []string) []string {
 	end := len(rows) - 1
 	for end >= 0 && saidRows(rows[end:], []string{ask}) == 0 {
 		end--
@@ -677,13 +678,14 @@ func aboveSaid(rows, lines []string, ask string) []string {
 			rows = rows[:top]
 		}
 	}
+	said := append(append(slices.Clip(lines), ask), asked...)
 	for len(rows) > 0 {
 		if rowText(rows[len(rows)-1]) == "" {
 			rows = rows[:len(rows)-1]
 			continue
 		}
 		k := 1
-		for k <= len(rows) && saidRows(rows[len(rows)-k:], lines) != k {
+		for k <= len(rows) && saidRows(rows[len(rows)-k:], said) != k {
 			k++
 		}
 		if k > len(rows) {

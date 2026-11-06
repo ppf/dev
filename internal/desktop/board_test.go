@@ -535,6 +535,13 @@ func TestCutAndLastLines(t *testing.T) {
 	if long := strings.Repeat("é", 300) + "?"; !slices.Equal(lastLines(long), []string{long}) {
 		t.Error("lastLines cut a line, want it whole for a tmux card to find its question")
 	}
+	ask := "Which way?\n\n- Rewrite in place\n- Translate on read\n- Leave them"
+	if got := lastLines("Intro.\n\n" + ask); !slices.Equal(got, []string{"Which way?", "- Rewrite in place", "- Translate on read", "- Leave them"}) {
+		t.Errorf("lastLines = %q, want back to the question its 3 options follow", got)
+	}
+	if got := lastLines("One.\nTwo.\nThree.\nFour."); len(got) != lastLineCount {
+		t.Errorf("lastLines = %q, want %d lines without a question", got, lastLineCount)
+	}
 }
 
 func TestTail(t *testing.T) {

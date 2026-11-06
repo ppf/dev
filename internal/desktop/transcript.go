@@ -11,12 +11,15 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ppf/dev/internal/inbox"
 )
 
 // tailBytes is how much of a transcript's end is read: rows run to hundreds of KB (attachments).
 const tailBytes = 1 << 20
 
-// lastLineCount is how many of the newest reply's lines are kept; lineRunes is what cut cuts a line to.
+// lastLineCount is how many of the newest reply's lines are kept, more for a question's options; lineRunes is what
+// cut cuts a line to.
 const (
 	lastLineCount = 3
 	lineRunes     = 200
@@ -269,7 +272,8 @@ func without(pending []block, id string) []block {
 	return pending
 }
 
-// lastLines is text's last non-blank lines, whole: a long question still ends in its "?".
+// lastLines is text's last non-blank lines, whole: a long question still ends in its "?"; back to the question
+// it ends on when its options take more of them.
 func lastLines(text string) []string {
 	var lines []string
 	for l := range strings.SplitSeq(text, "\n") {
@@ -277,7 +281,11 @@ func lastLines(text string) []string {
 			lines = append(lines, l)
 		}
 	}
-	return lines[max(0, len(lines)-lastLineCount):]
+	start := max(0, len(lines)-lastLineCount)
+	if i := inbox.QuestionAt(lines); i >= 0 {
+		start = min(start, i)
+	}
+	return lines[start:]
 }
 
 // cut cuts s to lineRunes.
