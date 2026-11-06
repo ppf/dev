@@ -1,0 +1,64 @@
+  │ config      │ 158        │ 187       │
+  ├─────────────┼────────────┼───────────┤
+  │ notify      │ 137        │ 168       │
+  ├─────────────┼────────────┼───────────┤
+  │ compact     │ 136        │ 172       │
+  ├─────────────┼────────────┼───────────┤
+  │ skill       │ 16         │ 31        │
+  ├─────────────┼────────────┼───────────┤
+  │ integration │ 1          │ 10        │
+  └─────────────┴────────────┴───────────┘
+
+  - \x1b[1mOrder changes:\x1b[0m \x1b[38;5;153mpicker\x1b[39m moves above \x1b[38;5;153mptywrap\x1b[39m and \x1b[38;5;153mworktree\x1b[39m, and \x1b[38;5;153mnotify\x1b[39m moves above \x1b[38;5;153mcompact\x1b[39m.
+  - \x1b[1mHow I counted:\x1b[0m no line-counting tool (scc, cloc or tokei) is installed, so a small script dropped blank lines, \x1b[38;5;153m//\x1b[39m
+    lines and \x1b[38;5;153m/* */\x1b[39m blocks. A line with code and a trailing comment counts as code.
+  - \x1b[1mintegration:\x1b[0m only 1 line is code; the other 9 are comments or blank.
+
+  Want a per-file breakdown of \x1b[38;5;153mherd\x1b[39m next?
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mCogitated for 12s · done 13:36\x1b[39m
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231myes\x1b[39m
+\x1b[49m
+  \x1b[38;5;246mRan \x1b[1m1\x1b[0m\x1b[38;5;246m shell command \x1b[39m
+
+\x1b[38;5;231m⏺\x1b[39m \x1b[38;5;153mherd\x1b[39m has 11 non-test files. \x1b[38;5;153mcards.go\x1b[39m is the biggest at 543 code lines, about 22% of the package.
+
+  ┌───────────┬────────────┬───────────┐
+  │   File    │ Code lines │ Raw lines │
+  ├───────────┼────────────┼───────────┤
+  │ cards.go  │ 543        │ 657       │
+  ├───────────┼────────────┼───────────┤
+  │ input.go  │ 410        │ 487       │
+  ├───────────┼────────────┼───────────┤
+  │ model.go  │ 370        │ 445       │
+  ├───────────┼────────────┼───────────┤
+  │ picker.go │ 202        │ 257       │
+  ├───────────┼────────────┼───────────┤
+  │ dialog.go │ 198        │ 244       │
+  ├───────────┼────────────┼───────────┤
+  │ herd.go   │ 188        │ 239       │
+  ├───────────┼────────────┼───────────┤
+  │ ci.go     │ 140        │ 177       │
+  ├───────────┼────────────┼───────────┤
+  │ view.go   │ 137        │ 164       │
+  ├───────────┼────────────┼───────────┤
+  │ editor.go │ 122        │ 150       │
+  ├───────────┼────────────┼───────────┤
+  │ chrome.go │ 117        │ 150       │
+  ├───────────┼────────────┼───────────┤
+  │ card.go   │ 73         │ 95        │
+  └───────────┴────────────┴───────────┘
+
+  - The files add up to the package totals from before (2,500 code, 3,065 raw).
+  - \x1b[38;5;153mcards.go\x1b[39m, \x1b[38;5;153minput.go\x1b[39m and \x1b[38;5;153mmodel.go\x1b[39m together hold 1,323 code lines, over half the package.
+
+  Want the same breakdown for \x1b[38;5;153msidebar\x1b[39m?
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mWorked for 6s · done 13:36\x1b[39m
+
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m❯ \x1b[2myes\x1b[0m
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m~/PhpstormProjects/ppf/dev/.claude/worktrees/demo-count\x1b[38;5;150m demo-count\x1b[38;5;140m Opus 5.5 \x1b[38;5;223m(high)\x1b[38;5;140m 6%\x1b[38;5;216m 13:44\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m

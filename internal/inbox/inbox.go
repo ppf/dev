@@ -141,8 +141,10 @@ func FromHook(worker string, input []byte) (Note, bool) {
 // option is a list item line: "- x", "* x", "• x", "1. x", "a) x".
 var option = regexp.MustCompile(`^\s*([-*•]|\d+[.)]|[A-Za-z][.)])\s`)
 
-// question is the question msg ends on: its last line ending in "?" (markdown emphasis aside), not a heading,
-// among its last askLines non-blank lines and followed only by list items, its options; "" when none.
+// IsOption reports a list item line, as a question's options are.
+func IsOption(l string) bool { return option.MatchString(l) }
+
+// question is the question msg ends on (see QuestionAt) and its options after it; "" when none.
 func question(msg string) (ask, options string) {
 	var lines []string
 	for l := range strings.Lines(msg) {
@@ -150,16 +152,27 @@ func question(msg string) (ask, options string) {
 			lines = append(lines, l)
 		}
 	}
+	i := QuestionAt(lines)
+	if i < 0 {
+		return "", ""
+	}
+	return lines[i], strings.Join(lines[i+1:], "")
+}
+
+// QuestionAt is where among a message's non-blank lines is the question it ends on: its last line ending in
+// "?" (markdown emphasis aside), not a heading, among its last askLines lines and followed only by list
+// items, its options; -1 when none.
+func QuestionAt(lines []string) int {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-askLines; i-- {
 		l := strings.TrimSpace(lines[i])
 		if strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#") {
-			return lines[i], strings.Join(lines[i+1:], "")
+			return i
 		}
 		if !option.MatchString(l) {
-			return "", ""
+			return -1
 		}
 	}
-	return "", ""
+	return -1
 }
 
 // Span is d in whole minutes: "17m", "1h", "1h 5m".

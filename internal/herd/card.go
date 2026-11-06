@@ -43,6 +43,9 @@ func (t tile) section() section {
 	return restingSection
 }
 
+// asks reports a Needs you card for the question t's turn ended on in its reply, not a dialog.
+func (t tile) asks() bool { return !t.deciding && t.section() == needsYouSection }
+
 // noteKind is the kind of a note as inbox.Note.Summary writes it, "<kind>: <text>" or "<kind>".
 func noteKind(note string) string {
 	kind, _, _ := strings.Cut(note, ":")

@@ -1,0 +1,30 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.319\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mOpus 5.5 with high effort · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m~/…/worktrees/herd-ask-card-fixes · \x1b[38;5;114m/rc\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  \x1b[38;5;246mAdvisor Tool (experimental) is on and may use more toke…\x1b[39m
+\x1b[38;5;244m────────────────────────────────────────────────────────────
+\x1b[39m❯ \x1b[2mTry "fix typecheck errors"\x1b[0m
+\x1b[38;5;244m────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m~/PhpstormProjects/ppf/dev/.claude/worktrees/herd-ask-c…\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m
