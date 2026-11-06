@@ -67,6 +67,7 @@ type tile struct {
 	context  string         // @agent_context, its context window's use in whole percent; "" when unknown
 	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error          // why its transcript could not be read
+	ci       ci             // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
 }
 
 // snapshot is what one refresh saw.
@@ -108,6 +109,7 @@ type lookups interface {
 	PR(pane, stored, gen, path, branch string) sidebar.PR
 	OpenPR(url string) error
 	Tail(path string) (desktop.Tail, error)
+	CI(url string) ci
 }
 
 type tickMsg struct{}
@@ -315,7 +317,7 @@ func sortBySection(tiles []tile) {
 }
 
 // buildSnapshot turns the rows into tiles by section, in sidebar order within one, keeping only agent sessions
-// this boss started. PRs and transcripts are only read while visible.
+// this boss started. PRs, their checks and transcripts are only read while visible.
 func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look lookups) (snapshot, error) {
 	var s snapshot
 	own := false
@@ -366,6 +368,9 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		t.question, _ = agent.ParseQuestion(r.Question)
 		if s.visible {
 			sess.PR = look.PR(a.Pane.ID, r.PR, r.PRGen, a.Pane.Path, sess.Branch)
+			if pr := sess.PR; pr.URL != "" && (pr.State == "open" || pr.State == "draft") {
+				t.ci = look.CI(pr.URL)
+			}
 			if r.Transcript != "" {
 				t.tail, t.tailErr = look.Tail(r.Transcript)
 			}
