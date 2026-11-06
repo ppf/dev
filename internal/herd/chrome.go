@@ -10,8 +10,8 @@ import (
 // maxBanner bounds Grok's opt-in banner, wrapped in a narrow pane.
 const maxBanner = 10
 
-// previewLines is t's captured screen as its tile shows it: without the agent's own input box, unless it
-// waits on a decision, as its question or dialog is what the user answers.
+// previewLines is t's captured screen as its card shows it: without the agent's own input box, unless it
+// waits on a decision (refresh then cuts the dialog its card shows off the end).
 func previewLines(capture string, t tile) []string {
 	lines := screenLines(capture)
 	if t.deciding {

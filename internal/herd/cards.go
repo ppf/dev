@@ -38,12 +38,24 @@ const (
 	hitCard hitKind = iota
 	// hitFold folds or unfolds the card.
 	hitFold
+	// hitOption picks option k of the card's dialog, as its number key does.
+	hitOption
+	// hitSubmit goes on from a multi-select question, as ⏎ does.
+	hitSubmit
+	// hitOpen switches to the worker, as ⏎ does.
+	hitOpen
+	// hitMessage opens the reply box, as i does.
+	hitMessage
+	// hitPR opens its PR, as o does.
+	hitPR
+	// hitClose asks to close the worker, as x does.
+	hitClose
 )
 
-// hit is the cells x0 to x1 (exclusive) of board row y, on tile's card.
+// hit is the cells x0 to x1 (exclusive) of board row y, on tile's card; k is the option a hitOption picks.
 type hit struct {
-	y, x0, x1, tile int
-	kind            hitKind
+	y, x0, x1, tile, k int
+	kind               hitKind
 }
 
 // board is the cards in sections as rows of the pane's width, before scrolling: what a click on each cell
@@ -52,12 +64,14 @@ type board struct {
 	lines []string
 	hits  []hit
 	spans [][2]int // by tile index: first row and the row after its last
+	focus int      // the row of the reply box's highlighted option; -1 for none
 }
 
 // board lays out the cards of m's tiles, which come in section order.
 func (m Model) board() board {
-	var b board
+	b := board{focus: -1}
 	w := m.width
+	picking := m.activePick() != nil
 	last := section(-1)
 	for i, t := range m.snap.tiles {
 		top := len(b.lines)
@@ -71,13 +85,16 @@ func (m Model) board() board {
 			}
 			b.lines = append(b.lines, sectionRow(s, n, w))
 		}
-		rows, arrow := m.card(t, w)
+		rows, hits := m.card(t, w)
 		for j := range rows {
-			y := len(b.lines) + j
-			b.hits = append(b.hits, hit{y: y, x0: 0, x1: w, tile: i, kind: hitCard})
-			if j == arrow.y {
-				// The arrow, a cell wider each side so it's easy to hit
-				b.hits = append(b.hits, hit{y: y, x0: arrow.x - 1, x1: arrow.x + 2, tile: i, kind: hitFold})
+			b.hits = append(b.hits, hit{y: len(b.lines) + j, x0: 0, x1: w, tile: i, kind: hitCard})
+		}
+		for _, h := range hits {
+			h.y += len(b.lines)
+			h.tile = i
+			b.hits = append(b.hits, h)
+			if picking && t.sess.Name == m.box.session && h.kind == hitOption && h.k == m.box.hl {
+				b.focus = h.y
 			}
 		}
 		b.lines = append(b.lines, rows...)
@@ -87,13 +104,17 @@ func (m Model) board() board {
 }
 
 // offset is the first board row shown in h rows so the card of tile sel shows whole, or its top when it's
-// taller than h.
+// taller than h, scrolled on to keep the reply box's highlighted option in view.
 func (b board) offset(sel, h int) int {
 	if sel >= len(b.spans) || h < 1 {
 		return 0
 	}
 	top, end := b.spans[sel][0], b.spans[sel][1]
-	return max(0, min(top, end-h, len(b.lines)-h))
+	off := max(0, min(top, end-h, len(b.lines)-h))
+	if b.focus >= off+h {
+		off = b.focus - h + 1
+	}
+	return off
 }
 
 // hitAt is what's under column x, row y of the pane, on the board as scrolled.
@@ -143,11 +164,11 @@ func sectionRow(s section, n, w int) string {
 	return sectionColours[s] + bold + label + reset + rule + strings.Repeat("─", max(0, w-ansi.StringWidth(label))) + reset
 }
 
-// card is t's rows, each w columns wide, and where its fold arrow is: one row when folded, else a
-// box: its name and time, title, status, branch and cost, PR, what it last said, its notes, then its screen.
-// A Needs you or Waiting card has a bar in its section's colour on its left; the selected card's box is in
-// its state's colour.
-func (m Model) card(t tile, w int) (rows []string, arrow struct{ x, y int }) {
+// card is t's rows, each w columns wide, and what clicks on them do (rows counted from the card's first): one
+// row when folded, else a box: its name and time, title, status or the dialog it waits on, branch and cost,
+// PR, what it last said, its notes, its screen, then its buttons. A Needs you or Waiting card has a bar in its
+// section's colour on its left; the selected card's box is in its state's colour.
+func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	sec := t.section()
 	gutter := " "
 	if sec == needsYouSection || sec == waitingSection {
@@ -158,14 +179,15 @@ func (m Model) card(t tile, w int) (rows []string, arrow struct{ x, y int }) {
 	if selected {
 		frame = sidebar.StateColour(t.sess.Agent, t.sess.State)
 	}
+	// The arrow, a cell wider each side so it's easy to hit
 	if t.folded(m.folds) {
-		arrow.x = 2
 		row := m.headRow(t, sec, true, w-1)
 		if selected {
 			row = sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
 		}
-		return []string{gutter + row}, arrow
+		return []string{gutter + row}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
 	}
+	hits = append(hits, hit{y: 1, x0: 2, x1: 5, kind: hitFold})
 	iw := max(1, w-3)
 	line := func(s string) string {
 		s = ansi.Truncate(s, iw, "…")
@@ -183,11 +205,25 @@ func (m Model) card(t tile, w int) (rows []string, arrow struct{ x, y int }) {
 	if t.sess.Title != "" && t.sess.Title != t.sess.Name {
 		text(rule, t.sess.Title)
 	}
-	status := statusText(t, sec)
-	if sec == needsYouSection {
-		text(sidebar.Red+bold, status)
-	} else {
-		text(sidebar.Muted, status)
+	// Columns before a row's text: the gutter, the box's │ and the indent
+	x0 := 2 + len(in)
+	// rowHits places a row's hits on the row about to be added
+	rowHits := func(hs []hit) {
+		for _, h := range hs {
+			h.y, h.x0, h.x1 = len(rows), h.x0+x0, h.x1+x0
+			hits = append(hits, h)
+		}
+	}
+	switch {
+	case t.pick != nil && sec == needsYouSection:
+		for _, r := range m.dialogRows(t, iw-len(in)) {
+			rowHits(r.hits)
+			rows = append(rows, line(in+r.text))
+		}
+	case sec == needsYouSection:
+		text(sidebar.Red+bold, statusText(t, sec))
+	default:
+		text(sidebar.Muted, statusText(t, sec))
 	}
 	if t.sess.Branch != "" || t.sess.Cost != "" || t.context != "" {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
@@ -207,9 +243,149 @@ func (m Model) card(t tile, w int) (rows []string, arrow struct{ x, y int }) {
 			rows = append(rows, line(in+reset+l+reset))
 		}
 	}
+	buttons, bhits := m.buttons(t, sec, iw-len(in))
+	rowHits(bhits)
+	rows = append(rows, line(in+buttons))
 	rows = append(rows, gutter+frame+"╰"+strings.Repeat("─", iw)+"╯"+reset)
-	arrow.x, arrow.y = 3, 1
-	return rows, arrow
+	return rows, hits
+}
+
+// dialogRow is a row of a card's dialog and what clicks on its cells do (columns from the row's start).
+type dialogRow struct {
+	text string
+	hits []hit
+}
+
+// dialogRows is the dialog t waits on, w columns: the permission's tool and command and what it says it
+// does, the question tabs, the question, its options side by side (wrapping; the highlighted one, the reply
+// box's or the dialog's own cursor, bracketed in t's colour; a multi-select's ☐/☑ and its Submit), then a
+// question's described options as `label: description`. The options dim while any answer is in flight.
+func (m Model) dialogRows(t tile, w int) []dialogRow {
+	p := t.pick
+	var rows []dialogRow
+	add := func(s string) { rows = append(rows, dialogRow{text: s}) }
+	if p.tool != "" {
+		add(sidebar.Red + bold + p.tool + reset + "  " + strings.Join(strings.Fields(p.detail), " "))
+		if p.about != "" {
+			add(rule + p.about + reset)
+		}
+	}
+	if len(p.tabs) > 1 {
+		tabs := make([]string, len(p.tabs))
+		for i, tab := range p.tabs {
+			tabs[i] = rule + tab + reset
+			if i == p.cur {
+				tabs[i] = bold + tab + reset
+			}
+		}
+		add(strings.Join(tabs, rule+" · "+reset))
+	}
+	if p.d.title != "" {
+		add(sidebar.Red + bold + p.d.title + reset)
+	}
+	bound := m.box.session == t.sess.Name && m.activePick() != nil
+	hl := max(0, p.d.option(p.d.cursor))
+	if bound {
+		hl = m.box.hl
+	}
+	accent, waiting := sidebar.StateColour(t.sess.Agent, t.sess.State), m.answering != "" || bound && m.waiting(p)
+	type chip struct {
+		text string
+		h    hit
+	}
+	var chips []chip
+	for i, o := range p.d.opts {
+		label := strconv.Itoa(o.num) + " "
+		switch {
+		case o.checkbox && o.checked:
+			label += "☑ "
+		case o.checkbox:
+			label += "☐ "
+		}
+		label += optionLabel(p, o)
+		c := " " + label + " "
+		switch {
+		case waiting:
+			c = rule + c + reset
+		case i == hl:
+			c = accent + bold + "[" + label + "]" + reset
+		}
+		chips = append(chips, chip{c, hit{kind: hitOption, k: i}})
+	}
+	if p.d.multi {
+		chips = append(chips, chip{sidebar.Muted + " Submit ⏎ " + reset, hit{kind: hitSubmit}})
+	}
+	var row dialogRow
+	x := 0
+	for _, c := range chips {
+		cw := min(ansi.StringWidth(c.text), w)
+		if x > 0 && x+1+cw > w {
+			rows, row, x = append(rows, row), dialogRow{}, 0
+		}
+		if x > 0 {
+			row.text += " "
+			x++
+		}
+		c.h.x0, c.h.x1 = x, x+cw
+		row.text += ansi.Truncate(c.text, cw, "…")
+		row.hits = append(row.hits, c.h)
+		x += cw
+	}
+	rows = append(rows, row)
+	for _, o := range p.d.opts {
+		if o.desc != "" && p.tool == "" {
+			add(rule + strings.Join(strings.Fields(o.label), " ") + ": " + o.desc + reset)
+		}
+	}
+	return rows
+}
+
+// optionLabel is o's label on its chip; a permission's indented lines are its label's wrapped rest, a
+// question's its description.
+func optionLabel(p *pick, o option) string {
+	if p.tool != "" && o.desc != "" {
+		return strings.Join(strings.Fields(o.label+" "+o.desc), " ")
+	}
+	return strings.Join(strings.Fields(o.label), " ")
+}
+
+// buttons is a card's last row, w columns: Open, Message… and its PR, × at the right, and what clicks on
+// them do. Open leads on a Needs you or Waiting card that shows no dialog; else they recede.
+func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
+	type button struct {
+		label string
+		kind  hitKind
+	}
+	bs := []button{{"Open", hitOpen}, {"Message…", hitMessage}}
+	if t.sess.PR.Number != 0 {
+		bs = append(bs, button{"PR #" + strconv.Itoa(t.sess.PR.Number), hitPR})
+	}
+	var b strings.Builder
+	var hits []hit
+	x := 0
+	for i, bt := range bs {
+		colour := sidebar.Muted
+		if i == 0 && (sec == needsYouSection || sec == waitingSection) && t.pick == nil {
+			colour = bold
+		}
+		bw := ansi.StringWidth(bt.label)
+		// Room for it and × after it: a narrow card drops the buttons that don't fit whole
+		if x+2+bw+3 > w {
+			break
+		}
+		if i > 0 {
+			b.WriteString("  ")
+			x += 2
+		}
+		b.WriteString(colour + bt.label + reset)
+		hits = append(hits, hit{x0: x, x1: x + bw, kind: bt.kind})
+		x += bw
+	}
+	if gap := w - x - 2; gap > 0 {
+		b.WriteString(strings.Repeat(" ", gap) + sidebar.Muted + "×" + reset)
+		hits = append(hits, hit{x0: w - 3, x1: w, kind: hitClose})
+	}
+	return b.String(), hits
 }
 
 // headRow is a card's first row, w columns: its fold arrow, state dot and name, then at the right its time in

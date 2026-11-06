@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func golden(t *testing.T, name string) string {
@@ -41,7 +43,17 @@ func TestParseDialogGolden(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
-			got, ok := parseDialog(golden(t, tt.file))
+			screen := golden(t, tt.file)
+			got, ok := parseDialog(screen)
+			// A Claude dialog starts at its top rule, or its tabs
+			if top := screenLines(screen)[got.top]; strings.HasPrefix(tt.file, "claude-") && !isTopRule(ansi.Strip(top)) && !tabRow(ansi.Strip(top)) {
+				t.Errorf("top %d is %q", got.top, ansi.Strip(top))
+			}
+			// The title starts at titleAt
+			if first := strings.Fields(got.title); len(first) > 0 && !strings.Contains(ansi.Strip(screenLines(screen)[got.titleAt]), first[0]) {
+				t.Errorf("titleAt %d is %q, want the title's first line", got.titleAt, ansi.Strip(screenLines(screen)[got.titleAt]))
+			}
+			got.top, got.titleAt = 0, 0
 			if !ok || !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("parseDialog = %v %+v\nwant %+v", ok, got, tt.want)
 			}

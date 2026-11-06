@@ -27,6 +27,10 @@ type dialog struct {
 	// submitAt is where Claude's multi-select Submit row is among the rows its cursor moves over: the number
 	// of options above it; 0 when none
 	submitAt int
+	// top is the screen line a Claude dialog starts on (its top rule), among the capture's screenLines (for
+	// others, where the scan for what it asks stopped); titleAt the line its title starts on (its options'
+	// when it has none)
+	top, titleAt int
 }
 
 type option struct {
@@ -144,12 +148,21 @@ func parseDialog(capture string) (dialog, bool) {
 	for ; i >= 0 && strings.TrimSpace(plain[i]) != "" && !isRule(plain[i]) && !tabRow(plain[i]); i-- {
 		title = append([]string{strings.TrimSpace(plain[i])}, title...)
 	}
-	d.title = strings.Join(title, " ")
+	d.title, d.titleAt = strings.Join(title, " "), i+1
 	for i >= 0 && strings.TrimSpace(plain[i]) == "" {
 		i--
 	}
 	if i >= 0 && tabRow(plain[i]) {
-		d.tabs = parseTabs(plain[i])
+		d.tabs, d.top = parseTabs(plain[i]), i
+		// The rule above the tabs is the dialog's too
+		for j := i - 1; j >= 0; j-- {
+			if isTopRule(plain[j]) {
+				d.top = j
+			}
+			if strings.TrimSpace(plain[j]) != "" {
+				break
+			}
+		}
 		return d, true
 	}
 	var what []string
@@ -158,7 +171,10 @@ func parseDialog(capture string) (dialog, bool) {
 			what = append([]string{squeeze(plain[i])}, what...)
 		}
 	}
-	d.what = strings.Join(what, "")
+	d.what, d.top = strings.Join(what, ""), i+1
+	if i >= 0 && isTopRule(plain[i]) {
+		d.top = i
+	}
 	return d, true
 }
 

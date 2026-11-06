@@ -2,7 +2,6 @@ package herd
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -87,19 +86,18 @@ func (m Model) bottom() []string {
 }
 
 // boxRows is the reply box bound to t: a rule in t's accent naming it (agent, state, branch), then the draft
-// or the picker for its dialog behind an accent bar, then a hint row when there is one.
+// (or, while its card's dialog is answered, the free-text answer being typed) behind an accent bar, then a
+// hint row when there is one.
 func (m Model) boxRows(t tile) []string {
 	w := m.width
 	accent := sidebar.StateColour(t.sess.Agent, t.sess.State)
 	head := sidebar.Header(t.sess, max(1, w-3), false)
 	top := accent + "─" + reset + head + " " + accent + strings.Repeat("─", max(0, w-2-ansi.StringWidth(head))) + reset
 	inner := max(1, w-2)
-	// The tiles keep at least half the height
-	room := max(1, m.height/2-2)
 	var body []string
 	var hint string
 	if p := m.activePick(); p != nil {
-		body, hint = m.pickRows(p, accent, inner, room)
+		body, hint = m.pickRows(p, inner)
 	} else {
 		body = m.draftRows(inner)
 	}
@@ -138,72 +136,19 @@ func (m Model) draftRows(width int) []string {
 	return rows
 }
 
-// pickRows is the picker for p in at most room rows: the permission's tool and command, the question tabs,
-// the question, then one row per option, scrolled to keep the highlighted one; hint is its keys.
-func (m Model) pickRows(p *pick, accent string, width, room int) (body []string, hint string) {
+// pickRows is the reply box's body while it answers p, whose options its card shows: the free-text option's
+// typed answer while it is typed, else nothing; hint is its keys.
+func (m Model) pickRows(p *pick, width int) (body []string, hint string) {
 	b := m.box
-	line := func(s string) { body = append(body, ansi.Truncate(s, width, "…")) }
-	if p.tool != "" {
-		line(bold + p.tool + reset + "  " + strings.Join(strings.Fields(p.detail), " "))
-		if p.about != "" {
-			line(rule + p.about + reset)
-		}
-	}
-	if len(p.tabs) > 1 {
-		tabs := make([]string, len(p.tabs))
-		for i, tab := range p.tabs {
-			tabs[i] = rule + tab + reset
-			if i == p.cur {
-				tabs[i] = bold + accent + tab + reset
-			}
-		}
-		line(strings.Join(tabs, rule+" · "+reset))
-	}
-	if p.d.title != "" {
-		line(bold + p.d.title + reset)
-	}
-	head := len(body)
-	labelW := 0
-	for _, o := range p.d.opts {
-		labelW = max(labelW, ansi.StringWidth(o.label))
-	}
-	labelW = min(labelW, width/2)
-	for i, o := range p.d.opts {
-		row := "  "
-		if i == b.hl {
-			row = accent + "❯ " + reset
-		}
-		row += rule + strconv.Itoa(o.num) + "." + reset + " "
-		if o.checkbox {
-			if o.checked {
-				row += accent + "☑" + reset + " "
-			} else {
-				row += "☐ "
-			}
-		}
-		typing := i == b.hl && b.other
-		switch {
-		case typing && len(b.ed.text) == 0:
+	if b.other {
+		row := p.d.opts[p.other].label + ": "
+		if len(b.ed.text) == 0 {
 			row += cursorCell + rule + "type the answer" + reset
-		case typing:
+		} else {
 			rows, cur := b.ed.rows(max(1, width-ansi.StringWidth(row)))
 			row += rows[cur]
-		case i == b.hl:
-			row += bold + o.label + reset
-		default:
-			row += o.label
 		}
-		if o.desc != "" && !typing {
-			row += strings.Repeat(" ", max(0, labelW-ansi.StringWidth(o.label))) + "  " + rule + o.desc + reset
-		}
-		line(row)
-	}
-	if len(body) > room {
-		// Options first: as many as fit under what of the head fits, from the highlighted one up
-		opts := body[head:]
-		n := min(len(opts), room)
-		start := min(max(0, b.hl-n+1), len(opts)-n)
-		body = append(body[max(0, head-(room-n)):head:head], opts[start:start+n]...)
+		body = []string{ansi.Truncate(row, width, "…")}
 	}
 	switch {
 	case m.waiting(p):
@@ -211,9 +156,9 @@ func (m Model) pickRows(p *pick, accent string, width, room int) (body []string,
 	case b.other:
 		hint = "⏎ send · esc back"
 	case p.d.multi:
-		hint = "↑↓ move · space toggle · ⏎ next · 1-9 · esc close"
+		hint = "←→ move · space toggle · ⏎ next · 1-9 · esc close"
 	default:
-		hint = "↑↓ move · ⏎ pick · 1-9 · esc close"
+		hint = "←→ move · ⏎ pick · 1-9 · esc close"
 	}
 	return body, hint
 }

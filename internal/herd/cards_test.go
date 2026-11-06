@@ -45,6 +45,7 @@ func TestBoardLayout(t *testing.T) {
 		"┃│ ▾ ● fix-login                                                  3m │",
 		"┃│    allow Bash: rm -rf build                                       │",
 		"┃│    feature/fix-login-redis                                        │",
+		"┃│    Open  Message…                                               × │",
 		"┃╰───────────────────────────────────────────────────────────────────╯",
 		" WORKING 1 ───────────────────────────────────────────────────────────",
 		" ╭───────────────────────────────────────────────────────────────────╮",
@@ -61,6 +62,7 @@ func TestBoardLayout(t *testing.T) {
 		" │    four                                                           │",
 		" │    five                                                           │",
 		" │    six                                                            │",
+		" │    Open  Message…  PR #95                                       × │",
 		" ╰───────────────────────────────────────────────────────────────────╯",
 		" WAITING 1 ───────────────────────────────────────────────────────────",
 		"┃╭───────────────────────────────────────────────────────────────────╮",
@@ -68,6 +70,7 @@ func TestBoardLayout(t *testing.T) {
 		"┃│    CI: lint, test                                                 │",
 		"┃│    ci-fix                                                         │",
 		"┃│    Pushed.                                                        │",
+		"┃│    Open  Message…                                               × │",
 		"┃╰───────────────────────────────────────────────────────────────────╯",
 		" IDLE 1 ──────────────────────────────────────────────────────────────",
 		"  ▸ ● old-spike  finished  ◆ #90                                   2h ",
@@ -97,11 +100,11 @@ func TestBoardColours(t *testing.T) {
 	if !strings.Contains(got[3], sidebar.Red+bold+"allow Bash") {
 		t.Errorf("needs you status not red: %q", got[3])
 	}
-	if !strings.HasPrefix(got[7], " "+sidebar.Gold+"╭") {
-		t.Errorf("selected working card not in gold: %q", got[7])
+	if !strings.HasPrefix(got[8], " "+sidebar.Gold+"╭") {
+		t.Errorf("selected working card not in gold: %q", got[8])
 	}
-	if !strings.HasPrefix(got[23], sidebar.Green+"┃") {
-		t.Errorf("waiting: green bar: %q", got[23])
+	if !strings.HasPrefix(got[25], sidebar.Green+"┃") {
+		t.Errorf("waiting: green bar: %q", got[25])
 	}
 }
 
@@ -114,7 +117,7 @@ func TestBoardNarrow(t *testing.T) {
 			t.Errorf("line %d is %d wide: %q", i, w, ansi.Strip(l))
 		}
 	}
-	if got := ansi.Strip(m.board().lines[11]); !strings.Contains(got, "│    …") || !strings.Contains(got, "-examples $1.20 · 63%") {
+	if got := ansi.Strip(m.board().lines[12]); !strings.Contains(got, "│    …") || !strings.Contains(got, "-examples $1.20 · 63%") {
 		t.Errorf("branch cut at its start: %q", got)
 	}
 }

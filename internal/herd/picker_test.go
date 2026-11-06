@@ -151,20 +151,24 @@ func TestPickerKeys(t *testing.T) {
 	if m.box.hl != 0 || m.activePick() == nil {
 		t.Fatalf("picker: hl %d", m.box.hl)
 	}
-	box := strings.Join(ansiStrip(m.render()[24-len(m.bottom()):]), "\n")
-	want := strings.Join([]string{
-		"─ ● a Claude · waiting · $1.20 ─────────",
-		"▎ Color · Extras · Submit",
-		"▎ Which color should the theme use?",
-		"▎ ❯ 1. Red              Warm and loud",
-		"▎   2. Green            Calm",
-		"▎   3. Blue             Cool and safe",
-		"▎   4. Type something.",
-		"▎   5. Chat about this",
-		" ↑↓ move · ⏎ pick · 1-9 · esc close",
-	}, "\n")
-	if box != want {
-		t.Errorf("picker:\n%s\nwant:\n%s", box, want)
+	// The card shows the dialog, its options side by side, the highlighted one bracketed; the box under the
+	// board its keys
+	got := ansiStrip(m.render())
+	want := []string{
+		"┃│    Color · Extras · Submit          │",
+		"┃│    Which color should the theme use?│",
+		"┃│    [1 Red]  2 Green   3 Blue        │",
+		"┃│     4 Type something.               │",
+		"┃│     5 Chat about this               │",
+		"┃│    Red: Warm and loud               │",
+		"┃│    Green: Calm                      │",
+		"┃│    Blue: Cool and safe              │",
+	}
+	if !slices.Equal(got[3:11], want) || got[22] != "─ ● a Claude · waiting · $1.20 ─────────" || got[23] != " ←→ move · ⏎ pick · 1-9 · esc close" {
+		t.Errorf("picker:\n%s", strings.Join(got, "\n"))
+	}
+	if m, _ := press(m, tea.KeyMsg{Type: tea.KeyRight}); !strings.Contains(ansi.Strip(m.render()[5]), "[2 Green]") {
+		t.Errorf("→ doesn't move to Green: %q", ansi.Strip(m.render()[5]))
 	}
 	// ↓ then ⏎ picks Green; keys wait while it's in flight and until the screen moves on
 	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyEnter})
@@ -200,8 +204,8 @@ func TestPickerKeys(t *testing.T) {
 
 func TestPickerMulti(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q2-checked", colors)
-	got := ansiStrip(m.render()[24-len(m.bottom()):])
-	if got[3] != "▎ ❯ 1. ☑ Tests            Add unit tests" || got[4] != "▎   2. ☐ Docs             Write README" || got[len(got)-1] != " ↑↓ move · space toggle · ⏎ next · 1-9 …" {
+	got := ansiStrip(m.render())
+	if got[5] != "┃│    [1 ☑ Tests]  2 ☐ Docs   3 ☑ Lint │" || got[7] != "┃│     5 Chat about this   Submit ⏎    │" || got[23] != " ←→ move · space toggle · ⏎ next · 1-9 …" {
 		t.Errorf("multi picker:\n%s", strings.Join(got, "\n"))
 	}
 	// space and digits toggle, ⏎ goes on; "Chat about this" answers at once
@@ -231,7 +235,7 @@ func TestPickerMulti(t *testing.T) {
 		t.Fatal("4 doesn't open the free text")
 	}
 	m, _ = press(m, runes("ci"))
-	if row := ansi.Strip(m.render()[24-len(m.bottom())+6]); row != "▎ ❯ 4. ☐ ci " {
+	if row := ansi.Strip(m.render()[22]); row != "▎ Type something: ci " {
 		t.Errorf("typing row %q", row)
 	}
 	c, sent := screens(t, "claude-ask-q2-checked", "")
@@ -263,17 +267,15 @@ func TestPickerMulti(t *testing.T) {
 func TestPickerPermission(t *testing.T) {
 	m := pickerModel(t, "claude-permission-bash", agent.Question{Tool: "Bash", Command: "mkdir -p build/out && touch build/out/x.txt", Description: "Create build/out directory and touch x.txt"})
 	m.width = 60
-	got := ansiStrip(m.render()[24-len(m.bottom()):])
+	got := ansiStrip(m.render())[3:10]
 	want := []string{
-		"─ ● a Claude · waiting · $1.20 ─────────────────────────────",
-		"▎ Bash  mkdir -p build/out && touch build/out/x.txt",
-		"▎ Create build/out directory and touch x.txt",
-		"▎ Do you want to proceed?",
-		"▎ ❯ 1. Yes",
-		"▎   2. Yes, and don't ask again for mkdir -p build/out and …",
-		"▎   3. Yes, and switch to auto mode · auto mode handles the…",
-		"▎   4. No",
-		" ↑↓ move · ⏎ pick · 1-9 · esc close",
+		"┃│    Bash  mkdir -p build/out && touch build/out/x.txt    │",
+		"┃│    Create build/out directory and touch x.txt           │",
+		"┃│    Do you want to proceed?                              │",
+		"┃│    [1 Yes]                                              │",
+		"┃│     2 Yes, and don't ask again for mkdir -p build/out a…│",
+		"┃│     3 Yes, and switch to auto mode · auto mode handles …│",
+		"┃│     4 No                                                │",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("permission picker:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -367,6 +369,11 @@ func TestRefreshPick(t *testing.T) {
 	if !tl.deciding || tl.pick == nil || tl.pick.cur != 0 || tl.pick.d.title != "Which color should the theme use?" {
 		t.Fatalf("tile %+v", tl)
 	}
+	// Its card shows the dialog: its screen stops above it
+	body := strings.Join(ansiStrip(tl.body), "\n")
+	if len(tl.body) == 0 || strings.Contains(body, "1. Red") || strings.Contains(body, "Chat about this") || strings.Contains(body, "Extras  ✔") {
+		t.Errorf("screen not cut above the dialog:\n%s", body)
+	}
 }
 
 func TestReplyEditing(t *testing.T) {
@@ -415,14 +422,124 @@ func TestReplyEditing(t *testing.T) {
 	}
 }
 
-// A short pane scrolls the options to keep the highlighted one, dropping the head first.
-func TestPickerScrolls(t *testing.T) {
+// A narrow card wraps its options, each chip cut to the card.
+func TestPickerWraps(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
-	m.height = 10 // room for 3 rows
-	m.box.hl = 4
-	got := ansiStrip(m.bottom())
-	if len(got) != 5 || got[1] != "▎   3. Blue             Cool and safe" || got[3] != "▎ ❯ 5. Chat about this" {
-		t.Errorf("scrolled picker:\n%s", strings.Join(got, "\n"))
+	m.width = 24
+	got := ansiStrip(m.render())
+	if got[5] != "┃│    [1 Red]  2 Green │" || got[6] != "┃│     3 Blue          │" || got[7] != "┃│     4 Type somethin…│" {
+		t.Errorf("wrapped options:\n%s", strings.Join(got[:12], "\n"))
+	}
+}
+
+// cellOf is where text shows on m's screen: its column and row.
+func cellOf(t *testing.T, m Model, text string) (int, int) {
+	t.Helper()
+	for y, l := range m.render() {
+		if i := strings.Index(ansi.Strip(l), text); i >= 0 {
+			return ansi.StringWidth(ansi.Strip(l)[:i]), y
+		}
+	}
+	t.Fatalf("%q not on screen:\n%s", text, strings.Join(ansiStrip(m.render()), "\n"))
+	return 0, 0
+}
+
+func clickAt(m Model, x, y int) (Model, tea.Cmd) {
+	next, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	return next.(Model), cmd
+}
+
+// A click on an option answers through the picker, as its key does, opening the card's box first; on a
+// multi-select's option it toggles it, on Submit it goes on. A click while an answer is out, or over a typed
+// reply, sends nothing.
+func TestCardAnswerClicks(t *testing.T) {
+	m := pickerModel(t, "claude-ask-q1", colors)
+	m.box = replyBox{}
+	c, sent := screens(t, "claude-ask-q1", "")
+	m.c = c
+	x, y := cellOf(t, m, "2 Green")
+	m, cmd := clickAt(m, x+2, y)
+	if cmd == nil || m.box.session != "a" || m.box.hl != 1 || m.answering != "a" {
+		t.Fatalf("click on Green: box %+v answering %q", m.box, m.answering)
+	}
+	if cmd(); !slices.Equal(*sent, []string{"-l 2"}) {
+		t.Errorf("click on Green sent %q", *sent)
+	}
+	if _, cmd := clickAt(m, x+2, y); cmd != nil {
+		t.Error("a click while the answer is out sends again")
+	}
+
+	m = pickerModel(t, "claude-ask-q2-checked", colors)
+	for _, tt := range []struct {
+		text string
+		want []string
+	}{
+		{"2 ☐ Docs", []string{"-l 2"}},
+		{"Submit ⏎", []string{"Down", "Down", "Down", "Down", "Enter"}},
+	} {
+		c, sent := screens(t, "claude-ask-q2-checked", "")
+		m.c = c
+		x, y := cellOf(t, m, tt.text)
+		_, cmd := clickAt(m, x+1, y)
+		if cmd == nil {
+			t.Fatalf("click on %s: no answer", tt.text)
+		}
+		if cmd(); !slices.Equal(*sent, tt.want) {
+			t.Errorf("click on %s sent %q, want %q", tt.text, *sent, tt.want)
+		}
+	}
+
+	m = pickerModel(t, "claude-ask-q1", colors)
+	m.box.ed.set("half")
+	x, y = cellOf(t, m, "3 Blue")
+	if m, cmd = clickAt(m, x+1, y); cmd != nil || !strings.Contains(m.msg, "typed reply") || m.box.ed.String() != "half" {
+		t.Errorf("click over a draft: msg %q draft %q", m.msg, m.box.ed.String())
+	}
+}
+
+// A card's buttons: Open switches to the worker, Message… opens its box, its PR opens it, × asks to close it
+// (closing the box, so the y isn't typed into it).
+func TestCardButtons(t *testing.T) {
+	m := board4()
+	var ran []string
+	m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
+	look := &fakeLookups{}
+	m.look = look
+	m.snap.tiles[1].sess.PR.URL = "https://example.invalid/95"
+	row := func(m Model, name string) int {
+		_, y := cellOf(t, m, "● "+name)
+		for ; y < m.height; y++ {
+			if strings.Contains(ansi.Strip(m.render()[y]), "Message…") {
+				return y
+			}
+		}
+		t.Fatalf("no buttons under %s", name)
+		return 0
+	}
+	y := row(m, "docs-api")
+	at := func(text string) int {
+		i := strings.Index(ansi.Strip(m.render()[y]), text)
+		return ansi.StringWidth(ansi.Strip(m.render()[y])[:i])
+	}
+	if _, cmd := clickAt(m, at("Open")+1, y); cmd == nil {
+		t.Error("Open: no switch")
+	} else if cmd(); len(ran) != 1 || !strings.HasPrefix(ran[0], "switch-client -t =docs-api:") {
+		t.Errorf("Open ran %q", ran)
+	}
+	if got, _ := clickAt(m, at("Message…")+1, y); got.box.session != "docs-api" {
+		t.Errorf("Message… opened %q", got.box.session)
+	}
+	if _, cmd := clickAt(m, at("PR #95")+1, y); cmd == nil {
+		t.Error("PR: nothing opened")
+	} else if msg := cmd().(actionMsg); !strings.Contains(msg.msg, "no browser") {
+		t.Errorf("PR: %q", msg.msg)
+	}
+	m.open(m.snap.tiles[1])
+	m.box.ed.set("draft")
+	y = row(m, "docs-api")
+	got, _ := clickAt(m, at("×"), y)
+	if got.confirm != "docs-api" || got.box.session != "" {
+		t.Errorf("×: confirm %q box %q", got.confirm, got.box.session)
 	}
 }
 
@@ -612,5 +729,92 @@ func TestPickerGuards(t *testing.T) {
 	}
 	if _, cmd := press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2"), Paste: true}); cmd != nil {
 		t.Error("a pasted digit answers")
+	}
+}
+
+// A click on another card's option goes to that card's worker, its box moving there and keeping the reply
+// typed in the box it left; a click while an answer is out moves nothing and says so; × keeps a typed reply
+// too.
+func TestCardClicksAcrossCards(t *testing.T) {
+	m := pickerModel(t, "claude-ask-q1", colors)
+	m.height = 40
+	b := goldenPick(t, "claude-permission-bash", agent.Question{})
+	m.snap.tiles[1].deciding, m.snap.tiles[1].pick, m.snap.tiles[1].pane = true, &b, "%6"
+	m.snap.tiles[1].sess.State = agent.Waiting
+	sortBySection(m.snap.tiles)
+	m.box.ed.set("half")
+	var sent []string
+	m.c = tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "capture-pane" {
+			return golden(t, "claude-permission-bash"), nil
+		}
+		sent = append(sent, strings.Join(args, " "))
+		return "", nil
+	})
+	x, y := cellOf(t, m, "4 No")
+	m, cmd := clickAt(m, x+1, y)
+	if cmd == nil || m.box.session != "b" || m.drafts["a"].ed.String() != "half" {
+		t.Fatalf("click on b's No: box %q drafts %v", m.box.session, m.drafts)
+	}
+	if cmd(); len(sent) != 1 || !strings.Contains(sent[0], "-t %6 ") || !strings.HasSuffix(sent[0], "-l 4") {
+		t.Errorf("sent %q, want 4 to b's pane %%6", sent)
+	}
+	x, y = cellOf(t, m, "2 Green")
+	if got, cmd := clickAt(m, x+1, y); cmd != nil || got.box.session != "b" || !strings.Contains(got.msg, "answering b") {
+		t.Errorf("click while b's answer is out: box %q msg %q", got.box.session, got.msg)
+	}
+	m.answering, m.box.sent = "", ""
+	m.box.ed.set("later")
+	x, y = cellOf(t, m, "×")
+	if got, _ := clickAt(m, x, y); got.confirm == "" || got.box.session != "" || got.drafts["b"].ed.String() != "later" {
+		t.Errorf("×: confirm %q box %q drafts %v", got.confirm, got.box.session, got.drafts)
+	}
+}
+
+// Without a box a card brackets its dialog's own cursor; while any answer is out every card's options dim.
+func TestCardDialogCursor(t *testing.T) {
+	m := pickerModel(t, "claude-ask-multi-other-typed", agent.Question{})
+	m.box = replyBox{}
+	if x, y := cellOf(t, m, "[3 ☑ a fish]"); x == 0 || y == 0 {
+		t.Error("the dialog's cursor isn't bracketed")
+	}
+	m.answering = "b"
+	if strings.Contains(ansi.Strip(strings.Join(m.render(), "\n")), "[") {
+		t.Error("options not dimmed while an answer is out")
+	}
+}
+
+// A click on the free-text option opens it for typing in the box; one on it again keeps the text, one on
+// another option drops it and picks that one.
+func TestCardFreeTextClick(t *testing.T) {
+	m := pickerModel(t, "claude-ask-q1", colors)
+	x, y := cellOf(t, m, "4 Type something.")
+	m, cmd := clickAt(m, x+1, y)
+	if cmd != nil || !m.box.other {
+		t.Fatal("click on Type something doesn't open it")
+	}
+	m, _ = press(m, runes("teal"))
+	if m, cmd = clickAt(m, x+1, y); cmd != nil || m.box.ed.String() != "teal" {
+		t.Errorf("click on it again: text %q", m.box.ed.String())
+	}
+	c, sent := screens(t, "claude-ask-q1", "")
+	m.c = c
+	x, y = cellOf(t, m, "3 Blue")
+	m, cmd = clickAt(m, x+1, y)
+	if cmd == nil || m.box.other || m.box.ed.String() != "" {
+		t.Fatalf("click on Blue: other %v text %q", m.box.other, m.box.ed.String())
+	}
+	if cmd(); !slices.Equal(*sent, []string{"-l 3"}) {
+		t.Errorf("sent %q", *sent)
+	}
+}
+
+// In a short pane the board scrolls to keep the box's highlighted option in view.
+func TestPickerScrolls(t *testing.T) {
+	m := pickerModel(t, "claude-permission-bash", agent.Question{})
+	m.width, m.height = 60, 10
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyRight})
+	if got := strings.Join(ansiStrip(m.render()), "\n"); !strings.Contains(got, "[4 No]") {
+		t.Errorf("the highlighted No is out of view:\n%s", got)
 	}
 }

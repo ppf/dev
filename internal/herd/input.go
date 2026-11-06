@@ -177,8 +177,10 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click on a card's ▸/▾ folds or unfolds it; elsewhere on a card it selects it and opens
-// the reply box for it, so the worker is answered in place (⏎ without a reply open switches to it).
+// handleMouse: a left click on a card's ▸/▾ folds or unfolds it; on one of its dialog's options picks it
+// (Submit goes on), as its key does; on Open switches to the worker, on its PR opens it, on × asks to close
+// it; elsewhere on a card (Message… too) it selects it and opens the reply box for it, so the worker is
+// answered in place (⏎ without a reply open switches to it).
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
@@ -187,15 +189,54 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if h.kind == hitFold {
-		m.fold(m.snap.tiles[h.tile])
+	t := m.snap.tiles[h.tile]
+	// A click is no y to a kill asked before it
+	m.msg, m.confirm = "", ""
+	switch h.kind {
+	case hitFold:
+		m.fold(t)
+		return m, nil
+	case hitOpen:
+		m.selected = t.sess.Name
+		return m, m.switchTo(t.sess.Name)
+	case hitPR:
+		m.selected = t.sess.Name
+		return m.openPR(h.tile)
+	case hitClose:
+		// Its y would go into a draft, and the box hides the question; a typed reply waits for its box
+		m.blur()
+		m.selected, m.confirm = t.sess.Name, t.sess.Name
 		return m, nil
 	}
-	if t := m.snap.tiles[h.tile]; t.sess.Name != m.box.session {
-		// A click on another tile moves the reply box there; one on the same keeps the draft
+	answers := h.kind == hitOption || h.kind == hitSubmit
+	if answers && m.answering != "" {
+		m.msg = "⏳ answering " + m.answering + "…: pick again once it's done"
+		return m, nil
+	}
+	if t.sess.Name != m.box.session {
+		// A click on another card moves the reply box there, keeping a reply typed in it for when it's back;
+		// one on the same keeps the draft and an answer's wait
+		m.blur()
 		m.open(t)
 	}
-	return m, nil
+	if !answers {
+		return m, nil
+	}
+	p := m.activePick()
+	switch {
+	case p == nil:
+		m.msg = "⚠ " + t.sess.Name + ": send or clear the typed reply to pick an option"
+		return m, nil
+	case m.waiting(p):
+		return m, nil
+	case h.kind == hitSubmit:
+		return m.answer(p, submit())
+	case m.box.other && h.k == p.other:
+		// Already typing it
+		return m, nil
+	}
+	m.box.other, m.box.ed, m.box.hl = false, editor{}, h.k
+	return m.pickOption(p, h.k)
 }
 
 // move is the session dir tiles away from tile i, wrapping.
@@ -361,7 +402,7 @@ func (m Model) sendReply() (tea.Model, tea.Cmd) {
 	}
 }
 
-// typePick answers the bound worker's dialog: ↑↓ move, ⏎ picks (a multi-select's ⏎ goes on to the next
+// typePick answers the bound worker's dialog: ←→ (↑↓) move, ⏎ picks (a multi-select's ⏎ goes on to the next
 // question or the review), 1-9 pick that option, space toggles, the free-text option takes typed text, esc
 // closes. Keys but esc are ignored while an answer is in flight or the screen still shows its dialog.
 func (m Model) typePick(k tea.KeyMsg, p *pick) (tea.Model, tea.Cmd) {
@@ -375,9 +416,9 @@ func (m Model) typePick(k tea.KeyMsg, p *pick) (tea.Model, tea.Cmd) {
 	}
 	n := len(p.d.opts)
 	switch k.Type {
-	case tea.KeyUp:
+	case tea.KeyUp, tea.KeyLeft:
 		b.hl = (b.hl - 1 + n) % n
-	case tea.KeyDown:
+	case tea.KeyDown, tea.KeyRight:
 		b.hl = (b.hl + 1) % n
 	case tea.KeySpace:
 		if p.d.opts[b.hl].checkbox {
