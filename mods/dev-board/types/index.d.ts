@@ -38,6 +38,8 @@ export type Worker = {
   needsAction: string
   lastLines: string[]
   tool: string
+  /** What the tool call says it does (its input's description); absent from a dev older than this mod. */
+  toolDescription?: string
   context: number | null
   notes: Note[]
   status: Status

@@ -68,7 +68,7 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 				return StatusStuck, n.Text
 			}
 		}
-		return StatusWorking, w.Tool
+		return StatusWorking, cmp.Or(w.ToolDescription, w.Tool)
 	}
 	// The worker's own IDLE marker says only that nothing runs: its question still waits on the person
 	if w.Ask != nil && w.Ask.Blocked {

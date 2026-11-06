@@ -67,6 +67,10 @@ func toolUse(id, name string) map[string]any {
 	return map[string]any{"type": "tool_use", "id": id, "name": name, "input": map[string]any{}}
 }
 
+func described(id, name, description string) map[string]any {
+	return map[string]any{"type": "tool_use", "id": id, "name": name, "input": map[string]any{"description": description}}
+}
+
 func toolResult(id string) map[string]any {
 	return map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{
 		map[string]any{"type": "tool_result", "tool_use_id": id, "content": "ok"},
@@ -133,10 +137,10 @@ func fixture(t *testing.T) Paths {
 	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), lines(t,
 		assistant("claude-opus-5-5", text("Looking."), toolUse("t1", "Read")),
 		toolResult("t1"),
-		assistant("claude-opus-5-5", text("one\n\ntwo\nthree\nfour"), toolUse("t2", "Bash")),
+		assistant("claude-opus-5-5", text("one\n\ntwo\nthree\nfour"), described("t2", "Bash", "Run the\n  tests")),
 	))
 	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), lines(t,
-		assistant("claude-haiku-4-5", text("Done."), toolUse("t1", "Bash")),
+		assistant("claude-haiku-4-5", text("Done."), described("t1", "Bash", "List files")),
 	))
 	writeJSON(t, filepath.Join(p.Models, "old.json"), map[string]any{"catalog": []any{
 		map[string]any{"id": "claude-opus-5-5", "runtime": map[string]any{"max_input_tokens": 1}},
@@ -181,8 +185,8 @@ func TestBoard(t *testing.T) {
 	if want := []string{"two", "three", "four"}; !slices.Equal(busy.LastLines, want) {
 		t.Errorf("busy last lines = %q, want %q", busy.LastLines, want)
 	}
-	if busy.Tool != "Bash" {
-		t.Errorf("busy tool = %q, want Bash", busy.Tool)
+	if busy.Tool != "Bash" || busy.ToolDescription != "Run the tests" {
+		t.Errorf("busy tool = %q, %q, want Bash, its description on one line", busy.Tool, busy.ToolDescription)
 	}
 	if busy.Context == nil || *busy.Context != 25 {
 		t.Errorf("busy context = %v, want 25", busy.Context)
@@ -201,8 +205,8 @@ func TestBoard(t *testing.T) {
 	if !slices.Equal(idle.LastLines, []string{"Done."}) {
 		t.Errorf("idle last lines = %q, want the live session's transcript", idle.LastLines)
 	}
-	if idle.Tool != "" {
-		t.Errorf("idle tool = %q, want none: a tool use left unanswered is shown only while busy", idle.Tool)
+	if idle.Tool != "" || idle.ToolDescription != "" {
+		t.Errorf("idle tool = %q, %q, want none: a tool use left unanswered is shown only while busy", idle.Tool, idle.ToolDescription)
 	}
 	if idle.Context == nil || *idle.Context != 100 {
 		t.Errorf("idle context = %v, want capped at 100", idle.Context)
@@ -210,9 +214,9 @@ func TestBoard(t *testing.T) {
 	for _, w := range workers {
 		t.Logf("%s: %s %q", w.ID, w.Status, w.StatusText)
 	}
-	if busy.Status != StatusWorking || busy.StatusText != "Bash" || blocked.Status != StatusBlocked ||
+	if busy.Status != StatusWorking || busy.StatusText != "Run the tests" || blocked.Status != StatusBlocked ||
 		blocked.StatusText != "pick one" || idle.Status != StatusIdle {
-		t.Errorf("statuses = %s %q, %s %q, %s, want working Bash, blocked pick one, idle", busy.Status,
+		t.Errorf("statuses = %s %q, %s %q, %s, want working Run the tests, blocked pick one, idle", busy.Status,
 			busy.StatusText, blocked.Status, blocked.StatusText, idle.Status)
 	}
 }
@@ -315,7 +319,7 @@ func TestBoardJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"ask", "branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
-		"needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "verdict",
+		"needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
 		"worktree"}
 	for _, w := range got {
 		keys := slices.Sorted(maps.Keys(w))
@@ -493,8 +497,20 @@ func TestParseTranscript(t *testing.T) {
 			t.Errorf("lines after %v = %q, want the marker kept: the row starts no turn", r, got.lines)
 		}
 	}
-	if got.tool != "Read" {
-		t.Errorf("tool = %q, want Read (Grep answered, Edit's turn over)", got.tool)
+	if got.tool != "Read" || got.toolDescription != "" {
+		t.Errorf("tool = %q, %q, want Read with no description (Grep answered, Edit's turn over)", got.tool, got.toolDescription)
+	}
+	long := strings.Repeat("é", lineRunes+5)
+	if got, _ := parseTranscript([]byte(lines(t, assistant("claude-opus-5-5", described("d", "Agent", long))))); got.tool != "Agent" || got.toolDescription != cut(long) {
+		t.Errorf("tool = %q, %q, want Agent with its description cut to a line", got.tool, got.toolDescription)
+	}
+	for _, b := range []map[string]any{
+		described("m", "mcp__linear__save_issue", "The issue body"),
+		{"type": "tool_use", "id": "n", "name": "Bash", "input": map[string]any{"description": 5}},
+	} {
+		if got, _ := parseTranscript([]byte(lines(t, assistant("claude-opus-5-5", b)))); got.toolDescription != "" {
+			t.Errorf("%v: toolDescription = %q, want none: another tool's description may be content, a number is none", b, got.toolDescription)
+		}
 	}
 	if got.broken != 0 {
 		t.Errorf("broken = %d, want 0: the last, unended row is being written", got.broken)

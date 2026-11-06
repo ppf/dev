@@ -465,10 +465,12 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     // The bar: on the desktop a track, its done part grown by the steps done against those left; on the terminal whole cells
     const bar = await ui.find({ key: 'local_a:bar' })
     if (surface === 'terminal') {
-      expect(((bar?.children[0] as Cell | undefined)?.children ?? []).map(c => [c.props.color, c.children.join('')])).toEqual([['success', '━━━'], ['inactive', '━━━━━━━']])
+      // The empty part thin and dim, so an empty bar reads as empty
+      expect(((bar?.children[0] as Cell | undefined)?.children ?? []).map(c => [c.props.color, c.props.dimColor, c.children.join('')])).toEqual([['success', undefined, '━━━'], ['inactive', true, '───────']])
     } else {
       const track = bar?.children[0] as Cell | undefined
-      expect(track?.props.backgroundColor).toBe('inactive')
+      // A faint track, not a theme grey that draws as a full bar
+      expect(track?.props.backgroundColor).toMatch(/^rgba\(/)
       expect(track?.children.map(c => [c.props.flexGrow, c.props.backgroundColor])).toEqual([[1, 'success'], [2, undefined]])
     }
     // Collapsed, only the step at hand
@@ -575,10 +577,11 @@ test('needs you sorts first, says what it asks, and the band counts it', async (
   expect((await ui.findAll({ type: 'Text', text: /^(allow|needs you|working)/ })).map(t => t.text)).toEqual(['allow Bash: rm -rf bin', 'working'])
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 2 workers · 2 busy')
+  // The worker that needs you is not counted busy too
+  expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 2 workers · 1 busy')
   // Only the needs you part is red
   const parts = (await band.find({ type: 'Text' }))?.children as { props: { color?: string; dimColor?: boolean }; children: string[] }[]
-  expect(parts.map(p => [p.children.join(''), p.props.color ?? (p.props.dimColor ? 'dim' : '')])).toEqual([['1 needs you', 'error'], [' · 2 workers · 2 busy', 'dim']])
+  expect(parts.map(p => [p.children.join(''), p.props.color ?? (p.props.dimColor ? 'dim' : '')])).toEqual([['1 needs you', 'error'], [' · 2 workers · 1 busy', 'dim']])
   await band.unmount()
 })
 
@@ -855,6 +858,92 @@ test("a needs-action of a worker not blocked still shows", async ($, on) => {
   await start($, on, ok([worker({ status: 'idle', verdict: 'blocked', needsAction: 'pick one' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Text', text: /^needs:/ }))?.text).toBe('needs: pick one')
+  await ui.unmount()
+})
+
+test('a blocked worker that needs you is counted there only, not blocked too', async ($, on) => {
+  await start($, on, ok([
+    worker({ state: 'blocked', status: 'needs you', statusText: 'Report format?' }),
+    worker({ id: 'local_b', title: 'Worker B', state: 'blocked', status: 'blocked' }),
+    worker({ id: 'local_c', title: 'Worker C', state: 'busy', status: 'working' }),
+  ]))
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await band.find({ type: 'Text' }))?.text).toBe('1 needs you · 3 workers · 1 busy · 1 blocked')
+  await band.unmount()
+})
+
+test('a question with options says it once: no needs line, no reply line restating it or listing its options; a verdict with news kept', async ($, on) => {
+  const format = { question: 'Report format?', header: '', multiSelect: false, options: [{ label: 'Per package', description: '' }, { label: 'Total only', description: '' }] }
+  await start($, on, ok([
+    worker({
+      state: 'blocked',
+      status: 'needs you',
+      statusText: 'Report format?',
+      verdict: 'blocked',
+      detail: 'counted 144 .go files under internal/; awaiting report format',
+      needsAction: 'pick a reply: Per package, or Total only',
+      lastLines: ['Counted 144 files.', 'Pick a reply: **Per package**, or `Total only`.'],
+      ask: { toolUseId: 'w1', questions: [format], askedAt: 0, answerable: false, reply: true },
+    }),
+    // Named among more words, the options are kept
+    worker({
+      id: 'local_b',
+      title: 'Worker B',
+      state: 'blocked',
+      status: 'needs you',
+      statusText: 'Report format?',
+      lastLines: ['Per package lists each one; Total only is a single number for the whole tree.'],
+      ask: { toolUseId: 'w2', questions: [format], askedAt: 0, answerable: false, reply: true },
+    }),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^needs:/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /^Pick a reply/ })).toBeFalsy()
+  expect((await ui.findAll({ type: 'Text', text: /^Report format\?$/ })).length).toBe(2)
+  expect((await ui.find({ type: 'Text', text: /^blocked: counted 144/ }))?.text).toBe('blocked: counted 144 .go files under internal/; awaiting report format')
+  // The line before it takes the room beside the verdict
+  expect((await ui.find({ type: 'Text', text: /^Counted 144 files/ }))?.text).toBe('Counted 144 files.')
+  expect((await ui.find({ type: 'Text', text: /^Per package lists/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a reply line listing the options is left out, by itself; a short comparison of them is kept', async ($, on) => {
+  const yes = { question: 'Ship it?', header: '', multiSelect: false, options: [{ label: 'Yes (Recommended)', description: '' }, { label: 'No', description: '' }] }
+  const format = { question: 'Report format?', header: '', multiSelect: false, options: [{ label: 'Per package', description: '' }, { label: 'Total only', description: '' }] }
+  const asks = (id: string, q: typeof yes, lastLines: string[]) =>
+    worker({ id, title: id, state: 'blocked', status: 'needs you', statusText: q.question, lastLines, ask: { toolUseId: id, questions: [q], askedAt: 0, answerable: false, reply: true } })
+  await start($, on, ok([
+    asks('local_a', format, ['Kept one.', 'Which one: **Per package** or `Total only`?']),
+    asks('local_b', yes, ['Kept two.', 'Pick one: Yes (Recommended) or No.']),
+    asks('local_c', format, ['Per package is slower; Total only skips files.']),
+    asks('local_d', format, ['So please pick one: Per package, or Total only']),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^Which one/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /^Pick one/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /^Per package is slower/ }))?.text).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^So please/ }))?.text).toBeTruthy()
+  await ui.unmount()
+})
+
+test('beside options a reply line saying the need is left out, as the need is; without options both show', async ($, on) => {
+  const format = { question: 'Report format?', header: '', multiSelect: false, options: [{ label: 'Per package', description: '' }, { label: 'Total only', description: '' }] }
+  const need = { needsAction: 'choose how the report groups files', lastLines: ['Choose how the report groups files.'] }
+  await start($, on, ok([
+    worker({ status: 'idle', ...need, ask: { toolUseId: 'w1', questions: [format], askedAt: 0, answerable: false, reply: true } }),
+    worker({ id: 'local_b', title: 'Worker B', status: 'idle', ...need, ask: { toolUseId: 'w2', questions: [{ ...format, options: [] }], askedAt: 0, answerable: false, reply: true } }),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.findAll({ type: 'Text', text: /^Choose how/ })).length).toBe(1)
+  expect((await ui.findAll({ type: 'Text', text: /^needs:/ })).map(t => t.text)).toEqual(['needs: choose how the report groups files'])
+  await ui.unmount()
+})
+
+test('a need beside a question without options still shows', async ($, on) => {
+  const open = { question: 'What should the report say?', header: '', multiSelect: false, options: [] }
+  await start($, on, ok([worker({ status: 'idle', needsAction: 'describe the report', ask: { toolUseId: 'w1', questions: [open], askedAt: 0, answerable: false, reply: true } })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^needs:/ }))?.text).toBe('needs: describe the report')
   await ui.unmount()
 })
 

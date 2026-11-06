@@ -32,6 +32,8 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   stopped: 'Idle',
 }
 const MAX_LAST_LINES = 2
+// The words a reply line listing a question's options may hold besides them, e.g. `Pick a reply: Per package, or Total only.`
+const LIST_WORDS = new Set(['pick', 'choose', 'select', 'reply', 'answer', 'one', 'of', 'a', 'an', 'the', 'or', 'and', 'either', 'with', 'please', 'which', 'do', 'you', 'want', 'prefer', 'should', 'i'])
 // A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
 const RETAKE_MS = 10_000
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
@@ -44,6 +46,8 @@ const STEP_LOOKS = {
 // An expanded list's rows at most, its count rows included; the progress bar's width in cells
 const MAX_STEPS = 7
 const BAR_CELLS = 10
+// The desktop bar's empty track: a faint grey that reads as empty on light and dark alike (the theme's greys draw a full-looking bar)
+const BAR_TRACK = 'rgba(128, 128, 128, 0.22)'
 // A PR's CI checks summed up: any failed (or cancelled), else any still running, else passed (passed or skipped)
 type Rollup = 'failed' | 'running' | 'passed'
 const FAILED_BUCKETS = ['fail', 'cancel']
@@ -83,7 +87,7 @@ const ICON_PX = 12
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
 // Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-6' })
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-7' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -196,14 +200,14 @@ function unsent(workers: Worker[], sentKeys: readonly string[]): { text: string;
   return { text: lines.length === 0 ? '' : `dev-board: ${lines.join('; ')}`, keys }
 }
 
-/** The band's line, e.g. `1 needs you · 3 workers · 1 busy · 1 blocked · PR #78 open`. */
+/** The band's line, e.g. `1 needs you · 3 workers · 1 busy · 1 blocked · PR #78 open`; a worker that needs you is counted there only. */
 function bandLine(workers: Worker[]): string {
   const open = workers.flatMap(w => w.prs.filter(pr => pr.state === 'OPEN').map(pr => `#${pr.number}`))
   const needsYou = workers.filter(w => w.status === NEEDS_YOU).length
   const parts = needsYou > 0 ? [`${needsYou} needs you`] : []
   parts.push(`${workers.length} worker${workers.length === 1 ? '' : 's'}`)
   for (const state of ['busy', 'blocked'] as const) {
-    const count = workers.filter(w => w.state === state).length
+    const count = workers.filter(w => w.state === state && w.status !== NEEDS_YOU).length
     if (count > 0) {
       parts.push(`${count} ${state}`)
     }
@@ -223,8 +227,11 @@ function paneTitle(workers: Worker[]): string {
   return parts.join(' · ')
 }
 
-/** Whether the tile shows what a worker not running needs (a blocked one's status says it). */
-const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked'
+/** Whether the worker's question has options, its buttons until a reply is sent. */
+const hasOptions = (w: Worker) => w.ask?.questions.some(q => q.options.length > 0) === true
+
+/** Whether the tile shows what a worker not running needs (a blocked one's status says it, a question's options ask it). */
+const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && !hasOptions(w)
 
 /** Whether the tile shows the person something to act on: a health note, a need or a question. */
 const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w) || w.ask != null
@@ -250,16 +257,32 @@ const plainLine = (line: string) =>
     .map((part, i) => (i % 2 === 1 ? part : part.replace(/!?\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, '$1').replace(/(?<!\w)(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?!\w)/g, '$2')))
     .join('')
 
+/** A pattern matching text where no letter or digit adjoins it. */
+const wholeWord = (text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u')
+
 /**
- * Whether a reply line says what the tile does above it: the status (`Blocked: pick one` beside `blocked · pick one`) or a
- * question it asks; their first 40 characters alike, case, inline markdown, end punctuation and a leading `<status>:` aside.
+ * Whether a reply line says what the tile does above it: the status (`Blocked: pick one` beside `blocked · pick one`), a
+ * question it asks or the need its options answer, their first 40 characters alike, case, inline markdown, end punctuation
+ * and a leading `<status>:` aside; or a question's options, every one named as a whole word, among list words only.
  */
 function repeatsTile(line: string, w: Worker): boolean {
   const said = (s: string) => plainLine(s).trim().toLowerCase().replace(/[.!?…]+$/, '')
   const text = said(line)
   const rest = text.startsWith(`${w.status}:`) ? text.slice(w.status.length + 1).trimStart() : text
-  const shown = [w.statusText, ...(w.ask?.questions.map(q => q.question) ?? [])].map(said)
-  return shown.some(what => what !== '' && rest.slice(0, 40) === what.slice(0, 40))
+  const shown = [w.statusText, hasOptions(w) ? w.needsAction : '', ...(w.ask?.questions.map(q => q.question) ?? [])].map(said)
+  if (shown.some(what => what !== '' && rest.slice(0, 40) === what.slice(0, 40))) return true
+  return (w.ask?.questions ?? []).some(q => {
+    const labels = q.options.map(o => said(o.label)).filter(l => l !== '')
+    if (labels.length === 0) return false
+    let left = rest
+    for (const l of labels) {
+      const named = wholeWord(l)
+      if (!named.test(left)) return false
+      left = left.replace(named, '')
+    }
+    // What is left only leads in and joins them: `A is safe; B deletes data` says more
+    return left.split(/[^\p{L}\p{N}]+/u).every(word => word === '' || LIST_WORDS.has(word))
+  })
 }
 
 /**
@@ -758,12 +781,14 @@ export const register: Register = on => {
               <Box key={`${w.id}:bar`}>
                 <Text>
                   <Text color="success">{'━'.repeat(cells)}</Text>
-                  <Text color="inactive">{'━'.repeat(BAR_CELLS - cells)}</Text>
+                  <Text color="inactive" dimColor>
+                    {'─'.repeat(BAR_CELLS - cells)}
+                  </Text>
                 </Text>
               </Box>
             ) : (
               <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
-                <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor="inactive">
+                <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor={BAR_TRACK}>
                   <Box flexGrow={done} backgroundColor="success" />
                   <Box flexGrow={w.plan.length - done} />
                 </Box>
@@ -872,7 +897,7 @@ export const register: Register = on => {
 
       const lastLines = w.lastLines.filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w)).slice(-(verdict === '' ? MAX_LAST_LINES : 1))
       // Working and Idle tiles ask nothing of the person, and a question's options shown answer it: their buttons recede to text
-      const showsOptions = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent && w.ask.questions.some(q => q.options.length > 0)
+      const showsOptions = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent && hasOptions(w)
       const isQuiet = !isAttention || showsOptions
       const quiet = isQuiet ? ({ plain: true, dimColor: true } as const) : {}
 

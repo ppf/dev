@@ -103,14 +103,16 @@ type Worker struct {
 	NeedsAction string `json:"needsAction"`
 	// LastLines are the last lines of the newest assistant text.
 	LastLines []string `json:"lastLines"`
-	// Tool is the tool call in flight while busy.
-	Tool string `json:"tool"`
+	// Tool is the tool call in flight while busy; ToolDescription what that call says it does (Bash's, Agent's
+	// description), "" for none or another tool.
+	Tool            string `json:"tool"`
+	ToolDescription string `json:"toolDescription"`
 	// Context is the share of the model's context window in use, in whole percent; nil when unknown.
 	Context *int `json:"context"`
 	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
 	Notes []Note `json:"notes"`
 	// Status is finer than State (needs you, rate-limited, stuck, working, waiting, blocked, review ready,
-	// idle, stopped); StatusText is what it says: the question, the tool, what it waits on.
+	// idle, stopped); StatusText is what it says: the question, what its tool call does (else the tool), what it waits on.
 	Status     string `json:"status"`
 	StatusText string `json:"statusText"`
 	// Since is how long it has been in its live state (busy, idle) or, not running, since the app's last
@@ -440,7 +442,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		w.Plan = t.plan
 	}
 	if w.State == StateBusy {
-		w.Tool = t.tool
+		w.Tool, w.ToolDescription = t.tool, t.toolDescription
 	}
 	window := windows[t.model]
 	if window > 0 && t.tokens > 0 {
