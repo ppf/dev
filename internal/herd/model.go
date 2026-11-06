@@ -162,6 +162,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
+			// A card entering Needs you shows screenRows of its screen again, where it asks
+			for _, t := range msg.snap.tiles {
+				was := slices.IndexFunc(m.snap.tiles, func(u tile) bool { return u.sess.Name == t.sess.Name })
+				if t.section() == needsYouSection && (was < 0 || m.snap.tiles[was].section() != needsYouSection) {
+					delete(m.expands, t.sess.Name)
+				}
+			}
 			m.snap, m.err = msg.snap, nil
 			if msg.inputs == m.inputs {
 				m.focused = msg.snap.focused

@@ -29,7 +29,8 @@ func TestCropInput(t *testing.T) {
 	menu := []string{"❯ 1. Postgres", "     The usual", "  2. SQLite", "  3. Type something."}
 	spinner := "✻ Thinking… (esc to interrupt)"
 	notice := "Advisor Tool (experimental) is on and may use more tokens · /advisor"
-	advisor := "\x1b[2m" + strings.Repeat(" ", 80-len([]rune(notice))) + notice + "\x1b[0m"
+	// Two columns in from the box's right edge, as Claude draws it
+	advisor := "\x1b[2m" + strings.Repeat(" ", 78-len([]rune(notice))) + notice + "\x1b[0m"
 	tests := []struct {
 		name  string
 		lines []string
@@ -47,6 +48,10 @@ func TestCropInput(t *testing.T) {
 		{"right-aligned notices over the box go with it", append(append(slices.Clone(conversation[:3]), spinner, strings.Repeat(" ", 64)+"Some notice · /x", advisor), screen("❯ ")[len(conversation):]...),
 			append(slices.Clone(conversation[:3]), spinner)},
 		{"a notice one short of the right edge goes", append(append(slices.Clone(conversation[:3]), spinner, strings.Repeat(" ", 8)+strings.Repeat("n", 71)), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), spinner)},
+		{"a line ending three short of the right edge stays", append(append(slices.Clone(conversation[:3]), strings.Repeat(" ", 8)+strings.Repeat("n", 69)), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), strings.Repeat(" ", 8)+strings.Repeat("n", 69))},
+		{"a notice cut to fit a narrow pane goes", append(append(slices.Clone(conversation[:3]), spinner, "  "+strings.Repeat("n", 75)+"…"), screen("❯ ")[len(conversation):]...),
 			append(slices.Clone(conversation[:3]), spinner)},
 		{"a full-width line indented less than a notice stays", append(append(slices.Clone(conversation[:3]), strings.Repeat(" ", 7)+strings.Repeat("n", 73)), screen("❯ ")[len(conversation):]...),
 			append(slices.Clone(conversation[:3]), strings.Repeat(" ", 7)+strings.Repeat("n", 73))},
@@ -273,4 +278,29 @@ func TestSnapshotCostOff(t *testing.T) {
 			t.Errorf("@dev_cost boss %q worker %q: tiles %+v, want cost %q", tc.boss, tc.worker, s.tiles, tc.want)
 		}
 	}
+}
+
+// Claude's right-aligned notices over its input box, as captured: two columns in from its edge ("Advisor Tool
+// (experimental) is on…", "◐ medium · /effort"), or cut to fit a narrow pane, go with the box.
+func TestCropNoticesGolden(t *testing.T) {
+	tests := []struct{ file, last string }{
+		{"claude-notice", "~/PhpstormProjects/ppf/dev/.claude/worktrees/herd-ask-card-fixes"},
+		{"claude-notice-narrow", "~/…/worktrees/herd-ask-card-fixes"},
+		{"claude-effort-done", "implementation and testing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			got := previewLines(screenGolden(t, tt.file), tile{sess: sidebar.Session{Agent: "Claude", State: agent.Idle}})
+			plain := ansi.Strip(strings.Join(got, "\n"))
+			if len(got) == 0 || !strings.Contains(ansi.Strip(got[len(got)-1]), tt.last) || strings.Contains(plain, "Advisor") || strings.Contains(plain, "◐ medium") {
+				t.Errorf("want the last line with %q, no notice; got:\n%s", tt.last, plain)
+			}
+		})
+	}
+}
+
+// screenGolden is a capture among package screen's, Claude's screens with its input box.
+func screenGolden(t *testing.T, name string) string {
+	t.Helper()
+	return golden(t, "../../screen/testdata/"+name)
 }
