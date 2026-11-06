@@ -539,6 +539,9 @@ func TestCutAndLastLines(t *testing.T) {
 	if got := lastLines("Intro.\n\n" + ask); !slices.Equal(got, []string{"Which way?", "- Rewrite in place", "- Translate on read", "- Leave them"}) {
 		t.Errorf("lastLines = %q, want back to the question its 3 options follow", got)
 	}
+	if got := lastLines(ask + "\nWAITING (your pick)"); len(got) != 5 || got[0] != "Which way?" {
+		t.Errorf("lastLines = %q, want back to the question above its options and marker", got)
+	}
 	if got := lastLines("One.\nTwo.\nThree.\nFour."); len(got) != lastLineCount {
 		t.Errorf("lastLines = %q, want %d lines without a question", got, lastLineCount)
 	}

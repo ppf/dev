@@ -273,7 +273,7 @@ func without(pending []block, id string) []block {
 }
 
 // lastLines is text's last non-blank lines, whole: a long question still ends in its "?"; back to the question
-// it ends on when its options take more of them.
+// it ends on (before any turn-end marker) when its options take more of them.
 func lastLines(text string) []string {
 	var lines []string
 	for l := range strings.SplitSeq(text, "\n") {
@@ -282,7 +282,14 @@ func lastLines(text string) []string {
 		}
 	}
 	start := max(0, len(lines)-lastLineCount)
-	if i := inbox.QuestionAt(lines); i >= 0 {
+	asked := lines
+	for len(asked) > 0 {
+		if _, _, marker := Marker(asked[len(asked)-1:]); !marker {
+			break
+		}
+		asked = asked[:len(asked)-1]
+	}
+	if i := inbox.QuestionAt(asked); i >= 0 {
 		start = min(start, i)
 	}
 	return lines[start:]
