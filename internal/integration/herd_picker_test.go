@@ -144,7 +144,7 @@ func waitPane(t *testing.T, d *devServer, pane, desc string, cond func(screen st
 	t.Fatalf("❌ timeout waiting for: %s; screen:\n%s", desc, screen)
 }
 
-// A click on a card opens its reply box, its rule in the card's accent; focus moving to the coordinator closes
+// A click on a card selects it and m opens its reply box, its rule in the card's accent; focus moving to the coordinator closes
 // it back to the hint row, and focus coming back doesn't reopen it.
 func TestHerdReplyBlur(t *testing.T) {
 	d, _, coord, previews := herdServer(t, "set -g mouse on\n")
@@ -152,6 +152,7 @@ func TestHerdReplyBlur(t *testing.T) {
 	waitPane(t, d, previews, "w1's card", func(screen string) bool { return strings.Contains(screen, "▸ ● w1") })
 	const accent = "38;2;152;187;108m─" // the box's rule in idle green
 	actClick(d, previews, 8, 1)
+	d.T("send-keys", "-t", previews, "m")
 	waitPane(t, d, previews, "the reply box", func(screen string) bool { return strings.Contains(screen, "esc cancel") })
 	check(t, "the click focused the previews", d.T("display", "-t", previews, "-p", "#{pane_active}"), "1")
 	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, accent) {
@@ -160,7 +161,7 @@ func TestHerdReplyBlur(t *testing.T) {
 
 	d.T("select-pane", "-t", coord)
 	waitPane(t, d, previews, "the box closed", func(screen string) bool {
-		return !strings.Contains(screen, "esc cancel") && strings.Contains(screen, "i reply")
+		return !strings.Contains(screen, "esc cancel") && strings.Contains(screen, "m message")
 	})
 	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); strings.Contains(styled, accent) {
 		t.Errorf("❌ the box's rule still drawn:\n%s", styled)

@@ -219,7 +219,8 @@ func TestBoardScroll(t *testing.T) {
 	}
 }
 
-// v shows half the pane of the selected card's screen.
+// v shows half the pane of the selected card's screen, for that card only, until v on it again; on a folded
+// card it unfolds it.
 func TestExpand(t *testing.T) {
 	m := board4()
 	m.height = 10
@@ -239,6 +240,27 @@ func TestExpand(t *testing.T) {
 	if got := m.screenRows(m.snap.tiles[2]); len(got) != 0 {
 		t.Errorf("an uncaptured card shows %q", got)
 	}
+	m.snap.tiles[0].body = slices.Repeat([]string{"x"}, 8)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if m = next.(Model); m.selected != "fix-login" || len(m.screenRows(m.snap.tiles[0])) != screenRows || len(m.screenRows(m.snap.tiles[1])) != 8 {
+		t.Errorf("after k: fix-login %d rows, docs-api %d", len(m.screenRows(m.snap.tiles[0])), len(m.screenRows(m.snap.tiles[1])))
+	}
+	m.selected = "docs-api"
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m = next.(Model); len(m.screenRows(m.snap.tiles[1])) != screenRows {
+		t.Errorf("v again: %d rows, want %d", len(m.screenRows(m.snap.tiles[1])), screenRows)
+	}
+	m.selected = "old-spike"
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m = next.(Model); m.snap.tiles[3].folded(m.folds) || !m.expands["old-spike"] {
+		t.Errorf("v on a folded card: folded %v, expanded %v", m.snap.tiles[3].folded(m.folds), m.expands["old-spike"])
+	}
+	// Expanded, then folded: v unfolds it expanded
+	m.fold(m.snap.tiles[3])
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m = next.(Model); m.snap.tiles[3].folded(m.folds) || !m.expands["old-spike"] {
+		t.Errorf("v on an expanded folded card: folded %v, expanded %v", m.snap.tiles[3].folded(m.folds), m.expands["old-spike"])
+	}
 }
 
 // A refresh captures the selected card first, then the deciding ones, then the other open ones; folded
@@ -255,7 +277,7 @@ func TestCaptures(t *testing.T) {
 }
 
 // A click lands on the card drawn there on a scrolled board; one on an open card's ▾ folds it, one elsewhere
-// on it opens its reply box.
+// on it selects it, one on its Message… opens its reply box.
 func TestBoardClicks(t *testing.T) {
 	m := board4()
 	m.height = 12
@@ -280,12 +302,24 @@ func TestBoardClicks(t *testing.T) {
 	if got := click(m, 3, y); !got.snap.tiles[2].folded(got.folds) || got.box.session != "" {
 		t.Errorf("click on ci-fix's ▾: folded %v, box %q", got.snap.tiles[2].folded(got.folds), got.box.session)
 	}
-	if got := click(m, 20, y); got.box.session != "ci-fix" {
-		t.Errorf("click on ci-fix's name row opened %q", got.box.session)
+	for _, dy := range []int{0, 1} {
+		if got := click(m, 20, y+dy); got.selected != "ci-fix" || got.box.session != "" {
+			t.Errorf("click on ci-fix's row %d: selected %q, box %q", dy, got.selected, got.box.session)
+		}
 	}
-	if got := click(m, 20, y+1); got.box.session != "ci-fix" {
-		t.Errorf("click in ci-fix's body opened %q", got.box.session)
+	m.height = 40
+	if got := click(m, 20, row(m, "old-spike")); got.selected != "old-spike" || got.box.session != "" {
+		t.Errorf("click on old-spike: selected %q, box %q", got.selected, got.box.session)
 	}
+	for y, l := range m.render() {
+		if x := strings.Index(ansi.Strip(l), "Message…"); x >= 0 && y > row(m, "ci-fix") {
+			if got := click(m, ansi.StringWidth(ansi.Strip(l)[:x])+1, y); got.box.session != "ci-fix" {
+				t.Errorf("click on ci-fix's Message… opened %q", got.box.session)
+			}
+			return
+		}
+	}
+	t.Error("no Message… under ci-fix")
 }
 
 // Tiles come in section order, in their order within one.
