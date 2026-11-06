@@ -8,6 +8,14 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
+// SessionName is the session dev opens for project's worktree wt; wt "" is the main checkout.
+func SessionName(project, wt string) string {
+	if wt == "" {
+		return project
+	}
+	return project + "-" + strings.ReplaceAll(wt, "/", "-")
+}
+
 // Group is a session's sidebar group: its @project, else its name cut at the last "-<digit>"
 // (bash ${name%-[0-9]*}: app-2 → app, proj-12-fix → proj).
 func Group(name, project string) string {

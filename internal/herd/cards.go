@@ -17,8 +17,7 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 )
 
-// screenRows is how much of its pane's screen an open card shows; the selected one shows half the pane while
-// expanded (v).
+// screenRows is how much of its pane's screen an open card shows; an expanded one (v) shows half the pane.
 const screenRows = 5
 
 // sectionNames and sectionColours label the sections, in their order.
@@ -34,7 +33,7 @@ var healthNotes = map[string]bool{inbox.Failed: true, inbox.Stuck: true, inbox.C
 type hitKind int
 
 const (
-	// hitCard selects the card and opens the reply box for it.
+	// hitCard selects the card.
 	hitCard hitKind = iota
 	// hitFold folds or unfolds the card.
 	hitFold
@@ -42,9 +41,9 @@ const (
 	hitOption
 	// hitSubmit goes on from a multi-select question, as ⏎ does.
 	hitSubmit
-	// hitOpen switches to the worker, as ⏎ does.
+	// hitOpen switches to the worker, as g and ⏎ do.
 	hitOpen
-	// hitMessage opens the reply box, as i does.
+	// hitMessage opens the reply box, as m does.
 	hitMessage
 	// hitPR opens its PR, as o does.
 	hitPR
@@ -158,6 +157,19 @@ func (m *Model) fold(t tile) {
 	m.folds[t.sess.Name] = !t.folded(m.folds)
 }
 
+// toggleExpand shows half the pane of t's screen on its card, or screenRows again; a folded card unfolds,
+// expanded.
+func (m *Model) toggleExpand(t tile) {
+	if m.expands == nil {
+		m.expands = map[string]bool{}
+	}
+	folded := t.folded(m.folds)
+	m.expands[t.sess.Name] = folded || !m.expands[t.sess.Name]
+	if folded {
+		m.fold(t)
+	}
+}
+
 // sectionRow is section s's header: its name and count in its colour, ruled to width w.
 func sectionRow(s section, n, w int) string {
 	label := " " + sectionNames[s] + " " + strconv.Itoa(n) + " "
@@ -179,13 +191,16 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	if selected {
 		frame = sidebar.StateColour(t.sess.Agent, t.sess.State)
 	}
+	// The selected card's name row is on the selection band
+	band := func(row string) string {
+		if !selected {
+			return row
+		}
+		return sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
+	}
 	// The arrow, a cell wider each side so it's easy to hit
 	if t.folded(m.folds) {
-		row := m.headRow(t, sec, true, w-1)
-		if selected {
-			row = sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
-		}
-		return []string{gutter + row}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
+		return []string{gutter + band(m.headRow(t, sec, true, w-1))}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
 	}
 	hits = append(hits, hit{y: 1, x0: 2, x1: 5, kind: hitFold})
 	iw := max(1, w-3)
@@ -194,7 +209,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		return gutter + frame + "│" + reset + s + strings.Repeat(" ", max(0, iw-ansi.StringWidth(s))) + frame + "│" + reset
 	}
 	rows = append(rows, gutter+frame+"╭"+strings.Repeat("─", iw)+"╮"+reset)
-	rows = append(rows, line(m.headRow(t, sec, false, iw)))
+	rows = append(rows, line(band(m.headRow(t, sec, false, iw))))
 	// The rows under the name start under it
 	in := "    "
 	text := func(colour, s string) {
@@ -229,7 +244,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
 	}
 	if pr := t.sess.PR; pr.Number != 0 {
-		rows = append(rows, line(in+sidebar.PRColour(pr.State)+prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State+reset+ciText(t.ci)))
+		rows = append(rows, line(in+prColour(pr.State)+prIcon(pr.State)+" PR #"+strconv.Itoa(pr.Number)+" "+pr.State+reset+ciText(t.ci)))
 	}
 	lines := said(t)
 	for _, l := range lines {
@@ -405,7 +420,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 			left += "  " + sidebar.Muted + s + reset
 		}
 		if pr := t.sess.PR; pr.Number != 0 {
-			left += "  " + sidebar.PRColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
+			left += "  " + prColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
 			if icon := ciIcon(t.ci.state); icon != "" {
 				left += " " + icon
 			}
@@ -508,6 +523,14 @@ func prIcon(state string) string {
 	return "○"
 }
 
+// prColour is a PR's colour by state as sidebar gives it, but a draft's at the card's muted level: sidebar's faint is too dim on a card.
+func prColour(state string) string {
+	if state == "draft" {
+		return sidebar.Muted
+	}
+	return sidebar.PRColour(state)
+}
+
 // lastSaid is how many of its newest reply's lines a card shows.
 const lastSaid = 2
 
@@ -555,12 +578,12 @@ func warnings(t tile) []string {
 	return ws
 }
 
-// screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane for the
-// selected card while expanded, without the blank rows or the reply lines its card shows whole (lines) it
-// starts with; none when not captured.
+// screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane while expanded,
+// without the blank rows or the reply lines its card shows whole (lines) it starts with; none when not
+// captured.
 func (m Model) screenRows(t tile, lines []string) []string {
 	n := screenRows
-	if m.expand && t.sess.Name == m.selected {
+	if m.expands[t.sess.Name] {
 		n = max(n, m.height/2)
 	}
 	shown := tail(t.body, n)
@@ -605,7 +628,7 @@ func rowText(row string) string {
 	return strings.Join(strings.Fields(strings.TrimPrefix(strings.TrimSpace(ansi.Strip(row)), "⏺")), " ")
 }
 
-// ciIcon is a CI state's glyph in its colour: ✓ passed, ✗ failed, ◷ running; "" for none.
+// ciIcon is a CI state's glyph in its colour: ✓ passed, ✗ failed, ● running (◷ draws half height in some terminals); "" for none.
 func ciIcon(state string) string {
 	switch state {
 	case ciPassed:
@@ -613,7 +636,7 @@ func ciIcon(state string) string {
 	case ciFailed:
 		return sidebar.Red + "✗" + reset
 	case ciRunning:
-		return sidebar.Gold + "◷" + reset
+		return sidebar.Gold + "●" + reset
 	}
 	return ""
 }

@@ -89,6 +89,38 @@ func TestModelBuildSnapshot(t *testing.T) {
 	}
 }
 
+// A session named <project>-<branch> is Named by its own project, also once Order nests it under a
+// starter of another group.
+func TestModelBuildSnapshotNamed(t *testing.T) {
+	agentRow := func(session, id, pane, project, startedBy string) paneRow {
+		return paneRow{Session: session, SessionID: id, Window: 1, ID: pane, Path: "/" + session, Command: "claude", StateCmd: "claude",
+			Project: project, StartedBy: startedBy}
+	}
+	rows := []paneRow{
+		{Session: "lead", SessionID: "$1", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30, Project: "app"},
+		agentRow("lead", "$1", "%1", "app", ""),
+		agentRow("api-fix", "$2", "%2", "api", "$1"),
+		agentRow("api-feat-x", "$3", "%3", "api", ""),
+		agentRow("api-old", "$4", "%4", "api", ""),
+		agentRow("web-main", "$5", "%5", "zz", ""),
+	}
+	branches := map[string]string{"/lead": "main", "/api-fix": "fix", "/api-feat-x": "feat/x", "/api-old": "new", "/web-main": "main"}
+	s, err := buildSnapshot(rows, nil, "%0", "host", func(path string) string { return branches[path] },
+		func(string, string, string, string, string) PR { return PR{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, x := range s.sessions {
+		if x.Named {
+			got = append(got, x.Group+"/"+x.Name)
+		}
+	}
+	if want := []string{"api/api-feat-x", "app/api-fix"}; !slices.Equal(got, want) {
+		t.Errorf("named = %q, want %q", got, want)
+	}
+}
+
 func TestModelSyncSelection(t *testing.T) {
 	sessions := []Session{{Name: "a"}, {Name: "b"}, {Name: "c"}}
 	viewing := func(session string) []Client { return []Client{{TTY: "/dev/x", Session: session, Activity: 1}} }

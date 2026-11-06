@@ -113,9 +113,9 @@ func (m Model) waiting(p *pick) bool {
 	return m.answering != "" || m.box.sent != "" && p.d.key() == m.box.sent
 }
 
-// handleKey: j/k/↓/↑ move (wrapping), ⏎ switch to the worker, i reply to it here, 1-9 answer a waiting
-// worker's dialog, o open its PR, x kill (asks y/n), v show more of the selected card's screen, f fold or
-// unfold its card, ctrl+c quit.
+// handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
+// here, 1-9 answer its dialog, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
+// fold or unfold it, ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -137,9 +137,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selected = m.move(i, 1)
 	case "k", "up":
 		m.selected = m.move(i, -1)
-	case "enter":
+	case "g", "enter":
 		return m, m.switchTo(m.selected)
-	case "i":
+	case "m", "i":
 		if len(m.snap.tiles) > 0 {
 			m.open(m.snap.tiles[i])
 		}
@@ -149,7 +149,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		t := m.snap.tiles[i]
 		if t.sess.State != agent.Waiting {
-			m.msg = "1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (i to reply)"
+			m.msg = "1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (m to reply)"
 			return m, nil
 		}
 		if t.pick != nil {
@@ -166,7 +166,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirm = m.snap.tiles[i].sess.Name
 	case "v":
-		m.expand = !m.expand
+		if len(m.snap.tiles) > 0 {
+			m.toggleExpand(m.snap.tiles[i])
+		}
 	case "f":
 		if len(m.snap.tiles) > 0 {
 			m.fold(m.snap.tiles[i])
@@ -178,9 +180,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleMouse: a left click on a card's ▸/▾ folds or unfolds it; on one of its dialog's options picks it
-// (Submit goes on), as its key does; on Open switches to the worker, on its PR opens it, on × asks to close
-// it; elsewhere on a card (Message… too) it selects it and opens the reply box for it, so the worker is
-// answered in place (⏎ without a reply open switches to it).
+// (Submit goes on), as its key does; on Open switches to the worker, on Message… opens the reply box for it,
+// on its PR opens it, on × asks to close it; elsewhere on a card it selects it, for the keys.
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
@@ -193,6 +194,13 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// A click is no y to a kill asked before it
 	m.msg, m.confirm = "", ""
 	switch h.kind {
+	case hitCard:
+		// An open reply box would take the keys meant for the card; one whose answer is out keeps its wait
+		if t.sess.Name != m.box.session || m.answering != m.box.session && m.box.sent == "" {
+			m.blur()
+		}
+		m.selected = t.sess.Name
+		return m, nil
 	case hitFold:
 		m.fold(t)
 		return m, nil

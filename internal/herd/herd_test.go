@@ -72,24 +72,45 @@ func TestSelectionAndClicks(t *testing.T) {
 	m.snap.tiles[0].pane, m.snap.tiles[1].pane = "%5", "%6"
 	// Tall enough for both tiles with the box open
 	m.height = 14
-	// Both in the Idle section, so folded under one header: a click answers in place: it selects the card and opens the reply
-	// box for it, never switching
+	// Both in the Idle section, so folded under one header: a click only selects the card, for the keys
 	m, cmd := click(m, 8, 1)
-	if m.selected != "a" || m.box.session != "a" || m.box.pane != "%5" || cmd != nil || len(ran) != 0 {
-		t.Errorf("click on tile a: selected %q reply %q pane %q, ran %q", m.selected, m.box.session, m.box.pane, ran)
+	if m.selected != "a" || m.box.session != "" || cmd != nil || len(ran) != 0 {
+		t.Errorf("click on tile a: selected %q reply %q, ran %q", m.selected, m.box.session, ran)
 	}
-	if next, cmd := click(m, 8, 0); cmd != nil || next.box.session != "a" {
+	if next, cmd := click(m, 8, 0); cmd != nil || next.selected != "a" {
 		t.Error("click on the section header does something")
 	}
-	m.box.ed.set("half")
-	if m, _ = click(m, 8, 1); m.box.ed.String() != "half" {
-		t.Errorf("click on the same tile drops the draft: %q", m.box.ed.String())
+	if m = key(m, "m"); m.box.session != "a" || m.box.pane != "%5" {
+		t.Errorf("m on tile a: reply %q pane %q", m.box.session, m.box.pane)
 	}
-	if m, _ = click(m, 8, 2); m.box.session != "b" || m.box.pane != "%6" || m.box.ed.String() != "" {
-		t.Errorf("click on tile b: reply %q pane %q draft %q", m.box.session, m.box.pane, m.box.ed.String())
+	// A click closes the box, so the keys reach the card it selects; its draft waits, and an answer going out
+	// keeps it
+	m.box.ed.set("half")
+	if m, _ = click(m, 8, 1); m.box.session != "" || m.drafts["a"].ed.String() != "half" {
+		t.Errorf("click on the box's tile: reply %q drafts %v", m.box.session, m.drafts)
+	}
+	m = key(m, "m")
+	m.box.sent = "key"
+	if m, _ = click(m, 8, 1); m.box.session != "a" {
+		t.Error("click on the box's tile closed it while its answer is on screen")
+	}
+	if m, _ = click(m, 8, 2); m.selected != "b" || m.box.session != "" || m.drafts["a"].ed.String() != "half" {
+		t.Errorf("click on tile b: selected %q reply %q drafts %v", m.selected, m.box.session, m.drafts)
 	}
 	if len(ran) != 0 {
 		t.Errorf("clicks ran %q", ran)
+	}
+	// g and ⏎ go to the selected worker's session
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("g")}, {Type: tea.KeyEnter}} {
+		ran = nil
+		_, cmd := m.Update(k)
+		if cmd == nil {
+			t.Fatalf("%s: no command", k)
+		}
+		cmd()
+		if len(ran) != 1 || !strings.Contains(ran[0], "switch-client") || !strings.HasSuffix(ran[0], tmux.SessionTarget("b")) {
+			t.Errorf("%s ran %q", k, ran)
+		}
 	}
 }
 
@@ -110,8 +131,10 @@ func TestBlurClosesBox(t *testing.T) {
 		return next.(Model)
 	}
 	m = click(m)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = next.(Model)
 	if m = refresh(m, false, m.inputs-1); m.box.session != "a" {
-		t.Fatal("a refresh listed before the click closed its box")
+		t.Fatal("a refresh listed before the key closed its box")
 	}
 	// Away before any refresh saw the pane focused
 	m.box.ed.set("half")
@@ -124,7 +147,7 @@ func TestBlurClosesBox(t *testing.T) {
 	if m = refresh(m, true, m.inputs); m.box.session != "" {
 		t.Error("focus back reopens the box")
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	if m = next.(Model); m.box.session != "a" || m.box.ed.String() != "half" {
 		t.Errorf("i after blur: box %q draft %q", m.box.session, m.box.ed.String())
 	}
@@ -172,7 +195,7 @@ type fakeLookups struct {
 	args  []string // the last PR call's
 	tails map[string]desktop.Tail
 	read  []string   // the transcripts Tail read
-	cis   []string   // the PRs CI read
+	cis   []string   // the PRs CI read, each with its pane and gen
 	pr    sidebar.PR // what PR returns; #1 open when zero
 }
 
@@ -186,8 +209,8 @@ func (f *fakeLookups) PR(pane, stored, gen, path, branch string) sidebar.PR {
 	return sidebar.PR{Number: 1, State: "open"}
 }
 func (f *fakeLookups) OpenPR(string) error { return errors.New("no browser") }
-func (f *fakeLookups) CI(url string) ci {
-	f.cis = append(f.cis, url)
+func (f *fakeLookups) CI(url, pane, gen string) ci {
+	f.cis = append(f.cis, url+" "+pane+" "+gen)
 	return ci{state: ciRunning, names: []string{"test"}}
 }
 func (f *fakeLookups) Tail(path string) (desktop.Tail, error) {

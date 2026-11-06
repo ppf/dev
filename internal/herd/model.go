@@ -100,7 +100,7 @@ type Model struct {
 	clk           control.Clock
 	host          string          // hostname, tmux's default pane title: a title that says nothing
 	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
-	expand        bool            // the selected card shows more of its screen
+	expands       map[string]bool // by session: its card shows more of its screen (v)
 }
 
 // lookups is what refresh asks sidebar.Lookups; tests replace it.
@@ -109,7 +109,7 @@ type lookups interface {
 	PR(pane, stored, gen, path, branch string) sidebar.PR
 	OpenPR(url string) error
 	Tail(path string) (desktop.Tail, error)
-	CI(url string) ci
+	CI(url, pane, gen string) ci
 }
 
 type tickMsg struct{}
@@ -172,10 +172,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selected = m.validSelection()
 			m.syncPick()
-			for name := range m.folds {
-				if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
-					// A new session of that name starts from its section's default
-					delete(m.folds, name)
+			for _, byName := range []map[string]bool{m.folds, m.expands} {
+				for name := range byName {
+					if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
+						// A new session of that name starts from its section's default
+						delete(byName, name)
+					}
 				}
 			}
 		}
@@ -382,7 +384,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		if s.visible {
 			sess.PR = look.PR(a.Pane.ID, r.PR, r.PRGen, a.Pane.Path, sess.Branch)
 			if pr := sess.PR; pr.URL != "" && (pr.State == "open" || pr.State == "draft") {
-				t.ci = look.CI(pr.URL)
+				t.ci = look.CI(pr.URL, a.Pane.ID, r.PRGen)
 			}
 			if r.Transcript != "" {
 				t.tail, t.tailErr = look.Tail(r.Transcript)

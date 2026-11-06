@@ -54,7 +54,7 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	home := os.Getenv("HOME")
 	inTmux := os.Getenv("TMUX") != ""
 	path := opts.Path
-	session := SessionName(opts.Name, opts.Worktree)
+	session := sidebar.SessionName(opts.Name, opts.Worktree)
 
 	if opts.Worktree != "" {
 		// Warnings must outlive the switch to the new session, hence display-message.
@@ -105,14 +105,6 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 		return err
 	}
 	return attach(c, session, inTmux)
-}
-
-// SessionName is the session opening project name's worktree wt gets; wt "" is the main checkout.
-func SessionName(name, wt string) string {
-	if wt == "" {
-		return name
-	}
-	return name + "-" + strings.ReplaceAll(wt, "/", "-")
 }
 
 // sizeSources is boss's window, which a --boss worker is watched from, then project.sh's order (tmux client,

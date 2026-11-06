@@ -236,6 +236,8 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				sess.Cost = FormatCost(a.Cost)
 			}
 			sess.Branch = branch(a.Pane.Path)
+			// Before Order moves a worker into its starter's group
+			sess.Named = sess.Branch != "" && name == SessionName(sess.Group, sess.Branch)
 			if viewed {
 				i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
 				sess.PR = pr(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
