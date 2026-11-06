@@ -122,7 +122,12 @@ func Run(argv []string, exited func(status int)) error {
 			o.drain(out)
 			_ = term.Restore(in, modes)
 			if ws.Stopped() {
+				// Kill may return before the stop lands: the command must not resume before Run stops
+				conts := make(chan os.Signal, 1)
+				signal.Notify(conts, syscall.SIGCONT)
 				_ = syscall.Kill(os.Getpid(), syscall.SIGSTOP)
+				<-conts
+				signal.Stop(conts)
 				// Continued (fg): take the terminal back, the size may have changed meanwhile
 				_, _ = term.MakeRaw(in)
 				_ = pty.InheritSize(os.Stdin, ptmx)
