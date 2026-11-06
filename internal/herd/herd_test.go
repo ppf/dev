@@ -2,6 +2,7 @@ package herd
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -191,18 +192,22 @@ func TestKill(t *testing.T) {
 }
 
 type fakeLookups struct {
-	prs   int
-	args  []string // the last PR call's
-	tails map[string]desktop.Tail
-	read  []string   // the transcripts Tail read
-	cis   []string   // the PRs CI read, each with its pane and gen
-	pr    sidebar.PR // what PR returns; #1 open when zero
+	prs    int
+	args   []string // the last PR call's
+	tails  map[string]desktop.Tail
+	read   []string              // the transcripts Tail read
+	cis    []string              // the PRs CI read, each with its pane and gen
+	pr     sidebar.PR            // what PR returns; #1 open when zero
+	byPath map[string]sidebar.PR // what PR returns for a path, over pr
 }
 
 func (f *fakeLookups) Branch(path string) string { return "br-" + path }
 func (f *fakeLookups) PR(pane, stored, gen, path, branch string) sidebar.PR {
 	f.prs++
 	f.args = []string{pane, stored, gen, path, branch}
+	if pr, ok := f.byPath[path]; ok {
+		return pr
+	}
 	if f.pr.Number != 0 {
 		return f.pr
 	}
@@ -495,6 +500,41 @@ func TestReplyBoxLooks(t *testing.T) {
 	m.msg = alert("gh: not logged in")
 	if got := ansiStrip(m.render()); got[14] != want[2] || got[15] != " gh: not logged in" {
 		t.Errorf("alert: %q", got[12:])
+	}
+}
+
+// The keys offer o PR only while the selected worker has a PR, or a lookup error to say.
+func TestHintPR(t *testing.T) {
+	r := tmux.FormatRow
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "")
+	for i, name := range []string{"has", "none", "failed"} {
+		rows += r(name, fmt.Sprint("$", i+3), "1", "1", "1", fmt.Sprint("%", i+3), "/"+name, "", "claude", "idle", "claude",
+			"", "", "", "", "$1", "", "", "", "", "", "", "", "", "")
+	}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "list-panes" {
+			return rows, nil
+		}
+		if args[0] == "list-clients" {
+			return r("/dev/ttys1", "herd", "5"), nil
+		}
+		return "", nil
+	})
+	look := &fakeLookups{byPath: map[string]sidebar.PR{"/none": {}, "/failed": {Err: "gh: not logged in"}}}
+	m := Model{c: c, pane: "%2", look: look, width: 80, height: 30}
+	next, _ := m.Update(m.refresh()())
+	m = next.(Model)
+	want := map[string]bool{"has": true, "none": false, "failed": true}
+	seen := map[string]bool{}
+	for range want {
+		seen[m.selected] = true
+		if got := strings.Contains(ansi.Strip(m.bottom()[0]), "o PR"); got != want[m.selected] {
+			t.Errorf("%s selected: o PR shown %v, want %v: %q", m.selected, got, want[m.selected], ansi.Strip(m.bottom()[0]))
+		}
+		m, _ = press(m, runes("j"))
+	}
+	if len(seen) != len(want) {
+		t.Errorf("selected only %v", seen)
 	}
 }
 

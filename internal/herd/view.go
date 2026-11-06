@@ -80,9 +80,15 @@ func (m Model) bottom() []string {
 		// Where the selection is on a board taller than the pane; first, so a narrow row cuts the hint
 		pages = fmt.Sprintf("%d/%d  ", sel+1, len(tiles))
 	}
-	hint := "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
-	if sel < len(tiles) && tiles[sel].sess.State == agent.Waiting {
-		hint = "1-9 answer  j/k select  g/⏎ go  m message  v screen  f fold  x kill"
+	hint := "j/k select  g/⏎ go  m message  v screen  f fold  x kill"
+	if sel < len(tiles) {
+		// o only offers what openPR does: the PR, or why its lookup failed
+		switch s := tiles[sel].sess; {
+		case s.State == agent.Waiting:
+			hint = "1-9 answer  " + hint
+		case s.PR.Number != 0 || s.PR.Err != "":
+			hint = "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
+		}
 	}
 	return []string{sidebar.HintRow(pages+hint, w)}
 }
