@@ -360,8 +360,8 @@ func TestReply(t *testing.T) {
 	if m.box.session != "" || cmd == nil || !slices.Equal(m.history, []string{"fix it"}) {
 		t.Fatalf("enter: reply %q, cmd %v, history %q", m.box.session, cmd, m.history)
 	}
-	if msg := cmd().(actionMsg); msg.msg != "Sent to b" {
-		t.Errorf("send: %q", msg.msg)
+	if msg := cmd().(actionMsg); msg.msg.text != "Sent to b" {
+		t.Errorf("send: %q", msg.msg.text)
 	}
 	if want := []string{"display-message " + tmux.Format[control.Status](), "paste-buffer %6", "send-keys Enter"}; !slices.Equal(slices.DeleteFunc(slices.Clone(ran), func(s string) bool { return strings.HasPrefix(s, "load-buffer") }), want) {
 		t.Errorf("sent with %q", ran)
@@ -372,8 +372,8 @@ func TestReply(t *testing.T) {
 	m, _ = key(m, runes("i"))
 	m, _ = key(m, runes("rm -rf x"))
 	_, cmd = key(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if msg := cmd().(actionMsg); !strings.Contains(msg.msg, "agent is gone") || len(ran) != 0 {
-		t.Errorf("gone agent: %q, ran %q", msg.msg, ran)
+	if msg := cmd().(actionMsg); !strings.Contains(msg.msg.text, "agent is gone") || len(ran) != 0 {
+		t.Errorf("gone agent: %q, ran %q", msg.msg.text, ran)
 	}
 	paneCmd = "claude"
 
@@ -395,8 +395,8 @@ func TestDialogKeys(t *testing.T) {
 		return next.(Model), cmd
 	}
 	// b is selected and not waiting
-	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg, "isn't waiting") {
-		t.Errorf("1 on a worker that isn't waiting: msg %q", m.msg)
+	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg.text, "isn't waiting") {
+		t.Errorf("1 on a worker that isn't waiting: msg %q", m.msg.text)
 	}
 	m.selected = "a"
 	if !strings.Contains(ansi.Strip(m.render()[11]), "1-9 answer") {
@@ -487,13 +487,13 @@ func TestReplyBoxLooks(t *testing.T) {
 	if n := strings.Count(strings.Join(m.render(), "\n"), bold+"Message…"); n != 1 {
 		t.Errorf("%d cards' Message… lit", n)
 	}
-	// A message takes the keys' place; an alert goes under the box
-	m.msg = "⏳ answering b…"
+	// A message takes the keys' place; an alert goes under the box, ❌ or not
+	m.msg = info("⏳ answering b…")
 	if got := ansiStrip(m.render()); !strings.HasSuffix(got[15], "─ ⏳ answering b… ─╯") {
 		t.Errorf("message: %q", got[13:])
 	}
-	m.msg = "❌ b: nope"
-	if got := ansiStrip(m.render()); got[14] != want[2] || got[15] != " ❌ b: nope" {
+	m.msg = alert("gh: not logged in")
+	if got := ansiStrip(m.render()); got[14] != want[2] || got[15] != " gh: not logged in" {
 		t.Errorf("alert: %q", got[12:])
 	}
 }

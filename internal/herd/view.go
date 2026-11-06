@@ -67,8 +67,8 @@ func (m Model) bottom() []string {
 	switch {
 	case m.confirm != "":
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
-	case m.msg != "":
-		return []string{sidebar.AlertRow(m.msg, w)}
+	case m.msg.text != "":
+		return []string{sidebar.AlertRow(m.msg.text, w)}
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
@@ -100,9 +100,8 @@ func (m Model) boxRows(t tile) []string {
 	} else {
 		body, hint = m.draftRows(iw-2), m.draftHint()
 	}
-	alert := strings.HasPrefix(m.msg, "❌") || strings.HasPrefix(m.msg, "⚠")
-	if m.msg != "" && !alert {
-		hint = m.msg
+	if m.msg.text != "" && !m.msg.alert {
+		hint = m.msg.text
 	}
 	title := ""
 	if iw > 4 {
@@ -117,8 +116,8 @@ func (m Model) boxRows(t tile) []string {
 		bottom = strings.Repeat("─", iw-3-ansi.StringWidth(hint)) + reset + " " + rule + hint + reset + " " + accent + "─"
 	}
 	rows = append(rows, " "+accent+"╰"+bottom+"╯"+reset)
-	if alert {
-		rows = append(rows, sidebar.AlertRow(m.msg, m.width))
+	if m.msg.alert {
+		rows = append(rows, sidebar.AlertRow(m.msg.text, m.width))
 	}
 	return rows
 }

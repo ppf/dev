@@ -89,8 +89,8 @@ type Model struct {
 	selected      string // session name
 	width, height int
 	err           error
-	confirm       string // session waiting for y to be killed
-	msg           string // one-off message on the bottom row, until the next key
+	confirm       string  // session waiting for y to be killed
+	msg           message // one-off message on the bottom row, until the next key
 	box           replyBox
 	drafts        map[string]replyBox // by session: a reply typed when focus moved away, back when its box opens again
 	focused       bool                // own pane is its window's active pane, as of the last input or refresh
@@ -205,7 +205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case watchMsg:
 		if msg.err != nil {
-			m.msg = "❌ inbox: " + msg.err.Error()
+			m.msg = alert("❌ inbox: " + msg.err.Error())
 		}
 		return m, m.watchLater()
 	}

@@ -11,8 +11,17 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// actionMsg is an action's outcome to show on the bottom row; "" clears it.
-type actionMsg struct{ msg string }
+// actionMsg is an action's outcome to show on the bottom row; none clears it.
+type actionMsg struct{ msg message }
+
+// message is a one-off line on the bottom row; an alert reports something that went wrong.
+type message struct {
+	text  string
+	alert bool
+}
+
+func info(s string) message  { return message{text: s} }
+func alert(s string) message { return message{text: s, alert: true} }
 
 const (
 	// maxHistory bounds the replies ↑ recalls.
@@ -103,7 +112,7 @@ func (m *Model) syncPick() {
 		case p.d.key() != b.sent:
 			b.sent = ""
 		case b.stale > staleRefreshes:
-			b.sent, m.msg = "", "⚠ "+b.session+": the answer didn't take, showing its dialog again"
+			b.sent, m.msg = "", alert("⚠ "+b.session+": the answer didn't take, showing its dialog again")
 		}
 	}
 }
@@ -121,7 +130,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.typeBox(k)
 	}
 	key := k.String()
-	m.msg = ""
+	m.msg = message{}
 	if m.confirm != "" {
 		target := m.confirm
 		m.confirm = ""
@@ -149,7 +158,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		t := m.snap.tiles[i]
 		if t.sess.State != agent.Waiting {
-			m.msg = "1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (m to reply)"
+			m.msg = info("1-9 answer a waiting worker's dialog; " + t.sess.Name + " isn't waiting (m to reply)")
 			return m, nil
 		}
 		if t.pick != nil {
@@ -192,7 +201,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	t := m.snap.tiles[h.tile]
 	// A click is no y to a kill asked before it
-	m.msg, m.confirm = "", ""
+	m.msg, m.confirm = message{}, ""
 	switch h.kind {
 	case hitCard:
 		// An open reply box would take the keys meant for the card; one whose answer is out keeps its wait
@@ -218,7 +227,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	answers := h.kind == hitOption || h.kind == hitSubmit
 	if answers && m.answering != "" {
-		m.msg = "⏳ answering " + m.answering + "…: pick again once it's done"
+		m.msg = info("⏳ answering " + m.answering + "…: pick again once it's done")
 		return m, nil
 	}
 	if t.sess.Name != m.box.session {
@@ -233,7 +242,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	p := m.activePick()
 	switch {
 	case p == nil:
-		m.msg = "⚠ " + t.sess.Name + ": send or clear the typed reply to pick an option"
+		m.msg = alert("⚠ " + t.sess.Name + ": send or clear the typed reply to pick an option")
 		return m, nil
 	case m.waiting(p):
 		return m, nil
@@ -281,9 +290,9 @@ func (m Model) openPR(i int) (tea.Model, tea.Cmd) {
 	case pr.Number != 0:
 		return m, m.action(func() error { return m.look.OpenPR(pr.URL) })
 	case pr.Err != "":
-		m.msg = pr.Err
+		m.msg = alert(pr.Err)
 	default:
-		m.msg = "No pull request for " + t.sess.Name
+		m.msg = info("No pull request for " + t.sess.Name)
 	}
 	return m, nil
 }
@@ -292,7 +301,7 @@ func (m Model) openPR(i int) (tea.Model, tea.Cmd) {
 func (m Model) action(fn func() error) tea.Cmd {
 	return func() tea.Msg {
 		if err := fn(); err != nil {
-			return actionMsg{"❌ " + err.Error()}
+			return actionMsg{alert("❌ " + err.Error())}
 		}
 		return actionMsg{}
 	}
@@ -305,7 +314,7 @@ func (m Model) typeBox(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
-	m.msg = ""
+	m.msg = message{}
 	b := &m.box
 	if p := m.activePick(); p != nil && !b.other {
 		return m.typePick(k, p)
@@ -397,16 +406,16 @@ func (m Model) sendReply() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		// The worker may have exited while the reply was typed: its pane's shell would run the text
 		if a, err := control.Resolve(m.c, target); err != nil || a.Pane != pane {
-			return actionMsg{"❌ " + target + ": its agent is gone, reply not sent"}
+			return actionMsg{alert("❌ " + target + ": its agent is gone, reply not sent")}
 		}
 		queued, err := control.Prompt(m.c, control.RealClock, pane, text)
 		if err != nil {
-			return actionMsg{"❌ " + target + ": " + err.Error()}
+			return actionMsg{alert("❌ " + target + ": " + err.Error())}
 		}
 		if queued {
-			return actionMsg{"Queued for " + target + ": it reads it at its turn's next step"}
+			return actionMsg{info("Queued for " + target + ": it reads it at its turn's next step")}
 		}
-		return actionMsg{"Sent to " + target}
+		return actionMsg{info("Sent to " + target)}
 	}
 }
 
@@ -469,7 +478,7 @@ func (m Model) sendWriteIn() (tea.Model, tea.Cmd) {
 	}
 	t, ok := m.bound()
 	if !ok || t.pick == nil || t.pick.other < 0 {
-		m.msg = "⚠ " + m.box.session + "'s dialog is gone: nothing sent"
+		m.msg = alert("⚠ " + m.box.session + "'s dialog is gone: nothing sent")
 		return m, nil
 	}
 	p := t.pick

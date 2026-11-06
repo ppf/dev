@@ -114,7 +114,7 @@ func TestSend(t *testing.T) {
 			p := goldenPick(t, tt.shown, agent.Question{})
 			m := Model{c: c, clk: fakeClock()}
 			msg := m.send("w", "%5", p.d, tt.answer(p))().(answeredMsg)
-			if msg.msg != tt.msg || msg.took != strings.HasPrefix(tt.msg, "Answered") || !slices.Equal(*sent, tt.keys) {
+			if msg.msg.text != tt.msg || msg.took != strings.HasPrefix(tt.msg, "Answered") || !slices.Equal(*sent, tt.keys) {
 				t.Errorf("sent %q: %+v, want %q %q", *sent, msg, tt.keys, tt.msg)
 			}
 		})
@@ -182,7 +182,7 @@ func TestPickerKeys(t *testing.T) {
 		t.Errorf("waiting hint %q", ansi.Strip(m.render()[23]))
 	}
 	m, _ = press(m)
-	next, _ := m.Update(answeredMsg{session: "a", msg: "Answered a", took: true})
+	next, _ := m.Update(answeredMsg{session: "a", msg: info("Answered a"), took: true})
 	m = next.(Model)
 	if m.answering != "" || m.box.sent == "" {
 		t.Errorf("answered: answering %q sent %q", m.answering, m.box.sent)
@@ -196,7 +196,7 @@ func TestPickerKeys(t *testing.T) {
 	}
 	// A failed answer can be retried at once
 	m.answering, m.box.sent = "a", p.d.key()
-	next, _ = m.Update(answeredMsg{session: "a", msg: "❌ a: nope"})
+	next, _ = m.Update(answeredMsg{session: "a", msg: alert("❌ a: nope")})
 	if m = next.(Model); m.waiting(&p) || !strings.Contains(ansi.Strip(m.render()[23]), "❌ a: nope") {
 		t.Errorf("failed answer: %+v", m.box)
 	}
@@ -492,8 +492,8 @@ func TestCardAnswerClicks(t *testing.T) {
 	m = pickerModel(t, "claude-ask-q1", colors)
 	m.box.ed.set("half")
 	x, y = cellOf(t, m, "3 Blue")
-	if m, cmd = clickAt(m, x+1, y); cmd != nil || !strings.Contains(m.msg, "typed reply") || m.box.ed.String() != "half" {
-		t.Errorf("click over a draft: msg %q draft %q", m.msg, m.box.ed.String())
+	if m, cmd = clickAt(m, x+1, y); cmd != nil || !strings.Contains(m.msg.text, "typed reply") || m.box.ed.String() != "half" {
+		t.Errorf("click over a draft: msg %q draft %q", m.msg.text, m.box.ed.String())
 	}
 }
 
@@ -531,8 +531,8 @@ func TestCardButtons(t *testing.T) {
 	}
 	if _, cmd := clickAt(m, at("PR #95")+1, y); cmd == nil {
 		t.Error("PR: nothing opened")
-	} else if msg := cmd().(actionMsg); !strings.Contains(msg.msg, "no browser") {
-		t.Errorf("PR: %q", msg.msg)
+	} else if msg := cmd().(actionMsg); !strings.Contains(msg.msg.text, "no browser") {
+		t.Errorf("PR: %q", msg.msg.text)
 	}
 	m.open(m.snap.tiles[1])
 	m.box.ed.set("draft")
@@ -615,16 +615,16 @@ func TestAnswerOutcomes(t *testing.T) {
 		t.Error("answered while another answer's keys go out")
 	}
 	m.answering, m.box.sent = "", m.snap.tiles[0].pick.d.key()
-	next, _ := m.Update(answeredMsg{session: "b", msg: "❌ b: nope"})
-	if m = next.(Model); m.box.sent == "" || m.msg != "❌ b: nope" {
-		t.Errorf("b's outcome: sent %q msg %q", m.box.sent, m.msg)
+	next, _ := m.Update(answeredMsg{session: "b", msg: alert("❌ b: nope")})
+	if m = next.(Model); m.box.sent == "" || m.msg.text != "❌ b: nope" {
+		t.Errorf("b's outcome: sent %q msg %q", m.box.sent, m.msg.text)
 	}
 	// The screen still shows the answered dialog after staleRefreshes: it's back, and said so
 	for range staleRefreshes + 1 {
 		m.syncPick()
 	}
-	if m.box.sent != "" || !strings.Contains(m.msg, "the answer didn't take") {
-		t.Errorf("stale: sent %q msg %q", m.box.sent, m.msg)
+	if m.box.sent != "" || !strings.Contains(m.msg.text, "the answer didn't take") {
+		t.Errorf("stale: sent %q msg %q", m.box.sent, m.msg.text)
 	}
 }
 
@@ -638,8 +638,8 @@ func TestWriteInSurvivesMissedCapture(t *testing.T) {
 	if !m.box.other || m.box.ed.String() != "teal" {
 		t.Fatalf("missed capture: other %v text %q", m.box.other, m.box.ed.String())
 	}
-	if m2, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil || !strings.Contains(m2.msg, "dialog is gone: nothing sent") {
-		t.Errorf("enter without the dialog: msg %q", m2.msg)
+	if m2, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil || !strings.Contains(m2.msg.text, "dialog is gone: nothing sent") {
+		t.Errorf("enter without the dialog: msg %q", m2.msg.text)
 	}
 	m.snap.tiles[0].pick = p
 	m.syncPick()
@@ -694,7 +694,7 @@ func TestSendRefusesAnotherCommand(t *testing.T) {
 		return "", nil
 	})
 	msg := Model{c: c, clk: fakeClock()}.send("w", "%5", shown.d, choose(0))().(answeredMsg)
-	if len(sent) != 0 || !strings.Contains(msg.msg, "dialog changed: nothing sent") {
+	if len(sent) != 0 || !strings.Contains(msg.msg.text, "dialog changed: nothing sent") {
 		t.Errorf("sent %q: %+v", sent, msg)
 	}
 }
@@ -760,8 +760,8 @@ func TestCardClicksAcrossCards(t *testing.T) {
 		t.Errorf("sent %q, want 4 to b's pane %%6", sent)
 	}
 	x, y = cellOf(t, m, "2 Green")
-	if got, cmd := clickAt(m, x+1, y); cmd != nil || got.box.session != "b" || !strings.Contains(got.msg, "answering b") {
-		t.Errorf("click while b's answer is out: box %q msg %q", got.box.session, got.msg)
+	if got, cmd := clickAt(m, x+1, y); cmd != nil || got.box.session != "b" || !strings.Contains(got.msg.text, "answering b") {
+		t.Errorf("click while b's answer is out: box %q msg %q", got.box.session, got.msg.text)
 	}
 	m.answering, m.box.sent = "", ""
 	m.box.ed.set("later")
