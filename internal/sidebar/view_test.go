@@ -176,8 +176,8 @@ func TestViewWideRunes(t *testing.T) {
 			t.Errorf("%s: × at column %d, want %d: %q", r.session, col, btn, line)
 		}
 	}
-	if !strings.Contains(f.lines[3], muted+" 機能/ブラ…"+reset) || !strings.Contains(f.lines[9], "とても長いセッションの名前がこ…") {
-		t.Errorf("branch or name not cut by width:\n%q\n%q", f.lines[3], f.lines[9])
+	if !strings.Contains(f.lines[3], muted+" 機能/ブラ…"+reset) || !strings.Contains(f.lines[f.rows[2].line], "とても長いセッションの名前がこ…") {
+		t.Errorf("branch or name not cut by width:\n%q\n%q", f.lines[3], f.lines[f.rows[2].line])
 	}
 	for i, line := range f.lines {
 		w := ansi.StringWidth(line)
@@ -360,6 +360,115 @@ func TestViewCost(t *testing.T) {
 	}
 }
 
+// The selected row's title that doesn't fit whole wraps onto lines of its own; other rows keep the cut.
+func TestViewSelectedTitleWraps(t *testing.T) {
+	long := "v0.35.0 dev app startup and sidebar layout review"
+	m := Model{selected: "a", snap: snapshot{width: 40, height: 14, focused: true, current: "x", sessions: []Session{
+		{Name: "a", Group: "g", Agent: "Claude", State: "idle", Title: long, Cost: "$18.42"},
+		{Name: "b", Group: "g", Agent: "Claude", State: "waiting", Title: long, Cost: "$0.85", Depth: 1,
+			PR: PR{Number: 7, State: "open", URL: "u7"}},
+		{Name: "c", Group: "g", Agent: "Claude", State: "idle", Title: "Fix login"},
+	}}}
+	strip := func(f frame, from, to int) []string {
+		var got []string
+		for _, l := range f.lines[from:to] {
+			got = append(got, strings.TrimRight(ansi.Strip(l), " "))
+		}
+		return got
+	}
+
+	f := m.render()
+	want := []string{
+		"  ● a                               ×",
+		"    Claude · idle · $18.42",
+		"    v0.35.0 dev app startup and sidebar",
+		"    layout review",
+		"  └ ● b                             ×",
+		"      #7 open · Claude · waiting · v0.…",
+		"  ● c                               ×",
+		"    Claude · idle · Fix login",
+	}
+	if got := strip(f, 3, 11); !slices.Equal(got, want) {
+		t.Errorf("a selected:\n got %q\nwant %q", got, want)
+	}
+	for i := 3; i <= 6; i++ {
+		if !strings.HasPrefix(f.lines[i], selectedBG) || ansi.StringWidth(f.lines[i]) != 40 {
+			t.Errorf("line %d not a full-width selected line: %q", i, f.lines[i])
+		}
+	}
+	// Continuation lines keep the meta colour and select their session when clicked
+	if !strings.Contains(f.lines[5], muted+"v0.35.0") {
+		t.Errorf("wrapped line colour: %q", f.lines[5])
+	}
+	if s, exact, _ := rowAt(f.rows, 6); s != "a" || exact {
+		t.Errorf("click on wrapped line = %q exact %v, want a, not exact", s, exact)
+	}
+
+	// A worker's wrap starts past its indent; the PR tag stays a link on the meta line
+	m.selected = "b"
+	f = m.render()
+	want = []string{
+		"  ● a                               ×",
+		"    Claude · idle · $18.42 · v0.35.0 d…",
+		"  └ ● b                             ×",
+		"      #7 open · Claude · waiting",
+		"      v0.35.0 dev app startup and",
+		"      sidebar layout review",
+		"  ● c                               ×",
+	}
+	if got := strip(f, 3, 10); !slices.Equal(got, want) {
+		t.Errorf("b selected:\n got %q\nwant %q", got, want)
+	}
+	if !strings.Contains(f.lines[7], red+"v0.35.0") {
+		t.Errorf("waiting row's wrapped line colour: %q", f.lines[7])
+	}
+	if !slices.Equal(f.links, []link{{6, 6, 13, "u7"}}) {
+		t.Errorf("links = %v", f.links)
+	}
+
+	// A title that fits stays on the meta line
+	m.selected = "c"
+	if got := strip(m.render(), 7, 9); !slices.Equal(got, []string{"  ● c                               ×", "    Claude · idle · Fix login"}) {
+		t.Errorf("c selected: %q", got)
+	}
+
+	// Wrapped lines that would push a session under the bottom row (no scrolling): the title stays cut
+	m.selected, m.snap.height = "a", 11
+	if got := strip(m.render(), 4, 11); !slices.Equal(got, []string{"    Claude · idle · $18.42 · v0.35.0 d…",
+		"  └ ● b                             ×", "      #7 open · Claude · waiting · v0.…",
+		"  ● c                               ×", "    Claude · idle · Fix login", "", ansi.Strip(hint)}) {
+		t.Errorf("one line short: %q", got)
+	}
+	m.snap.height = 12
+	if got := strip(m.render(), 4, 12); !slices.Equal(got, []string{"    Claude · idle · $18.42",
+		"    v0.35.0 dev app startup and sidebar", "    layout review",
+		"  └ ● b                             ×", "      #7 open · Claude · waiting · v0.…",
+		"  ● c                               ×", "    Claude · idle · Fix login", ansi.Strip(hint)}) {
+		t.Errorf("tall enough: %q", got)
+	}
+}
+
+// The wrap decision counts only what the meta line shows: an exact fit and a title beside a dropped cost stay.
+func TestViewSelectedTitleFits(t *testing.T) {
+	line := func(width int, s Session) []string {
+		m := Model{selected: s.Name, snap: snapshot{width: width, height: 10, current: "x", sessions: []Session{s}}}
+		f := m.render()
+		return []string{strings.TrimRight(ansi.Strip(f.lines[4]), " "), strings.TrimRight(ansi.Strip(f.lines[5]), " ")}
+	}
+	s := Session{Name: "a", Group: "g", Agent: "Claude", State: "idle", Cost: "$18.42", Title: "0123456789"}
+	if got, want := line(40, s), []string{"    Claude · idle · $18.42 · 0123456789", ""}; !slices.Equal(got, want) {
+		t.Errorf("exact fit = %q, want %q", got, want)
+	}
+	s.Title += "x"
+	if got, want := line(40, s), []string{"    Claude · idle · $18.42", "    0123456789x"}; !slices.Equal(got, want) {
+		t.Errorf("one column over = %q, want %q", got, want)
+	}
+	s.Cost, s.Title = "$1234.56", "abc"
+	if got, want := line(24, s), []string{"    Claude · idle · abc", ""}; !slices.Equal(got, want) {
+		t.Errorf("cost dropped = %q, want %q", got, want)
+	}
+}
+
 func TestFormatCost(t *testing.T) {
 	for usd, want := range map[float64]string{0: "$0.00", 0.004: "$0.00", 1.236: "$1.24", 189.21: "$189.21"} {
 		if got := FormatCost(usd); got != want {
@@ -431,5 +540,18 @@ func TestViewHidesNamedBranch(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("rows =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestListLines(t *testing.T) {
+	sessions := []Session{{Name: "a", Group: "api"}, {Name: "b", Group: "web"}, {Name: "c", Group: "web"}}
+	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: sessions}}
+	lines := m.render().lines
+	drawn := len(lines)
+	for drawn > 0 && lines[drawn-1] == "" {
+		drawn--
+	}
+	if got := listLines(sessions); got != drawn || got != 11 {
+		t.Errorf("listLines = %d, render drew %d, want 11", got, drawn)
 	}
 }

@@ -61,6 +61,7 @@ func (m Model) render() frame {
 	if len(m.snap.sessions) == 0 {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
+	unwrapped := listLines(m.snap.sessions)
 	prevGroup := ""
 	for _, s := range m.snap.sessions {
 		if s.Group != prevGroup {
@@ -138,7 +139,21 @@ func (m Model) render() frame {
 		}
 		avail := maxMeta - (vis - 4)
 		// The cost only whole, before the title: a cut "$18…" would read as another amount
-		if cost != "" && ansi.StringWidth(body+" · "+cost) <= avail {
+		withCost := cost != "" && ansi.StringWidth(body+" · "+cost) <= avail
+		// Selected row wraps a cut title onto lines below only if every session still fits (no scrolling)
+		var wrapped []string
+		if selected && title != "" {
+			full := body
+			if withCost {
+				full += " · " + cost
+			}
+			if ansi.StringWidth(full+" · "+title) > avail {
+				if l := strings.Split(ansi.Wrap(title, maxMeta-iw, ""), "\n"); unwrapped+len(l) < h {
+					wrapped, title = l, ""
+				}
+			}
+		}
+		if withCost {
 			body += " · " + cost
 			// " · ", then at least one character of the title before its "…"
 			if rest := avail - ansi.StringWidth(body); title != "" && rest > 4 {
@@ -150,6 +165,9 @@ func (m Model) render() frame {
 		body = truncate(body, avail)
 		meta += colour + body + reset
 		f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
+		for _, l := range wrapped {
+			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
+		}
 	}
 
 	// Exactly h lines: content reaching the bottom row gives way to it, as bash drew that row last
@@ -163,6 +181,21 @@ func (m Model) render() frame {
 	// A tag cut off or under the bottom row isn't on screen to click
 	f.links = slices.DeleteFunc(f.links, func(l link) bool { return l.line >= h-1 })
 	return f
+}
+
+// listLines is how many lines render draws for sessions when no title wraps.
+func listLines(sessions []Session) int {
+	n, prev := 2, ""
+	for _, s := range sessions {
+		if s.Group != prev {
+			if prev != "" {
+				n++
+			}
+			n, prev = n+1, s.Group
+		}
+		n += 2
+	}
+	return n
 }
 
 // bottomRow is the last line: the refresh error, else the hint while focused on a non-empty list

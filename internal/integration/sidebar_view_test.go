@@ -202,11 +202,12 @@ func TestSidebarViewParity(t *testing.T) {
 	}
 
 	d.T("select-pane", "-t", other)
-	d.T("set-option", "-g", "@sidebar_selected_session", "gamma")
+	// delta has no title: dev wraps a selected row's cut title, bash doesn't
+	d.T("set-option", "-g", "@sidebar_selected_session", "delta")
 	// Until both moved, the old equal screens would pass the comparison
-	waitFor(t, "both sidebars select gamma", func() bool {
-		return viewSelectedRow(d.T("capture-pane", "-p", "-e", "-t", bashPane)) == "gamma" &&
-			viewSelectedRow(d.T("capture-pane", "-p", "-e", "-t", devPane)) == "gamma"
+	waitFor(t, "both sidebars select delta", func() bool {
+		return viewSelectedRow(d.T("capture-pane", "-p", "-e", "-t", bashPane)) == "delta" &&
+			viewSelectedRow(d.T("capture-pane", "-p", "-e", "-t", devPane)) == "delta"
 	})
-	viewSame(d, "W=11 selection on gamma", bashPane, devPane, "SESSIONS")
+	viewSame(d, "W=11 selection on delta", bashPane, devPane, "SESSIONS")
 }
