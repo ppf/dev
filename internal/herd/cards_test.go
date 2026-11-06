@@ -539,7 +539,8 @@ func TestAsksCardLongQuestion(t *testing.T) {
 }
 
 // dev-demo-long-ask and dev-demo-short-ask as live (transcript, hook note, screen): each card says its question
-// once, from its start, though its options outnumber a reply's last lines and its prompt above quotes it.
+// once, from its start, though its options outnumber a reply's last lines and its prompt above quotes it; the
+// options its status can't fit show once, at its screen's end.
 func TestAsksCardLiveDemos(t *testing.T) {
 	long := "Before I go further on the migration I need you to pick how we handle the legacy session records that " +
 		"still carry the old two-letter region codes, since rewriting them in place touches about forty thousand rows " +
@@ -585,10 +586,21 @@ func TestAsksCardLiveDemos(t *testing.T) {
 		if !strings.Contains(screen, "❯ This is a UI demo") {
 			t.Errorf("%s: screen not the prompt above the question:\n%s", tt.name, got)
 		}
-		for _, s := range append(options, "Which way?", "wait for CI?") {
-			if strings.Contains(screen, strings.TrimPrefix(s, "- ")) {
-				t.Errorf("%s: %q on screen, want the question and its options once, in the status:\n%s", tt.name, s, got)
+		for _, s := range []string{"Which way?", "wait for CI?"} {
+			if strings.Contains(screen, s) {
+				t.Errorf("%s: %q on screen, want the question once, in the status:\n%s", tt.name, s, got)
 			}
+		}
+		if tt.name != "long" {
+			continue
+		}
+		for _, o := range options {
+			if n := strings.Count(got, o); n != 1 || !strings.Contains(screen, o) {
+				t.Errorf("long: %q shown %d times, want once, on screen:\n%s", o, n, got)
+			}
+		}
+		if rows := strings.Split(screen, "\n"); !strings.Contains(rows[slices.IndexFunc(rows, func(r string) bool { return strings.Contains(r, "Open  Message") })-1], options[2]) {
+			t.Errorf("long: screen doesn't end with the options:\n%s", got)
 		}
 	}
 }
@@ -729,7 +741,7 @@ func TestAsksOptionsNoteCut(t *testing.T) {
 }
 
 // An asks card's status says the reply's question and options from its start; its screen stops above the
-// question whatever the status's width.
+// question whatever the status's width, then shows the options when the status doesn't fit them.
 func TestAsksStatusFromReply(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Which DB? - Postgres - SQLite",
 		tail: desktop.Tail{Lines: []string{"Intro.", "Which **DB**?", "- `Postgres`", "- SQLite"}},
@@ -742,8 +754,11 @@ func TestAsksStatusFromReply(t *testing.T) {
 	if got := statusText(listed, needsYouSection); got != "- Should I push?" {
 		t.Errorf("status = %q, want the reply's question written as a list item", got)
 	}
-	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
-		t.Errorf("screen = %q, want the rows above the question though the status is cut", got)
+	if got := (Model{}).screenRows(tl, said(tl), 80); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
+		t.Errorf("screen = %q, want the rows above the question", got)
+	}
+	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command", "  - Postgres", "  - SQLite"}) {
+		t.Errorf("screen = %q, want the rows above the question, then its options: the status is cut", got)
 	}
 }
 
