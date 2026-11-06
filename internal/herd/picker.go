@@ -81,6 +81,12 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 	return p
 }
 
+// question reports a question's dialog (its tabs on screen, or the hook's question matched), not a
+// permission prompt, menu or the answers' review, whose screen shows what it asks about; false for none.
+func (p *pick) question() bool {
+	return p != nil && (len(p.d.tabs) > 0 || p.cur >= 0) && p.d.title != reviewTitle
+}
+
 // sameText compares texts ignoring how they wrap.
 func sameText(a, b string) bool {
 	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")

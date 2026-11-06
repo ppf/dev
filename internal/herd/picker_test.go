@@ -818,3 +818,59 @@ func TestPickerScrolls(t *testing.T) {
 		t.Errorf("the highlighted No is out of view:\n%s", got)
 	}
 }
+
+// A working tile whose AskUserQuestion hook recorded the question on screen is a decision before its
+// Notification makes it one; a recorded question not on screen (answered, its turn going on) isn't; no case
+// reads its state again.
+func TestRefreshAsking(t *testing.T) {
+	other := agent.Question{Tool: agent.AskUserQuestion, Questions: []agent.Ask{{Question: "Other?", Header: "X"}}}
+	tests := []struct {
+		name   string
+		q      agent.Question
+		screen string
+		asks   bool
+	}{
+		{"its question on screen", colors, golden(t, "claude-ask-q1"), true},
+		{"its second question on screen", colors, golden(t, "claude-ask-q2-checked"), true},
+		{"its answers' review on screen", colors, golden(t, "claude-ask-review"), true},
+		{"another question on screen", other, golden(t, "claude-ask-q1"), false},
+		{"no dialog", colors, "⏺ Picked Red.\n\n✻ Working…\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var q strings.Builder
+			rc := tmux.NewFake(func(args []string) (string, error) { q.WriteString(args[5]); return "", nil })
+			if err := agent.RecordQuestion(rc, "%3", tt.q); err != nil {
+				t.Fatal(err)
+			}
+			var ran []string
+			c := tmux.NewFake(func(args []string) (string, error) {
+				ran = append(ran, args[0])
+				switch args[0] {
+				case "list-panes":
+					r := tmux.FormatRow
+					return r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
+						r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "", "", "", "", "$1", "", "", "", "", q.String(), "", "", "", ""), nil
+				case "list-clients":
+					return tmux.FormatRow("/dev/ttys1", "herd", "5"), nil
+				}
+				return tt.screen, nil
+			})
+			m := Model{c: c, pane: "%1", look: &fakeLookups{}, width: 80, height: 40}
+			msg := m.refresh()().(refreshMsg)
+			if msg.err != nil {
+				t.Fatal(msg.err)
+			}
+			tl := msg.snap.tiles[0]
+			if tl.deciding != tt.asks || (tl.pick != nil) != tt.asks || (tl.section() == needsYouSection) != tt.asks {
+				t.Errorf("deciding %v, pick %v, section %d", tl.deciding, tl.pick != nil, tl.section())
+			}
+			if want := map[bool]string{true: agent.Waiting, false: agent.Working}[tt.asks]; tl.sess.State != want {
+				t.Errorf("state %q, want %q", tl.sess.State, want)
+			}
+			if slices.Contains(ran, "display-message") || slices.Contains(ran, "if-shell") {
+				t.Errorf("state read again: %q", ran)
+			}
+		})
+	}
+}

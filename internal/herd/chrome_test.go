@@ -14,7 +14,7 @@ import (
 )
 
 func TestCropInput(t *testing.T) {
-	rule := strings.Repeat("─", 60)
+	rule := strings.Repeat("─", 80)
 	status := []string{"  ~/src/app main Opus 5.5 (low) 12%", "  ⏵⏵ auto mode on (shift+tab to cycle)"}
 	conversation := []string{"⏺ Done: the tests pass.", "", "✻ Worked for 6s · done 18:53", ""}
 	screen := func(box ...string) []string {
@@ -28,6 +28,8 @@ func TestCropInput(t *testing.T) {
 	permission := []string{"Bash command", "", "  rm -rf build", "", "Do you want to proceed?", "❯ 1. Yes", "  2. Yes, and don't ask again", "  3. No (esc)"}
 	menu := []string{"❯ 1. Postgres", "     The usual", "  2. SQLite", "  3. Type something."}
 	spinner := "✻ Thinking… (esc to interrupt)"
+	notice := "Advisor Tool (experimental) is on and may use more tokens · /advisor"
+	advisor := "\x1b[2m" + strings.Repeat(" ", 80-len([]rune(notice))) + notice + "\x1b[0m"
 	tests := []struct {
 		name  string
 		lines []string
@@ -42,6 +44,14 @@ func TestCropInput(t *testing.T) {
 		{"question menu: its ❯ marks the selected option", screen(menu...), screen(menu...)},
 		{"menu option starting the box", screen("❯ Option A", "  Option B", "", "Do you want to use option A?"), screen("❯ Option A", "  Option B", "", "Do you want to use option A?")},
 		{"mid-turn: the spinner above the box stays", append(append(slices.Clone(conversation[:3]), spinner, ""), screen("❯ ")[len(conversation):]...), append(slices.Clone(conversation[:3]), spinner)},
+		{"right-aligned notices over the box go with it", append(append(slices.Clone(conversation[:3]), spinner, strings.Repeat(" ", 64)+"Some notice · /x", advisor), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), spinner)},
+		{"a notice one short of the right edge goes", append(append(slices.Clone(conversation[:3]), spinner, strings.Repeat(" ", 8)+strings.Repeat("n", 71)), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), spinner)},
+		{"a full-width line indented less than a notice stays", append(append(slices.Clone(conversation[:3]), strings.Repeat(" ", 7)+strings.Repeat("n", 73)), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), strings.Repeat(" ", 7)+strings.Repeat("n", 73))},
+		{"a reply's full-width line over the box stays", append(append(slices.Clone(conversation[:3]), "  "+strings.Repeat("word ", 15)+"ends"), screen("❯ ")[len(conversation):]...),
+			append(slices.Clone(conversation[:3]), "  "+strings.Repeat("word ", 15)+"ends")},
 		{"no box", conversation[:3], conversation[:3]},
 		{"a rule in the conversation, far from the bottom, isn't the box", append([]string{rule, "❯ quoted", rule}, append(slices.Clone(conversation[:3]), "a", "b", "c", "d", "e", "f", "g", "h")...),
 			append([]string{rule, "❯ quoted", rule}, append(slices.Clone(conversation[:3]), "a", "b", "c", "d", "e", "f", "g", "h")...)},

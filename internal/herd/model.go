@@ -224,8 +224,8 @@ func (m Model) validSelection() string {
 }
 
 // refresh lists panes and clients (two tmux calls), and while a client shows this window captures the open
-// cards' panes and the deciding ones', for their dialogs (one call each, at most maxCaptures, the selected
-// card's first).
+// cards' panes and the deciding and asking ones', for their dialogs (one call each, at most maxCaptures, the
+// selected card's first).
 func (m Model) refresh() tea.Cmd {
 	selected, inputs, host := m.selected, m.inputs, m.host
 	folds := maps.Clone(m.folds)
@@ -253,11 +253,17 @@ func (m Model) refresh() tea.Cmd {
 				continue
 			}
 			t := &snap.tiles[i]
-			if t.deciding {
-				if d, ok := parseDialog(out); ok {
-					p := newPick(d, t.question, ansi.Strip(out))
-					t.pick = &p
-				} else {
+			if t.deciding || t.asking() {
+				d, ok := parseDialog(out)
+				var p pick
+				if ok {
+					p = newPick(d, t.question, ansi.Strip(out))
+				}
+				switch {
+				// A deciding tile's dialog, or the question an asking tile's hook recorded: a decision before its Notification records it
+				case ok && (t.deciding || p.cur >= 0):
+					t.pick, t.deciding, t.sess.State = &p, true, agent.Waiting
+				case t.deciding:
 					// Its dialog may have been answered No or Esc, which fires no hook
 					st, err := control.ReadChecked(m.c, t.pane)
 					if err != nil {
@@ -289,16 +295,16 @@ func (m Model) refresh() tea.Cmd {
 const maxCaptures = 12
 
 // captures are the indexes of the tiles whose panes a refresh captures: the selected one when open, then the
-// deciding ones, then the other open ones nearest the selected one (in view, as the board scrolls to it), at
-// most maxCaptures.
+// deciding (or asking) ones, then the other open ones nearest the selected one (in view, as the board scrolls
+// to it), at most maxCaptures.
 func captures(tiles []tile, selected string, folds map[string]bool) []int {
 	var first, deciding, open []int
 	sel := index(tiles, selected)
 	for i, t := range tiles {
 		switch {
-		case t.sess.Name == selected && (t.deciding || !t.folded(folds)):
+		case t.sess.Name == selected && (t.deciding || t.asking() || !t.folded(folds)):
 			first = append(first, i)
-		case t.deciding:
+		case t.deciding || t.asking():
 			deciding = append(deciding, i)
 		case !t.folded(folds):
 			open = append(open, i)
@@ -310,6 +316,13 @@ func captures(tiles []tile, selected string, folds map[string]bool) []int {
 }
 
 func abs(n int) int { return max(n, -n) }
+
+// asking reports a working agent whose AskUserQuestion hook recorded its question: its dialog shows
+// before the Notification that makes it a decision. The record stays until its turn ends, so only the
+// question on screen says it's open.
+func (t tile) asking() bool {
+	return t.sess.State == agent.Working && t.question.Tool == agent.AskUserQuestion
+}
 
 // sortBySection puts tiles in section order, keeping their order within one.
 func sortBySection(tiles []tile) {
