@@ -1,0 +1,65 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.319\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mOpus 5.5 with high effort · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m~/PhpstormProjects/ppf/dev/.claude/worktrees/demo-long-ask\x1b[39m
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mThis is a UI demo: change no files, run no tools. Never use AskUserQuestion. End your turn with exactly this text, as \x1b[39m
+  \x1b[38;5;231mis:\x1b[39m
+
+  \x1b[38;5;231mBefore I go further on the migration I need you to pick how we handle the legacy session records that still carry the \x1b[39m
+  \x1b[38;5;231mold two-letter region codes, since rewriting them in place touches about forty thousand rows across three shards and \x1b[39m
+  \x1b[38;5;231mcannot be rolled back without a restore from last night's snapshot, which would drop today's writes. Which way?\x1b[39m
+
+  \x1b[38;5;231m- Rewrite in place tonight during the maintenance window\x1b[39m
+  \x1b[38;5;231m- Keep both formats and translate on read\x1b[39m
+  \x1b[38;5;231m- Leave them and only fix new records\x1b[39m
+
+\x1b[38;5;231m\x1b[49m⏺\x1b[39m Before I go further on the migration I need you to pick how we handle the legacy session records that still carry the
+  old two-letter region codes, since rewriting them in place touches about forty thousand rows across three shards and
+  cannot be rolled back without a restore from last night's snapshot, which would drop today's writes. Which way?
+
+  - Rewrite in place tonight during the maintenance window
+  - Keep both formats and translate on read
+  - Leave them and only fix new records
+
+\x1b[38;5;246m✻\x1b[39m \x1b[38;5;246mBrewed for 2s · done 16:50\x1b[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m❯ 
+\x1b[38;5;244m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  \x1b[38;5;110m~/PhpstormProjects/ppf/dev/.claude/worktrees/demo-long-ask\x1b[38;5;150m demo-long-ask\x1b[38;5;140m Opus 5.5 \x1b[38;5;223m(high)\x1b[38;5;140m 6%\x1b[38;5;216m 16:59\x1b[39m
+  \x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m

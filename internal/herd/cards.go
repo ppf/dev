@@ -233,7 +233,12 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 			rows = append(rows, line(in+r.text))
 		}
 	case sec == needsYouSection:
-		text(sidebar.Red+bold, statusText(t, sec))
+		status := statusText(t, sec)
+		// Its options show on screen, under it
+		if _, ask, _ := reply(t); len(optionRows(t, iw-len(in))) > 0 {
+			status = strings.Join(strings.Fields(ask), " ")
+		}
+		text(sidebar.Red+bold, status)
 	default:
 		text(sidebar.Muted, statusText(t, sec))
 	}
@@ -630,8 +635,9 @@ func warnings(t tile) []string {
 }
 
 // screenRows is the end of t's captured screen its card shows: screenRows rows, half the pane while expanded,
-// without blank rows or the leading lines shown whole; on an asks card, only the rows above its question, but
-// with only its options read, only when its status (then the note) fits room.
+// without blank rows or the leading lines shown whole; on an asks card, only the rows above its question, then
+// its options when its status doesn't fit them (optionRows), but with only its options read, only when its
+// status (then the note) fits room.
 func (m Model) screenRows(t tile, lines []string, room int) []string {
 	n := screenRows
 	if m.expands[t.sess.Name] {
@@ -639,7 +645,7 @@ func (m Model) screenRows(t tile, lines []string, room int) []string {
 	}
 	shown := t.body
 	if _, ask, asked := reply(t); ask != "" && (len(asked) > 0 || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
-		shown = aboveSaid(shown, lines, ask)
+		shown = append(slices.Clip(aboveSaid(shown, lines, ask, asked)), optionRows(t, room)...)
 	}
 	shown = tail(shown, n)
 	for len(shown) > 0 {
@@ -654,13 +660,11 @@ func (m Model) screenRows(t tile, lines []string, room int) []string {
 	return shown
 }
 
-// aboveSaid is rows above the wrapped ask, without blank rows and the lines shown whole just above; rows whole
-// when ask isn't on them. An option ask is cut with all options and the "?" paragraph above them.
-func aboveSaid(rows, lines []string, ask string) []string {
-	end := len(rows) - 1
-	for end >= 0 && saidRows(rows[end:], []string{ask}) == 0 {
-		end--
-	}
+// aboveSaid is rows above the wrapped ask, without blank rows and the lines shown whole or a copy of the
+// question asked and its options (a prompt quoting them) just above; rows whole when ask isn't on them. An
+// option ask is cut with all options and the "?" paragraph above them.
+func aboveSaid(rows, lines []string, ask string, asked []string) []string {
+	end := askRow(rows, ask)
 	if end < 0 {
 		return rows
 	}
@@ -677,19 +681,55 @@ func aboveSaid(rows, lines []string, ask string) []string {
 			rows = rows[:top]
 		}
 	}
+	said := append(append(slices.Clip(lines), ask), asked...)
 	for len(rows) > 0 {
 		if rowText(rows[len(rows)-1]) == "" {
 			rows = rows[:len(rows)-1]
 			continue
 		}
 		k := 1
-		for k <= len(rows) && saidRows(rows[len(rows)-k:], lines) != k {
+		for k <= len(rows) && saidRows(rows[len(rows)-k:], said) != k {
 			k++
 		}
 		if k > len(rows) {
 			break
 		}
 		rows = rows[:len(rows)-k]
+	}
+	return rows
+}
+
+// askRow is the first of the last rows saying ask as the screen wraps it; -1 for none.
+func askRow(rows []string, ask string) int {
+	end := len(rows) - 1
+	for end >= 0 && saidRows(rows[end:], []string{ask}) == 0 {
+		end--
+	}
+	return end
+}
+
+// optionRows is the screen rows of an asks card's options below its question, without blank rows, when its
+// status, the question with them, doesn't fit room; nil otherwise, or when they aren't on screen.
+func optionRows(t tile, room int) []string {
+	_, ask, asked := reply(t)
+	if len(asked) < 2 || ansi.StringWidth(statusText(t, needsYouSection)) <= room {
+		return nil
+	}
+	i := askRow(t.body, ask)
+	if i < 0 {
+		return nil
+	}
+	var rows []string
+	for i += saidRows(t.body[i:], []string{ask}); i < len(t.body); {
+		if rowText(t.body[i]) == "" {
+			i++
+			continue
+		}
+		k := saidRows(t.body[i:], asked[1:])
+		if k == 0 {
+			break
+		}
+		rows, i = append(rows, t.body[i:i+k]...), i+k
 	}
 	return rows
 }

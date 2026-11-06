@@ -538,6 +538,73 @@ func TestAsksCardLongQuestion(t *testing.T) {
 	}
 }
 
+// dev-demo-long-ask and dev-demo-short-ask as live (transcript, hook note, screen): each card says its question
+// once, from its start, though its options outnumber a reply's last lines and its prompt above quotes it; the
+// options its status can't fit show once, at its screen's end.
+func TestAsksCardLiveDemos(t *testing.T) {
+	long := "Before I go further on the migration I need you to pick how we handle the legacy session records that " +
+		"still carry the old two-letter region codes, since rewriting them in place touches about forty thousand rows " +
+		"across three shards and cannot be rolled back without a restore from last night's snapshot, which would drop " +
+		"today's writes. Which way?"
+	options := []string{"- Rewrite in place tonight during the maintenance window", "- Keep both formats and translate on read",
+		"- Leave them and only fix new records"}
+	row := func(r any) string {
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data) + "\n"
+	}
+	for _, tt := range []struct {
+		name, golden, reply, start string
+		lines                      int
+	}{
+		{"long", "claude-asks-options", long + "\n\n" + strings.Join(options, "\n"), "Before I go further", 4},
+		{"short", "claude-asks-quoted", "Ship it now or wait for CI?", "Ship it now or wait for CI?", 1},
+	} {
+		path := filepath.Join(t.TempDir(), "t.jsonl")
+		jsonl := row(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]any{{"type": "text", "text": tt.reply}}}})
+		if err := os.WriteFile(path, []byte(jsonl), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		read, err := desktop.ReadTail(path)
+		if err != nil || len(read.Lines) != tt.lines {
+			t.Fatalf("%s: ReadTail = %q, %v, want the question and its options", tt.name, read.Lines, err)
+		}
+		note, ok := inbox.FromHook(tt.name, []byte(row(map[string]any{"hook_event_name": "Stop", "last_assistant_message": tt.reply})))
+		if !ok || note.Kind != inbox.Asks {
+			t.Fatalf("%s: note = %+v, want an asks note", tt.name, note)
+		}
+		tl := tile{sess: sidebar.Session{Name: tt.name, Agent: "Claude", State: agent.Idle, Branch: tt.name}, note: note.Summary(), tail: read}
+		tl.body = previewLines(screenGolden(t, tt.golden), tl)
+		m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+		got := ansi.Strip(strings.Join(m.board().lines, "\n"))
+		if n := strings.Count(got, tt.start); n != 1 || !strings.Contains(got, "│    "+tt.start) {
+			t.Errorf("%s: question's start shown %d times, want once in the status:\n%s", tt.name, n, got)
+		}
+		_, screen, _ := strings.Cut(got, "┄ screen")
+		if !strings.Contains(screen, "❯ This is a UI demo") {
+			t.Errorf("%s: screen not the prompt above the question:\n%s", tt.name, got)
+		}
+		for _, s := range []string{"Which way?", "wait for CI?"} {
+			if strings.Contains(screen, s) {
+				t.Errorf("%s: %q on screen, want the question once, in the status:\n%s", tt.name, s, got)
+			}
+		}
+		if tt.name != "long" {
+			continue
+		}
+		for _, o := range options {
+			if n := strings.Count(got, o); n != 1 || !strings.Contains(screen, o) {
+				t.Errorf("long: %q shown %d times, want once, on screen:\n%s", o, n, got)
+			}
+		}
+		if rows := strings.Split(screen, "\n"); !strings.Contains(rows[slices.IndexFunc(rows, func(r string) bool { return strings.Contains(r, "Open  Message") })-1], options[2]) {
+			t.Errorf("long: screen doesn't end with the options:\n%s", got)
+		}
+	}
+}
+
 // The same reply on a card not asking it keeps its question as a last line.
 func TestSaidKeepsQuestionNotAsked(t *testing.T) {
 	tl := asksTile(t)
@@ -674,7 +741,7 @@ func TestAsksOptionsNoteCut(t *testing.T) {
 }
 
 // An asks card's status says the reply's question and options from its start; its screen stops above the
-// question whatever the status's width.
+// question whatever the status's width, then shows the options when the status doesn't fit them.
 func TestAsksStatusFromReply(t *testing.T) {
 	tl := tile{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Which DB? - Postgres - SQLite",
 		tail: desktop.Tail{Lines: []string{"Intro.", "Which **DB**?", "- `Postgres`", "- SQLite"}},
@@ -687,8 +754,11 @@ func TestAsksStatusFromReply(t *testing.T) {
 	if got := statusText(listed, needsYouSection); got != "- Should I push?" {
 		t.Errorf("status = %q, want the reply's question written as a list item", got)
 	}
-	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
-		t.Errorf("screen = %q, want the rows above the question though the status is cut", got)
+	if got := (Model{}).screenRows(tl, said(tl), 80); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
+		t.Errorf("screen = %q, want the rows above the question", got)
+	}
+	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command", "  - Postgres", "  - SQLite"}) {
+		t.Errorf("screen = %q, want the rows above the question, then its options: the status is cut", got)
 	}
 }
 
