@@ -23,7 +23,7 @@ import (
 // board4 is a worker in each section, the selected one working, at 70×40.
 func board4() Model {
 	now := time.Unix(1700000000, 0)
-	return Model{width: 70, height: 40, selected: "docs-api", clk: control.Clock{Now: func() time.Time { return now }},
+	return Model{width: 70, height: 40, selected: "docs-api", size: shared, clk: control.Clock{Now: func() time.Time { return now }},
 		snap: snapshot{tiles: []tile{
 			{sess: sidebar.Session{Name: "fix-login", Agent: "Claude", State: agent.Waiting, Branch: "feature/fix-login-redis"},
 				deciding: true, since: now.Add(-3 * time.Minute),

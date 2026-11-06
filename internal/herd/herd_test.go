@@ -34,7 +34,7 @@ const (
 )
 
 func twoTiles() Model {
-	return Model{width: 40, height: 12, selected: "b", snap: snapshot{self: "$1", tiles: []tile{
+	return Model{width: 40, height: 12, selected: "b", size: shared, snap: snapshot{self: "$1", tiles: []tile{
 		{sess: sidebar.Session{Name: "a", Agent: "Claude", State: "waiting", Cost: "$1.20"}, body: []string{"\x1b[31mred line that is far too long to fit\x1b[0m"}},
 		{sess: sidebar.Session{Name: "b", Agent: "Codex", Branch: "fix", PR: sidebar.PR{Number: 3, State: "open"}}, body: []string{"x"}},
 	}}}
@@ -233,10 +233,10 @@ func (f *fakeLookups) Tail(path string) (desktop.Tail, error) {
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
-			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "", "", "", "") +
-			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "", "", "", "", "") +
+			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -289,8 +289,8 @@ func TestRefreshDialogGone(t *testing.T) {
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, open} {
 		var ran []string
 		state := "waiting"
@@ -494,7 +494,7 @@ func TestTmuxQuote(t *testing.T) {
 	}
 }
 
-// The previews take 40% of the window, at least 60 columns, at most half.
+// fitWidth gives the previews 40% of the window, at least 60 columns, at most half.
 func TestFitWidth(t *testing.T) {
 	for window, want := range map[string]string{"100": "50", "140": "60", "200": "80"} {
 		var resized string
@@ -506,6 +506,101 @@ func TestFitWidth(t *testing.T) {
 		})
 		if err := fitWidth(c, "%2"); err != nil || resized != want {
 			t.Errorf("window %s: resized to %q (%v), want %s", window, resized, err, want)
+		}
+	}
+}
+
+// The pane collapses while it has nothing to show and takes its share of the window otherwise: sized once the
+// first refresh is in, again only when that changes or a resize widens it collapsed, never while zoomed; a
+// focused collapsed pane hands the focus to the coordinator.
+func TestFit(t *testing.T) {
+	var ran []string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		return "200\n", nil
+	})
+	workers := snapshot{tiles: twoTiles().snap.tiles}
+	const fits, shrinks = "display-message -p -t %2 #{window_width}|resize-pane -t %2 -x 80", "resize-pane -t %2 -x 1"
+	const handsFocus = shrinks + " ; select-pane -t %2 -L"
+	type step struct {
+		name string
+		msg  tea.Msg
+		want string
+	}
+	for name, steps := range map[string][]step{
+		"empty boss": {
+			{"resize before a refresh", tea.WindowSizeMsg{Width: 80, Height: 20}, ""},
+			{"first refresh", refreshMsg{}, shrinks},
+			{"no change", refreshMsg{}, ""},
+			{"refresh error shows", refreshMsg{err: errors.New("gone")}, fits},
+			{"error gone, focused", refreshMsg{snap: snapshot{focused: true}}, handsFocus},
+			{"resize widens it", tea.WindowSizeMsg{Width: 47, Height: 20}, shrinks},
+			{"own collapse's resize", tea.WindowSizeMsg{Width: 1, Height: 20}, ""},
+			{"focus moved back in", refreshMsg{snap: snapshot{focused: true}}, handsFocus},
+			{"first worker, zoomed", refreshMsg{snap: snapshot{tiles: workers.tiles, zoomed: true}}, ""},
+			{"unzoomed", refreshMsg{snap: workers}, fits},
+			{"resize with workers", tea.WindowSizeMsg{Width: 47, Height: 20}, ""},
+			{"same workers", refreshMsg{snap: workers}, ""},
+			{"last worker gone", refreshMsg{}, shrinks},
+		},
+		"restored with workers": {{"first refresh", refreshMsg{snap: workers}, fits}},
+	} {
+		m := Model{c: c, pane: "%2"}
+		for _, st := range steps {
+			ran = nil
+			next, _ := m.Update(st.msg)
+			if m = next.(Model); m.msg.alert {
+				t.Fatalf("%s, %s: %s", name, st.name, m.msg.text)
+			}
+			if got := strings.Join(ran, "|"); got != st.want {
+				t.Errorf("%s, %s: ran %q, want %q", name, st.name, got, st.want)
+			}
+		}
+	}
+}
+
+// The pane stays at its share while it has an open reply box or a kill to confirm, though its last worker went.
+func TestFitKeepsPrompts(t *testing.T) {
+	for name, m := range map[string]Model{"reply box": {box: replyBox{session: "a"}}, "confirm": {confirm: "a"}} {
+		var ran []string
+		m.c, m.pane, m.size = tmux.NewFake(func(args []string) (string, error) {
+			ran = append(ran, args[0])
+			return "200\n", nil
+		}), "%2", shared
+		// Typing in the box keeps the pane focused
+		m.Update(refreshMsg{snap: snapshot{focused: true}})
+		if len(ran) != 0 {
+			t.Errorf("%s: ran %q, want nothing", name, ran)
+		}
+	}
+}
+
+// A failed fit shows why, at the pane's share so the alert reads, and is tried again on the next message.
+func TestFitFails(t *testing.T) {
+	fail := true
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if fail && args[0] == "resize-pane" {
+			return "", errors.New("no pane")
+		}
+		return "200\n", nil
+	})
+	next, _ := Model{c: c, pane: "%2", size: unsized}.Update(refreshMsg{})
+	m := next.(Model)
+	if m.size != unsized || !strings.HasSuffix(m.msg.text, ": no pane") || !m.msg.alert {
+		t.Fatalf("after a failed collapse: size %v, msg %+v", m.size, m.msg)
+	}
+	fail = false
+	if next, _ = m.Update(tickMsg{}); next.(Model).size != shared {
+		t.Errorf("next message: size %v, want its share for the alert", next.(Model).size)
+	}
+}
+
+// A collapsed pane, one column wide, renders without panicking, with or without workers and an alert.
+func TestRenderOneColumn(t *testing.T) {
+	for _, m := range []Model{{}, twoTiles()} {
+		m.width, m.height, m.msg = 1, 3, alert("❌ x")
+		if got := m.render(); len(got) != 3 {
+			t.Errorf("%d tiles: %d rows, want 3", len(m.snap.tiles), len(got))
 		}
 	}
 }
@@ -558,10 +653,10 @@ func TestReplyBoxLooks(t *testing.T) {
 // The keys offer o PR only while the selected worker has a PR, or a lookup error to say.
 func TestHintPR(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "")
 	for i, name := range []string{"has", "none", "failed"} {
 		rows += r(name, fmt.Sprint("$", i+3), "1", "1", "1", fmt.Sprint("%", i+3), "/"+name, "", "claude", "idle", "claude",
-			"", "", "", "", "$1", "", "", "", "", "", "", "", "", "")
+			"", "", "", "", "$1", "", "", "", "", "", "", "", "", "", "")
 	}
 	c := tmux.NewFake(func(args []string) (string, error) {
 		if args[0] == "list-panes" {
@@ -573,7 +668,7 @@ func TestHintPR(t *testing.T) {
 		return "", nil
 	})
 	look := &fakeLookups{byPath: map[string]sidebar.PR{"/none": {}, "/failed": {Err: "gh: not logged in"}}}
-	m := Model{c: c, pane: "%2", look: look, width: 80, height: 30}
+	m := Model{c: c, pane: "%2", look: look, width: 80, height: 30, size: shared}
 	next, _ := m.Update(m.refresh()())
 	m = next.(Model)
 	want := map[string]bool{"has": true, "none": false, "failed": true}
