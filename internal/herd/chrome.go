@@ -44,15 +44,30 @@ func squeezeBlank(lines []string) []string {
 }
 
 // cropInput drops Claude Code's own input box (screen.ClaudeInput) from the bottom of its captured screen,
-// with the status lines under it. It looks like an input in a tile but takes nothing typed there. A screen
-// without that box is returned unchanged.
+// with the status lines under it and the right-aligned notices just above it ("Advisor Tool (experimental)
+// is on…"). It looks like an input in a tile but takes nothing typed there. A screen without that box is
+// returned unchanged.
 func cropInput(lines []string) []string {
 	plain := screen.Plain(lines)
 	top, _, ok := screen.ClaudeInput(plain)
 	if !ok {
 		return lines
 	}
+	w := ansi.StringWidth(plain[top])
+	for top > 0 && notice(strings.TrimRight(ansi.Strip(lines[top-1]), " "), w) {
+		top--
+	}
 	return cutAt(lines, plain, top)
+}
+
+// minNoticeIndent is how far right a notice line starts at the least: a reply's prose starts at the left,
+// and Claude leaves a blank row between a reply and its input box.
+const minNoticeIndent = 8
+
+// notice reports a line, without its styles, drawn right-aligned to width w, as Claude's notices over its
+// input box are.
+func notice(l string, w int) bool {
+	return indent(l) >= minNoticeIndent && ansi.StringWidth(l) >= w-1
 }
 
 // cropCodexInput drops Codex's input from the bottom of its captured screen: a › prompt row starting the
