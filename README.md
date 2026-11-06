@@ -230,6 +230,10 @@ go test -tags integration -count=1 ./internal/integration/ # isolated tmux serve
 
 Every sidebar shows the same width, kept in the global tmux option `@sidebar_width` (default 40). Drag any sidebar's border (or `resize-pane` it) and every other sidebar follows; new sidebars open at that width. When tmux rescales panes because a window resizes (another client size, a terminal resize), each sidebar takes the stored width back instead of drifting. Compact mode's zoom leaves it alone.
 
+## Sidebar branch
+
+The sidebar shows an agent session's branch right of its name, cut to the columns the name leaves, unless the session is named after it (`<project>-<branch>`, `/` as `-`, as a worktree's is): `dev` on `main` shows `main`, `dev-fix-login` on `fix-login` shows none.
+
 ## Sidebar PR links
 
 When the [GitHub CLI](https://cli.github.com) (`gh`) is installed and signed in, the sidebar looks up each agent session's PR (`gh pr view` in the agent pane's directory, so fork PRs count; in the background, only while the sidebar's session is on screen, cached for a minute per directory and branch in the agent pane's `@dev_pr` option, which every sidebar and the boss previews share; the `dev state` `PostToolUse` hook bumps the pane's `@dev_pr_gen` after a `gh pr create`, `merge`, `close`, `reopen` or `ready`, so the tag shows as soon as gh answers) and leads the session's second line with it, e.g. `#12 open`. State is one of `open`, `draft`, `merged`, `closed`. No `gh`, no remote, or no PR shows nothing.
