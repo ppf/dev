@@ -267,6 +267,15 @@ func (m Model) refresh() tea.Cmd {
 				}
 			}
 			t.body = previewLines(out, *t)
+			if p := t.pick; p != nil {
+				// Its card shows the dialog itself, from its tabs or title on: what it shows above them (a command, a
+				// file's contents, a folder, the answers to review) stays on screen
+				cut := p.d.titleAt
+				if len(p.d.tabs) > 0 {
+					cut = p.d.top
+				}
+				t.body = trimBlank(t.body[:min(cut, len(t.body))])
+			}
 		}
 		// A dialog found gone moves its card out of Needs you
 		sortBySection(snap.tiles)
@@ -393,7 +402,11 @@ func lastLines(capture string, n int) []string {
 
 // screenLines splits a capture into lines without OSC sequences or trailing blank lines.
 func screenLines(capture string) []string {
-	lines := strings.Split(osc.ReplaceAllString(capture, ""), "\n")
+	return trimBlank(strings.Split(osc.ReplaceAllString(capture, ""), "\n"))
+}
+
+// trimBlank drops trailing blank lines.
+func trimBlank(lines []string) []string {
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
