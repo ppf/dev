@@ -16,7 +16,7 @@ import (
 // tailBytes is how much of a transcript's end is read: rows run to hundreds of KB (attachments).
 const tailBytes = 1 << 20
 
-// lastLineCount and lineRunes trim the newest assistant text for a tile.
+// lastLineCount is how many of the newest reply's lines are kept; lineRunes is what cut cuts a line to.
 const (
 	lastLineCount = 3
 	lineRunes     = 200
@@ -269,14 +269,11 @@ func without(pending []block, id string) []block {
 	return pending
 }
 
-// lastLines is text's last non-blank lines, each cut to lineRunes.
+// lastLines is text's last non-blank lines, whole: a long question still ends in its "?".
 func lastLines(text string) []string {
 	var lines []string
 	for l := range strings.SplitSeq(text, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
-			if r := []rune(l); len(r) > lineRunes {
-				l = string(r[:lineRunes-1]) + "…"
-			}
 			lines = append(lines, l)
 		}
 	}
