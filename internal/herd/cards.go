@@ -484,8 +484,8 @@ func statusText(t tile, sec section) string {
 		}
 		_, ask, _ := strings.Cut(t.note, ": ")
 		// The note keeps only a long question's end: the reply read says it from its start
-		if _, q, options := reply(t); q != "" && !inbox.IsOption(q) {
-			ask = strings.Join(append([]string{q}, options...), " ")
+		if _, _, asked := reply(t); len(asked) > 0 {
+			ask = strings.Join(asked, " ")
 		}
 		return clean(cmp.Or(ask, "asks"))
 	case workingSection:
@@ -572,9 +572,9 @@ func said(t tile) []string {
 }
 
 // reply is the last lines of t's newest reply without backticks, bold or a turn-end marker line; on an asks
-// card it stops at the question: ask is the question and options the lines after it, or ask is the first
-// option (no options) when the question is above the lines read.
-func reply(t tile) (lines []string, ask string, options []string) {
+// card it stops at the question: ask is the question, asked it and its options; or ask is the first option
+// (asked nil) when the question is above the lines read.
+func reply(t tile) (lines []string, ask string, asked []string) {
 	strip := strings.NewReplacer("**", "", "`", "")
 	for _, l := range t.tail.Lines {
 		if _, _, marker := desktop.Marker([]string{l}); !marker {
@@ -583,18 +583,22 @@ func reply(t tile) (lines []string, ask string, options []string) {
 	}
 	if t.asks() {
 		if i := inbox.QuestionAt(lines); i >= 0 {
-			// An italic question shows without its * or _
-			lines, ask, options = lines[:i], strings.Trim(strip.Replace(lines[i]), "*_ "), lines[i+1:]
+			lines, asked = lines[:i], lines[i:]
 		} else if len(lines) > 0 && !slices.ContainsFunc(lines, func(l string) bool { return !inbox.IsOption(l) }) {
 			lines, ask = nil, strip.Replace(lines[0])
 		}
 	}
-	for _, ls := range [][]string{lines, options} {
+	for _, ls := range [][]string{lines, asked} {
 		for i, l := range ls {
 			ls[i] = strip.Replace(l)
 		}
 	}
-	return lines, ask, options
+	if len(asked) > 0 {
+		// An italic question shows without its * or _
+		asked[0] = strings.Trim(asked[0], "*_ ")
+		ask = asked[0]
+	}
+	return lines, ask, asked
 }
 
 // tableRow reports a reply line that is a table's row or rule, markdown or box-drawn, or a "---" break: cut
@@ -634,7 +638,7 @@ func (m Model) screenRows(t tile, lines []string, room int) []string {
 		n = max(n, m.height/2)
 	}
 	shown := t.body
-	if _, ask, _ := reply(t); ask != "" && (!inbox.IsOption(ask) || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
+	if _, ask, asked := reply(t); ask != "" && (len(asked) > 0 || ansi.StringWidth(statusText(t, needsYouSection)) <= room) {
 		shown = aboveSaid(shown, lines, ask)
 	}
 	shown = tail(shown, n)

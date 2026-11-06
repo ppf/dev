@@ -682,6 +682,11 @@ func TestAsksStatusFromReply(t *testing.T) {
 	if got := statusText(tl, needsYouSection); got != "Which DB? - Postgres - SQLite" {
 		t.Errorf("status = %q, want the reply's question and options", got)
 	}
+	listed := tl
+	listed.tail.Lines = []string{"Intro.", "- Should I push?"}
+	if got := statusText(listed, needsYouSection); got != "- Should I push?" {
+		t.Errorf("status = %q, want the reply's question written as a list item", got)
+	}
 	if got := (Model{}).screenRows(tl, said(tl), 5); !slices.Equal(got, []string{"⏺ Ran 1 shell command"}) {
 		t.Errorf("screen = %q, want the rows above the question though the status is cut", got)
 	}
