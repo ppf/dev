@@ -194,8 +194,9 @@ func moves(from, to int) ([]stroke, error) {
 
 // answeredMsg is an answer's outcome for session; took reports the dialog changed as the keys meant.
 type answeredMsg struct {
-	session, msg string
-	took         bool
+	session string
+	msg     message
+	took    bool
 }
 
 // screenDialog captures pane and parses its dialog.
@@ -214,14 +215,14 @@ func (m Model) send(target, pane string, shown dialog, a answer) tea.Cmd {
 	c, clk := m.c, m.clk
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
-			return answeredMsg{session: target, msg: "❌ " + target + ": " + err.Error()}
+			return answeredMsg{session: target, msg: alert("❌ " + target + ": " + err.Error())}
 		}
 		now, open, err := screenDialog(c, pane)
 		if err != nil {
 			return fail(err)
 		}
 		if !open || now.key() != shown.key() {
-			return answeredMsg{session: target, msg: "⚠ " + target + "'s dialog changed: nothing sent, showing it again"}
+			return answeredMsg{session: target, msg: alert("⚠ " + target + "'s dialog changed: nothing sent, showing it again")}
 		}
 		keys, err := a.keys(now)
 		if err != nil {
@@ -247,7 +248,7 @@ func (m Model) send(target, pane string, shown dialog, a answer) tea.Cmd {
 				return fail(fmt.Errorf("keys sent, check the worker: %w", err))
 			}
 			if a.took(now, after, open) {
-				return answeredMsg{session: target, msg: "Answered " + target, took: true}
+				return answeredMsg{session: target, msg: info("Answered " + target), took: true}
 			}
 			if clk.Now().Sub(start) >= answerTimeout {
 				return fail(errors.New("keys sent, but the dialog didn't change: check the worker"))

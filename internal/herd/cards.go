@@ -204,10 +204,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	}
 	hits = append(hits, hit{y: 1, x0: 2, x1: 5, kind: hitFold})
 	iw := max(1, w-3)
-	line := func(s string) string {
-		s = ansi.Truncate(s, iw, "…")
-		return gutter + frame + "│" + reset + s + strings.Repeat(" ", max(0, iw-ansi.StringWidth(s))) + frame + "│" + reset
-	}
+	line := func(s string) string { return boxLine(gutter, frame, s, iw) }
 	rows = append(rows, gutter+frame+"╭"+strings.Repeat("─", iw)+"╮"+reset)
 	rows = append(rows, line(band(m.headRow(t, sec, false, iw))))
 	// The rows under the name start under it
@@ -267,6 +264,12 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	rows = append(rows, line(in+buttons))
 	rows = append(rows, gutter+frame+"╰"+strings.Repeat("─", iw)+"╯"+reset)
 	return rows, hits
+}
+
+// boxLine is s inside a box's sides in frame, cut or padded to iw columns, after gutter.
+func boxLine(gutter, frame, s string, iw int) string {
+	s = ansi.Truncate(s, iw, "…")
+	return gutter + frame + "│" + reset + s + strings.Repeat(" ", max(0, iw-ansi.StringWidth(s))) + frame + "│" + reset
 }
 
 // dialogRow is a row of a card's dialog and what clicks on its cells do (columns from the row's start).
@@ -384,7 +387,11 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 	x := 0
 	for i, bt := range bs {
 		colour := sidebar.Muted
-		if i == 0 && (sec == needsYouSection || sec == waitingSection) && t.pick == nil {
+		switch {
+		case bt.kind == hitMessage && m.box.session == t.sess.Name && m.activePick() == nil:
+			// The reply box under the board writes to this card
+			colour = sidebar.StateColour(t.sess.Agent, t.sess.State) + bold
+		case i == 0 && (sec == needsYouSection || sec == waitingSection) && t.pick == nil:
 			colour = bold
 		}
 		bw := ansi.StringWidth(bt.label)

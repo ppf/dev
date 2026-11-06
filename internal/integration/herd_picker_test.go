@@ -104,7 +104,7 @@ func TestHerdPicker(t *testing.T) {
 	// Past the answer's timeout, nothing reports a failure
 	time.Sleep(3 * time.Second)
 	screen := d.T("capture-pane", "-p", "-t", previews)
-	if strings.Contains(screen, "❌") || strings.Contains(screen, "⚠") || !strings.Contains(screen, "⏎ send · esc cancel") {
+	if strings.Contains(screen, "❌") || strings.Contains(screen, "⚠") || !strings.Contains(screen, "type a message") {
 		t.Errorf("❌ answer reported a failure:\n%s", screen)
 	}
 }
