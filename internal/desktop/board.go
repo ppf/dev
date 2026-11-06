@@ -101,7 +101,7 @@ type Worker struct {
 	Verdict     string `json:"verdict"`
 	Detail      string `json:"detail"`
 	NeedsAction string `json:"needsAction"`
-	// LastLines are the last lines of the newest assistant text.
+	// LastLines are the last lines of the newest assistant text, each cut to lineRunes.
 	LastLines []string `json:"lastLines"`
 	// Tool is the tool call in flight while busy; ToolDescription what that call says it does (Bash's, Agent's
 	// description), "" for none or another tool.
@@ -437,6 +437,9 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		h.Question = cmp.Or(h.Question, l.WaitingFor)
 	}
 	t, err := readTranscript(p.Projects, cli)
+	for i, l := range t.lines {
+		t.lines[i] = cut(l)
+	}
 	w.LastLines = t.lines
 	if t.plan != nil {
 		w.Plan = t.plan

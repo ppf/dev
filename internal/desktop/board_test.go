@@ -78,6 +78,9 @@ func toolResult(id string) map[string]any {
 	}}}
 }
 
+// fourLong is the busy worker's last reply line, too long for the board.
+var fourLong = "four " + strings.Repeat("é", lineRunes)
+
 // fixture lays out a home with a boss and its workers, returning its paths.
 func fixture(t *testing.T) Paths {
 	t.Helper()
@@ -138,7 +141,7 @@ func fixture(t *testing.T) Paths {
 	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), lines(t,
 		assistant("claude-opus-5-5", text("Looking."), toolUse("t1", "Read")),
 		toolResult("t1"),
-		assistant("claude-opus-5-5", text("one\n\ntwo\nthree\nfour"), described("t2", "Bash", "Run the\n  tests")),
+		assistant("claude-opus-5-5", text("one\n\ntwo\nthree\n"+fourLong), described("t2", "Bash", "Run the\n  tests")),
 	))
 	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), lines(t,
 		assistant("claude-haiku-4-5", text("Done."), described("t1", "Bash", "List files")),
@@ -183,8 +186,8 @@ func TestBoard(t *testing.T) {
 	if want := []PR{{Number: 78, URL: "https://github.com/o/r/pull/78", State: "OPEN"}}; !slices.Equal(busy.PRs, want) {
 		t.Errorf("busy PRs = %+v, want %+v", busy.PRs, want)
 	}
-	if want := []string{"two", "three", "four"}; !slices.Equal(busy.LastLines, want) {
-		t.Errorf("busy last lines = %q, want %q", busy.LastLines, want)
+	if want := []string{"two", "three", cut(fourLong)}; !slices.Equal(busy.LastLines, want) {
+		t.Errorf("busy last lines = %q, want %q, the long one cut", busy.LastLines, want)
 	}
 	if busy.Tool != "Bash" || busy.ToolDescription != "Run the tests" {
 		t.Errorf("busy tool = %q, %q, want Bash, its description on one line", busy.Tool, busy.ToolDescription)
@@ -524,10 +527,13 @@ func TestParseTranscript(t *testing.T) {
 	}
 }
 
-func TestLastLinesCut(t *testing.T) {
-	got := lastLines(strings.Repeat("é", 300))
-	if r := []rune(got[0]); len(r) != lineRunes || r[len(r)-1] != '…' {
+func TestCutAndLastLines(t *testing.T) {
+	got := cut(strings.Repeat("é", 300))
+	if r := []rune(got); len(r) != lineRunes || r[len(r)-1] != '…' {
 		t.Errorf("cut line has %d runes, want %d ending in …", len(r), lineRunes)
+	}
+	if long := strings.Repeat("é", 300) + "?"; !slices.Equal(lastLines(long), []string{long}) {
+		t.Error("lastLines cut a line, want it whole for a tmux card to find its question")
 	}
 }
 

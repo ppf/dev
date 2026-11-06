@@ -1,7 +1,10 @@
 package herd
 
 import (
+	"encoding/json"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 )
 
@@ -467,6 +471,57 @@ func TestAsksCard(t *testing.T) {
 		if !strings.Contains(screen, "│ card.go   │ 73") || !strings.Contains(screen, "└───────────┴") || strings.Contains(screen, "Worked for") {
 			t.Errorf("%d columns: screen not the rows above the question:\n%s", w, got)
 		}
+	}
+}
+
+// An asks card says a question longer than a board line once: its last lines stop above it.
+func TestAsksCardLongQuestion(t *testing.T) {
+	ask := "Should I also move the CI cache settings into the shared workflow file, so `herd`, `sidebar` and `inbox` " +
+		"all reuse one Go module cache keyed on go.sum, or keep each job's own cache as it is now, given the shared " +
+		"one would make a cold run slower for the first job but save about a minute on every later job in the same run?"
+	reply := "Pushed the cache change to the branch.\n\n" + ask
+	row := func(r any) string {
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data) + "\n"
+	}
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	jsonl := row(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]any{{"type": "text", "text": reply}}}})
+	if err := os.WriteFile(path, []byte(jsonl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read, err := desktop.ReadTail(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, ok := inbox.FromHook("cache", []byte(row(map[string]any{"hook_event_name": "Stop", "last_assistant_message": reply})))
+	if !ok || note.Kind != inbox.Asks {
+		t.Fatalf("note = %+v, want an asks note", note)
+	}
+	tl := tile{sess: sidebar.Session{Name: "cache", Agent: "Claude", State: agent.Idle, Branch: "ci-cache"},
+		note: note.Summary(), tail: read}
+	// The screen wraps the reply at 120 columns
+	tl.body = []string{"⏺ Pushed the cache change to the branch.", ""}
+	prefix, rowText := "⏺ ", ""
+	for _, w := range strings.Fields(strings.ReplaceAll(ask, "`", "")) {
+		if len(rowText)+1+len(w) > 118 {
+			tl.body = append(tl.body, prefix+rowText)
+			prefix, rowText = "  ", ""
+		}
+		rowText = strings.TrimPrefix(rowText+" "+w, " ")
+	}
+	tl.body = append(tl.body, prefix+rowText, "", "✻ Worked for 6s · done 13:36")
+	if got := said(tl); slices.ContainsFunc(got, func(l string) bool { return strings.Contains(l, "CI cache") }) {
+		t.Errorf("said = %q, want the question left to the status", got)
+	}
+	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
+	// Its status, cut to its end, doesn't fit, so the screen keeps the whole question
+	above, screen, _ := strings.Cut(got, "┄ screen")
+	if strings.Contains(above, "Should I also move") || !strings.Contains(screen, "Should I also move") {
+		t.Errorf("question's start not on the screen alone:\n%s", got)
 	}
 }
 
