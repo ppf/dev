@@ -497,3 +497,16 @@ func TestReplyBoxLooks(t *testing.T) {
 		t.Errorf("alert: %q", got[12:])
 	}
 }
+
+// With the reply box closed, a message shows faint and an alert red.
+func TestBottomMessage(t *testing.T) {
+	m := twoTiles()
+	m.msg = info("Sent to b")
+	if got := m.bottom(); len(got) != 1 || got[0] != sidebar.HintRow("Sent to b", m.width) {
+		t.Errorf("message: %q", got)
+	}
+	m.msg = alert("gh: not logged in")
+	if got := m.bottom(); len(got) != 1 || got[0] != sidebar.AlertRow("gh: not logged in", m.width) {
+		t.Errorf("alert: %q", got)
+	}
+}

@@ -67,8 +67,10 @@ func (m Model) bottom() []string {
 	switch {
 	case m.confirm != "":
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
-	case m.msg.text != "":
+	case m.msg.alert:
 		return []string{sidebar.AlertRow(m.msg.text, w)}
+	case m.msg.text != "":
+		return []string{sidebar.HintRow(m.msg.text, w)}
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
@@ -105,7 +107,7 @@ func (m Model) boxRows(t tile) []string {
 	}
 	title := ""
 	if iw > 4 {
-		title = " " + ansi.Truncate(bold+verb+reset+sidebar.Header(t.sess, iw, false), iw-4, "…") + " "
+		title = " " + ansi.Truncate(bold+verb+reset+sidebar.Header(t.sess, iw, false), iw-4, "…") + reset + " "
 	}
 	rows := []string{" " + accent + "╭─" + reset + title + accent + strings.Repeat("─", max(0, iw-1-ansi.StringWidth(title))) + "╮" + reset}
 	for _, l := range body {
