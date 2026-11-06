@@ -160,19 +160,24 @@ func TestCICacheRereads(t *testing.T) {
 	}
 }
 
-// An open PR's row shows its checks' icon and names, a folded card the icon after the PR; checks that
-// couldn't be read again keep the icon, saying why in place of the names; a folded one marks it ?. Only a
-// shown boss reads an open or draft PR's checks, one with a URL.
+// An open PR's row shows its checks' icon and names, a folded card the icon after the PR (a draft's at the
+// muted level); checks that couldn't be read again keep the icon, saying why in place of the names; a folded
+// one marks it ?. Only a shown boss reads an open or draft PR's checks, one with a URL.
 func TestCardCI(t *testing.T) {
 	pr := sidebar.PR{Number: 95, State: "open", URL: "u"}
-	m := Model{width: 70, height: 30, snap: snapshot{tiles: []tile{
+	draft := sidebar.PR{Number: 103, State: "draft", URL: "u"}
+	m := Model{width: 70, height: 60, snap: snapshot{tiles: []tile{
 		{sess: sidebar.Session{Name: "a", State: agent.Working, PR: pr}, ci: ci{state: ciFailed, names: []string{"lint", "test"}}},
 		{sess: sidebar.Session{Name: "b", State: agent.Idle, PR: pr}, ci: ci{state: ciPassed, names: []string{"test"}}},
 		{sess: sidebar.Session{Name: "c", State: agent.Working, PR: pr}, ci: ci{state: ciRunning, names: []string{"e2e"}, err: "gh: offline"}},
+		{sess: sidebar.Session{Name: "d", State: agent.Working, PR: draft}, ci: ci{state: ciRunning, names: []string{"e2e"}}},
+		{sess: sidebar.Session{Name: "e", State: agent.Idle, PR: draft}, ci: ci{state: ciRunning, names: []string{"e2e"}}},
 	}}}
 	got := strings.Join(m.board().lines, "\n")
 	for _, w := range []string{"○ PR #95 open" + reset + "  " + sidebar.Red + "✗" + reset + " " + sidebar.Muted + "lint, test",
-		"○ #95" + reset + " " + sidebar.Green + "✓", "◷" + reset + " " + sidebar.Muted + "CI unknown: gh: offline", "○ #95" + reset + " " + sidebar.Green + "✓"} {
+		"○ #95" + reset + " " + sidebar.Green + "✓", sidebar.Gold + "●" + reset + " " + sidebar.Muted + "CI unknown: gh: offline", "○ #95" + reset + " " + sidebar.Green + "✓",
+		sidebar.Muted + "◌ PR #103 draft" + reset + "  " + sidebar.Gold + "●" + reset + " " + sidebar.Muted + "e2e",
+		sidebar.Muted + "◌ #103" + reset + " " + sidebar.Gold + "●" + reset} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in:\n%s", w, ansi.Strip(got))
 		}
