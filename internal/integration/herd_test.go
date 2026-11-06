@@ -88,9 +88,9 @@ func TestHerd(t *testing.T) {
 	}
 	check(t, "--mine --boss outside tmux", status+errOut+" "+strings.Join(sessions, " "), "0 app web")
 
-	waitFor(t, "app and web tiles", func() bool {
+	waitFor(t, "app and web cards", func() bool {
 		screen := d.T("capture-pane", "-p", "-t", previews)
-		return strings.Contains(screen, "● app Claude · idle") && strings.Contains(screen, "got: hello") && strings.Contains(screen, "● web Claude")
+		return strings.Contains(screen, "▸ ● app  finished") && strings.Contains(screen, "● web")
 	})
 	waitFor(t, "web nested under the boss in its sidebar", func() bool {
 		return strings.Contains(d.T("capture-pane", "-p", "-t", sidebarPane), "└ ● web")
@@ -174,9 +174,9 @@ func TestHerdKillForgets(t *testing.T) {
 		_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", worker, "--timeout", "30s")
 		check(t, "start "+worker, status+errOut, "0")
 	}
-	waitFor(t, "app and web tiles", func() bool {
+	waitFor(t, "app and web cards", func() bool {
 		screen := d.T("capture-pane", "-p", "-t", previews)
-		return strings.Contains(screen, "● app Claude") && strings.Contains(screen, "● web Claude")
+		return strings.Contains(screen, "● app") && strings.Contains(screen, "● web")
 	})
 	d.T("run-shell", devBin+" resurrect snapshot")
 	check(t, "saved", d.saved(), "app boot boss web")

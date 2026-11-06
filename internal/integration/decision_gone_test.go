@@ -107,7 +107,7 @@ func TestDecisionGone(t *testing.T) {
 	d.T("switch-client", "-t", "=herd:")
 	ask(true)
 	waitFor(t, "previews settle w1", func() bool {
-		return opt("@agent_state") == "idle" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "w1 Claude · idle")
+		return opt("@agent_state") == "idle" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "▸ ● w1")
 	})
 	check(t, "question cleared", opt("@agent_question"), "")
 
