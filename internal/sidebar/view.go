@@ -96,7 +96,7 @@ func (m Model) render() frame {
 			line = "  " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
 		}
 		vis := 4 + iw + ansi.StringWidth(display)
-		if s.Branch != "" {
+		if s.Branch != "" && !s.Named {
 			if bmax := right - vis - 2; bmax > 3 {
 				bt := truncate(s.Branch, bmax)
 				pad := max(1, bmax-ansi.StringWidth(bt))

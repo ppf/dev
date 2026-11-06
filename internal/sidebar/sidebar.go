@@ -48,6 +48,7 @@ type Session struct {
 	Name   string
 	Group  string // see Group
 	Branch string // the agent pane's branch; "" without an agent pane
+	Named  bool   // Name is SessionName(its project, Branch), so the row leaves the branch out
 	Agent  string // "Claude", "Codex", "Grok", or "" for no agent
 	State  string // trusted hook state (working, waiting, idle) or ""
 	Title  string // the agent pane's cleaned title, "" when generic

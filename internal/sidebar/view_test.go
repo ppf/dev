@@ -412,3 +412,24 @@ func TestViewIndentStaysLeftOfButtons(t *testing.T) {
 		}
 	}
 }
+
+func TestViewHidesNamedBranch(t *testing.T) {
+	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: []Session{
+		{Name: "dev", Group: "dev", Branch: "main", Agent: "Claude"},
+		{Name: "dev-demo-ask", Group: "dev", Branch: "demo-ask", Named: true, Agent: "Claude", Depth: 1},
+		{Name: "dev-old", Group: "dev", Branch: "new", Agent: "Claude"},
+	}}}
+	f := m.render()
+	var got []string
+	for _, r := range f.rows {
+		got = append(got, strings.TrimRight(ansi.Strip(f.lines[r.line]), " "))
+	}
+	want := []string{
+		"  ● dev                       main  ×",
+		"  └ ● dev-demo-ask                  ×",
+		"  ● dev-old                    new  ×",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("rows =\n%q\nwant\n%q", got, want)
+	}
+}
