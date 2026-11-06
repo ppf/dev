@@ -63,41 +63,100 @@ func TestCICache(t *testing.T) {
 		}
 		return []byte(out), nil
 	}
-	if got := c.get(url); got.state != "" {
+	if got := c.get(url, "1"); got.state != "" {
 		t.Errorf("first get = %+v, want nothing yet", got)
 	}
 	// While it runs, another get starts none
-	c.get(url)
+	c.get(url, "1")
 	close(release)
 	c.wg.Wait()
-	if got := c.get(url); got.state != ciPassed || len(calls) != 1 || calls[0] != "pr view "+url+" --json statusCheckRollup" {
+	if got := c.get(url, "1"); got.state != ciPassed || len(calls) != 1 || calls[0] != "pr view "+url+" --json statusCheckRollup" {
 		t.Errorf("after the read: %+v, calls %q", got, calls)
 	}
 	now = now.Add(ciTTL - time.Second)
-	c.get(url)
+	c.get(url, "1")
 	c.wg.Wait()
 	if len(calls) != 1 {
 		t.Errorf("read again within ciTTL: %d calls", len(calls))
 	}
 	now = now.Add(time.Second)
 	fail = true
-	c.get(url)
+	c.get(url, "1")
 	c.wg.Wait()
-	if got := c.get(url); got.state != ciPassed || got.err != "HTTP 401: Bad credentials" || len(calls) != 2 {
+	if got := c.get(url, "1"); got.state != ciPassed || got.err != "HTTP 401: Bad credentials" || len(calls) != 2 {
 		t.Errorf("after a failed read: %+v, calls %d", got, len(calls))
 	}
 	now = now.Add(ciTTL)
 	fail = false
-	c.get(url)
+	c.get(url, "1")
 	c.wg.Wait()
-	if got := c.get(url); got.state != ciPassed || got.err != "" {
+	if got := c.get(url, "1"); got.state != ciPassed || got.err != "" {
 		t.Errorf("after a good read: %+v", got)
 	}
 	now = now.Add(ciForget)
-	c.get("other")
+	c.get("other", "1")
 	c.wg.Wait()
 	if _, ok := c.entries[url]; ok {
 		t.Error("a PR not looked at for ciForget is kept")
+	}
+}
+
+// A PR without checks yet (just opened or pushed) is read again after ciEmptyTTL, one with checks after ciTTL;
+// a newer @dev_pr_gen (the worker ran a gh command that changed the PR) reads it at once, and a read started
+// under an older one is read again once done.
+func TestCICacheRereads(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	calls := 0
+	out := `{"statusCheckRollup":[]}`
+	const url = "https://github.com/o/r/pull/1"
+	release := make(chan struct{}, 10)
+	c := newCICache()
+	c.now = func() time.Time { return now }
+	c.gh = func(args ...string) ([]byte, error) {
+		<-release
+		calls++
+		return []byte(out), nil
+	}
+	read := func(gen string) ci {
+		release <- struct{}{}
+		c.get(url, gen)
+		c.wg.Wait()
+		return c.get(url, gen)
+	}
+	if got := read("1"); got.state != "" || calls != 1 {
+		t.Fatalf("first read: %+v, calls %d", got, calls)
+	}
+	now = now.Add(ciEmptyTTL - time.Second)
+	c.get(url, "1")
+	c.wg.Wait()
+	if calls != 1 {
+		t.Errorf("no checks: read again within ciEmptyTTL: %d calls", calls)
+	}
+	now = now.Add(time.Second)
+	out = `{"statusCheckRollup":[{"name":"test","status":"IN_PROGRESS"}]}`
+	if got := read("1"); got.state != ciRunning || calls != 2 {
+		t.Errorf("no checks: not read again after ciEmptyTTL: %+v, calls %d", got, calls)
+	}
+	now = now.Add(ciEmptyTTL)
+	c.get(url, "1")
+	c.wg.Wait()
+	if calls != 2 {
+		t.Errorf("checks: read again after ciEmptyTTL: %d calls", calls)
+	}
+	out = `{"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}`
+	if got := read("2"); got.state != ciPassed || calls != 3 {
+		t.Errorf("newer gen: not read at once: %+v, calls %d", got, calls)
+	}
+	// A gen bump while a read runs: that read is under the older gen, so the next get reads again
+	now = now.Add(ciTTL)
+	c.get(url, "2")
+	if got := c.get(url, "3"); got.state != ciPassed {
+		t.Errorf("while a read runs: %+v", got)
+	}
+	release <- struct{}{}
+	c.wg.Wait()
+	if got := read("3"); got.state != ciPassed || calls != 5 {
+		t.Errorf("read under an older gen: not read again: %+v, calls %d", got, calls)
 	}
 }
 
@@ -119,7 +178,7 @@ func TestCardCI(t *testing.T) {
 		}
 	}
 	rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", WindowActive: true},
-		{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1"}}
+		{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1", PRGen: "3"}}
 	shown := []sidebar.Client{{TTY: "/dev/ttys1", Session: "boss"}}
 	for _, tt := range []struct {
 		pr      sidebar.PR
@@ -134,7 +193,7 @@ func TestCardCI(t *testing.T) {
 	} {
 		look := &fakeLookups{pr: tt.pr}
 		s, err := buildSnapshot(rows, tt.clients, "%1", "", look)
-		if err != nil || slices.Equal(look.cis, []string{"u"}) != tt.read || (s.tiles[0].ci.state != "") != tt.read {
+		if err != nil || slices.Equal(look.cis, []string{"u 3"}) != tt.read || (s.tiles[0].ci.state != "") != tt.read {
 			t.Errorf("%+v shown %v: read %q (%v), want read %v", tt.pr, tt.clients != nil, look.cis, err, tt.read)
 		}
 	}

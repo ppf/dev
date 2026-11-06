@@ -17,12 +17,14 @@ const (
 	ciRunning = "running"
 )
 
-// ciTTL is how long a PR's checks are kept before gh is asked again; ciReads caps the reads running at once;
-// a PR not looked at for ciForget is forgotten (merged, closed, its worker gone).
+// ciTTL is how long a PR's checks are kept before gh is asked again, ciEmptyTTL while it has none (a PR just
+// opened or pushed, its checks not started yet); ciReads caps the reads running at once; a PR not looked at for
+// ciForget is forgotten (merged, closed, its worker gone).
 const (
-	ciTTL    = time.Minute
-	ciReads  = 2
-	ciForget = 10 * time.Minute
+	ciTTL      = time.Minute
+	ciEmptyTTL = 10 * time.Second
+	ciReads    = 2
+	ciForget   = 10 * time.Minute
 )
 
 // ci is an open PR's checks: failed when any failed or was cancelled, else running while any runs, else
@@ -91,7 +93,8 @@ func parseRollup(out []byte) (ci, error) {
 }
 
 // ciCache reads PRs' checks with gh in the background: a refresh gets the last read at once and starts a
-// read for a PR not read yet or read over ciTTL ago, whose result the next refresh shows.
+// read for a PR not read yet, read over ciTTL ago (ciEmptyTTL when it had no checks) or before its pane's
+// @dev_pr_gen moved on, whose result the next refresh shows.
 type ciCache struct {
 	// gh runs gh args; tests replace it.
 	gh      func(args ...string) ([]byte, error)
@@ -106,6 +109,7 @@ type ciCache struct {
 type ciEntry struct {
 	ci      ci
 	read    time.Time
+	gen     string    // the pane's @dev_pr_gen when the read started
 	seen    time.Time // last looked at
 	pending bool      // a read is running
 }
@@ -115,8 +119,8 @@ func newCICache() *ciCache {
 	return &ciCache{gh: gh, now: time.Now, sem: make(chan struct{}, ciReads), entries: map[string]ciEntry{}}
 }
 
-// get is the checks of the PR at url as last read, starting a read when due.
-func (c *ciCache) get(url string) ci {
+// get is the checks of the PR at url as last read, starting a read when due; gen is its pane's @dev_pr_gen.
+func (c *ciCache) get(url, gen string) ci {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
@@ -127,17 +131,21 @@ func (c *ciCache) get(url string) ci {
 	}
 	e, ok := c.entries[url]
 	e.seen = now
-	if !e.pending && (!ok || now.Sub(e.read) >= ciTTL) {
+	ttl := ciTTL
+	if e.ci.state == "" && e.ci.err == "" {
+		ttl = ciEmptyTTL
+	}
+	if !e.pending && (!ok || e.gen != gen || now.Sub(e.read) >= ttl) {
 		e.pending = true
 		c.wg.Add(1)
-		go c.fetch(url)
+		go c.fetch(url, gen)
 	}
 	c.entries[url] = e
 	return e.ci
 }
 
-// fetch reads url's checks; a failure keeps the last ones read, with why.
-func (c *ciCache) fetch(url string) {
+// fetch reads url's checks under gen; a failure keeps the last ones read, with why.
+func (c *ciCache) fetch(url, gen string) {
 	defer c.wg.Done()
 	c.sem <- struct{}{}
 	args := []string{"pr", "view", url, "--json", "statusCheckRollup"}
@@ -155,5 +163,5 @@ func (c *ciCache) fetch(url string) {
 		// The reason only: a card's row would cut it off behind the call gh's errors start with
 		got.err = strings.TrimPrefix(err.Error(), "gh "+strings.Join(args, " ")+": ")
 	}
-	c.entries[url] = ciEntry{ci: got, read: c.now(), seen: e.seen}
+	c.entries[url] = ciEntry{ci: got, read: c.now(), gen: gen, seen: e.seen}
 }
