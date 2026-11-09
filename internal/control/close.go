@@ -28,8 +28,8 @@ type Closed struct {
 
 // Close closes worker a for the coordinator in pane, archiving its untracked files. It refuses unless pane's
 // session started a, a is idle (or waiting only because it sat idle), and a's worktree (under .claude/worktrees,
-// used by no other session) has no tracked changes and its HEAD is in origin's default branch, or is the head of a
-// PR/MR that is open (into any branch), or merged into that branch.
+// used by no other session) has no tracked changes and its HEAD is in origin's default branch (without origin, the
+// main checkout's branch), or is the head of a PR/MR that is open (into any branch), or merged into that branch.
 func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	done := Closed{Session: a.Session}
 	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")

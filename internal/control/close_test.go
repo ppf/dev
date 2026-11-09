@@ -183,3 +183,42 @@ func errString(err error) string {
 	}
 	return err.Error()
 }
+
+// Without an origin remote, delivered means in the main checkout's branch, which dev agent start branched from.
+func TestDeliveredNoOrigin(t *testing.T) {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"} {
+		t.Setenv(k, v)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "repo")
+	git(dir, "init", "-q", "-b", "master", root)
+	git(root, "commit", "-q", "--allow-empty", "-m", "init")
+	wt := filepath.Join(root, ".claude", "worktrees", "w")
+	git(root, "worktree", "add", "-q", "-b", "w", wt)
+	git(wt, "commit", "-q", "--allow-empty", "-m", "work")
+	head := git(wt, "rev-parse", "HEAD")
+
+	if d, err := Delivered(wt); err == nil || !strings.Contains(d.Reason, "aren't in master, and no PR/MR open or merged at its HEAD: no origin remote") {
+		t.Errorf("not merged: Delivered = %+v, %v; want refused, not in master", d, err)
+	}
+	git(root, "merge", "-q", "--ff-only", "w")
+	if d, err := Delivered(wt); err != nil || d.Reason != "in master" || d.Head != head {
+		t.Errorf("merged: Delivered = %+v, %v; want delivered in master at %s", d, err, head)
+	}
+	git(root, "checkout", "-q", "--detach")
+	if _, err := Delivered(wt); err == nil || !strings.Contains(err.Error(), "no branch checked out") {
+		t.Errorf("detached main checkout: Delivered err = %v; want no branch checked out", err)
+	}
+}

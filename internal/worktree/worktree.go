@@ -133,7 +133,19 @@ func Dirty(wt string) (bool, error) {
 }
 
 // FetchDefault fetches origin into the repo at root and returns origin's default branch (origin/HEAD), e.g. origin/main.
+// Without an origin remote it returns the branch checked out at root, which Ensure branches from then.
 func FetchDefault(root string) (string, error) {
+	_, err := OriginURL(root)
+	if errors.Is(err, ErrNoOrigin) {
+		branch, err := gitOutput(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
+			return "", fmt.Errorf("no origin remote, and %s has no branch checked out", root)
+		}
+		return branch, err
+	}
+	if err != nil {
+		return "", err
+	}
 	// A credential prompt would hang the coordinator's call
 	fetch := exec.Command("git", "-C", root, "fetch", "--quiet", "origin")
 	fetch.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -166,9 +178,16 @@ func Head(wt string) (string, error) {
 	return gitOutput(wt, "rev-parse", "HEAD")
 }
 
+// ErrNoOrigin is OriginURL's error for a repo without an origin remote.
+var ErrNoOrigin = errors.New("no origin remote")
+
 // OriginURL is the URL configured for wt's origin remote, without insteadOf rewrites.
 func OriginURL(wt string) (string, error) {
-	return gitOutput(wt, "config", "--get", "remote.origin.url")
+	url, err := gitOutput(wt, "config", "--get", "remote.origin.url")
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
+		return "", ErrNoOrigin
+	}
+	return url, err
 }
 
 // Branch is the branch checked out in wt, "" for a detached HEAD.

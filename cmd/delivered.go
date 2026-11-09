@@ -16,8 +16,8 @@ func newDeliveredCmd() *cobra.Command {
 		Short: "Check a worker's worktree is delivered (dev agent close's checks, without tmux): exit 0 if so",
 		Long: `Check a worker's worktree under .claude/worktrees (e.g. a desktop-app session's) is delivered, as dev agent
 close checks it before closing, without its tmux checks and without touching the worktree: its HEAD in origin's
-default branch (fetched first), or the head commit of a PR/MR that is open, or merged into that branch, and no changes
-to tracked files. Exit status 0 when delivered, else 1 with the failed check.`,
+default branch (fetched first; without an origin remote, the main checkout's branch), or the head commit of a PR/MR
+that is open, or merged into that branch, and no changes to tracked files. Exit status 0 when delivered, else 1 with the failed check.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			d, err := control.Delivered(args[0])

@@ -375,9 +375,10 @@ func newAgentCloseCmd() *cobra.Command {
 		Short: "Close a finished worker this session (or --boss's) started: kill its session, remove its worktree and branch",
 		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered.
 Refused, naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
-no changes to tracked files and its HEAD is in origin's default branch (fetched first), or is the head commit of
-a PR (gh) or MR (glab) found through origin's repository (on GitHub also origin's PR to its upstream) that is
-open, or merged into that branch. A worker started with --boss outside tmux is refused unless closed that way.
+no changes to tracked files and its HEAD is in origin's default branch (fetched first; without an origin remote, the
+branch checked out in the main checkout), or is the head commit of a PR (gh) or MR (glab) found through origin's
+repository (on GitHub also origin's PR to its upstream) that is open, or merged into that branch. A worker started
+with --boss outside tmux is refused unless closed that way.
 Its untracked, not ignored files (e.g. RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first.
 Then clients watching it move to this (or --boss's) session, its session is killed, its worktree removed and its
 branch force-deleted.`,
