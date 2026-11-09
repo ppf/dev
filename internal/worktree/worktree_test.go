@@ -533,3 +533,16 @@ func TestArchiveUntracked(t *testing.T) {
 		t.Errorf("second Archive: %v", err)
 	}
 }
+
+func TestFetchDefaultNoOrigin(t *testing.T) {
+	root := newRepo(t, "", "")
+	git(t, root, "remote", "remove", "origin")
+	git(t, root, "checkout", "-q", "-b", "trunk")
+	if base, err := FetchDefault(root); err != nil || base != "trunk" {
+		t.Errorf("FetchDefault = %q, %v; want trunk", base, err)
+	}
+	git(t, root, "remote", "add", "origin", filepath.Join(filepath.Dir(root), "missing.git"))
+	if _, err := FetchDefault(root); err == nil || !strings.Contains(err.Error(), "git fetch origin") {
+		t.Errorf("unreachable origin: FetchDefault err = %v; want the fetch's error", err)
+	}
+}

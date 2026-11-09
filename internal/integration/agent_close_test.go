@@ -249,4 +249,30 @@ func TestAgentClose(t *testing.T) {
 	if _, err := d.Try("has-session", "-t", "=remote:"); err == nil {
 		t.Error("❌ session remote still there")
 	}
+
+	// No origin remote: delivered once its commits are in the main checkout's branch, which is kept
+	git(t, root, "remote", "remove", "origin")
+	local := filepath.Join(root, ".claude", "worktrees", "local")
+	git(t, root, "worktree", "add", "-q", "-b", "local", local, "main")
+	writeFile(t, filepath.Join(local, "h.txt"), "h")
+	git(t, local, "add", "h.txt")
+	git(t, local, "commit", "-qm", "h")
+	d.T("new-session", "-d", "-s", "local", "-c", local, "sleep 600")
+	d.T("set-option", "-t", "=local:", "@dev_started_by", coordID)
+	if out, err := devCmd(d.T("display", "-t", "=local:", "-p", "#{pane_id}"), idle, "state", "idle"); err != nil {
+		t.Fatalf("❌ dev state idle: %v\n%s", err, out)
+	}
+	if out, err := devCmd(coord, "", "agent", "close", "local"); err == nil || !strings.Contains(out, "aren't in main") {
+		t.Errorf("❌ close of unmerged local = %v, %q; want it refused", err, out)
+	}
+	git(t, root, "merge", "-q", "--ff-only", "local")
+	if out, err := devCmd(coord, "", "agent", "close", "local"); err != nil {
+		t.Errorf("❌ close merged local: %v\n%s", err, out)
+	}
+	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/local"); err == nil {
+		t.Error("❌ branch local still there")
+	}
+	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/main"); err != nil {
+		t.Error("❌ branch main deleted")
+	}
 }
