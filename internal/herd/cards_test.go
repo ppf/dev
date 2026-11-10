@@ -30,13 +30,13 @@ func board4() Model {
 				question: agent.Question{Tool: "Bash", Command: "rm -rf build"}},
 			{sess: sidebar.Session{Name: "docs-api", Agent: "Claude", State: agent.Working, Title: "Document the API",
 				Branch: "feature/docs-api-examples", Cost: "$1.20", PR: sidebar.PR{Number: 95, State: "open"}},
-				since: now.Add(-12 * time.Minute), context: "63",
+				since: now.Add(-12 * time.Minute), context: "63", model: "opus", effort: "medium",
 				tail: desktop.Tail{Lines: []string{"Added **examples** for every `endpoint`.", "Tests next."}, Tool: "Bash", ToolDescription: "Run the desktop tests"},
 				body: []string{"one", "two", "three", "four", "five", "six"}},
 			{sess: sidebar.Session{Name: "ci-fix", Agent: "Claude", State: agent.Idle, Branch: "ci-fix"},
-				since: now.Add(-8 * time.Minute), tail: desktop.Tail{Lines: []string{"Pushed.", "WAITING (CI: lint, test)"}}},
+				since: now.Add(-8 * time.Minute), model: "sonnet", tail: desktop.Tail{Lines: []string{"Pushed.", "WAITING (CI: lint, test)"}}},
 			{sess: sidebar.Session{Name: "old-spike", Agent: "Claude", State: agent.Idle, PR: sidebar.PR{Number: 90, State: "merged"}},
-				since: now.Add(-2 * time.Hour), note: "finished: done"},
+				since: now.Add(-2 * time.Hour), model: "opus", effort: "low", note: "finished: done"},
 		}}}
 }
 
@@ -48,7 +48,7 @@ func TestBoardLayout(t *testing.T) {
 		"┃╭───────────────────────────────────────────────────────────────────╮",
 		"┃│ ▾ ● fix-login                                                  3m │",
 		"┃│    allow Bash: rm -rf build                                       │",
-		"┃│    feature/fix-login-redis                                        │",
+		"┃│    feature/fix-login-redis                          default model │",
 		"┃│    Open  Message…                                               × │",
 		"┃╰───────────────────────────────────────────────────────────────────╯",
 		" WORKING 1 ───────────────────────────────────────────────────────────",
@@ -56,7 +56,7 @@ func TestBoardLayout(t *testing.T) {
 		" │ ▾ ● docs-api                                                  12m │",
 		" │    Document the API                                               │",
 		" │    Run the desktop tests                                          │",
-		" │    feature/docs-api-examples                          $1.20 · 63% │",
+		" │    feature/docs-api-examples             opus·medium  $1.20 · 63% │",
 		" │    ○ PR #95 open                                                  │",
 		" │    Added examples for every endpoint.                             │",
 		" │    Tests next.                                                    │",
@@ -72,12 +72,12 @@ func TestBoardLayout(t *testing.T) {
 		"┃╭───────────────────────────────────────────────────────────────────╮",
 		"┃│ ▾ ● ci-fix                                                     8m │",
 		"┃│    CI: lint, test                                                 │",
-		"┃│    ci-fix                                                         │",
+		"┃│    ci-fix                                                  sonnet │",
 		"┃│    Pushed.                                                        │",
 		"┃│    Open  Message…                                               × │",
 		"┃╰───────────────────────────────────────────────────────────────────╯",
 		" IDLE 1 ──────────────────────────────────────────────────────────────",
-		"  ▸ ● old-spike  finished  ◆ #90                                   2h ",
+		"  ▸ ● old-spike  finished  ◆ #90                         opus·low  2h ",
 	}
 	got := board4().board().lines
 	for i := range max(len(got), len(want)) {
@@ -803,5 +803,41 @@ func TestSaidOnScreenCut(t *testing.T) {
 	m.snap.tiles[1].body = []string{"⏺ Agent finished", "", "  " + strings.Repeat("x", 70), "", strings.Repeat(" ", 40) + said, "", "✶ Perambulating…"}
 	if got := ansi.Strip(strings.Join(m.board().lines, "\n")); !strings.Contains(got, "    "+said+" ") {
 		t.Errorf("reply line dropped for a cut screen row:\n%s", got)
+	}
+}
+
+// A Claude worker's meta row carries its model and effort, a gold default model warning when no model was
+// passed, nothing for Codex and Grok; a narrow card drops the branch first, then the model, never the cost.
+func TestModelOnCard(t *testing.T) {
+	claude := func(model, effort string) tile {
+		return tile{sess: sidebar.Session{Agent: "Claude", Branch: "feature/long-branch-name", Cost: "$4.10"}, context: "62", model: model, effort: effort}
+	}
+	tests := []struct {
+		name, want string
+		t          tile
+		w          int
+	}{
+		{"model and effort", "opus·medium  $4.10 · 62%", claude("opus", "medium"), 60},
+		{"model alone", "opus  $4.10 · 62%", claude("opus", ""), 60},
+		{"default", "default model  $4.10 · 62%", claude("", ""), 60},
+		{"branch cut first", "opus·medium  $4.10 · 62%", claude("opus", "medium"), 36},
+		{"model dropped before cost", " $4.10 · 62%", claude("opus", "medium"), 20},
+	}
+	for _, tt := range tests {
+		got := ansi.Strip(metaRow(tt.t, tt.w))
+		if !strings.HasSuffix(got, tt.want) || strings.Contains(got, "opus") != strings.Contains(tt.want, "opus") {
+			t.Errorf("%s: %q, want suffix %q", tt.name, got, tt.want)
+		}
+		if w := ansi.StringWidth(got); w != tt.w-1 {
+			t.Errorf("%s: %d wide, want %d", tt.name, w, tt.w-1)
+		}
+	}
+	if got := metaRow(claude("", ""), 60); !strings.Contains(got, sidebar.Gold+"default model") {
+		t.Errorf("default not gold: %q", got)
+	}
+	cx := claude("opus", "medium")
+	cx.sess.Agent = "Codex"
+	if got := ansi.Strip(metaRow(cx, 60)); strings.Contains(got, "opus") || strings.Contains(got, "default") {
+		t.Errorf("codex shows a model: %q", got)
 	}
 }

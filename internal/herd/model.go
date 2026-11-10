@@ -53,6 +53,8 @@ type row struct {
 	Context      string `tmux:"@agent_context"`
 	Since        string `tmux:"@agent_since"`
 	Zoomed       bool   `tmux:"window_zoomed_flag"`
+	Model        string `tmux:"@dev_model"`
+	Effort       string `tmux:"@dev_effort"`
 }
 
 // tile is one worker session's preview.
@@ -66,6 +68,8 @@ type tile struct {
 	note     string         // its latest boss inbox note (inbox.OptNote)
 	since    time.Time      // when its state began (@agent_since); zero when unknown
 	context  string         // @agent_context, its context window's use in whole percent; "" when unknown
+	model    string         // @dev_model, the --model its Claude started with; "" when none was passed
+	effort   string         // @dev_effort, the --effort its Claude started with
 	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error          // why its transcript could not be read
 	ci       ci             // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
@@ -435,7 +439,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
 		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
-		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context}
+		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort}
 		if sec, err := strconv.ParseInt(r.Since, 10, 64); err == nil {
 			t.since = time.Unix(sec, 0)
 		}

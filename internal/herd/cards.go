@@ -242,7 +242,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	default:
 		text(sidebar.Muted, statusText(t, sec))
 	}
-	if t.sess.Branch != "" || t.sess.Cost != "" || t.context != "" {
+	if t.sess.Branch != "" || t.sess.Cost != "" || t.context != "" || modelText(t) != "" {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
 	}
 	if pr := t.sess.PR; pr.Number != 0 {
@@ -427,7 +427,7 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 }
 
 // headRow is a card's first row, w columns: its fold arrow, state dot and name, then at the right its time in
-// its state. Folded, the status, PR and a ⚠ for a warning follow the name.
+// its state. Folded, the status, PR and a ⚠ for a warning follow the name and the model comes before the time.
 func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	arrow := "▾"
 	if folded {
@@ -455,6 +455,9 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	right := ""
 	if !t.since.IsZero() {
 		right = sidebar.Muted + span(m.clk.Now().Sub(t.since)) + reset + " "
+	}
+	if mt := modelText(t); folded && mt != "" {
+		right = modelColour(t) + mt + reset + "  " + right
 	}
 	room := max(1, w-ansi.StringWidth(right)-1)
 	left = ansi.Truncate(" "+left, room, "…")
@@ -511,7 +514,28 @@ func staleNote(t tile) bool {
 	return !t.deciding && noteKind(t.note) == inbox.Decision
 }
 
-// metaRow is the branch, cut at its start so its end shows, and at the right the cost and context use, w columns.
+// modelText is a Claude worker's model and effort as "opus·medium", "default model" when no --model was passed,
+// "" for Codex and Grok, which take no flags.
+func modelText(t tile) string {
+	if t.sess.Agent != "Claude" {
+		return ""
+	}
+	if t.model == "" {
+		return "default model"
+	}
+	return strings.Join(slices.DeleteFunc([]string{t.model, t.effort}, func(s string) bool { return s == "" }), "·")
+}
+
+// modelColour is gold for a worker on the default model, else muted.
+func modelColour(t tile) string {
+	if t.model == "" {
+		return sidebar.Gold
+	}
+	return sidebar.Muted
+}
+
+// metaRow is the branch, cut at its start so its end shows, and at the right the model, cost and context use, w columns.
+// The model gives way to the cost and context, the branch to all of them.
 func metaRow(t tile, w int) string {
 	var right []string
 	if t.sess.Cost != "" {
@@ -521,7 +545,19 @@ func metaRow(t tile, w int) string {
 		right = append(right, t.context+"%")
 	}
 	r := strings.Join(right, " · ")
-	room := max(0, w-ansi.StringWidth(r)-2)
+	rw := ansi.StringWidth(r)
+	r = sidebar.Muted + r + reset
+	if mt := modelText(t); mt != "" {
+		sep := 0
+		if rw > 0 {
+			sep = 2
+		}
+		if ansi.StringWidth(mt)+sep+rw <= w-1 {
+			r = modelColour(t) + mt + reset + strings.Repeat(" ", sep) + r
+			rw += ansi.StringWidth(mt) + sep
+		}
+	}
+	room := max(0, w-rw-2)
 	branch := t.sess.Branch
 	switch {
 	case room == 0:
@@ -529,8 +565,8 @@ func metaRow(t tile, w int) string {
 	case ansi.StringWidth(branch) > room:
 		branch = ansi.TruncateLeft(branch, ansi.StringWidth(branch)-room+1, "…")
 	}
-	gap := max(1, w-ansi.StringWidth(branch)-ansi.StringWidth(r)-1)
-	return rule + branch + reset + strings.Repeat(" ", gap) + sidebar.Muted + r + reset
+	gap := max(1, w-ansi.StringWidth(branch)-rw-1)
+	return rule + branch + reset + strings.Repeat(" ", gap) + r
 }
 
 // prIcon is a PR state's glyph, each its own shape.
