@@ -44,6 +44,11 @@ type replyBox struct {
 	// another dialog, or after staleRefreshes still showing it
 	sent  string
 	stale int // refreshes since the answer that still show the sent dialog
+	// A question answered whole (pick.whole): the option picked on each tab (-1 none), for the question qsig
+	// (pick.qsig), and the tab ←→ and 1-9 act on
+	picks []int
+	qsig  string
+	tab   int
 }
 
 // open binds the reply box to t, with the reply typed to t's agent pane before focus moved away.
@@ -106,6 +111,15 @@ func (m *Model) syncPick() {
 			b.other, b.ed = false, editor{}
 		}
 		b.hlSig, b.hl = sig, max(0, p.d.option(p.d.cursor))
+	}
+	if p.whole() {
+		if qs := p.qsig(); qs != b.qsig {
+			b.qsig, b.picks = qs, make([]int, len(p.asks))
+			for i, a := range p.asks {
+				b.picks[i] = recommended(a)
+			}
+		}
+		b.tab = max(b.tab, p.cur)
 	}
 	if b.sent != "" && m.answering == "" {
 		// A capture mid-redraw can take an answer for done: the picker comes back after a few refreshes
@@ -262,6 +276,9 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.answer(p, submit())
 	case m.box.other && h.k == p.other:
 		// Already typing it
+		return m, nil
+	case p.whole() && h.k < len(p.asks[p.cur].Options):
+		m.pickTab(p, p.cur, h.k)
 		return m, nil
 	}
 	m.box.other, m.box.ed, m.box.hl = false, editor{}, h.k
@@ -442,6 +459,9 @@ func (m Model) typePick(k tea.KeyMsg, p *pick) (tea.Model, tea.Cmd) {
 	}
 	if m.waiting(p) {
 		return m, nil
+	}
+	if p.whole() && !b.other {
+		return m.typeWhole(k, p)
 	}
 	n := len(p.d.opts)
 	switch k.Type {

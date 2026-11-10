@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -23,7 +24,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "")
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "", "", "")
 }
 
 func TestList(t *testing.T) {
@@ -40,7 +41,7 @@ func TestList(t *testing.T) {
 		{Session: "app", Pane: "%1", Label: "Claude", State: "idle", Project: "app", Path: "/nonexistent/app"},
 		{Session: "cx", Pane: "%7", Label: "Codex", Path: "/nonexistent/cx"},
 	}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("List = %+v, want %+v", got, want)
 	}
 }
@@ -84,6 +85,42 @@ func TestListQueued(t *testing.T) {
 	})
 	if got, err := List(gone); err != nil || len(got) != 3 || got[0].Queued {
 		t.Errorf("List(pane gone) = %+v, %v", got, err)
+	}
+}
+
+// A deciding Claude's AskUserQuestion dialog is listed whole, from its agent pane's @agent_question (not its
+// session's first pane), with the recommended options marked; a permission's question, or one left over from
+// an answered dialog, isn't.
+func TestListQuestions(t *testing.T) {
+	ask := `{"tool":"AskUserQuestion","questions":[` +
+		`{"question":"Which repos?","header":"Scope","options":[{"label":"core only (Recommended)","description":"least risk"},{"label":"all","description":""}],"multiSelect":false},` +
+		`{"question":"Add e2e?","header":"Tests","options":[{"label":"yes","description":""},{"label":"no (Recommended)","description":""}],"multiSelect":true}]}`
+	line := func(session, pane, cmd, state, waitingFor, question string) string {
+		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", cmd, state, cmd, "", "", "%0", "$"+session, "", "", "", "", "", "",
+			waitingFor, question)
+	}
+	out := line("asks", "%0", "dev", "", "", "") + line("asks", "%1", "claude", "waiting", "permission_prompt", ask) +
+		line("answered", "%2", "claude", "working", "", ask) + line("idle", "%3", "claude", "waiting", "idle_prompt", ask) +
+		line("bash", "%4", "claude", "waiting", "permission_prompt", `{"tool":"Bash","command":"ls"}`)
+	agents, err := List(tmux.NewFake(func([]string) (string, error) { return out, nil }))
+	if err != nil || len(agents) != 4 {
+		t.Fatalf("List = %+v, %v", agents, err)
+	}
+	want := []Question{
+		{Header: "Scope", Question: "Which repos?", Options: []Option{{Label: "core only (Recommended)", Description: "least risk", Recommended: true}, {Label: "all"}}},
+		{Header: "Tests", Question: "Add e2e?", MultiSelect: true, Options: []Option{{Label: "yes"}, {Label: "no (Recommended)", Recommended: true}}},
+	}
+	if !reflect.DeepEqual(agents[0].Questions, want) {
+		t.Errorf("asks: questions = %+v, want %+v", agents[0].Questions, want)
+	}
+	for _, a := range agents[1:] {
+		if a.Questions != nil {
+			t.Errorf("%s: questions = %+v, want none", a.Session, a.Questions)
+		}
+	}
+	b, err := json.Marshal(agents[0].Questions[1])
+	if err != nil || string(b) != `{"header":"Tests","question":"Add e2e?","multi_select":true,"options":[{"label":"yes"},{"label":"no (Recommended)","recommended":true}]}` {
+		t.Errorf("JSON = %s, %v", b, err)
 	}
 }
 
@@ -568,7 +605,7 @@ func TestListStartedByAndHerd(t *testing.T) {
 	model, effort := map[string]string{"fix-login": "sonnet", "herd": "opus"}, map[string]string{"fix-login": "medium", "mine-too": "low"}
 	line := func(session, id, pane, startedBy, herd string) string {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "", outside[session],
-			model[session], effort[session])
+			model[session], effort[session], "", "")
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
 		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
@@ -644,7 +681,7 @@ func TestBossPane(t *testing.T) {
 }
 
 func TestListCostOff(t *testing.T) {
-	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "")
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "", "", "")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
 	if err != nil {
 		t.Fatal(err)

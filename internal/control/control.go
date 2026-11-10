@@ -56,8 +56,43 @@ type Agent struct {
 	// a later /model or /effort; omitted when it started without that flag.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	// Questions are every question (tab) of the AskUserQuestion dialog it waits on, open or not; omitted when none.
+	Questions []Question `json:"questions,omitempty"`
 	// HideCost is @dev_cost off: text output leaves the cost out, --json keeps cost_usd.
 	HideCost bool `json:"-"`
+}
+
+// Question is one question (tab) of an agent's AskUserQuestion dialog.
+type Question struct {
+	Header      string   `json:"header"`
+	Question    string   `json:"question"`
+	MultiSelect bool     `json:"multi_select,omitempty"`
+	Options     []Option `json:"options"`
+}
+
+// Option is a Question's option; Recommended is agent.Choice.Recommended.
+type Option struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+}
+
+// dialogQuestions are the questions of the AskUserQuestion dialog an agent in state, waiting for waitingFor, shows,
+// from its @agent_question; nil when it decides nothing (the option outlives an answered dialog until the turn
+// ends) or the question is a permission's.
+func dialogQuestions(state, waitingFor, question string) []Question {
+	q, ok := agent.ParseQuestion(question)
+	if !ok || q.Tool != agent.AskUserQuestion || !agent.Deciding(state, waitingFor) {
+		return nil
+	}
+	qs := make([]Question, len(q.Questions))
+	for i, a := range q.Questions {
+		qs[i] = Question{Header: a.Header, Question: a.Question, MultiSelect: a.MultiSelect, Options: make([]Option, len(a.Options))}
+		for k, c := range a.Options {
+			qs[i].Options[k] = Option{Label: c.Label, Description: c.Description, Recommended: c.Recommended()}
+		}
+	}
+	return qs
 }
 
 // row is one list-panes -a row: agent.Pane's fields plus the session options Detect and Agent need.
@@ -81,6 +116,9 @@ type row struct {
 	Outside   string `tmux:"@dev_started_outside"`
 	Model     string `tmux:"@dev_model"`
 	Effort    string `tmux:"@dev_effort"`
+	// Pane options of each pane: only the agent pane's count
+	WaitingFor string `tmux:"@agent_waiting_for"`
+	Question   string `tmux:"@agent_question"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -119,6 +157,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 	}
 	var first []row // each session's first row: session options are the same on all its rows
 	panes := map[string][]agent.Pane{}
+	byID := map[string]row{}
 	names := map[string]string{} // @dev_started_by value → the starter's name
 	for _, r := range rows {
 		if _, seen := panes[r.Session]; !seen {
@@ -128,6 +167,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 				names[sidebar.Starter(r.SessionID, r.Session, true)] = r.Session
 			}
 		}
+		byID[r.ID] = r
 		panes[r.Session] = append(panes[r.Session], agent.Pane{
 			Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path,
 			Title: r.Title, Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost,
@@ -143,6 +183,9 @@ func list(c *tmux.Client) ([]Agent, error) {
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
 			Outside: r.Outside != "", Model: r.Model, Effort: r.Effort, HideCost: sidebar.CostHidden(r.CostOpt),
+		}
+		if p := byID[a.Pane.ID]; p.Question != "" {
+			ag.Questions = dialogQuestions(a.State, p.WaitingFor, p.Question)
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost

@@ -46,6 +46,12 @@ type Choice struct {
 	Description string `json:"description"`
 }
 
+// Recommended reports c marked as the recommended option. AskUserQuestion has no such field: it is a label
+// convention, "(Recommended)" in the label (as in "Restart it (Recommended)").
+func (c Choice) Recommended() bool {
+	return strings.Contains(c.Label, "(Recommended)")
+}
+
 // HookQuestion reads the Question from a PermissionRequest or PreToolUse hook's input; ok=false for other
 // events, a PreToolUse of another tool, or input without a tool. Only the fields a dialog shows are kept:
 // a Write's content can be huge.

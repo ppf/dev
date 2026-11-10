@@ -1,0 +1,40 @@
+
+\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[39m\x1b[49m   \x1b[1mClaude Code\x1b[0m \x1b[38;5;246mv2.1.322\x1b[39m
+\x1b[38;5;174m▝▜\x1b[48;5;16m█████\x1b[49m█▀\x1b[39m  \x1b[38;5;246mSonnet 5.5 with high effort · Claude Max\x1b[39m
+\x1b[38;5;174m ▝▝   ▝▝ \x1b[39m  \x1b[38;5;246m/tmp/proj · \x1b[38;5;114m\x1b]8;id=uy86qs;https://claude.ai/code/session_019UVg3QXrbg6wjeXNrmgTLJ?from=cli\x1b\/rc\x1b[39m\x1b]8;;\x1b\
+
+
+\x1b[38;5;246m\x1b[48;5;237m❯ \x1b[38;5;231mTest of a dialog UI, no real work. Call AskUserQuestion once with exactly these 3 single-select questions, nothing \x1b[39m
+  \x1b[38;5;231melse: 1) header "Scope", question "Which repos should the change touch?", options "core only (Recommended)", "core \x1b[39m
+  \x1b[38;5;231mand api", "all repos". 2) header "Rollout", question "When should it ship?", options "behind a flag (Recommended)", \x1b[39m
+  \x1b[38;5;231m"directly". 3) header "Tests", question "Add end-to-end tests?", options "yes", "no (Recommended)". After the \x1b[39m
+  \x1b[38;5;231manswers, reply only with the answers.\x1b[39m
+\x1b[38;5;246m\x1b[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m←  ☒ Scope  ☒ Rollout \x1b[38;5;16m\x1b[48;5;153m ☐ Tests \x1b[39m\x1b[49m ✔ Submit  →
+
+\x1b[1m\x1b[38;5;231mAdd end-to-end tests?\x1b[0m
+
+\x1b[38;5;153m❯\x1b[39m \x1b[38;5;246m1.\x1b[39m \x1b[38;5;153myes\x1b[39m
+     \x1b[38;5;246mAdd end-to-end tests\x1b[39m
+  \x1b[38;5;246m2.\x1b[39m no (Recommended)
+     \x1b[38;5;246mSkip end-to-end tests\x1b[39m
+  \x1b[38;5;246m3. Type something.\x1b[39m
+\x1b[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+\x1b[39m  4. Chat about this
+
+\x1b[38;5;246mEnter to select · Tab/Arrow keys to navigate · Esc to cancel
+
+
+
+
+
+\x1b[39m
+
+
+
+
+
+
+
+
+

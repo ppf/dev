@@ -31,9 +31,10 @@ const (
 // question (@agent_question) when that is the dialog shown.
 type pick struct {
 	d     dialog
-	tabs  []string // the question tabs
-	cur   int      // the tab on screen; -1 when unknown
-	other int      // the free-text option ("Type something"); -1 when none
+	tabs  []string    // the question tabs
+	cur   int         // the tab on screen; -1 when unknown
+	other int         // the free-text option ("Type something"); -1 when none
+	asks  []agent.Ask // the hook's questions, one per tab, when it matched the dialog on screen (cur >= 0)
 	// The permission the dialog asks: its tool, command, file or URL, and description
 	tool, detail, about string
 }
@@ -63,6 +64,9 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 		if d.title == reviewTitle {
 			p.cur = len(q.Questions)
 		}
+		if p.cur >= 0 {
+			p.asks = q.Questions
+		}
 		if p.cur >= 0 && len(q.Questions) > 1 || d.title == reviewTitle {
 			for _, a := range q.Questions {
 				p.tabs = append(p.tabs, a.Header)
@@ -85,6 +89,29 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 // permission prompt, menu or the answers' review, whose screen shows what it asks about; false for none.
 func (p *pick) question() bool {
 	return p != nil && (len(p.d.tabs) > 0 || p.cur >= 0) && p.d.title != reviewTitle
+}
+
+// whole reports a question of several tabs the board answers whole: every tab from the open one on a
+// single choice, each picked on the board and sent in one go (sendAll).
+func (p *pick) whole() bool {
+	if !p.question() || len(p.asks) < 2 || p.cur >= len(p.asks) || p.d.multi {
+		return false
+	}
+	return !slices.ContainsFunc(p.asks[p.cur:], func(a agent.Ask) bool { return a.MultiSelect || len(a.Options) == 0 })
+}
+
+// qsig identifies p's question by its tabs' questions, the same on every tab.
+func (p *pick) qsig() string {
+	var b strings.Builder
+	for _, a := range p.asks {
+		b.WriteString(a.Question + "\x00")
+	}
+	return b.String()
+}
+
+// recommended is the first of a's options marked recommended (agent.Choice.Recommended); -1 when none.
+func recommended(a agent.Ask) int {
+	return slices.IndexFunc(a.Options, agent.Choice.Recommended)
 }
 
 // sameText compares texts ignoring how they wrap.
@@ -224,35 +251,82 @@ func (m Model) send(target, pane string, shown dialog, a answer) tea.Cmd {
 		if !open || now.key() != shown.key() {
 			return answeredMsg{session: target, msg: alert("⚠ " + target + "'s dialog changed: nothing sent, showing it again")}
 		}
-		keys, err := a.keys(now)
-		if err != nil {
+		if err := run(c, clk, pane, now, a); err != nil {
 			return fail(err)
 		}
-		for i, k := range keys {
-			if i > 0 {
-				clk.Sleep(keyDelay)
-			}
-			if k.text != "" {
-				err = control.SendText(c, pane, k.text)
-			} else {
-				err = control.SendKeys(c, pane, []string{k.key})
-			}
+		return answeredMsg{session: target, msg: info("Answered " + target), took: true}
+	}
+}
+
+// run presses a's keys on dialog now, the one on screen, keyDelay apart, and polls until they took, or
+// answerTimeout passes.
+func run(c *tmux.Client, clk control.Clock, pane string, now dialog, a answer) error {
+	keys, err := a.keys(now)
+	if err != nil {
+		return err
+	}
+	for i, k := range keys {
+		if i > 0 {
+			clk.Sleep(keyDelay)
+		}
+		if k.text != "" {
+			err = control.SendText(c, pane, k.text)
+		} else {
+			err = control.SendKeys(c, pane, []string{k.key})
+		}
+		if err != nil {
+			return fmt.Errorf("sent %d of %d keys, check the worker: %w", i, len(keys), err)
+		}
+	}
+	for start := clk.Now(); ; {
+		clk.Sleep(answerPoll)
+		after, open, err := screenDialog(c, pane)
+		if err != nil {
+			return fmt.Errorf("keys sent, check the worker: %w", err)
+		}
+		if a.took(now, after, open) {
+			return nil
+		}
+		if clk.Now().Sub(start) >= answerTimeout {
+			return errors.New("keys sent, but the dialog didn't change: check the worker")
+		}
+	}
+}
+
+// sendAll answers asks[from:], the questions of the dialog shown on tab from, with picks (an option index
+// per question), one tab after another, then submits them on the review. Before each key it checks the
+// screen still shows what it expects (the dialog shown, then each next tab's question, then the review)
+// and stops when it doesn't.
+func (m Model) sendAll(target, pane string, shown dialog, asks []agent.Ask, from int, picks []int) tea.Cmd {
+	c, clk := m.c, m.clk
+	return func() tea.Msg {
+		n := len(asks) - from
+		for i := from; i <= len(asks); i++ {
+			now, open, err := screenDialog(c, pane)
 			if err != nil {
-				return fail(fmt.Errorf("sent %d of %d keys, check the worker: %w", i, len(keys), err))
+				return answeredMsg{session: target, msg: alert("❌ " + target + ": " + err.Error())}
+			}
+			k := -1
+			switch {
+			case !open:
+			case i == from:
+				if now.key() == shown.key() {
+					k = picks[i]
+				}
+			case i < len(asks):
+				if sameText(now.title, asks[i].Question) {
+					k = picks[i]
+				}
+			case now.title == reviewTitle:
+				k = slices.IndexFunc(now.opts, func(o option) bool { return o.label == "Submit answers" })
+			}
+			if k < 0 || k >= len(now.opts) {
+				return answeredMsg{session: target, msg: alert(fmt.Sprintf("⚠ %s's dialog changed after %d of %d answers: nothing more sent, showing it again", target, i-from, n))}
+			}
+			if err := run(c, clk, pane, now, choose(k)); err != nil {
+				return answeredMsg{session: target, msg: alert(fmt.Sprintf("❌ %s: after %d of %d answers: %v", target, i-from, n, err))}
 			}
 		}
-		for start := clk.Now(); ; {
-			clk.Sleep(answerPoll)
-			after, open, err := screenDialog(c, pane)
-			if err != nil {
-				return fail(fmt.Errorf("keys sent, check the worker: %w", err))
-			}
-			if a.took(now, after, open) {
-				return answeredMsg{session: target, msg: info("Answered " + target), took: true}
-			}
-			if clk.Now().Sub(start) >= answerTimeout {
-				return fail(errors.New("keys sent, but the dialog didn't change: check the worker"))
-			}
-		}
+		return answeredMsg{session: target, msg: info(fmt.Sprintf("Answered %s's %d questions", target, n)), took: true}
 	}
 }
