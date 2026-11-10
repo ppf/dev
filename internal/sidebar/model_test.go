@@ -56,7 +56,7 @@ func TestModelBuildSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Session{
-		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50"},
+		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50", CostUSD: 1.5, HasCost: true},
 		{Name: "app-2", Group: "app"},
 		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle"},
 		{Name: "side", Group: "side"},
@@ -189,7 +189,7 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "")
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "")
 }
 
 func modelTestModel(c *tmux.Client) Model {
@@ -207,7 +207,7 @@ func TestModelRefresh(t *testing.T) {
 	}
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
-			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
+			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{@agent_waiting_for}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
 			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f#{@dev_pr}\x1f#{@dev_pr_gen}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
@@ -328,5 +328,40 @@ func TestModelBuildSnapshotCostOff(t *testing.T) {
 	}
 	if !slices.Equal(off.sessions, want) || slices.Equal(on.sessions, want) {
 		t.Errorf("@dev_cost off sessions =\n%+v\nwant\n%+v (costs dropped, all else kept)", off.sessions, want)
+	}
+}
+
+func TestModelDeciding(t *testing.T) {
+	rows := []paneRow{
+		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
+		{Session: "ask", Window: 1, ID: "%1", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: "permission_prompt", Sidebar: "%0"},
+		{Session: "rest", Window: 1, ID: "%2", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: agent.IdlePrompt, Sidebar: "%0"},
+	}
+	snap, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(_, _, _, _, _ string) PR { return PR{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, s := range snap.sessions {
+		got[s.Name] = s.Deciding
+	}
+	if !got["ask"] || got["rest"] {
+		t.Errorf("Deciding = %v, want ask only", got)
+	}
+}
+
+func TestModelCostHidden(t *testing.T) {
+	rows := []paneRow{
+		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
+		{Session: "w", Window: 1, ID: "%1", Command: "claude", State: "idle", StateCmd: "claude", Cost: "2.5", CostOpt: "off", Sidebar: "%0"},
+	}
+	snap, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(_, _, _, _, _ string) PR { return PR{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range snap.sessions {
+		if s.Name == "w" && (s.Cost != "" || s.CostUSD != 2.5 || !s.HasCost) {
+			t.Errorf("hidden cost: Cost %q, CostUSD %v, HasCost %t; want \"\", 2.5, true", s.Cost, s.CostUSD, s.HasCost)
+		}
 	}
 }

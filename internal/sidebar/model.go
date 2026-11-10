@@ -29,12 +29,14 @@ type paneRow struct {
 	State    string `tmux:"@agent_state"`
 	StateCmd string `tmux:"@agent_cmd"`
 	Cost     string `tmux:"@agent_cost"`
-	Active   bool   `tmux:"pane_active"`
-	Width    int    `tmux:"pane_width"`
-	Height   int    `tmux:"pane_height"`
-	Project  string `tmux:"@project"`
-	Sidebar  string `tmux:"@sidebar_pane"`
-	Selected string `tmux:"@sidebar_selected_session"`
+	// Why a waiting agent waits: Claude's idle reminder is not a decision
+	WaitingFor string `tmux:"@agent_waiting_for"`
+	Active     bool   `tmux:"pane_active"`
+	Width      int    `tmux:"pane_width"`
+	Height     int    `tmux:"pane_height"`
+	Project    string `tmux:"@project"`
+	Sidebar    string `tmux:"@sidebar_pane"`
+	Selected   string `tmux:"@sidebar_selected_session"`
 	// Session id and options: who started it (dev agent start from a coordinator)
 	SessionID string `tmux:"session_id"`
 	StartedBy string `tmux:"@dev_started_by"`
@@ -232,14 +234,16 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			StartedBy: rs[0].StartedBy}
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, PaneTitle(a.Label, a.Pane.Title, name, host)
+			sess.CostUSD, sess.HasCost = a.Cost, a.CostOK
 			if a.CostOK && !CostHidden(rs[0].CostOpt) {
 				sess.Cost = FormatCost(a.Cost)
 			}
+			i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
+			sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
 			sess.Branch = branch(a.Pane.Path)
 			// Before Order moves a worker into its starter's group
 			sess.Named = sess.Branch != "" && name == SessionName(sess.Group, sess.Branch)
 			if viewed {
-				i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
 				sess.PR = pr(a.Pane.ID, rs[i].PR, rs[i].PRGen, a.Pane.Path, sess.Branch)
 			}
 		}

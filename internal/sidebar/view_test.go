@@ -34,17 +34,17 @@ func TestViewRenderGolden(t *testing.T) {
 				"",
 				" \x1b[38;2;84;84;109m─\x1b[0m \x1b[38;2;114;113;105mapi\x1b[0m \x1b[38;2;84;84;109m──────────────────────────────\x1b[0m",
 				"  \x1b[38;2;192;163;110m●\x1b[0m gamma                    \x1b[38;2;114;113;105m main\x1b[0m  \x1b[38;2;84;84;109m×\x1b[0m",
-				"    \x1b[38;2;114;113;105mClaude · working · Fix login\x1b[0m",
+				"    \x1b[38;2;114;113;105mworking · Fix login\x1b[0m",
 				"",
 				" \x1b[38;2;84;84;109m─\x1b[0m \x1b[38;2;114;113;105mweb\x1b[0m \x1b[38;2;84;84;109m──────────────────────────────\x1b[0m",
 				"  \x1b[38;2;228;104;118m●\x1b[0m \x1b[1malpha\x1b[0m \x1b[38;2;114;113;105m feature/very-long-branc…\x1b[0m \x1b[38;2;84;84;109m×\x1b[0m",
-				"    \x1b[38;2;228;104;118mClaude · waiting\x1b[0m",
+				"    \x1b[38;2;228;104;118mwaiting\x1b[0m",
 				"  \x1b[38;2;84;84;109m○\x1b[0m beta                            \x1b[38;2;84;84;109m×\x1b[0m",
 				"    \x1b[38;2;84;84;109mno agent\x1b[0m",
 				"\x1b[48;2;42;42;55m  \x1b[38;2;114;113;105m●\x1b[0m\x1b[48;2;42;42;55m delta                           \x1b[38;2;228;104;118m×\x1b[0m\x1b[48;2;42;42;55m   \x1b[0m",
 				"\x1b[48;2;42;42;55m    \x1b[38;2;114;113;105mCodex · b on a\x1b[0m\x1b[48;2;42;42;55m                      \x1b[0m",
 				"  \x1b[38;2;152;187;108m●\x1b[0m averyveryverylongsessionnameth… \x1b[38;2;84;84;109m×\x1b[0m",
-				"    \x1b[38;2;114;113;105mClaude · idle · a very long title …\x1b[0m",
+				"    \x1b[38;2;114;113;105midle · a very long title that will…\x1b[0m",
 				"", "", "", "", "", "", "", "",
 				" \x1b[38;2;84;84;109mj/k ⏎  d new  x kill  r ren  q back\x1b[0m",
 			},
@@ -61,7 +61,7 @@ func TestViewRenderGolden(t *testing.T) {
 				"",
 				" \x1b[38;2;84;84;109m─\x1b[0m \x1b[38;2;114;113;105mweb\x1b[0m \x1b[38;2;84;84;109m────\x1b[0m",
 				"  \x1b[38;2;192;163;110m●\x1b[0m alpha",
-				"    \x1b[38;2;114;113;105mClaude ·…\x1b[0m",
+				"    \x1b[38;2;114;113;105mworking …\x1b[0m",
 				"\x1b[48;2;42;42;55m  \x1b[38;2;84;84;109m○\x1b[0m\x1b[48;2;42;42;55m \x1b[1mbeta\x1b[0m\x1b[48;2;42;42;55m      \x1b[0m",
 				"\x1b[48;2;42;42;55m    \x1b[38;2;84;84;109mno agent\x1b[0m\x1b[48;2;42;42;55m  \x1b[0m",
 				"", "", "", "", "",
@@ -303,9 +303,9 @@ func TestViewPRTag(t *testing.T) {
 	}}}
 	f := m.render()
 	for i, want := range map[int]string{
-		4: "    \x1b[38;2;152;187;108m#12 open\x1b[0m\x1b[38;2;114;113;105m · Claude · idle · a long …\x1b[0m",
+		4: "    \x1b[38;2;152;187;108m#12 open\x1b[0m\x1b[38;2;114;113;105m · idle · a long title tha…\x1b[0m",
 		6: "\x1b[48;2;42;42;55m    \x1b[38;2;84;84;109m#3 draft\x1b[0m\x1b[48;2;42;42;55m\x1b[38;2;114;113;105m · Claude\x1b[0m\x1b[48;2;42;42;55m                   \x1b[0m",
-		8: "    \x1b[38;2;192;163;110m#9 merged\x1b[0m\x1b[38;2;228;104;118m · Claude · waiting\x1b[0m",
+		8: "    \x1b[38;2;192;163;110m#9 merged\x1b[0m\x1b[38;2;228;104;118m · waiting\x1b[0m",
 	} {
 		if f.lines[i] != want {
 			t.Errorf("line %d:\n got %q\nwant %q", i, f.lines[i], want)
@@ -342,17 +342,17 @@ func TestViewCost(t *testing.T) {
 		m := Model{snap: snapshot{width: width, height: 8, current: "x", sessions: []Session{s}}}
 		return ansi.Strip(m.render().lines[4])
 	}
-	if got, want := line(40, session), "    Claude · idle · $1.24 · Fix login"; got != want {
+	if got, want := line(40, session), "    idle · $1.24 · Fix login"; got != want {
 		t.Errorf("cost line = %q, want %q", got, want)
 	}
-	if got, want := line(31, session), "    Claude · idle · $1.24 · F…"; got != want {
+	if got, want := line(31, session), "    idle · $1.24 · Fix login"; got != want {
 		t.Errorf("title cut after the cost = %q, want %q", got, want)
 	}
-	if got, want := line(30, session), "    Claude · idle · $1.24"; got != want {
+	if got, want := line(30, session), "    idle · $1.24 · Fix login"; got != want {
 		t.Errorf("no room for the title = %q, want %q", got, want)
 	}
 	// A cost that doesn't fit whole is left out, not cut
-	if got, want := line(24, session), "    Claude · idle · Fi…"; got != want {
+	if got, want := line(24, session), "    idle · $1.24 · Fix…"; got != want {
 		t.Errorf("no room for the cost = %q, want %q", got, want)
 	}
 	if got := line(40, Session{Name: "app", Group: "app", Agent: "Claude", State: "idle"}); strings.Contains(got, "$") {
@@ -380,13 +380,13 @@ func TestViewSelectedTitleWraps(t *testing.T) {
 	f := m.render()
 	want := []string{
 		"  ● a                               ×",
-		"    Claude · idle · $18.42",
+		"    idle · $18.42",
 		"    v0.35.0 dev app startup and sidebar",
 		"    layout review",
 		"  └ ● b                             ×",
-		"      #7 open · Claude · waiting · v0.…",
+		"      #7 open · waiting · $0.85 · v0.3…",
 		"  ● c                               ×",
-		"    Claude · idle · Fix login",
+		"    idle · Fix login",
 	}
 	if got := strip(f, 3, 11); !slices.Equal(got, want) {
 		t.Errorf("a selected:\n got %q\nwant %q", got, want)
@@ -409,9 +409,9 @@ func TestViewSelectedTitleWraps(t *testing.T) {
 	f = m.render()
 	want = []string{
 		"  ● a                               ×",
-		"    Claude · idle · $18.42 · v0.35.0 d…",
+		"    idle · $18.42 · v0.35.0 dev app st…",
 		"  └ ● b                             ×",
-		"      #7 open · Claude · waiting",
+		"      #7 open · waiting · $0.85",
 		"      v0.35.0 dev app startup and",
 		"      sidebar layout review",
 		"  ● c                               ×",
@@ -428,22 +428,22 @@ func TestViewSelectedTitleWraps(t *testing.T) {
 
 	// A title that fits stays on the meta line
 	m.selected = "c"
-	if got := strip(m.render(), 7, 9); !slices.Equal(got, []string{"  ● c                               ×", "    Claude · idle · Fix login"}) {
+	if got := strip(m.render(), 7, 9); !slices.Equal(got, []string{"  ● c                               ×", "    idle · Fix login"}) {
 		t.Errorf("c selected: %q", got)
 	}
 
 	// Wrapped lines that would push a session under the bottom row (no scrolling): the title stays cut
 	m.selected, m.snap.height = "a", 11
-	if got := strip(m.render(), 4, 11); !slices.Equal(got, []string{"    Claude · idle · $18.42 · v0.35.0 d…",
-		"  └ ● b                             ×", "      #7 open · Claude · waiting · v0.…",
-		"  ● c                               ×", "    Claude · idle · Fix login", "", ansi.Strip(hint)}) {
+	if got := strip(m.render(), 4, 11); !slices.Equal(got, []string{"    idle · $18.42 · v0.35.0 dev app st…",
+		"  └ ● b                             ×", "      #7 open · waiting · $0.85 · v0.3…",
+		"  ● c                               ×", "    idle · Fix login", "", ansi.Strip(hint)}) {
 		t.Errorf("one line short: %q", got)
 	}
 	m.snap.height = 12
-	if got := strip(m.render(), 4, 12); !slices.Equal(got, []string{"    Claude · idle · $18.42",
+	if got := strip(m.render(), 4, 12); !slices.Equal(got, []string{"    idle · $18.42",
 		"    v0.35.0 dev app startup and sidebar", "    layout review",
-		"  └ ● b                             ×", "      #7 open · Claude · waiting · v0.…",
-		"  ● c                               ×", "    Claude · idle · Fix login", ansi.Strip(hint)}) {
+		"  └ ● b                             ×", "      #7 open · waiting · $0.85 · v0.3…",
+		"  ● c                               ×", "    idle · Fix login", ansi.Strip(hint)}) {
 		t.Errorf("tall enough: %q", got)
 	}
 }
@@ -456,15 +456,15 @@ func TestViewSelectedTitleFits(t *testing.T) {
 		return []string{strings.TrimRight(ansi.Strip(f.lines[4]), " "), strings.TrimRight(ansi.Strip(f.lines[5]), " ")}
 	}
 	s := Session{Name: "a", Group: "g", Agent: "Claude", State: "idle", Cost: "$18.42", Title: "0123456789"}
-	if got, want := line(40, s), []string{"    Claude · idle · $18.42 · 0123456789", ""}; !slices.Equal(got, want) {
+	if got, want := line(31, s), []string{"    idle · $18.42 · 0123456789", ""}; !slices.Equal(got, want) {
 		t.Errorf("exact fit = %q, want %q", got, want)
 	}
 	s.Title += "x"
-	if got, want := line(40, s), []string{"    Claude · idle · $18.42", "    0123456789x"}; !slices.Equal(got, want) {
+	if got, want := line(31, s), []string{"    idle · $18.42", "    0123456789x"}; !slices.Equal(got, want) {
 		t.Errorf("one column over = %q, want %q", got, want)
 	}
 	s.Cost, s.Title = "$1234.56", "abc"
-	if got, want := line(24, s), []string{"    Claude · idle · abc", ""}; !slices.Equal(got, want) {
+	if got, want := line(17, s), []string{"    idle · abc", ""}; !slices.Equal(got, want) {
 		t.Errorf("cost dropped = %q, want %q", got, want)
 	}
 }
@@ -490,9 +490,9 @@ func TestViewIndentsWorkers(t *testing.T) {
 	}
 	want := []string{
 		"  ● herd-app                        ×",
-		"    Claude · idle",
+		"    idle",
 		"  └ ● app-fix                       ×",
-		"      #7 open · Claude · working", // the cost doesn't fit whole past the indent
+		"      #7 open · working · $0.42", // the cost doesn't fit whole past the indent
 		"    └ ○ app-fix-sub                 ×",
 		"        no agent",
 	}
@@ -553,5 +553,117 @@ func TestListLines(t *testing.T) {
 	}
 	if got := listLines(sessions); got != drawn || got != 11 {
 		t.Errorf("listLines = %d, render drew %d, want 11", got, drawn)
+	}
+}
+
+func TestViewAgentName(t *testing.T) {
+	m := Model{snap: snapshot{width: 40, height: 14, current: "x", sessions: []Session{
+		{Name: "a", Group: "g", Agent: "Claude", State: "idle", Title: "t"},
+		{Name: "b", Group: "g", Agent: "Codex", State: "idle", Title: "t"},
+		{Name: "c", Group: "g", Agent: "Grok", State: "working"},
+		{Name: "d", Group: "g", Agent: "Claude"},
+	}}}
+	f := m.render()
+	for i, want := range map[int]string{4: "    idle · t", 6: "    Codex · idle · t", 8: "    Grok · working", 10: "    Claude"} {
+		if got := strings.TrimRight(ansi.Strip(f.lines[i]), " "); got != want {
+			t.Errorf("line %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func rollupSessions() []Session {
+	return []Session{
+		{Name: "boss", Group: "g", Boss: true, ID: "$1", Agent: "Claude", State: "idle", Title: "t", Cost: "$1.00", CostUSD: 1, HasCost: true},
+		{Name: "w1", Group: "g", ID: "$2", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true, Cost: "$2.50", CostUSD: 2.5, HasCost: true},
+		{Name: "w2", Group: "g", ID: "$3", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "working"},
+		{Name: "w3", Group: "g", ID: "$4", StartedBy: "$3", Depth: 2, Agent: "Claude", State: "working", Cost: "$0.50", CostUSD: 0.5, HasCost: true},
+		{Name: "solo", Group: "g", Boss: true, ID: "$5", Agent: "Claude", State: "idle"},
+	}
+}
+
+func TestViewBossRollup(t *testing.T) {
+	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}
+	f := m.render()
+	var got []string
+	for _, l := range f.lines[3:14] {
+		got = append(got, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	want := []string{
+		"  ● boss                            ×",
+		"    idle · $1.00 · t",
+		"    1 need you · 2 working · $4.00",
+		"  └ ● w1                            ×",
+		"      waiting · $2.50",
+		"  └ ● w2                            ×",
+		"      working",
+		"    └ ● w3                          ×",
+		"        working · $0.50",
+		"  ● solo                            ×",
+		"    idle",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("rows =\n%q\nwant\n%q", got, want)
+	}
+	if !strings.Contains(f.lines[5], red+"1 need you") {
+		t.Errorf("need-you colour: %q", f.lines[5])
+	}
+	wantRows := []rowStart{{3, "boss"}, {6, "w1"}, {8, "w2"}, {10, "w3"}, {12, "solo"}}
+	if !slices.Equal(f.rows, wantRows) {
+		t.Errorf("rows = %v, want %v", f.rows, wantRows)
+	}
+	// A click on the roll-up line selects its boss, not exact so × doesn't close it
+	if s, exact, _ := rowAt(f.rows, 5); s != "boss" || exact {
+		t.Errorf("click on roll-up = %q exact %v", s, exact)
+	}
+}
+
+func TestViewBossRollupVariants(t *testing.T) {
+	line := func(width int, ss []Session) string {
+		m := Model{snap: snapshot{width: width, height: 20, current: "x", sessions: ss}}
+		return strings.TrimRight(ansi.Strip(m.render().lines[5]), " ")
+	}
+	idle := []Session{
+		{Name: "boss", Group: "g", Boss: true, ID: "$1", Agent: "Claude", State: "idle"},
+		{Name: "w", Group: "g", ID: "$2", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "idle"},
+	}
+	idle = append(idle, Session{Name: "r", Group: "g", ID: "$3", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting"})
+	idle[1].State = "idle"
+	if got, want := line(40, idle), "    2 idle"; got != want { // an idle reminder (waiting, not deciding) is idle
+		t.Errorf("all idle = %q, want %q", got, want)
+	}
+	if !strings.Contains(newRollupFrame(idle).lines[5], muted+"2 idle") {
+		t.Error("idle count not muted")
+	}
+	if got, want := line(27, rollupSessions()), "    1 need you · 2 working"; got != want {
+		t.Errorf("cost cut before counts = %q, want %q", got, want)
+	}
+	if got, want := line(18, rollupSessions()), "    1 need you ·…"; got != want {
+		t.Errorf("counts cut = %q, want %q", got, want)
+	}
+	// @dev_cost off hides line 2's cost (Cost "") but not the roll-up's total
+	hidden := rollupSessions()
+	for i := range hidden {
+		hidden[i].Cost = ""
+	}
+	if got, want := line(40, hidden), "    1 need you · 2 working · $4.00"; got != want {
+		t.Errorf("cost hidden = %q, want %q", got, want)
+	}
+	// Selected: full-width selection background on the roll-up line
+	m := Model{selected: "boss", snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}
+	if l := m.render().lines[5]; !strings.HasPrefix(l, selectedBG) || ansi.StringWidth(l) != 40 {
+		t.Errorf("selected roll-up line: %q", l)
+	}
+}
+
+func newRollupFrame(ss []Session) frame {
+	return Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: ss}}.render()
+}
+
+func TestViewBossRollupListLines(t *testing.T) {
+	ss := rollupSessions()
+	m := Model{snap: snapshot{width: 40, height: 40, current: "x", sessions: ss}}
+	rows := m.render().rows
+	if got, drawn := listLines(ss), rows[len(rows)-1].line+2; got != drawn || got != 14 {
+		t.Errorf("listLines = %d, render drew %d, want 14", got, drawn)
 	}
 }

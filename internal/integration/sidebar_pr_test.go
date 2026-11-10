@@ -37,16 +37,16 @@ esac`, "gh")
 	}
 	actSwitch(d, "a")
 	sidebar := actEnsure(d, "a")
-	waitScreen(t, d.server, sidebar, "#12 open · Claude · idle")
+	waitScreen(t, d.server, sidebar, "#12 open · idle")
 
 	row, ok := actRow(d, sidebar, "pr")
 	if !ok {
 		t.Fatalf("no row for pr:\n%s", strings.Join(actScreen(d, sidebar), "\n"))
 	}
 	screen := actScreen(d, sidebar)
-	check(t, "pr meta line", strings.TrimSpace(screen[row+1]), "#12 open · Claude · idle · pr task")
+	check(t, "pr meta line", strings.TrimSpace(screen[row+1]), "#12 open · idle · pr task")
 	nopr, _ := actRow(d, sidebar, "nopr")
-	check(t, "nopr meta line", strings.TrimSpace(screen[nopr+1]), "Claude · idle · nopr task")
+	check(t, "nopr meta line", strings.TrimSpace(screen[nopr+1]), "idle · nopr task")
 
 	webCalls := func() string {
 		b, err := os.ReadFile(d.stubLog)
@@ -116,4 +116,18 @@ esac`, "gh")
 	actSwitch(d, "b")
 	waitScreen(t, d.server, b, "#35 open")
 	check(t, "lookups after the switch", strconv.Itoa(lookups()), "2")
+}
+
+// viewGitRepo returns a temp repository with one commit on branch.
+func viewGitRepo(t *testing.T, branch string) string {
+	t.Helper()
+	dir := tempDir(t)
+	// No hooks: the user's global core.hooksPath must not run on a test commit
+	git := []string{"-C", dir, "-c", "core.hooksPath=" + t.TempDir(), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}
+	for _, args := range [][]string{{"init", "-q", "-b", branch}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		if out, err := exec.Command("git", append(git, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
 }
