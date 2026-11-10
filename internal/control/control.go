@@ -52,6 +52,10 @@ type Agent struct {
 	Boss bool `json:"boss,omitempty"`
 	// Outside marks a worker a coordinator outside tmux started for StartedBy (dev agent start --boss).
 	Outside bool `json:"outside,omitempty"`
+	// Model and Effort are the --model and --effort its Claude was started with (dev agent start, dev boss), not
+	// a later /model or /effort; omitted when it started without that flag.
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 	// HideCost is @dev_cost off: text output leaves the cost out, --json keeps cost_usd.
 	HideCost bool `json:"-"`
 }
@@ -75,6 +79,8 @@ type row struct {
 	Herd      string `tmux:"@dev_herd"`
 	CostOpt   string `tmux:"@dev_cost"`
 	Outside   string `tmux:"@dev_started_outside"`
+	Model     string `tmux:"@dev_model"`
+	Effort    string `tmux:"@dev_effort"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -136,7 +142,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
-			Outside: r.Outside != "", HideCost: sidebar.CostHidden(r.CostOpt),
+			Outside: r.Outside != "", Model: r.Model, Effort: r.Effort, HideCost: sidebar.CostHidden(r.CostOpt),
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost

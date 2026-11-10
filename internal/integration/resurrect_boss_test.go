@@ -25,9 +25,9 @@ func TestResurrectBoss(t *testing.T) {
 		out, _ := d.Try("display", "-t", target, "-p", format)
 		return out
 	}
-	openBoss := func(desc string) {
+	openBoss := func(desc string, flags ...string) {
 		t.Helper()
-		cmd := exec.Command(devBin, "boss", "app")
+		cmd := exec.Command(devBin, append([]string{"boss", "app"}, flags...)...)
 		cmd.Env = env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("dev boss app (%s): %v: %s", desc, err, out)
@@ -35,8 +35,16 @@ func TestResurrectBoss(t *testing.T) {
 		check(t, "client on the boss ("+desc+")", d.T("list-clients", "-F", "#{client_session}"), "boss-app")
 	}
 
-	openBoss("new")
+	openBoss("new", "--model", "opus", "--effort", "medium")
 	coordinator := display("=boss-app:1.2", "#{pane_id}")
+	if start := display(coordinator, "#{pane_start_command}"); !strings.Contains(start, "pty-wrap -- claude --model opus --effort medium --append-system-prompt") {
+		t.Errorf("coordinator not started with the model and effort: %q", start)
+	}
+	flagged := exec.Command(devBin, "boss", "app", "--effort", "low")
+	flagged.Env = env
+	out, err := flagged.CombinedOutput()
+	check(t, "another effort for an existing boss", boolStr(err != nil)+" "+string(out),
+		"1 ❌ session boss-app was started with --effort medium, not low: --model and --effort only apply to a new session\n")
 	waitFor(t, "previews running", func() bool { return display("=boss-app:1.3", "#{pane_current_command}") == "dev" })
 	transcript := filepath.Join(tempDir(t), "b1.jsonl")
 	writeFile(t, transcript, "{}\n")
@@ -52,7 +60,7 @@ func TestResurrectBoss(t *testing.T) {
 	d.T("run-shell", save+" quiet")
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
-	check(t, "boss saved", string(state), "boss-app\tapp\t1.1\n:started_by\tworker\tboss-app\n:boss\tboss-app\t1.2\t1.3\n"+
+	check(t, "boss saved", string(state), "boss-app\tapp\t1.1\n:started_by\tworker\tboss-app\n:started_with\tboss-app\topus\tmedium\n:boss\tboss-app\t1.2\t1.3\n"+
 		":agent\tboss-app\t1.2\tclaude\tb1\t"+transcript+"\t"+dir+"\n")
 	if err := os.Truncate(d.stubLog, 0); err != nil {
 		t.Fatal(err)
@@ -67,7 +75,8 @@ func TestResurrectBoss(t *testing.T) {
 		c, _ := d.Try("list-clients", "-F", "#{client_session}")
 		return c == "boot"
 	})
-	openBoss("restored")
+	// With the model and effort it was started with, the restored boss is attached, not refused
+	openBoss("restored", "--model", "opus", "--effort", "medium")
 	sessions := strings.Split(d.T("ls", "-F", "#{session_name}"), "\n")
 	sort.Strings(sessions)
 	check(t, "sessions restored", strings.Join(sessions, " "), "boot boss-app boss-zzz worker")
@@ -79,7 +88,7 @@ func TestResurrectBoss(t *testing.T) {
 		return strings.Contains(string(log), coordinator+" claude")
 	})
 	log, _ := os.ReadFile(d.stubLog)
-	if line := strings.TrimSpace(string(log)); !strings.HasPrefix(line, coordinator+" claude --resume b1 --append-system-prompt You are the coordinator") ||
+	if line := strings.TrimSpace(string(log)); !strings.HasPrefix(line, coordinator+" claude --resume b1 --effort medium --append-system-prompt You are the coordinator") ||
 		!strings.HasSuffix(line, "--remote-control=boss-app") {
 		t.Errorf("coordinator command: %q", line)
 	}
@@ -91,6 +100,8 @@ func TestResurrectBoss(t *testing.T) {
 	sidebar := d.T("show-option", "-qv", "-t", "=boss-app:", "@sidebar_pane")
 	check(t, "sidebar rebuilt", devSidebarStart(display(sidebar, "#{pane_start_command}")), "true")
 	check(t, "worker still the boss's", d.T("show-option", "-qv", "-t", "=worker:", "@dev_started_by"), "boss-app")
+	check(t, "model and effort still the boss's", d.T("show-option", "-qv", "-t", "=boss-app:", "@dev_model")+" "+
+		d.T("show-option", "-qv", "-t", "=boss-app:", "@dev_effort"), "opus medium")
 	check(t, "no restore warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
 	openBoss("again")
 	check(t, "attached, not recreated", display("=boss-app:1.2", "#{pane_id}"), coordinator)

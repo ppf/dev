@@ -30,7 +30,7 @@ The first two rules are for `dev boss`; the rest hold everywhere.
 ## Discover
 
 ```bash
-dev agent list --json          # [{session, pane, agent, state, queued?, project, branch, path, cost_usd?, started_by?, boss?, outside?}]
+dev agent list --json          # [{session, pane, agent, state, queued?, project, branch, path, cost_usd?, started_by?, boss?, outside?, model?, effort?}]
 dev agent list --mine --json   # only your workers: the sessions you started with dev agent start
 dev agent get <target> --json
 ```
@@ -39,15 +39,41 @@ dev agent get <target> --json
 
 Outside tmux (e.g. the Claude desktop app), pass `--boss <session>` (a `dev boss` session) to `start`, `list --mine` and `close`: you act as that boss. The workers you start are yours, not its coordinator's: they're marked `outside: true`, its inbox notes about them tell it to leave them to you, and its `close` refuses them. Their notes go to its inbox, not to you: `wait` on them yourself.
 
+`model` and `effort` are what a session's Claude was started with (`start --model`, `--effort`), so you see what you chose; they're left out when it started without that flag, and a later `/model` or `/effort` doesn't change them.
+
 Your workers ("child sessions") are the ones `--mine` lists, less any `outside: true` ones; `started_by` names the session that started a worker, and `boss: true` marks a coordinator, never a worker. Every other session is the user's own: drive it only when asked. Use `dev agent` for dev sessions, not Claude's own session or agent tools.
 
 ## Start a worker
 
 ```bash
-dev agent start <project> <worktree> --json   # creates the worktree and session if missing, never attaches
+dev agent start <project> <worktree> --model <model> --effort <effort> --json   # creates the worktree and session if missing, never attaches
 ```
 
-Give each worker its own worktree (a short branch-like name: `fix-login`, `docs/api`). It returns once the worker's Claude registered (default `--timeout 1m`); a timeout prints the worker's screen — often a trust or login prompt for the user. An existing session is reused, not recreated. `--agent codex` starts a Codex worker instead (only when the user asks for Codex). It returns once codex runs, before it may show a trust or login screen: `read` it, relay it with AskUserQuestion and answer with `send-keys` per the user's pick before the first prompt. `prompt --wait`/`wait` work only if the user set up its Codex hooks, else use plain `prompt` and `read`. `--agent grok` works the same for a Grok worker (only when the user asks for Grok; its Grok hooks). A reused session running another agent than `--agent` asks for is an error.
+Give each worker its own worktree (a short branch-like name: `fix-login`, `docs/api`). It returns once the worker's Claude registered (default `--timeout 1m`); a timeout prints the worker's screen — often a trust or login prompt for the user. An existing session is reused, not recreated; a `--model` or `--effort` other than the one it was started with is an error (see [Model and effort](#model-and-effort)). `--agent codex` starts a Codex worker instead (only when the user asks for Codex). It returns once codex runs, before it may show a trust or login screen: `read` it, relay it with AskUserQuestion and answer with `send-keys` per the user's pick before the first prompt. `prompt --wait`/`wait` work only if the user set up its Codex hooks, else use plain `prompt` and `read`. `--agent grok` works the same for a Grok worker (only when the user asks for Grok; its Grok hooks). A reused session running another agent than `--agent` asks for is an error.
+
+## Model and effort
+
+<!-- boss-core:model-effort -->
+Set every Claude worker's model and effort when you start it: one left on the user's default runs their most expensive setup for everything. What counts is cost and rate limit per finished task. Starting defaults, to tune to the project and the user:
+
+| Work | Model | Effort |
+| --- | --- | --- |
+| Everyday engineering: features, debugging, multi-PR work, anything you're unsure about | `opus` | `medium` |
+| Well-scoped: a bug fix or feature against a clear spec, review-finding fixes, tests, docs, release chores, repeated investigation or review tasks | `sonnet` | `medium` |
+| Reading only, where a wrong answer is cheap to spot: find files, read logs, summarize, triage | `haiku` or `sonnet` | not set |
+| The hardest: major refactors and migrations, architecture, long unattended runs | `fable` | `medium` |
+
+- **A clear spec isn't enough on its own:** a migration or performance work can be well specified and still need `opus`.
+- **When a result falls short,** in this order: make sure the worker can check its own work (a test, a build, a script); raise effort one level; then the next model up, starting one effort level lower. Past `high`, try the next model up before `xhigh`.
+- **A model switch means a fresh worker,** not `/model` in a running one: the prompt cache and the earlier reasoning don't carry over.
+- **"ultracode" in a brief** makes the worker run a workflow of many agents. It is worth it for work too big for one context that splits into many independent pieces: building something from scratch out of a large pile of files (diagrams from many source files), audits, migrations, broad research. Not for ordinary features or fixes.
+  - **Ask before every use.** You may propose it when a task fits: ask through AskUserQuestion, saying why the task fits and that it starts many agents. An earlier yes doesn't cover the next task; no answer or a no means a normal worker. The user naming ultracode for a task themselves is the yes for that task.
+  - **On a yes:** a fresh worker on `opus` (effort by the table), with the word "ultracode" in its brief. Never on `fable`: a workflow's agents run on the worker's model, and on `fable` they use up the limit too fast.
+<!-- /boss-core:model-effort -->
+
+Here they are `dev agent start <project> <worktree> --model <model> --effort <effort>`, both on every start of a Claude worker (no `--effort` where the table sets none). `--effort` takes `low`, `medium`, `high`, `xhigh` or `max`; `--model` an alias or a model id. They apply only to a new Claude session: for a session that exists, `start` takes them only when they equal what it was started with (a retried start), and fails otherwise, naming those; with `--agent codex` or `grok` it always fails. So a higher effort is a fresh worker too, as `/effort` in a running one saves as the user's default (see [Prompt and wait](#prompt-and-wait)). A worker keeps both when dev restarts it (`dev resurrect`).
+
+"ultracode" counts only in a short prompt: `prompt` pastes the brief, and Claude Code doesn't read the keyword from a pasted brief of more than about three lines. So send the brief first, ending it with "Don't start yet: reply READY", then the keyword in a one-line prompt of its own: `dev agent prompt <target> --wait "ultracode: go ahead with the brief above"`.
 
 ## Prompt and wait
 

@@ -1,10 +1,12 @@
 package control
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +23,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "")
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "")
 }
 
 func TestList(t *testing.T) {
@@ -562,8 +564,11 @@ func TestAwaitAgent(t *testing.T) {
 
 func TestListStartedByAndHerd(t *testing.T) {
 	outside := map[string]string{"by-name": "1"} // started with --boss
+	// Started with --model and --effort, or only one of them
+	model, effort := map[string]string{"fix-login": "sonnet", "herd": "opus"}, map[string]string{"fix-login": "medium", "mine-too": "low"}
 	line := func(session, id, pane, startedBy, herd string) string {
-		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "", outside[session])
+		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "", outside[session],
+			model[session], effort[session])
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
 		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
@@ -589,6 +594,14 @@ func TestListStartedByAndHerd(t *testing.T) {
 		"orphan": "/false/false", "by-name": "herd/false/true", "not-a-boss": "/false/false"}
 	if !maps.Equal(got, want) {
 		t.Errorf("started_by/herd/outside = %v, want %v", got, want)
+	}
+	started, err := json.Marshal(agents[:4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := regexp.MustCompile(`"(model|effort)":"[^"]*"|"session":"user"`).FindAllString(string(started), -1); !slices.Equal(got,
+		[]string{`"model":"opus"`, `"model":"sonnet"`, `"effort":"medium"`, `"effort":"low"`, `"session":"user"`}) {
+		t.Errorf("model and effort in JSON = %q, want each only where it was given", got)
 	}
 	mine, err := StartedBy(c, agents, "%1")
 	if err != nil || len(mine) != 3 || mine[0].Session != "fix-login" || mine[1].Session != "mine-too" || mine[2].Session != "by-name" {
@@ -631,7 +644,7 @@ func TestBossPane(t *testing.T) {
 }
 
 func TestListCostOff(t *testing.T) {
-	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "")
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
 	if err != nil {
 		t.Fatal(err)

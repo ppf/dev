@@ -26,13 +26,14 @@ var ErrShown = errors.New("open failed")
 
 // Options select the session to open.
 type Options struct {
-	Path     string // project directory, ~ already expanded
-	Name     string // project key: session base name and @project
-	Worktree string // worktree name under .claude/worktrees; empty = main checkout
-	Detach   bool   // dev agent start: create the session if missing; no restore, title or attach
-	Agent    string // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
-	Worker   bool   // dev agent start from a tmux pane or with --boss (marked @dev_started_by): claude starts without Remote Control
-	Boss     string // dev agent start --boss: the boss session whose window sizes a new session
+	Path     string      // project directory, ~ already expanded
+	Name     string      // project key: session base name and @project
+	Worktree string      // worktree name under .claude/worktrees; empty = main checkout
+	Detach   bool        // dev agent start: create the session if missing; no restore, title or attach
+	Agent    string      // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
+	Worker   bool        // dev agent start from a tmux pane or with --boss (marked @dev_started_by): claude starts without Remote Control
+	Boss     string      // dev agent start --boss: the boss session whose window sizes a new session
+	Start    agent.Start // dev agent start --model, --effort: what a new session's claude starts with
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -89,19 +90,24 @@ func Run(c *tmux.Client, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude), session, opts.Worker)
+	agentCmd, err := agentCommand(cmp.Or(opts.Agent, agent.Claude), session, opts.Worker, opts.Start)
 	if err != nil {
 		return err
+	}
+	if found {
+		if err := opts.Start.CheckExisting(c, session); err != nil {
+			return err
+		}
 	}
 	if opts.Detach {
 		if found {
 			return nil
 		}
-		return createLayout(c, session, opts.Name, path, agentCmd, width, height)
+		return createLayout(c, session, opts.Name, path, agentCmd, opts.Start, width, height)
 	}
 	if found {
 		ensureSidebar(c, session)
-	} else if err := createLayout(c, session, opts.Name, path, agentCmd, width, height); err != nil {
+	} else if err := createLayout(c, session, opts.Name, path, agentCmd, opts.Start, width, height); err != nil {
 		return err
 	}
 	return attach(c, session, inTmux)
@@ -248,12 +254,13 @@ func hasSession(c *tmux.Client, name string) (bool, error) {
 }
 
 // agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control
-// unless a worker's, under dev pty-wrap so its images get through tmux, its clean exit closing the session.
-func agentCommand(kind, session string, worker bool) (string, error) {
+// unless a worker's, with start's model and effort, under dev pty-wrap so its images get through tmux, its clean
+// exit closing the session.
+func agentCommand(kind, session string, worker bool, start agent.Start) (string, error) {
 	if kind != agent.Claude {
 		return kind, nil
 	}
-	argv, err := ptywrap.ClosingArgv(agent.ClaudeArgv(session, worker)...)
+	argv, err := ptywrap.ClosingArgv(agent.ClaudeArgv(session, worker, start.Args(false)...)...)
 	if err != nil {
 		return "", err
 	}
@@ -261,8 +268,8 @@ func agentCommand(kind, session string, worker bool) (string, error) {
 }
 
 // createLayout builds the default session: Agent (agentCmd | lazygit over a terminal, sidebar on the
-// left) and Files (nvim | two terminals), finishing on the agent pane.
-func createLayout(c *tmux.Client, session, project, path, agentCmd string, width, height int) error {
+// left) and Files (nvim | two terminals), finishing on the agent pane; start is recorded on the session.
+func createLayout(c *tmux.Client, session, project, path, agentCmd string, start agent.Start, width, height int) error {
 	target := tmux.SessionTarget(session)
 	sidebarCmd, err := sidebar.PaneCommand()
 	if err != nil {
@@ -280,6 +287,9 @@ func createLayout(c *tmux.Client, session, project, path, agentCmd string, width
 	run("new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height),
 		"-s", session, "-c", path, "-n", "Agent")
 	run("set-option", "-t", target, "@project", project)
+	if set := start.SetOptions(target); set != nil {
+		run(set...)
+	}
 	run("send-keys", "-t", target+"1", agentCmd, "Enter")
 	claude := run("display-message", "-t", target+"1.1", "-p", "#{pane_id}")
 	lazygit := run("split-window", "-t", claude, "-h", "-l", "50%", "-c", path, "-PF", "#{pane_id}")

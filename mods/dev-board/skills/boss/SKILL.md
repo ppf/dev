@@ -30,9 +30,31 @@ Write a bold title line and one sentence on what it will do, then call `start_se
 - `initiation: "user_asked"` (the user asked for this work), `context: "fresh"`, `use_worktree: true`
 - `title` (under 60 chars), `name` (a short handle: `fix-login`, `docs-api`), `branch_name` (a slug)
 - `prompt`: the brief. `background`: the goal and decisions so far, for someone who hasn't seen this conversation (80+ chars)
-- `model`: a cheaper model for read-only or mechanical work; omit otherwise
+- `model`: on every start, by the table under [Model and effort](#model-and-effort)
 
 Never change a worker's Remote Control: it follows the app configuration (on by default). Use `set_remote_control` only when the user asks.
+
+### Model and effort
+
+<!-- boss-core:model-effort -->
+Set every Claude worker's model and effort when you start it: one left on the user's default runs their most expensive setup for everything. What counts is cost and rate limit per finished task. Starting defaults, to tune to the project and the user:
+
+| Work | Model | Effort |
+| --- | --- | --- |
+| Everyday engineering: features, debugging, multi-PR work, anything you're unsure about | `opus` | `medium` |
+| Well-scoped: a bug fix or feature against a clear spec, review-finding fixes, tests, docs, release chores, repeated investigation or review tasks | `sonnet` | `medium` |
+| Reading only, where a wrong answer is cheap to spot: find files, read logs, summarize, triage | `haiku` or `sonnet` | not set |
+| The hardest: major refactors and migrations, architecture, long unattended runs | `fable` | `medium` |
+
+- **A clear spec isn't enough on its own:** a migration or performance work can be well specified and still need `opus`.
+- **When a result falls short,** in this order: make sure the worker can check its own work (a test, a build, a script); raise effort one level; then the next model up, starting one effort level lower. Past `high`, try the next model up before `xhigh`.
+- **A model switch means a fresh worker,** not `/model` in a running one: the prompt cache and the earlier reasoning don't carry over.
+- **"ultracode" in a brief** makes the worker run a workflow of many agents. It is worth it for work too big for one context that splits into many independent pieces: building something from scratch out of a large pile of files (diagrams from many source files), audits, migrations, broad research. Not for ordinary features or fixes.
+  - **Ask before every use.** You may propose it when a task fits: ask through AskUserQuestion, saying why the task fits and that it starts many agents. An earlier yes doesn't cover the next task; no answer or a no means a normal worker. The user naming ultracode for a task themselves is the yes for that task.
+  - **On a yes:** a fresh worker on `opus` (effort by the table), with the word "ultracode" in its brief. Never on `fable`: a workflow's agents run on the worker's model, and on `fable` they use up the limit too fast.
+<!-- /boss-core:model-effort -->
+
+Here the model is `start_session`'s `model`. Set effort only if `start_session` offers a parameter for it; if not, go by model alone.
 
 Starting several at once: check the account's usage (`get_usage`: 5-hour and weekly %) and, when it's high, tell the user before starting; then `mark_chapter` with a short batch title.
 

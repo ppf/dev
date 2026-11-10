@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 )
 
@@ -52,6 +55,19 @@ func TestAgentArgs(t *testing.T) {
 		{[]string{"agent", "close"}, "accepts 1 arg(s), received 0"},
 		{[]string{"agent", "start", "app", ""}, "empty worktree name"},
 		{[]string{"agent", "start", "app", "--agent", "gemini"}, `unknown --agent "gemini", want claude, codex or grok`},
+		{[]string{"agent", "start", "app", "--effort", "ultra"}, `unknown --effort "ultra", want low, medium, high, xhigh, max`},
+		{[]string{"agent", "start", "app", "--effort", ""}, `unknown --effort "", want low, medium, high, xhigh, max`},
+		{[]string{"agent", "start", "app", "--model", ""}, `invalid --model "", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--model", "son net"}, `invalid --model "son net", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--model", "a\tb"}, `invalid --model "a\tb", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--agent", "codex", "--model", "sonnet"}, "--model and --effort only apply to Claude, not --agent codex"},
+		{[]string{"agent", "start", "app", "--agent", "grok", "--effort", "low"}, "--model and --effort only apply to Claude, not --agent grok"},
+		{[]string{"agent", "start", "app", "--model", "a\x1bb"}, `invalid --model "a\x1bb", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--model", "opus;"}, `invalid --model "opus;", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--model=--resume"}, `invalid --model "--resume", want a model alias or id`},
+		{[]string{"boss", "--model", ";"}, `invalid --model ";", want a model alias or id`},
+		{[]string{"boss", "--effort", "ultra"}, `unknown --effort "ultra", want low, medium, high, xhigh, max`},
+		{[]string{"boss", "--model", " "}, `invalid --model " ", want a model alias or id`},
 		{[]string{"agent", "wait", "app", "--until", "done"}, `unknown --until "done", want idle, waiting or settled`},
 		{[]string{"agent", "list", "--boss", "herd"}, "--boss needs --mine"},
 	} {
@@ -65,5 +81,19 @@ func TestAgentCloseOutsideTmux(t *testing.T) {
 	t.Setenv("TMUX_PANE", "")
 	if _, _, err := execute(t, "", "agent", "close", "app"); err == nil || !strings.Contains(err.Error(), "run it inside tmux") {
 		t.Errorf("agent close outside tmux = %v, want an inside-tmux error", err)
+	}
+}
+
+func TestCheckStartAccepts(t *testing.T) {
+	for _, args := range [][]string{nil, {"--model", "claude-opus-5-5[1m]", "--effort", "max"}, {"--model", "arn:aws:bedrock:us-east-1:1:inference-profile/x"}, {"--effort", "low"}} {
+		var start agent.Start
+		cmd := &cobra.Command{}
+		addStartFlags(cmd, &start, "x")
+		if err := cmd.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		if err := checkStart(cmd, start); err != nil {
+			t.Errorf("checkStart(%q) = %v, want none", args, err)
+		}
 	}
 }
