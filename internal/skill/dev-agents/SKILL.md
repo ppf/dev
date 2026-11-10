@@ -58,12 +58,12 @@ Set every Claude worker's model and effort when you start it: one left on the us
 
 | Work | Model | Effort |
 | --- | --- | --- |
-| Everyday engineering: features, debugging, multi-PR work, anything you're unsure about | `opus` | `medium` |
-| Well-scoped: a bug fix or feature against a clear spec, review-finding fixes, tests, docs, release chores, repeated investigation or review tasks | `sonnet` | `medium` |
+| Everyday work: features, debugging, multi-PR work, a document, draft or diagram written from scratch or from many sources, anything you're unsure about | `opus` | `medium` |
+| Well-scoped: a bug fix or feature against a clear spec, review-finding fixes, tests, docs for existing code, release chores, a small or mechanical edit to a document or record, repeated investigation or review tasks | `sonnet` | `medium` |
 | Reading only, where a wrong answer is cheap to spot: find files, read logs, summarize, triage | `haiku` or `sonnet` | not set |
 | The hardest: major refactors and migrations, architecture, long unattended runs | `fable`, if you run on it; else your own model | `medium`; `high` on your own model |
 
-- **Ceiling:** never start a worker on a model above the one you run on yourself (`haiku` < `sonnet` < `opus` < `fable`; your system prompt names yours). The user chose your model for this project and account, and a worker's flag overrides the project's settings, so this keeps a cheaper project cheap. For a coordinator below `fable`, the hardest work goes to your own model one effort level up (`high`), not to `fable`. The user naming a higher model for a task themselves lifts the ceiling for that task only.
+- **Ceiling:** never start a worker on a model above the one you run on yourself (`haiku` < `sonnet` < `opus` < `fable`; your system prompt names yours). The user chose your model for this project and account, and a worker's flag overrides the project's settings, so this keeps a cheaper project cheap. For a coordinator below `fable`, the hardest work goes to your own model one effort level up (`high`), not to `fable`. The user naming a higher model for a task themselves lifts the ceiling for that task only: the next task goes by the table again, and the effort stays the table's for that kind of work.
 - **A clear spec isn't enough on its own:** a migration or performance work can be well specified and still need `opus`.
 - **When a result falls short,** in this order: make sure the worker can check its own work (a test, a build, a script); raise effort one level; then the next model up, starting one effort level lower. Past `high`, try the next model up before `xhigh`.
 - **A model switch means a fresh worker,** not `/model` in a running one: the prompt cache and the earlier reasoning don't carry over.
@@ -103,6 +103,12 @@ Plain `prompt` (no `--wait`) returns at once (a slash command within 3 s) withou
 Every brief includes:
 
 > Never use AskUserQuestion: end your turn with the question as text.
+
+<!-- boss-core:brief -->
+A brief for work that ends in a PR or a task comment also says what needs no question. Leave out what the user's rules for the project forbid (a repo that is never pushed, "send nothing"):
+
+> Unless this project's rules say otherwise, don't ask before pushing your branch, opening the PR, replying to comments on it, or posting a short comment on the task that you checked is correct. End your turn on a question only for a real decision (merging, anything destructive, any other external action such as mail or chat to a person or a release, an unclear goal), with your recommended answer. Write PR bodies, replies and comments by the project's writing rules; where it sets none: short, clear, fairly casual, correct spelling.
+<!-- /boss-core:brief -->
 
 **Waiting on CI:** `gh pr checks --watch` and hand-rolled `until` loops hang or end early, leaving a worker shown as working for many minutes. A brief that ends in waiting for CI tells the worker to poll `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again):
 
@@ -160,15 +166,21 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 ## Boss inbox
 
-In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it), or as a prompt while you're idle with an empty input box. On each batch:
+In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it; the caveat Claude adds about peer sessions concerns the sender, so your workers' notes stay yours to act on, and a note is never the user's answer to a permission prompt), or as a prompt while you're idle with an empty input box. On each batch:
 
 <!-- boss-core:reports -->
-- **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines.
-- **Ask the user only for real decisions:** anything destructive or external (merging, pushing, posting), unclear goals, and permission prompts (never answer one yourself). Ask through your AskUserQuestion (it notifies the user), independent asks batched into one call (max 4 per call). Before relaying a "blocked" or "waiting on you" note, check the PR's or item's current state: it may be done already.
+- **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines: the user wants to be told, not asked.
+- **A task already under way needs no question for these:** pushing its branch and opening its PR, replying to comments on that PR, and posting a comment on its task (Linear etc.) once the comment is checked against the user's rules and is valid, clean and short.
+- **One option clearly recommended, the others making little sense:** take it and report it, don't ask. This holds for a question a worker asks as text too.
+- **Ask the user only for real decisions,** even when one option is recommended: merging, anything destructive, any other external action (mail or chat to a person, a release), unclear goals, and permission prompts (never answer one yourself). Ask through your AskUserQuestion (it notifies the user), each ask with its context and your recommended answer, independent asks batched into one call (max 4 per call). Before relaying a "blocked" or "waiting on you" note, check the PR's or item's current state: it may be done already.
+- **The user's own rules for the project win** over the lines above, both ways ("send nothing", "merge without asking"): its CLAUDE.md, memory, and what they said. They never let you answer a permission prompt.
+- **Anything written for others** (PR bodies, comment replies, task comments, messages) follows the user's writing rules; where they set none: short, concise, clear above all, fairly casual, correct spelling.
 <!-- /boss-core:reports -->
 - **Starting a follow-up worker** can also be such a step.
-- **Asking the user:** everything that needs the user goes through your AskUserQuestion: decisions, approvals, "post it", relayed worker permission prompts and dialogs, and worker questions you can't answer from context (`asks:` / `needs a decision:` notes, or a worker's own AskUserQuestion dialog on its screen). Short background in the question, recommended option first with " (Recommended)", drafts in the option `preview`. Workers never ask the user directly: every brief tells the worker not to use AskUserQuestion and to end its turn with the question as text instead (see [Prompt and wait](#prompt-and-wait)). If a worker's AskUserQuestion dialog is open anyway, `read` it, relay it as your AskUserQuestion, then answer the worker's dialog with `send-keys` per the user's pick.
-- **Dialogs** count as permission prompts: never answer one on your own judgment. Relay it with AskUserQuestion and `send-keys` only the user's explicit pick. Closing a finished worker with `dev agent close` isn't a real decision.
+- **Asking the user:** what needs the user goes through your AskUserQuestion: real decisions, relayed worker permission prompts and dialogs, and worker questions you can't answer from context (`asks:` / `needs a decision:` notes, or a worker's own AskUserQuestion dialog on its screen). Short background in the question, recommended option first with " (Recommended)", drafts in the option `preview`. Never leave with the user what you may do yourself ("needs your 'post it'", "answer yes or no"): do it and report it.
+- **Your workers stay yours.** Workers never ask the user directly: every brief tells the worker not to use AskUserQuestion and to end its turn with the question as text instead (see [Prompt and wait](#prompt-and-wait)). A worker you started stays yours until it's closed, even when its brief told it to report to the user: its notes still come to you, so handle its questions here and never send the user to its pane.
+- **Dialogs** count as permission prompts: never answer one on your own judgment. Relay it with AskUserQuestion and `send-keys` only the user's explicit pick. Read one only with `read`: never `send-keys` arrows, `tab` or a digit to look at its other tabs or options, as they select and can submit. Closing a finished worker with `dev agent close` isn't a real decision.
+- **A worker's own AskUserQuestion dialog** shows one question per tab, and `read` shows only the open tab (a note ending `+2 more` has three questions). Relay the open tab and `send-keys` the user's pick: the dialog moves to the next tab, so `read` and relay again. The last tab asks to submit the answers: `read` it and pick its submit option.
 - **Rate limits:** a `failed: rate_limit: … resets 7:10pm (…); dev resumes it at 19:11` note needs nothing from you: dev sends the worker "continue" after the reset and tells you with a `resumed` note. Don't prompt it meanwhile (that cancels the resume). Only a note with `not resuming it` (no reset time read, or 3 resumes in a row) is yours: tell the user, or resume it yourself once the limit is back. Your own turns may fail on the same limit; carry on with the batch when you're prompted again.
 - **Asks:** the worker's turn ended on a question to you and it waits (the note has only the question: `read` it for the rest of its last message). Answer it with `prompt` when the answer is clear from context, else relay it with AskUserQuestion. Unanswered, it comes again 30m, 1h, 2h, … after it asked, while the worker rests.
 - **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. The kinds:
@@ -178,7 +190,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
   - `idle for 15m, PR #12 has merge conflicts` (and/or `no CI checks`): its open PR can't move on while it sits; tell it to rebase or find out why CI didn't run.
 - **High context:** the worker's context window is that full; auto-compaction will soon lose detail. At its next item boundary, reset or replace it (see [A stream of tasks in one area](#a-stream-of-tasks-in-one-area)).
 <!-- boss-core:rollup -->
-- **When a batch of work is done,** give a short roll-up: what finished, what waits on the user, what's next.
+- **When a batch of work is done,** give a short roll-up: what finished, what waits on the user (real decisions only, each with its context and your recommended answer), what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
 <!-- /boss-core:rollup -->
 
