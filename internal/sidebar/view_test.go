@@ -573,10 +573,10 @@ func TestViewAgentName(t *testing.T) {
 
 func rollupSessions() []Session {
 	return []Session{
-		{Name: "boss", Group: "g", Boss: true, ID: "$1", Agent: "Claude", State: "idle", Title: "t", Cost: "$1.00"},
-		{Name: "w1", Group: "g", ID: "$2", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true, Cost: "$2.50"},
+		{Name: "boss", Group: "g", Boss: true, ID: "$1", Agent: "Claude", State: "idle", Title: "t", Cost: "$1.00", CostUSD: 1, HasCost: true},
+		{Name: "w1", Group: "g", ID: "$2", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true, Cost: "$2.50", CostUSD: 2.5, HasCost: true},
 		{Name: "w2", Group: "g", ID: "$3", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "working"},
-		{Name: "w3", Group: "g", ID: "$4", StartedBy: "$3", Depth: 2, Agent: "Claude", State: "working", Cost: "$0.50"},
+		{Name: "w3", Group: "g", ID: "$4", StartedBy: "$3", Depth: 2, Agent: "Claude", State: "working", Cost: "$0.50", CostUSD: 0.5, HasCost: true},
 		{Name: "solo", Group: "g", Boss: true, ID: "$5", Agent: "Claude", State: "idle"},
 	}
 }
@@ -639,6 +639,14 @@ func TestViewBossRollupVariants(t *testing.T) {
 	}
 	if got, want := line(18, rollupSessions()), "    1 need you ·…"; got != want {
 		t.Errorf("counts cut = %q, want %q", got, want)
+	}
+	// @dev_cost off hides line 2's cost (Cost "") but not the roll-up's total
+	hidden := rollupSessions()
+	for i := range hidden {
+		hidden[i].Cost = ""
+	}
+	if got, want := line(40, hidden), "    1 need you · 2 working · $4.00"; got != want {
+		t.Errorf("cost hidden = %q, want %q", got, want)
 	}
 	// Selected: full-width selection background on the roll-up line
 	m := Model{selected: "boss", snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}

@@ -56,7 +56,7 @@ func TestModelBuildSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Session{
-		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50"},
+		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50", CostUSD: 1.5, HasCost: true},
 		{Name: "app-2", Group: "app"},
 		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle"},
 		{Name: "side", Group: "side"},
@@ -347,5 +347,21 @@ func TestModelDeciding(t *testing.T) {
 	}
 	if !got["ask"] || got["rest"] {
 		t.Errorf("Deciding = %v, want ask only", got)
+	}
+}
+
+func TestModelCostHidden(t *testing.T) {
+	rows := []paneRow{
+		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
+		{Session: "w", Window: 1, ID: "%1", Command: "claude", State: "idle", StateCmd: "claude", Cost: "2.5", CostOpt: "off", Sidebar: "%0"},
+	}
+	snap, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(_, _, _, _, _ string) PR { return PR{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range snap.sessions {
+		if s.Name == "w" && (s.Cost != "" || s.CostUSD != 2.5 || !s.HasCost) {
+			t.Errorf("hidden cost: Cost %q, CostUSD %v, HasCost %t; want \"\", 2.5, true", s.Cost, s.CostUSD, s.HasCost)
+		}
 	}
 }

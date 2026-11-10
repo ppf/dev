@@ -234,6 +234,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			StartedBy: rs[0].StartedBy}
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, PaneTitle(a.Label, a.Pane.Title, name, host)
+			sess.CostUSD, sess.HasCost = a.Cost, a.CostOK
 			if a.CostOK && !CostHidden(rs[0].CostOpt) {
 				sess.Cost = FormatCost(a.Cost)
 			}

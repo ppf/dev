@@ -3,7 +3,6 @@ package sidebar
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -335,8 +334,8 @@ func rollups(sessions []Session) []*rollup {
 }
 
 func (r *rollup) addCost(s Session) {
-	if usd, err := strconv.ParseFloat(strings.TrimPrefix(s.Cost, "$"), 64); err == nil {
-		r.cost, r.hasCost = r.cost+usd, true
+	if s.HasCost {
+		r.cost, r.hasCost = r.cost+s.CostUSD, true
 	}
 }
 
