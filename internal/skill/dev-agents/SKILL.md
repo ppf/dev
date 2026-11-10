@@ -61,8 +61,9 @@ Set every Claude worker's model and effort when you start it: one left on the us
 | Everyday engineering: features, debugging, multi-PR work, anything you're unsure about | `opus` | `medium` |
 | Well-scoped: a bug fix or feature against a clear spec, review-finding fixes, tests, docs, release chores, repeated investigation or review tasks | `sonnet` | `medium` |
 | Reading only, where a wrong answer is cheap to spot: find files, read logs, summarize, triage | `haiku` or `sonnet` | not set |
-| The hardest: major refactors and migrations, architecture, long unattended runs | `fable` | `medium` |
+| The hardest: major refactors and migrations, architecture, long unattended runs | `fable`, if you run on it; else your own model | `medium`; `high` on your own model |
 
+- **Ceiling:** never start a worker on a model above the one you run on yourself (`haiku` < `sonnet` < `opus` < `fable`; your system prompt names yours). The user chose your model for this project and account, and a worker's flag overrides the project's settings, so this keeps a cheaper project cheap. For a coordinator below `fable`, the hardest work goes to your own model one effort level up (`high`), not to `fable`. The user naming a higher model for a task themselves lifts the ceiling for that task only.
 - **A clear spec isn't enough on its own:** a migration or performance work can be well specified and still need `opus`.
 - **When a result falls short,** in this order: make sure the worker can check its own work (a test, a build, a script); raise effort one level; then the next model up, starting one effort level lower. Past `high`, try the next model up before `xhigh`.
 - **A model switch means a fresh worker,** not `/model` in a running one: the prompt cache and the earlier reasoning don't carry over.
