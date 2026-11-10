@@ -37,16 +37,16 @@ esac`, "gh")
 	}
 	actSwitch(d, "a")
 	sidebar := actEnsure(d, "a")
-	waitScreen(t, d.server, sidebar, "#12 open · Claude · idle")
+	waitScreen(t, d.server, sidebar, "#12 open · idle")
 
 	row, ok := actRow(d, sidebar, "pr")
 	if !ok {
 		t.Fatalf("no row for pr:\n%s", strings.Join(actScreen(d, sidebar), "\n"))
 	}
 	screen := actScreen(d, sidebar)
-	check(t, "pr meta line", strings.TrimSpace(screen[row+1]), "#12 open · Claude · idle · pr task")
+	check(t, "pr meta line", strings.TrimSpace(screen[row+1]), "#12 open · idle · pr task")
 	nopr, _ := actRow(d, sidebar, "nopr")
-	check(t, "nopr meta line", strings.TrimSpace(screen[nopr+1]), "Claude · idle · nopr task")
+	check(t, "nopr meta line", strings.TrimSpace(screen[nopr+1]), "idle · nopr task")
 
 	webCalls := func() string {
 		b, err := os.ReadFile(d.stubLog)
