@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -62,8 +63,9 @@ func (m Model) render() frame {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
 	unwrapped := listLines(m.snap.sessions)
+	rolls := rollups(m.snap.sessions)
 	prevGroup := ""
-	for _, s := range m.snap.sessions {
+	for i, s := range m.snap.sessions {
 		if s.Group != prevGroup {
 			if prevGroup != "" {
 				f.lines = append(f.lines, "")
@@ -119,7 +121,12 @@ func (m Model) render() frame {
 		cost, title := "", ""
 		if s.Agent != "" {
 			body, colour = s.Agent, muted
-			if s.State != "" {
+			switch {
+			case s.State == "":
+			case s.Agent == "Claude":
+				// Claude is the default agent: its name is left out of the line
+				body = s.State
+			default:
 				body += " · " + s.State
 			}
 			cost, title = s.Cost, s.Title
@@ -168,6 +175,10 @@ func (m Model) render() frame {
 		for _, l := range wrapped {
 			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
 		}
+		if r := rolls[i]; r != nil {
+			text, tw := r.line(maxMeta - iw)
+			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
+		}
 	}
 
 	// Exactly h lines: content reaching the bottom row gives way to it, as bash drew that row last
@@ -186,7 +197,8 @@ func (m Model) render() frame {
 // listLines is how many lines render draws for sessions when no title wraps.
 func listLines(sessions []Session) int {
 	n, prev := 2, ""
-	for _, s := range sessions {
+	rolls := rollups(sessions)
+	for i, s := range sessions {
 		if s.Group != prev {
 			if prev != "" {
 				n++
@@ -194,6 +206,9 @@ func listLines(sessions []Session) int {
 			n, prev = n+1, s.Group
 		}
 		n += 2
+		if rolls[i] != nil {
+			n++
+		}
 	}
 	return n
 }
@@ -281,4 +296,75 @@ func CostHidden(opt string) bool {
 // FormatCost renders a session cost in USD for the sidebar and dev agent.
 func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
+}
+
+// rollup is a boss's third line: how many of its workers need a decision or work, and what the boss and
+// all its workers cost.
+type rollup struct {
+	waiting, working, workers int
+	cost                      float64
+	hasCost                   bool
+}
+
+// rollups returns, per index of sessions (display order), the roll-up of a boss with workers; nil for any
+// other row. Order keeps a boss's workers, nested ones included, right after it at a greater Depth.
+func rollups(sessions []Session) []*rollup {
+	out := make([]*rollup, len(sessions))
+	for i, s := range sessions {
+		if !s.Boss || i+1 >= len(sessions) || sessions[i+1].Depth <= s.Depth {
+			continue
+		}
+		r := &rollup{}
+		r.addCost(s)
+		for _, w := range sessions[i+1:] {
+			if w.Depth <= s.Depth {
+				break
+			}
+			r.workers++
+			switch {
+			case w.Deciding:
+				r.waiting++
+			case w.State == agent.Working:
+				r.working++
+			}
+			r.addCost(w)
+		}
+		out[i] = r
+	}
+	return out
+}
+
+func (r *rollup) addCost(s Session) {
+	if usd, err := strconv.ParseFloat(strings.TrimPrefix(s.Cost, "$"), 64); err == nil {
+		r.cost, r.hasCost = r.cost+usd, true
+	}
+}
+
+// line is the roll-up in width columns and its display width: the cost goes before the counts do.
+func (r *rollup) line(width int) (string, int) {
+	var plain, styled string
+	add := func(colour, text string) {
+		if plain != "" {
+			plain += " · "
+			styled += muted + " · " + reset
+		}
+		plain += text
+		styled += colour + text + reset
+	}
+	if r.waiting > 0 {
+		add(red, fmt.Sprintf("%d need you", r.waiting))
+	}
+	if r.working > 0 {
+		add(muted, fmt.Sprintf("%d working", r.working))
+	}
+	if plain == "" {
+		add(muted, fmt.Sprintf("%d idle", r.workers))
+	}
+	if r.hasCost {
+		cost := FormatCost(r.cost)
+		if ansi.StringWidth(plain+" · "+cost) <= width {
+			add(muted, cost)
+		}
+	}
+	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
 }
