@@ -334,7 +334,7 @@ func TestReply(t *testing.T) {
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", "", "", "", "", ""), nil
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", "", "", "", "", "", "", ""), nil
 		case "has-session":
 			return "", nil
 		}
@@ -429,7 +429,7 @@ func TestAskOptionKeys(t *testing.T) {
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", "", "", ""), nil
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", "", "", "", "", ""), nil
 		case "has-session":
 			return "", nil
 		case "display-message":

@@ -172,6 +172,8 @@ func (m Model) pickRows(p *pick, width int) (body []string, hint string) {
 		hint = "⏳ answering " + b.session + "…"
 	case b.other:
 		hint = "⏎ send · esc back"
+	case p.whole():
+		hint = "1-9 ↑↓ pick · ←→ tab · ⏎ answer all · esc close"
 	case p.d.multi:
 		hint = "←→ move · space toggle · ⏎ next · 1-9 · esc close"
 	default:

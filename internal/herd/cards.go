@@ -43,6 +43,8 @@ const (
 	hitSubmit
 	// hitOpen switches to the worker, as g and ⏎ do.
 	hitOpen
+	// hitFocus is no cell (x0 == x1), only the row of the tab ←→ moved to, kept in view as the highlighted option is.
+	hitFocus
 	// hitMessage opens the reply box, as m does.
 	hitMessage
 	// hitPR opens its PR, as o does.
@@ -92,7 +94,7 @@ func (m Model) board() board {
 			h.y += len(b.lines)
 			h.tile = i
 			b.hits = append(b.hits, h)
-			if picking && t.sess.Name == m.box.session && h.kind == hitOption && h.k == m.box.hl {
+			if picking && t.sess.Name == m.box.session && (h.kind == hitOption && h.k == m.box.hl || h.kind == hitFocus) {
 				b.focus = h.y
 			}
 		}
@@ -315,18 +317,17 @@ func (m Model) dialogRows(t tile, w int) []dialogRow {
 		add(strings.Join(tabs, rule+" · "+reset))
 	}
 	if p.d.title != "" {
-		add(sidebar.Red + bold + p.d.title + reset)
+		add(m.focusMark(t, p.cur) + sidebar.Red + bold + p.d.title + reset)
 	}
 	bound := m.box.session == t.sess.Name && m.activePick() != nil
 	hl := max(0, p.d.option(p.d.cursor))
-	if bound {
+	switch {
+	case bound && p.whole():
+		hl = m.picked(t, p.cur)
+	case bound:
 		hl = m.box.hl
 	}
 	accent, waiting := sidebar.StateColour(t.sess.Agent, t.sess.State), m.answering != "" || bound && m.waiting(p)
-	type chip struct {
-		text string
-		h    hit
-	}
 	var chips []chip
 	for i, o := range p.d.opts {
 		label := strconv.Itoa(o.num) + " "
@@ -336,7 +337,7 @@ func (m Model) dialogRows(t tile, w int) []dialogRow {
 		case o.checkbox:
 			label += "☐ "
 		}
-		label += optionLabel(p, o)
+		label += starred(p, p.cur, i, optionLabel(p, o))
 		c := " " + label + " "
 		switch {
 		case waiting:
@@ -349,29 +350,13 @@ func (m Model) dialogRows(t tile, w int) []dialogRow {
 	if p.d.multi {
 		chips = append(chips, chip{sidebar.Muted + " Submit ⏎ " + reset, hit{kind: hitSubmit}})
 	}
-	var row dialogRow
-	x := 0
-	for _, c := range chips {
-		cw := min(ansi.StringWidth(c.text), w)
-		if x > 0 && x+1+cw > w {
-			rows, row, x = append(rows, row), dialogRow{}, 0
-		}
-		if x > 0 {
-			row.text += " "
-			x++
-		}
-		c.h.x0, c.h.x1 = x, x+cw
-		row.text += ansi.Truncate(c.text, cw, "…")
-		row.hits = append(row.hits, c.h)
-		x += cw
-	}
-	rows = append(rows, row)
+	rows = append(rows, wrapChips(chips, w)...)
 	for _, o := range p.d.opts {
 		if o.desc != "" && p.tool == "" {
 			add(rule + strings.Join(strings.Fields(o.label), " ") + ": " + o.desc + reset)
 		}
 	}
-	return rows
+	return append(rows, m.tabRows(t, w)...)
 }
 
 // optionLabel is o's label on its chip; a permission's indented lines are its label's wrapped rest, a

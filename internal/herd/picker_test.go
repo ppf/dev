@@ -874,3 +874,138 @@ func TestRefreshAsking(t *testing.T) {
 		})
 	}
 }
+
+// scope3 is the question claude-ask3-* show: three single-choice tabs, each with a recommended option.
+var scope3 = agent.Question{Tool: agent.AskUserQuestion, Questions: []agent.Ask{
+	{Question: "Which repos should the change touch?", Header: "Scope", Options: []agent.Choice{{Label: "core only (Recommended)"}, {Label: "core and api"}, {Label: "all repos"}}},
+	{Question: "When should it ship?", Header: "Rollout", Options: []agent.Choice{{Label: "behind a flag (Recommended)"}, {Label: "directly"}}},
+	{Question: "Add end-to-end tests?", Header: "Tests", Options: []agent.Choice{{Label: "yes"}, {Label: "no (Recommended)"}}},
+}}
+
+func TestPickWhole(t *testing.T) {
+	for _, tt := range []struct {
+		file  string
+		q     agent.Question
+		whole bool
+	}{
+		{"claude-ask3-q1", scope3, true},
+		{"claude-ask3-q3", scope3, true},
+		{"claude-ask3-review", scope3, false},
+		{"claude-ask-q1", colors, false}, // its Extras tab is a multi-select
+		{"claude-ask3-q1", agent.Question{}, false},
+	} {
+		if p := goldenPick(t, "claude-ask3-q3", scope3); !slices.Equal(p.answered(), []bool{true, true, false}) {
+			t.Errorf("answered %v", p.answered())
+		}
+		if p := goldenPick(t, tt.file, tt.q); p.whole() != tt.whole {
+			t.Errorf("%s: whole %v, want %v", tt.file, p.whole(), tt.whole)
+		}
+	}
+}
+
+// Every tab shows on the card, the open one first; ★ marks the recommended options.
+func TestWholeCard(t *testing.T) {
+	m := pickerModel(t, "claude-ask3-q1", scope3)
+	m.width = 50
+	got := strings.Join(ansiStrip(m.render()), "\n")
+	for _, want := range []string{"│    ▸ Which repos should the change touch?", "│    [1 ★ core only]  2 core and api", "│    Rollout  When should it ship?",
+		"│    [1 ★ behind a flag]  2 directly", "│    Tests  Add end-to-end tests?", "│     1 yes  [2 ★ no]",
+		"1-9 ↑↓ pick · ←→ tab · ⏎ answer all"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "Which repos") > strings.Index(got, "Rollout  When") {
+		t.Errorf("open tab not first:\n%s", got)
+	}
+	// A tab moved past with → without an answer: no whole answer, and the card says so
+	skipped := golden(t, "claude-ask3-q2")
+	skipped = strings.Replace(skipped, "☒", "☐", 1)
+	d, _ := parseDialog(skipped)
+	if p := newPick(d, scope3, ansi.Strip(skipped)); p.whole() {
+		t.Error("whole with an unanswered tab before the open one")
+	} else if m.snap.tiles[0].pick = &p; !strings.Contains(strings.Join(ansiStrip(m.render()), "\n"), "Scope  not answered") {
+		t.Errorf("skipped tab:\n%s", strings.Join(ansiStrip(m.render()), "\n"))
+	}
+	// On the last tab the ones before it are answered; narrow, nothing spills out of the card
+	m = pickerModel(t, "claude-ask3-q3", scope3)
+	m.width = 30
+	for _, l := range ansiStrip(m.render()) {
+		if ansi.StringWidth(l) > 30 {
+			t.Errorf("row wider than the pane: %q", l)
+		}
+	}
+	if got := strings.Join(ansiStrip(m.render()), "\n"); !strings.Contains(got, "Scope  answered") || !strings.Contains(got, "Rollout  answered") {
+		t.Errorf("answered tabs:\n%s", got)
+	}
+}
+
+func TestWholeKeys(t *testing.T) {
+	m := pickerModel(t, "claude-ask3-q1", scope3)
+	if !slices.Equal(m.box.picks, []int{0, 0, 1}) || m.box.tab != 0 {
+		t.Fatalf("starts on the recommended: %+v", m.box)
+	}
+	// A digit picks and moves on; ←→ stay within the tabs; ↑↓ change the tab's pick
+	m, cmd := press(m, runes("3"), tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyLeft}, tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil || !slices.Equal(m.box.picks, []int{2, 1, 1}) || m.box.tab != 1 {
+		t.Errorf("picks %v tab %d, sent %v", m.box.picks, m.box.tab, cmd != nil)
+	}
+	if m, _ := press(m, tea.KeyMsg{Type: tea.KeyLeft}, tea.KeyMsg{Type: tea.KeyLeft}); m.box.tab != 0 {
+		t.Errorf("← past the open tab: %d", m.box.tab)
+	}
+	// ⏎ sends every pick
+	if m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil || m.answering != "a" {
+		t.Errorf("⏎ sent nothing: %+v", m.box)
+	}
+	// A tab without a recommended option needs a pick first
+	q := scope3
+	q.Questions = slices.Clone(q.Questions)
+	q.Questions[2].Options = []agent.Choice{{Label: "yes"}, {Label: "no"}}
+	m = pickerModel(t, "claude-ask3-q1", q)
+	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.box.tab != 2 || m.msg.text != "pick Tests first" {
+		t.Errorf("⏎ without a pick: tab %d msg %q", m.box.tab, m.msg.text)
+	}
+	// Another question starts on its open tab, its own recommended picks
+	m = pickerModel(t, "claude-ask3-q1", scope3)
+	m.box.tab = 2
+	two := agent.Question{Tool: agent.AskUserQuestion, Questions: scope3.Questions[:2]}
+	p := goldenPick(t, "claude-ask3-q1", two)
+	m.snap.tiles[0].pick = &p
+	if m.syncPick(); m.box.tab != 0 || !slices.Equal(m.box.picks, []int{0, 0}) {
+		t.Errorf("new question: tab %d picks %v", m.box.tab, m.box.picks)
+	}
+	// The open tab's free text answers it alone, as before
+	m = pickerModel(t, "claude-ask3-q1", scope3)
+	if m, _ = press(m, runes("4")); !m.box.other {
+		t.Error("4 didn't open the free text")
+	}
+}
+
+func TestSendAll(t *testing.T) {
+	shown := goldenPick(t, "claude-ask3-q1", scope3)
+	tests := []struct {
+		name  string
+		files []string // per step: the check's capture, then the poll's
+		keys  []string
+		msg   string
+	}{
+		{"every tab, then submit", []string{"claude-ask3-q1", "claude-ask3-q2", "claude-ask3-q2", "claude-ask3-q3", "claude-ask3-q3", "claude-ask3-review", "claude-ask3-review", ""},
+			[]string{"-l 1", "-l 2", "-l 2", "-l 1"}, "Answered w's 3 questions"},
+		{"changed before the first", []string{"claude-ask3-q2"}, nil, "⚠ w's dialog changed after 0 of 3 answers: nothing more sent, showing it again"},
+		{"another tab next", []string{"claude-ask3-q1", "claude-ask3-q3", "claude-ask3-q3"}, []string{"-l 1"},
+			"⚠ w's dialog changed after 1 of 3 answers: nothing more sent, showing it again"},
+		{"gone before the review", []string{"claude-ask3-q1", "claude-ask3-q2", "claude-ask3-q2", "claude-ask3-q3", "claude-ask3-q3", ""},
+			[]string{"-l 1", "-l 2", "-l 2"}, "⚠ w's dialog changed after 3 of 3 answers: nothing more sent, showing it again"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, sent := screens(t, tt.files...)
+			m := Model{c: c, clk: fakeClock()}
+			msg := m.sendAll("w", "%5", shown.d, scope3.Questions, 0, []int{0, 1, 1})().(answeredMsg)
+			if msg.msg.text != tt.msg || msg.took != strings.HasPrefix(tt.msg, "Answered") || !slices.Equal(*sent, tt.keys) {
+				t.Errorf("sent %q: %+v, want %q %q", *sent, msg, tt.keys, tt.msg)
+			}
+		})
+	}
+}
