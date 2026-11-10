@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
@@ -33,7 +34,7 @@ func newRootCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return openProject(cmd, args[0], wt, false, false, "", "")
+		return openProject(cmd, args[0], wt, false, false, "", "", agent.Start{})
 	}
 	root.AddCommand(newListCmd(), newImportCmd(), newStateCmd(), newSidebarCmd(), newGotoCmd(), newNewCmd(),
 		newResurrectCmd(), newCompactCmd(), newAgentCmd(), newStatuslineCmd(), newHerdCmd(), newPtyWrapCmd(), newQuestionCmd(),
@@ -98,13 +99,13 @@ func runPicker(cmd *cobra.Command) error {
 	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 		return err
 	}
-	return herd.Open(c, res.Project.Name, dir)
+	return herd.Open(c, res.Project.Name, dir, agent.Start{})
 }
 
 // openProject opens project name, or its worktree wt (created when missing) when wt is set; detach
 // creates the session without attaching and sends messages to stderr, keeping stdout for results;
-// agentCmd starts in a new session's Agent pane ("" = claude).
-func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agentCmd, boss string) error {
+// agentCmd starts in a new session's Agent pane ("" = claude), a claude with start's model and effort.
+func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agentCmd, boss string, start agent.Start) error {
 	// Rejected rather than sanitized: a typo must not become a different branch.
 	if wt != "" && worktree.Sanitize(wt) != wt {
 		return fmt.Errorf("invalid worktree name %q: only A-Za-z0-9._/- allowed", wt)
@@ -134,7 +135,7 @@ func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agent
 		os.Stdout = os.Stderr
 		defer func() { os.Stdout = stdout }()
 	}
-	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach, Agent: agentCmd, Worker: worker, Boss: boss}, out)
+	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach, Agent: agentCmd, Worker: worker, Boss: boss, Start: start}, out)
 }
 
 // completeArgs completes project names (with descriptions), then that project's worktree names.

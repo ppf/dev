@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -19,17 +20,21 @@ func TestAgentCommand(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		worker bool
+		start  agent.Start
 		want   []string
 	}{
-		{"named dev-x in Remote Control", false, []string{"claude", "--remote-control=dev-x"}},
-		{"worker: Remote Control off", true, []string{"claude", "--settings", `{"remoteControlAtStartup":false}`}},
+		{"named dev-x in Remote Control", false, agent.Start{}, []string{"claude", "--remote-control=dev-x"}},
+		{"worker: Remote Control off", true, agent.Start{}, []string{"claude", "--settings", `{"remoteControlAtStartup":false}`}},
+		{"worker with a model and effort", true, agent.Start{Model: "sonnet", Effort: "medium"},
+			[]string{"claude", "--model", "sonnet", "--effort", "medium", "--settings", `{"remoteControlAtStartup":false}`}},
+		{"effort alone", false, agent.Start{Effort: "low"}, []string{"claude", "--effort", "low", "--remote-control=dev-x"}},
 	} {
-		got, err := agentCommand("claude", "dev-x", tt.worker)
+		got, err := agentCommand("claude", "dev-x", tt.worker, tt.start)
 		if want := tmux.ShellJoin(append([]string{exe, "pty-wrap", "--close-on-exit", "--"}, tt.want...)...); err != nil || got != want {
 			t.Errorf("%s: claude = %q, %v; want %q", tt.name, got, err, want)
 		}
 	}
-	if got, _ := agentCommand("codex", "dev-x", false); got != "codex" {
+	if got, _ := agentCommand("codex", "dev-x", false, agent.Start{}); got != "codex" {
 		t.Errorf("codex = %q, want it as is", got)
 	}
 }
@@ -186,5 +191,29 @@ func TestWorktreeFailureShownOnce(t *testing.T) {
 		if got := out.String(); got != tc.want {
 			t.Errorf("%s: out = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A session that exists by now (another start made it meanwhile) keeps its claude: another model or effort for
+// it is refused, not dropped.
+func TestRunExistingSessionRefusesStart(t *testing.T) {
+	t.Setenv("TMUX", "")
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "display-message" && args[len(args)-1] == "#{@dev_model}\t#{@dev_effort}" {
+			return "\tmedium\n", nil
+		}
+		return "", nil
+	})
+	opts := Options{Path: "/p", Name: "x", Detach: true}
+	if err := Run(c, opts, &bytes.Buffer{}); err != nil {
+		t.Errorf("reused without a model or effort = %v, want none", err)
+	}
+	opts.Start = agent.Start{Effort: "medium"}
+	if err := Run(c, opts, &bytes.Buffer{}); err != nil {
+		t.Errorf("reused with the effort it started with = %v, want none", err)
+	}
+	opts.Start = agent.Start{Effort: "low"}
+	if err := Run(c, opts, &bytes.Buffer{}); err == nil || !strings.HasPrefix(err.Error(), "session x was started with --effort medium, not low") {
+		t.Errorf("reused with another effort = %v, want it refused", err)
 	}
 }

@@ -51,7 +51,11 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Each new ` +
 	`feature or piece of work gets a fresh worker (dev agent start with a new worktree name); prompt an existing one of ` +
 	`yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with ` +
-	`unrelated or merely related work. When unsure, delegate. The pane on your right previews every worker. ` +
+	`unrelated or merely related work. When unsure, delegate. ` +
+	`Pass --model and --effort on every dev agent start of a Claude worker, chosen by the table in the dev-agents skill ` +
+	`(Model and effort): without them it runs the user's default, their most expensive setup. Ask the user through your ` +
+	`AskUserQuestion before every use of ultracode, a word that makes a worker run a workflow of many agents (the rule is ` +
+	`in that section too). The pane on your right previews every worker. ` +
 	`Your workers (child sessions) are ` + "`dev agent list --mine`" + `; the other dev sessions are the user's own, so ` +
 	`drive them only when asked. For dev sessions always use dev agent, not Claude's own session or agent tools. ` +
 	`Be proactive: messages starting "[dev boss inbox]" list your workers' news (finished, failed, needs a decision, stuck); ` +
@@ -78,8 +82,9 @@ func SessionName(project string) string {
 }
 
 // Open attaches to project's boss session, creating it in dir when missing: the sidebar (unless sidebars
-// are hidden), the coordinator Claude, then the previews. A session of that name that isn't a boss is refused.
-func Open(c *tmux.Client, project, dir string) error {
+// are hidden), the coordinator Claude with start's model and effort, then the previews. A session of that name
+// that isn't a boss is refused, and so is a start other than the one a boss that exists was started with.
+func Open(c *tmux.Client, project, dir string, start agent.Start) error {
 	session := SessionName(project)
 	target := tmux.SessionTarget(session)
 	if _, err := c.Run("has-session", "-t", target); err == nil {
@@ -90,9 +95,12 @@ func Open(c *tmux.Client, project, dir string) error {
 		if strings.TrimSpace(mark) == "" {
 			return fmt.Errorf("session %q exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it", session)
 		}
+		if err := start.CheckExisting(c, session); err != nil {
+			return err
+		}
 		return withSidebar(c, session, sidebar.Origin{})
 	}
-	claude, err := create(c, session, project, dir)
+	claude, err := create(c, session, project, dir, start)
 	if err != nil {
 		return err
 	}
@@ -115,14 +123,14 @@ func withSidebar(c *tmux.Client, session string, from sidebar.Origin) error {
 	return ensureErr
 }
 
-// create builds the boss layout and returns the coordinator's pane; commands go to tmux as argv, so the
-// prompt needs no shell quoting.
-func create(c *tmux.Client, session, project, dir string) (string, error) {
+// create builds the boss layout and returns the coordinator's pane, start recorded on the session; commands go
+// to tmux as argv, so the prompt needs no shell quoting.
+func create(c *tmux.Client, session, project, dir string, start agent.Start) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	coordinator, err := ptywrap.Argv(coordinatorArgv(session)...)
+	coordinator, err := ptywrap.Argv(coordinatorArgv(session, start.Args(false)...)...)
 	if err != nil {
 		return "", err
 	}
@@ -139,6 +147,9 @@ func create(c *tmux.Client, session, project, dir string) (string, error) {
 	claude := run(append([]string{"new-session", "-d", "-x", strconv.Itoa(width), "-y", strconv.Itoa(height), "-s", session,
 		"-c", dir, "-n", "Boss", "-PF", "#{pane_id}"}, coordinator...)...)
 	run("set-option", "-t", target, OptHerd, "1")
+	if set := start.SetOptions(target); set != nil {
+		run(set...)
+	}
 	if project != "" {
 		run("set-option", "-t", target, "@project", project)
 	}
@@ -156,13 +167,14 @@ func tmuxQuote(s string) string {
 }
 
 // Adopt makes session, restored with bare shells in its coordinator and previews panes, a boss again: the
-// coordinator Claude (resume: claude's args resuming its conversation) and the previews replace the shells.
-func Adopt(c *tmux.Client, session, claude, previews string, resume []string) error {
+// coordinator Claude (args: claude's args resuming its conversation, and its agent.Start's) and the previews
+// replace the shells.
+func Adopt(c *tmux.Client, session, claude, previews string, args []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	coordinator, err := ptywrap.Argv(coordinatorArgv(session, resume...)...)
+	coordinator, err := ptywrap.Argv(coordinatorArgv(session, args...)...)
 	if err != nil {
 		return err
 	}

@@ -1,5 +1,5 @@
 // Package resurrect keeps what tmux-resurrect doesn't restore — each dev session's @project, its
-// sidebar and the boss that started it, each boss, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
+// sidebar, the boss that started it and the model and effort its Claude started with, each boss, and each agent pane's conversation — in a .dev file next to every snapshot, and rebuilds them
 // after a restore (dev-resurrect.sh). Each function runs as a resurrect hook; every failure is warned in
 // tmux before it is returned.
 package resurrect
@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,8 +31,9 @@ import (
 
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project or
 // a boss, the position empty while its sidebar is hidden, then a startedByPrefix line per worker a boss
-// started, a bossPrefix line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session. A snapshot identical to the last one is deleted by save.sh, so its state goes to the
-// last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save from
+// started, a startedWithPrefix line per session whose Claude started with a model or effort, a bossPrefix
+// line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session.
+// A snapshot identical to the last one is deleted by save.sh, so its state goes to the last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save from
 // leaving last dangling or on an older snapshot (see settle).
 func Save(c *tmux.Client, snapshot string) error {
 	if info, err := os.Stat(snapshot); err != nil || !info.Mode().IsRegular() {
@@ -60,6 +62,8 @@ func Save(c *tmux.Client, snapshot string) error {
 		StartedBy string `tmux:"@dev_started_by"`
 		Herd      string `tmux:"@dev_herd"`
 		Outside   string `tmux:"@dev_started_outside"`
+		Model     string `tmux:"@dev_model"`
+		Effort    string `tmux:"@dev_effort"`
 	}](c, "list-sessions")
 	if err != nil {
 		return fail(c, "list-sessions failed, dev state not saved", err)
@@ -122,6 +126,11 @@ func Save(c *tmux.Client, snapshot string) error {
 			fmt.Fprint(&b, "\t"+outsideMark)
 		}
 		fmt.Fprintln(&b)
+	}
+	for _, s := range sessions {
+		if s.Model != "" || s.Effort != "" {
+			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", startedWithPrefix, s.Name, s.Model, s.Effort)
+		}
 	}
 	for _, s := range sessions {
 		coordinator, previews := roles[sessionRole{s.Name, herd.RoleCoordinator}], roles[sessionRole{s.Name, herd.RolePreviews}]
@@ -277,7 +286,8 @@ func PreRestore(c *tmux.Client) error {
 }
 
 // Restore restarts the agents and bosses, then sets @project, undoes restored zooms and rebuilds the sidebar of each
-// session in the last snapshot's .dev file that the restore created, preserving its active window and focus.
+// session in the last snapshot's .dev file that the restore created, preserving its active window and focus, and
+// records again who started it and the model and effort its Claude started with.
 func Restore(c *tmux.Client) error {
 	last, err := helper("last_resurrect_file")
 	if err != nil {
@@ -315,7 +325,7 @@ func Restore(c *tmux.Client) error {
 	shell = filepath.Base(strings.TrimSpace(shell))
 
 	liveSessions := strings.Split(string(liveData), "\n")
-	entries, agents, startedBy, bosses := parseState(string(data))
+	entries, agents, startedBy, bosses, starts := parseState(string(data))
 	var errs []error
 	// First: rebuilding a sidebar renumbers its window's panes, and agents and bosses are saved by position.
 	// A coordinator restarts with its boss, or as a plain agent when its boss can't be restored.
@@ -325,7 +335,7 @@ func Restore(c *tmux.Client) error {
 		if slices.Contains(liveSessions, b.Session) {
 			continue
 		}
-		tried, err := restoreBoss(c, b, agents, shell)
+		tried, err := restoreBoss(c, b, agents, starts[b.Session], shell)
 		if err != nil {
 			warn(c, b.Session+": "+err.Error())
 			errs = append(errs, err)
@@ -333,7 +343,7 @@ func Restore(c *tmux.Client) error {
 		adopted[slot{b.Session, b.Coordinator}] = tried
 	}
 	agents = slices.DeleteFunc(agents, func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
-	if err := resumeAgents(c, agents, startedBy, liveSessions, shell); err != nil {
+	if err := resumeAgents(c, agents, startedBy, starts, liveSessions, shell); err != nil {
 		errs = append(errs, err)
 	}
 	for _, e := range entries {
@@ -359,6 +369,18 @@ func Restore(c *tmux.Client) error {
 		}
 		if _, err := c.Run(set...); err != nil {
 			warn(c, w.Session+": @dev_started_by not set")
+			errs = append(errs, err)
+		}
+	}
+	for _, session := range slices.Sorted(maps.Keys(starts)) {
+		if slices.Contains(liveSessions, session) {
+			continue
+		}
+		if _, err := c.Run("has-session", "-t", "="+session); err != nil {
+			continue
+		}
+		if _, err := c.Run(starts[session].SetOptions(tmux.SessionTarget(session))...); err != nil {
+			warn(c, session+": "+agent.OptModel+" and "+agent.OptEffort+" not set")
 			errs = append(errs, err)
 		}
 	}
@@ -480,8 +502,9 @@ func restartsClaude(procs string) bool {
 // resumeAgents types each saved agent's resume command into its restored pane, in a session the restore
 // created; a pane back in another directory gets a fresh agent, as its conversation is stored by directory.
 // Nothing is restarted while resurrect restarts claude itself: two commands would be typed into one pane.
-// A worker (in startedBy) resumes without Remote Control, as it started; a clean exit closes the session, as at its start.
-func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntry, live []string, shell string) error {
+// A worker (in startedBy) resumes without Remote Control, as it started, and each agent with its Start's args
+// (starts, by session: only --effort when resumed); a clean exit closes the session, as at its start.
+func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntry, starts map[string]agent.Start, live []string, shell string) error {
 	if len(agents) == 0 {
 		return nil
 	}
@@ -517,7 +540,7 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntr
 			id = ""
 		}
 		worker := slices.ContainsFunc(startedBy, func(w startedByEntry) bool { return w.Session == a.Session })
-		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript, a.Session, worker)
+		cmd, resumed, ok := agent.ResumeCommand(a.Kind, id, a.Transcript, a.Session, worker, starts[a.Session])
 		if !ok {
 			warn(c, a.Session+":"+a.Pos+": unknown agent "+a.Kind+", not restarted")
 			continue
@@ -540,9 +563,9 @@ func resumeAgents(c *tmux.Client, agents []agentEntry, startedBy []startedByEntr
 }
 
 // restoreBoss makes b's session a boss again when its coordinator and previews panes came back as bare
-// shells: the coordinator resumes its saved conversation (agents, by position) when it can, else starts fresh.
-// tried reports whether it went on to replace the shells.
-func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, shell string) (tried bool, err error) {
+// shells: the coordinator resumes its saved conversation (agents, by position) when it can, else starts fresh,
+// either way with start's args (only --effort when resumed). tried reports whether it went on to replace the shells.
+func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, start agent.Start, shell string) (tried bool, err error) {
 	target := tmux.SessionTarget(b.Session)
 	if _, err := c.Run("has-session", "-t", "="+b.Session); err != nil {
 		return false, nil
@@ -567,7 +590,7 @@ func restoreBoss(c *tmux.Client, b bossEntry, agents []agentEntry, shell string)
 			warn(c, b.Session+":"+a.Pos+": conversation "+a.ID+" not resumed (directory changed or transcript gone), fresh coordinator")
 		}
 	}
-	if err := adoptBoss(c, b.Session, panes[0], panes[1], resume); err != nil {
+	if err := adoptBoss(c, b.Session, panes[0], panes[1], append(resume, start.Args(resume != nil)...)); err != nil {
 		return true, &stepError{"boss", err}
 	}
 	return true, nil
@@ -629,6 +652,10 @@ const startedByPrefix = ":started_by"
 // outsideMark ends a started-by line of a worker marked herd.OptStartedOutside.
 const outsideMark = "outside"
 
+// startedWithPrefix starts a "<prefix><TAB>session<TAB>model<TAB>effort" line of a .dev file: the agent.Start of
+// session's Claude, one of the two maybe empty.
+const startedWithPrefix = ":started_with"
+
 // bossPrefix starts a "<prefix><TAB>session<TAB>window.pane<TAB>window.pane" line of a .dev file: a boss,
 // its coordinator's and previews' positions.
 const bossPrefix = ":boss"
@@ -647,17 +674,24 @@ type agentEntry struct {
 	Session, Pos, Kind, ID, Transcript, Path string
 }
 
-// parseState reads a .dev file's session, agent, started-by and boss lines.
-func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEntry) {
+// parseState reads a .dev file's session, agent, started-by, boss and started-with (by session) lines.
+func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEntry, map[string]agent.Start) {
 	var entries []entry
 	var agents []agentEntry
 	var startedBy []startedByEntry
 	var bosses []bossEntry
+	starts := map[string]agent.Start{}
 	for _, line := range strings.Split(data, "\n") {
 		session, rest, _ := strings.Cut(line, "\t")
 		if session == bossPrefix {
 			if f := strings.Split(rest, "\t"); len(f) == 3 && f[0] != "" && f[1] != "" && f[2] != "" {
 				bosses = append(bosses, bossEntry{f[0], f[1], f[2]})
+			}
+			continue
+		}
+		if session == startedWithPrefix {
+			if f := strings.Split(rest, "\t"); len(f) >= 3 && f[0] != "" && (f[1] != "" || f[2] != "") {
+				starts[f[0]] = agent.Start{Model: f[1], Effort: f[2]}
 			}
 			continue
 		}
@@ -680,7 +714,7 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 		project, pos, _ := strings.Cut(rest, "\t")
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
-	return entries, agents, startedBy, bosses
+	return entries, agents, startedBy, bosses, starts
 }
 
 const snapshotTimeout = time.Minute

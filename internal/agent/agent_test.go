@@ -175,23 +175,29 @@ func TestResumeCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	noRC := `'--settings' '{"remoteControlAtStartup":false}'`
+	both := Start{Model: "sonnet", Effort: "medium"}
 	tests := []struct {
 		name, kind, id, transcript string
 		worker                     bool
+		start                      Start
 		want                       string
 		resumed, ok                bool
 	}{
-		{"resumes its conversation", Claude, "s", transcript, false, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
-		{"transcript gone", Claude, "s", transcript + ".gone", false, `'claude' '--remote-control=dev-x'`, false, true},
-		{"no id", Claude, "", transcript, false, `'claude' '--remote-control=dev-x'`, false, true},
-		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, false, `'claude' '--remote-control=dev-x'`, false, true},
-		{"a worker resumes without Remote Control", Claude, "s", transcript, true, `'claude' '--resume' 's' ` + noRC, true, true},
-		{"a fresh worker too", Claude, "", transcript, true, `'claude' ` + noRC, false, true},
-		{"unknown kind", "codex", "s", transcript, false, "", false, false},
+		{"resumes its conversation", Claude, "s", transcript, false, Start{}, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
+		{"transcript gone", Claude, "s", transcript + ".gone", false, Start{}, `'claude' '--remote-control=dev-x'`, false, true},
+		{"no id", Claude, "", transcript, false, Start{}, `'claude' '--remote-control=dev-x'`, false, true},
+		{"id unsafe to type", Claude, "s; rm -rf ~", transcript, false, Start{}, `'claude' '--remote-control=dev-x'`, false, true},
+		{"a worker resumes without Remote Control", Claude, "s", transcript, true, Start{}, `'claude' '--resume' 's' ` + noRC, true, true},
+		{"a fresh worker too", Claude, "", transcript, true, Start{}, `'claude' ` + noRC, false, true},
+		{"unknown kind", "codex", "s", transcript, false, Start{}, "", false, false},
+		{"a resume keeps the model itself, so only the effort", Claude, "s", transcript, true, both, `'claude' '--resume' 's' '--effort' 'medium' ` + noRC, true, true},
+		{"a resume started with a model alone", Claude, "s", transcript, false, Start{Model: "sonnet"}, `'claude' '--resume' 's' '--remote-control=dev-x'`, true, true},
+		{"a fresh agent gets the model too", Claude, "s", transcript + ".gone", true, both, `'claude' '--model' 'sonnet' '--effort' 'medium' ` + noRC, false, true},
+		{"a model is typed as one argument", Claude, "", transcript, false, Start{Model: "claude-opus-5-5[1m]"}, `'claude' '--model' 'claude-opus-5-5[1m]' '--remote-control=dev-x'`, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript, "dev-x", tt.worker)
+			got, resumed, ok := ResumeCommand(tt.kind, tt.id, tt.transcript, "dev-x", tt.worker, tt.start)
 			if got != tt.want || resumed != tt.resumed || ok != tt.ok {
 				t.Errorf("ResumeCommand = %q, %v, %v; want %q, %v, %v", got, resumed, ok, tt.want, tt.resumed, tt.ok)
 			}
@@ -538,5 +544,59 @@ func TestCodexPaneErrors(t *testing.T) {
 		if _, _, err := CodexPane(failing, []byte(input)); err == nil {
 			t.Errorf("CodexPane(%s) err = nil; want error", input)
 		}
+	}
+}
+
+func TestStart(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		start         Start
+		fresh, resume []string
+		options       []string
+	}{
+		{"neither", Start{}, nil, nil, nil},
+		{"model", Start{Model: "sonnet"}, []string{"--model", "sonnet"}, nil, []string{"set-option", "-t", "=w:", "@dev_model", "sonnet"}},
+		{"effort", Start{Effort: "low"}, []string{"--effort", "low"}, []string{"--effort", "low"}, []string{"set-option", "-t", "=w:", "@dev_effort", "low"}},
+		{"both", Start{Model: "opus", Effort: "xhigh"}, []string{"--model", "opus", "--effort", "xhigh"}, []string{"--effort", "xhigh"},
+			[]string{"set-option", "-t", "=w:", "@dev_model", "opus", ";", "set-option", "-t", "=w:", "@dev_effort", "xhigh"}},
+	} {
+		if got := tt.start.Args(false); !slices.Equal(got, tt.fresh) {
+			t.Errorf("%s: Args(false) = %q, want %q", tt.name, got, tt.fresh)
+		}
+		if got := tt.start.Args(true); !slices.Equal(got, tt.resume) {
+			t.Errorf("%s: Args(true) = %q, want %q", tt.name, got, tt.resume)
+		}
+		if got := tt.start.SetOptions("=w:"); !slices.Equal(got, tt.options) {
+			t.Errorf("%s: SetOptions = %q, want %q", tt.name, got, tt.options)
+		}
+	}
+}
+
+func TestStartCheckExisting(t *testing.T) {
+	tail := ": --model and --effort only apply to a new session"
+	for _, tt := range []struct {
+		name            string
+		start, recorded Start
+		err             string
+	}{
+		{"the same model and effort: a retried start", Start{"sonnet", "medium"}, Start{"sonnet", "medium"}, ""},
+		{"a flag left out isn't compared", Start{Effort: "medium"}, Start{"sonnet", "medium"}, ""},
+		{"another effort", Start{"sonnet", "high"}, Start{"sonnet", "medium"}, "session w was started with --effort medium, not high" + tail},
+		{"another model", Start{Model: "opus"}, Start{"sonnet", "medium"}, "session w was started with --model sonnet, not opus" + tail},
+		{"a session started without the flag", Start{Effort: "low"}, Start{Model: "sonnet"}, "session w was started without --effort, not with low" + tail},
+	} {
+		c := tmux.NewFake(func(args []string) (string, error) {
+			if want := []string{"display-message", "-p", "-t", "=w:", "#{@dev_model}\t#{@dev_effort}"}; !slices.Equal(args, want) {
+				t.Errorf("%s: ran %q, want %q", tt.name, args, want)
+			}
+			return tt.recorded.Model + "\t" + tt.recorded.Effort + "\n", nil
+		})
+		if err := tt.start.CheckExisting(c, "w"); (err == nil) != (tt.err == "") || err != nil && err.Error() != tt.err {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.err)
+		}
+	}
+	// Neither flag: nothing to compare, tmux isn't asked
+	if err := (Start{}).CheckExisting(tmux.NewFake(nil), "w"); err != nil {
+		t.Errorf("no flags: %v", err)
 	}
 }

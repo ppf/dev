@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -311,9 +312,30 @@ Claude fires no hook for that.`,
 	}
 }
 
+// addStartFlags adds --model and --effort; who names what they start, for the flag help.
+func addStartFlags(cmd *cobra.Command, start *agent.Start, who string) {
+	cmd.Flags().StringVar(&start.Model, "model", "", "model a new "+who+" starts with (claude --model: an alias or a model id); default: the user's settings")
+	cmd.Flags().StringVar(&start.Effort, "effort", "", "effort a new "+who+" starts with: "+strings.Join(agent.Efforts, ", ")+"; default: the user's settings")
+}
+
+// checkStart refuses a --effort claude doesn't know and a --model that is empty, has whitespace or a control
+// character, starts with "-" (claude would take it for a flag) or ends in ";" (tmux's command separator): it is
+// typed into a shell and kept in tmux options and the tab-separated resurrect state.
+func checkStart(cmd *cobra.Command, start agent.Start) error {
+	if cmd.Flags().Changed("effort") && !slices.Contains(agent.Efforts, start.Effort) {
+		return fmt.Errorf("unknown --effort %q, want %s", start.Effort, strings.Join(agent.Efforts, ", "))
+	}
+	blank := func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
+	if m := start.Model; cmd.Flags().Changed("model") && (m == "" || strings.ContainsFunc(m, blank) || strings.HasPrefix(m, "-") || strings.HasSuffix(m, ";")) {
+		return fmt.Errorf("invalid --model %q, want a model alias or id", start.Model)
+	}
+	return nil
+}
+
 func newAgentStartCmd() *cobra.Command {
 	var asJSON bool
 	var agentCmd, boss string
+	var start agent.Start
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "start <project> [worktree]",
@@ -322,12 +344,21 @@ func newAgentStartCmd() *cobra.Command {
 wait until its agent's first hook registers it (a Codex or Grok pane counts once its CLI runs, so read its
 screen before the first prompt). An existing session is reused; one running another agent than an explicit
 --agent is an error. A new session started from a tmux pane, or with --boss, is that session's worker.
+--model and --effort start a new session's Claude with them (list --json and get --json show them, and it keeps
+them when dev restarts it). With an existing session they are an error unless they equal what it was started
+with, and with --agent codex or grok always.
 Prints the agent like get.`,
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if agentCmd != agent.Claude && agentCmd != agent.Codex && agentCmd != agent.Grok {
 				return fmt.Errorf("unknown --agent %q, want claude, codex or grok", agentCmd)
+			}
+			if err := checkStart(cmd, start); err != nil {
+				return err
+			}
+			if start != (agent.Start{}) && agentCmd != agent.Claude {
+				return fmt.Errorf("--model and --effort only apply to Claude, not --agent %s", agentCmd)
 			}
 			wt, err := worktreeArg(args)
 			if err != nil {
@@ -339,10 +370,16 @@ Prints the agent like get.`,
 				return err
 			}
 			_, missing := c.Run("has-session", "-t", tmux.SessionTarget(session))
+			// Before openProject, which would fetch for the worktree first
+			if missing == nil {
+				if err := start.CheckExisting(c, session); err != nil {
+					return err
+				}
+			}
 			// A herd's x only kills workers its coordinator started, never a reused session; workers start
 			// without Remote Control
 			worker := missing != nil && pane != ""
-			if err := openProject(cmd, args[0], wt, true, worker, agentCmd, boss); err != nil {
+			if err := openProject(cmd, args[0], wt, true, worker, agentCmd, boss, start); err != nil {
 				return err
 			}
 			if worker {
@@ -364,6 +401,7 @@ Prints the agent like get.`,
 	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex or grok")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
 	addBossFlag(cmd, &boss)
+	addStartFlags(cmd, &start, "session's Claude")
 	return cmd
 }
 

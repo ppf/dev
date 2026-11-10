@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,6 +261,39 @@ func TestAgentStart(t *testing.T) {
 	check(t, "sessions", d.T("list-sessions", "-F", "#{session_name}"), "app\nboot")
 	out, errOut, status := devAgent(env, "", "start", "app", "--agent", "codex", "--timeout", "30s")
 	check(t, "reused session running another agent", out+status+" "+errOut, "1 ❌ session app already runs Claude, not codex\n")
+
+	// --model and --effort: a new session's claude starts with them; a session that exists takes only the ones it
+	// started with
+	out, errOut, status = devAgent(env, "", "start", "app", "--effort", "low", "--timeout", "30s")
+	check(t, "an effort for a session started without one", out+status+" "+errOut,
+		"1 ❌ session app was started without --effort, not with low: --model and --effort only apply to a new session\n")
+	env = d.scriptEnv(writeProjects(t, [2]string{"app", dir}, [2]string{"fl", tempDir(t)}))
+	out, errOut, status = devAgent(env, "", "start", "fl", "--agent", "codex", "--model", "sonnet", "--timeout", "30s")
+	check(t, "a model for codex", out+status+" "+errOut, "1 ❌ --model and --effort only apply to Claude, not --agent codex\n")
+	if _, err := d.Try("has-session", "-t", "=fl:"); err == nil {
+		t.Error("❌ refused start opened fl")
+	}
+	out, errOut, status = devAgent(env, "", "start", "fl", "--model", "sonnet", "--effort", "medium", "--json", "--timeout", "30s")
+	var fl map[string]string
+	if err := json.Unmarshal([]byte(out), &fl); err != nil || status != "0" {
+		t.Fatalf("start with a model and effort: exit %s, %v: %q %q", status, err, out, errOut)
+	}
+	check(t, "start prints the model and effort", fl["model"]+" "+fl["effort"], "sonnet medium")
+	if args := agentArgs(t, d, fl["pane"]); !strings.Contains(args, "pty-wrap --close-on-exit -- claude --model sonnet --effort medium --remote-control=fl") {
+		t.Errorf("claude not started with the model and effort: %q", args)
+	}
+	check(t, "recorded on the session", d.T("show-option", "-qv", "-t", "=fl:", "@dev_model")+" "+d.T("show-option", "-qv", "-t", "=fl:", "@dev_effort"), "sonnet medium")
+	out, errOut, status = devAgent(env, "", "start", "fl", "--model", "sonnet", "--effort", "medium", "--json", "--timeout", "30s")
+	var again map[string]string
+	if err := json.Unmarshal([]byte(out), &again); err != nil || status != "0" || again["pane"] != fl["pane"] {
+		t.Errorf("a retried start with the same model and effort: exit %s, %v: %q %q, want the session reused", status, err, out, errOut)
+	}
+	out, errOut, status = devAgent(env, "", "start", "fl", "--model", "sonnet", "--effort", "high", "--timeout", "30s")
+	check(t, "another effort for the session", out+status+" "+errOut,
+		"1 ❌ session fl was started with --effort medium, not high: --model and --effort only apply to a new session\n")
+	out, _, _ = devAgent(env, "", "list", "--json")
+	check(t, "list --json shows them only where given", fmt.Sprint(strings.Count(out, `"model": "sonnet"`), strings.Count(out, `"effort": "medium"`),
+		strings.Count(out, `"model"`), strings.Count(out, `"effort"`)), "1 1 1 1")
 
 	repo := newRepo(t, "", "")
 	env = d.scriptEnv(append(gitEnv, writeProjects(t, [2]string{"repo", repo}))...)

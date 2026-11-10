@@ -334,7 +334,7 @@ func TestReply(t *testing.T) {
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", "", "", ""), nil
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", paneCmd, "idle", "claude", "", "", "", "$2", "", "", "", "", "", ""), nil
 		case "has-session":
 			return "", nil
 		}
@@ -429,7 +429,7 @@ func TestAskOptionKeys(t *testing.T) {
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", ""), nil
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", "", "", ""), nil
 		case "has-session":
 			return "", nil
 		case "display-message":
@@ -695,5 +695,43 @@ func TestBottomMessage(t *testing.T) {
 	m.msg = alert("gh: not logged in")
 	if got := m.bottom(); len(got) != 1 || got[0] != sidebar.AlertRow("gh: not logged in", m.width) {
 		t.Errorf("alert: %q", got)
+	}
+}
+
+func TestCoordinatorArgv(t *testing.T) {
+	start := agent.Start{Model: "opus", Effort: "medium"}
+	for _, tt := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"new", nil, []string{"claude"}},
+		{"new with a model and effort", start.Args(false), []string{"claude", "--model", "opus", "--effort", "medium"}},
+		{"resumed, the effort again", append([]string{"--resume", "b1"}, start.Args(true)...), []string{"claude", "--resume", "b1", "--effort", "medium"}},
+	} {
+		want := append(tt.want, "--append-system-prompt", coordinatorPrompt, "--remote-control=boss-p")
+		if got := coordinatorArgv("boss-p", tt.args...); !slices.Equal(got, want) {
+			t.Errorf("%s: %q, want %q", tt.name, got[:len(got)-3], tt.want)
+		}
+	}
+}
+
+// An existing boss keeps the coordinator it has: another model or effort for it is refused, not dropped.
+func TestOpenExistingBossRefusesStart(t *testing.T) {
+	var ran []string
+	c := tmux.NewFake(func(args []string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		if args[0] == "display-message" {
+			return "opus\tmedium\n", nil
+		}
+		return "1\n", nil
+	})
+	err := Open(c, "p", "/p", agent.Start{Model: "opus", Effort: "low"})
+	if want := "session boss-p was started with --effort medium, not low: --model and --effort only apply to a new session"; err == nil || err.Error() != want {
+		t.Errorf("Open = %v, want %q", err, want)
+	}
+	if want := []string{"has-session -t =boss-p:", "show-option -qv -t =boss-p: @dev_herd",
+		"display-message -p -t =boss-p: #{@dev_model}\t#{@dev_effort}"}; !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want only %q", ran, want)
 	}
 }

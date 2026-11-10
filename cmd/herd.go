@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
@@ -14,16 +15,22 @@ import (
 
 func newHerdCmd() *cobra.Command {
 	var previews bool
+	var start agent.Start
 	cmd := &cobra.Command{
 		Use:     "boss [project]",
 		Aliases: []string{"herd"},
 		Short:   "Open the coordinator view: a coordinator Claude next to live previews of its workers",
 		Long: `Open or attach the boss session ("boss", or "boss-<project>"): a coordinator Claude started in the
 project's main checkout (default: $HOME) that drives the other sessions with the dev-agents skill, next to
-live previews of the workers it started.`,
+live previews of the workers it started. --model and --effort start a new boss's coordinator with them (with
+a boss that exists they are an error unless they equal what it was started with); it keeps them when dev
+restarts it.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkStart(cmd, start); err != nil {
+				return err
+			}
 			c := tmux.New()
 			if previews {
 				pane := os.Getenv("TMUX_PANE")
@@ -51,10 +58,11 @@ live previews of the workers it started.`,
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 				return err
 			}
-			return herd.Open(c, project, dir)
+			return herd.Open(c, project, dir, start)
 		},
 	}
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
+	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd
 }

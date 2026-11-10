@@ -398,15 +398,81 @@ func ClaudeArgv(session string, worker bool, args ...string) []string {
 	return append(argv, "--remote-control="+session)
 }
 
+// Efforts are the levels claude's --effort takes.
+var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// OptModel and OptEffort are the session options holding the Start of a session's Claude.
+const (
+	OptModel  = "@dev_model"
+	OptEffort = "@dev_effort"
+)
+
+// Start is the --model and --effort a session's Claude was started with (dev agent start, dev boss); an empty
+// field leaves that one to the user's settings.
+type Start struct{ Model, Effort string }
+
+// Args are claude's args for s. claude --resume keeps the conversation's model but takes the user's default
+// effort, so a resumed conversation gets only --effort.
+func (s Start) Args(resumed bool) []string {
+	var args []string
+	if s.Model != "" && !resumed {
+		args = append(args, "--model", s.Model)
+	}
+	if s.Effort != "" {
+		args = append(args, "--effort", s.Effort)
+	}
+	return args
+}
+
+// SetOptions is the tmux command recording s on the session at target (OptModel, OptEffort): nil for an empty s.
+func (s Start) SetOptions(target string) []string {
+	var cmd []string
+	for _, o := range [][2]string{{OptModel, s.Model}, {OptEffort, s.Effort}} {
+		if o[1] == "" {
+			continue
+		}
+		if cmd != nil {
+			cmd = append(cmd, ";")
+		}
+		cmd = append(cmd, "set-option", "-t", target, o[0], o[1])
+	}
+	return cmd
+}
+
+// CheckExisting refuses s for session, whose Claude already runs, unless each flag given equals what the session
+// recorded at its start (OptModel, OptEffort); a flag left out isn't compared, so a retried start is accepted.
+func (s Start) CheckExisting(c *tmux.Client, session string) error {
+	if s == (Start{}) {
+		return nil
+	}
+	out, err := c.Run("display-message", "-p", "-t", tmux.SessionTarget(session), "#{"+OptModel+"}\t#{"+OptEffort+"}")
+	if err != nil {
+		return err
+	}
+	model, effort, _ := strings.Cut(strings.TrimSuffix(out, "\n"), "\t")
+	for _, f := range [][3]string{{"--model", s.Model, model}, {"--effort", s.Effort, effort}} {
+		switch flag, given, recorded := f[0], f[1], f[2]; {
+		case given == "" || given == recorded:
+		case recorded == "":
+			return fmt.Errorf("session %s was started without %s, not with %s: --model and --effort only apply to a new session", session, flag, given)
+		default:
+			return fmt.Errorf("session %s was started with %s %s, not %s: --model and --effort only apply to a new session", session, flag, recorded, given)
+		}
+	}
+	return nil
+}
+
 // ResumeCommand is the shell command that restarts an agent of kind in session, without Remote Control
-// for a worker (see ClaudeArgv): resumed, its conversation id when the id is safe to type and the
-// conversation's transcript still exists, else a fresh agent. ok=false for an unknown kind.
-func ResumeCommand(kind, id, transcript, session string, worker bool) (cmd string, resumed, ok bool) {
+// for a worker (see ClaudeArgv), with start's args (Start.Args: only --effort when resumed): resumed, its
+// conversation id when the id is safe to type and the conversation's transcript still exists, else a fresh
+// agent. ok=false for an unknown kind.
+func ResumeCommand(kind, id, transcript, session string, worker bool, start Start) (cmd string, resumed, ok bool) {
 	if kind != Claude {
 		return "", false, false
 	}
 	args := ResumeArgs(id, transcript)
-	return tmux.ShellJoin(ClaudeArgv(session, worker, args...)...), args != nil, true
+	resumed = args != nil
+	return tmux.ShellJoin(ClaudeArgv(session, worker, append(args, start.Args(resumed)...)...)...), resumed, true
 }
 
 // ResumeArgs are claude's args resuming conversation id: nil unless the id is safe to type and its

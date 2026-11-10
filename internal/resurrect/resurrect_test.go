@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
@@ -80,11 +81,12 @@ func TestSave(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	// boss-p's workers: w-name names it, w-old holds its id as older versions wrote, w-out a coordinator outside
 	// tmux started for it; w-gone's starter is gone
-	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "", "") +
-		tmux.FormatRow("hidden", "proj", "", "$3", "", "", "") + tmux.FormatRow("stale", "p", "%99", "$4", "", "", "") +
-		tmux.FormatRow("boss-p", "", "", "$9", "", "1", "") + tmux.FormatRow("w-name", "p", "", "$10", "boss-p", "", "") +
-		tmux.FormatRow("w-old", "", "", "$11", "$9", "", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "", "") +
-		tmux.FormatRow("boss-old", "", "", "$13", "", "1", "") + tmux.FormatRow("w-out", "", "", "$14", "boss-p", "", "1")
+	// Started with a model or effort: the worker w-name with both, boss-p's coordinator and plain (no worker) with one
+	sessions := tmux.FormatRow("devt", "devt", "%1", "$1", "", "", "", "", "") + tmux.FormatRow("plain", "", "", "$2", "", "", "", "", "low") +
+		tmux.FormatRow("hidden", "proj", "", "$3", "", "", "", "", "") + tmux.FormatRow("stale", "p", "%99", "$4", "", "", "", "", "") +
+		tmux.FormatRow("boss-p", "", "", "$9", "", "1", "", "opus", "") + tmux.FormatRow("w-name", "p", "", "$10", "boss-p", "", "", "sonnet", "medium") +
+		tmux.FormatRow("w-old", "", "", "$11", "$9", "", "", "", "") + tmux.FormatRow("w-gone", "", "", "$12", "$50", "", "", "", "") +
+		tmux.FormatRow("boss-old", "", "", "$13", "", "1", "", "", "") + tmux.FormatRow("w-out", "", "", "$14", "boss-p", "", "1", "", "")
 	// devt's window 1 is also linked into linked as window 5, listed after devt. %2 runs Claude with a
 	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet. boss-p's
 	// panes carry their roles (its window 1 also linked into linked as window 6, listed first), plain's
@@ -109,7 +111,8 @@ func TestSave(t *testing.T) {
 			name:    "one line per session with a project or a boss",
 			replies: map[string]any{"list-sessions": sessions, "list-panes -a": panes},
 			want: "devt\tdevt\t1.1\nhidden\tproj\t\nstale\tp\t\nboss-p\t\t\nw-name\tp\t\nboss-old\t\t\n" +
-				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:started_by\tw-out\tboss-p\toutside\n:boss\tboss-p\t1.2\t1.3\n" +
+				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:started_by\tw-out\tboss-p\toutside\n" +
+				":started_with\tplain\t\tlow\n:started_with\tboss-p\topus\t\n:started_with\tw-name\tsonnet\tmedium\n:boss\tboss-p\t1.2\t1.3\n" +
 				":agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n:agent\tboss-p\t1.2\tclaude\tb1\t/t/b1.jsonl\t/repo\n",
 		},
 		{
@@ -173,7 +176,7 @@ func TestSave(t *testing.T) {
 // save.sh deletes a new snapshot identical to the last one, so its state replaces the last one's.
 func TestSaveIdenticalSnapshot(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	replies := map[string]any{"list-sessions": tmux.FormatRow("devt", "devt", "", "$1", "", "", ""), "list-panes -a": ""}
+	replies := map[string]any{"list-sessions": tmux.FormatRow("devt", "devt", "", "$1", "", "", "", "", ""), "list-panes -a": ""}
 	tests := []struct {
 		name, last, link string
 		wantDev          string // the file that gets the state
@@ -672,6 +675,32 @@ func TestRestoreAgents(t *testing.T) {
 				slotQuery("devu"), send("%5", resumeU), "has-session -t =devt", "set-option -t =devt: @dev_started_by boss-p"},
 		},
 		{
+			name: "each keeps the model and effort it started with: a resume the effort (it keeps its model itself), a fresh one both",
+			state: line("devt", "claude", "s1", transcript, "/repo") + line("devu", "claude", "s9", transcript+".gone", "/repo") +
+				":started_by\tdevt\tboss-p\n:started_with\tdevt\tsonnet\tmedium\n:started_with\tdevu\topus\thigh\n:started_with\tlive\topus\thigh\n" +
+				":started_with\tgone\topus\t\n",
+			replies: with(map[string]any{send("%2", `'claude' '--resume' 's1' '--effort' 'medium' '--settings' '{"remoteControlAtStartup":false}'`): "",
+				send("%5", `'claude' '--model' 'opus' '--effort' 'high' '--remote-control=devu'`): "",
+				"has-session -t =devt": "", "set-option -t =devt: @dev_started_by boss-p": "",
+				"has-session -t =devu": "", "has-session -t =gone": errors.New("no session"),
+				"set-option -t =devt: @dev_model sonnet ; set-option -t =devt: @dev_effort medium": "",
+				"set-option -t =devu: @dev_model opus ; set-option -t =devu: @dev_effort high":     ""}),
+			want: slices.Concat([]string{procs, slotQuery("devt"), send("%2", `'claude' '--resume' 's1' '--effort' 'medium' '--settings' '{"remoteControlAtStartup":false}'`),
+				slotQuery("devu")}, fresh("devu", "s9"), []string{send("%5", `'claude' '--model' 'opus' '--effort' 'high' '--remote-control=devu'`),
+				"has-session -t =devt", "set-option -t =devt: @dev_started_by boss-p",
+				"has-session -t =devt", "set-option -t =devt: @dev_model sonnet ; set-option -t =devt: @dev_effort medium",
+				"has-session -t =devu", "set-option -t =devu: @dev_model opus ; set-option -t =devu: @dev_effort high", "has-session -t =gone"}),
+		},
+		{
+			name:  "a model and effort that can't be set again are warned and returned",
+			state: ":started_with\tdevt\t\tlow\n",
+			replies: with(map[string]any{"has-session -t =devt": "",
+				"set-option -t =devt: @dev_effort low": &tmux.Error{Stderr: "no such session", Err: errors.New("exit status 1")}}),
+			want: slices.Concat([]string{"has-session -t =devt", "set-option -t =devt: @dev_effort low"},
+				warned("devt: @dev_model and @dev_effort not set")),
+			wantErr: true,
+		},
+		{
 			name:    "a pane back in another directory gets a fresh agent",
 			state:   line("devt", "claude", "s1", transcript, "/elsewhere"),
 			replies: slots,
@@ -831,6 +860,30 @@ func TestRestoreBoss(t *testing.T) {
 			want:    append(queried, "adopt boss-p %7 %8 []"),
 		},
 		{
+			name:    "a coordinator started with a model and effort resumes with the effort, which a resume doesn't keep",
+			state:   boss + coordinator(transcript, "/repo") + ":started_with\tboss-p\topus\tmedium\n",
+			replies: with(map[string]any{"set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium": ""}),
+			want: append(queried, "adopt boss-p %7 %8 [--resume b1 --effort medium]", "has-session -t =boss-p",
+				"set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium"),
+		},
+		{
+			name:    "a fresh one starts with both again",
+			state:   boss + ":started_with\tboss-p\topus\tmedium\n",
+			replies: with(map[string]any{"set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium": ""}),
+			want: append(queried, "adopt boss-p %7 %8 [--model opus --effort medium]", "has-session -t =boss-p",
+				"set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium"),
+		},
+		{
+			name:  "the previews slot not a bare shell: the coordinator resumes as a plain agent, with its effort",
+			state: boss + coordinator(transcript, "/repo") + ":started_with\tboss-p\topus\tmedium\n",
+			replies: with(map[string]any{slotQuery("1.3"): "dev" + tmux.Sep + "%8" + tmux.Sep + "/repo\n", procs: "\n",
+				send("%7", `'claude' '--resume' 'b1' '--effort' 'medium' '--remote-control=boss-p'`): "",
+				"set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium": ""}),
+			want: slices.Concat(queried, warned("boss-p:1.3 is not the boss's bare shell, boss not restored"),
+				[]string{procs, slotQuery("1.2"), send("%7", `'claude' '--resume' 'b1' '--effort' 'medium' '--remote-control=boss-p'`),
+					"has-session -t =boss-p", "set-option -t =boss-p: @dev_model opus ; set-option -t =boss-p: @dev_effort medium"}),
+		},
+		{
 			name:    "its transcript gone",
 			state:   boss + coordinator(transcript+".gone", "/repo"),
 			replies: slots,
@@ -978,26 +1031,30 @@ func TestParseState(t *testing.T) {
 		wantAgents []agentEntry
 		wantBy     []startedByEntry
 		wantBosses []bossEntry
+		wantStarts map[string]agent.Start
 	}{
-		{"empty", "", nil, nil, nil, nil},
-		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil, nil},
-		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil, nil},
-		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil, nil},
-		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil, nil},
+		{"empty", "", nil, nil, nil, nil, nil},
+		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil, nil, nil},
+		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil, nil, nil},
+		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil, nil, nil},
+		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil, nil, nil},
 		{"agent lines", "devt\tp\t1.1\n:agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n", []entry{{"devt", "p", "1.1"}},
-			[]agentEntry{devtAgent}, nil, nil},
-		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil},
+			[]agentEntry{devtAgent}, nil, nil, nil},
+		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil, nil},
 		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n:started_by\to\tboss-p\toutside\n", nil, nil,
-			[]startedByEntry{{"w", "boss-p", false}, {"o", "boss-p", true}}, nil},
-		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}},
+			[]startedByEntry{{"w", "boss-p", false}, {"o", "boss-p", true}}, nil, nil},
+		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}, nil},
+		{"started-with lines, one of the two maybe empty",
+			":started_with\tw\tsonnet\tmedium\n:started_with\tm\topus\t\n:started_with\te\t\tlow\n:started_with\tbad\t\t\n:started_with\tbad\topus\n:started_with\t\topus\tlow\n",
+			nil, nil, nil, nil, map[string]agent.Start{"w": {Model: "sonnet", Effort: "medium"}, "m": {Model: "opus"}, "e": {Effort: "low"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, agents, by, bosses := parseState(tt.data)
+			got, agents, by, bosses, starts := parseState(tt.data)
 			if !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(agents, tt.wantAgents) || !reflect.DeepEqual(by, tt.wantBy) ||
-				!reflect.DeepEqual(bosses, tt.wantBosses) {
-				t.Errorf("parseState(%q) = %v, %v, %v, %v; want %v, %v, %v, %v", tt.data, got, agents, by, bosses,
-					tt.want, tt.wantAgents, tt.wantBy, tt.wantBosses)
+				!reflect.DeepEqual(bosses, tt.wantBosses) || !maps.Equal(starts, tt.wantStarts) {
+				t.Errorf("parseState(%q) = %v, %v, %v, %v, %v; want %v, %v, %v, %v, %v", tt.data, got, agents, by, bosses, starts,
+					tt.want, tt.wantAgents, tt.wantBy, tt.wantBosses, tt.wantStarts)
 			}
 		})
 	}

@@ -81,6 +81,9 @@ func TestResurrectDev(t *testing.T) {
 	d.T("set-option", "-t", "=devu:", "@dev_started_by", "boss-x")
 	d.T("set-option", "-t", "=plain:", "@dev_herd", "1")
 	d.T("set-option", "-t", "=devt:", "@dev_started_by", display("=plain:", "#{session_id}"))
+	// Started with a model and effort, as dev agent start --model --effort records them
+	d.T("set-option", "-t", "=devt:", "@dev_model", "sonnet", ";", "set-option", "-t", "=devt:", "@dev_effort", "medium")
+	d.T("set-option", "-t", "=devu:", "@dev_model", "opus")
 	d.T("run-shell", save+" quiet")
 	// A new conversation in the same layout: last's .dev holds its state whether save.sh drops the new
 	// snapshot as identical or keeps it (resurrect's ps of the sidebar pane may catch a sidebar tmux call)
@@ -89,7 +92,7 @@ func TestResurrectDev(t *testing.T) {
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
 	check(t, "dev state saved next to snapshot", string(state), "devt\tdevt\t1.1\ndevu\tdevu\t1.1\nplain\t\t\n"+
-		":started_by\tdevt\tplain\n:started_by\tdevu\tboss-x\n"+
+		":started_by\tdevt\tplain\n:started_by\tdevu\tboss-x\n:started_with\tdevt\tsonnet\tmedium\n:started_with\tdevu\topus\t\n"+
 		":agent\tdevt\t1.2\tclaude\ts1\t"+transcript+"\t"+dir+"\n"+
 		":agent\tdevu\t1.2\tclaude\tu1\t"+goneTranscript+"\t"+dirU+"\n")
 	check(t, "no save warnings", d.T("show", "-gqv", "@dev_resurrect_warnings"), "")
@@ -107,7 +110,9 @@ func TestResurrectDev(t *testing.T) {
 	sort.Strings(sessions)
 	check(t, "sessions restored", strings.Join(sessions, " "), "boot devt devu plain")
 	noRC := ` --settings {"remoteControlAtStartup":false}`
-	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1" + noRC + "\n" + display("=devu:1.2", "#{pane_id}") + " claude" + noRC + "\n"
+	// A resume keeps its model itself and gets its effort again; a fresh claude gets the model it started with
+	agents := display("=devt:1.2", "#{pane_id}") + " claude --resume s1 --effort medium" + noRC + "\n" +
+		display("=devu:1.2", "#{pane_id}") + " claude --model opus" + noRC + "\n"
 	claudes := func() []string {
 		log, _ := os.ReadFile(d.stubLog)
 		var lines []string
@@ -127,6 +132,8 @@ func TestResurrectDev(t *testing.T) {
 	check(t, "@project restored", d.T("show-option", "-qv", "-t", "=devt:", "@project"), "devt")
 	check(t, "bosses restored by name", d.T("show-option", "-qv", "-t", "=devt:", "@dev_started_by")+" "+
 		d.T("show-option", "-qv", "-t", "=devu:", "@dev_started_by"), "plain boss-x")
+	check(t, "model and effort restored", d.T("show-option", "-qv", "-t", "=devt:", "@dev_model")+" "+d.T("show-option", "-qv", "-t", "=devt:", "@dev_effort")+
+		" "+d.T("show-option", "-qv", "-t", "=devu:", "@dev_model")+" "+d.T("show-option", "-qv", "-t", "=devu:", "@dev_effort")+".", "sonnet medium opus .")
 	check(t, "restored zoom undone", display("=devt:2", "#{window_zoomed_flag}"), "0")
 	check(t, "focus stays on agent pane", display("=devt:1", "#{pane_index}"), "2")
 	check(t, "restore warns only about devu's lost conversation", d.T("show", "-gqv", "@dev_resurrect_warnings"),
