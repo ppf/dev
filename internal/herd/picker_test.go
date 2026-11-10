@@ -894,6 +894,9 @@ func TestPickWhole(t *testing.T) {
 		{"claude-ask-q1", colors, false}, // its Extras tab is a multi-select
 		{"claude-ask3-q1", agent.Question{}, false},
 	} {
+		if p := goldenPick(t, "claude-ask3-q3", scope3); !slices.Equal(p.answered(), []bool{true, true, false}) {
+			t.Errorf("answered %v", p.answered())
+		}
 		if p := goldenPick(t, tt.file, tt.q); p.whole() != tt.whole {
 			t.Errorf("%s: whole %v, want %v", tt.file, p.whole(), tt.whole)
 		}
@@ -914,6 +917,15 @@ func TestWholeCard(t *testing.T) {
 	}
 	if strings.Index(got, "Which repos") > strings.Index(got, "Rollout  When") {
 		t.Errorf("open tab not first:\n%s", got)
+	}
+	// A tab moved past with → without an answer: no whole answer, and the card says so
+	skipped := golden(t, "claude-ask3-q2")
+	skipped = strings.Replace(skipped, "☒", "☐", 1)
+	d, _ := parseDialog(skipped)
+	if p := newPick(d, scope3, ansi.Strip(skipped)); p.whole() {
+		t.Error("whole with an unanswered tab before the open one")
+	} else if m.snap.tiles[0].pick = &p; !strings.Contains(strings.Join(ansiStrip(m.render()), "\n"), "Scope  not answered") {
+		t.Errorf("skipped tab:\n%s", strings.Join(ansiStrip(m.render()), "\n"))
 	}
 	// On the last tab the ones before it are answered; narrow, nothing spills out of the card
 	m = pickerModel(t, "claude-ask3-q3", scope3)
@@ -953,6 +965,15 @@ func TestWholeKeys(t *testing.T) {
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil || m.box.tab != 2 || m.msg.text != "pick Tests first" {
 		t.Errorf("⏎ without a pick: tab %d msg %q", m.box.tab, m.msg.text)
+	}
+	// Another question starts on its open tab, its own recommended picks
+	m = pickerModel(t, "claude-ask3-q1", scope3)
+	m.box.tab = 2
+	two := agent.Question{Tool: agent.AskUserQuestion, Questions: scope3.Questions[:2]}
+	p := goldenPick(t, "claude-ask3-q1", two)
+	m.snap.tiles[0].pick = &p
+	if m.syncPick(); m.box.tab != 0 || !slices.Equal(m.box.picks, []int{0, 0}) {
+		t.Errorf("new question: tab %d picks %v", m.box.tab, m.box.picks)
 	}
 	// The open tab's free text answers it alone, as before
 	m = pickerModel(t, "claude-ask3-q1", scope3)

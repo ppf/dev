@@ -74,7 +74,7 @@ func (m Model) tabRows(t tile, w int) []dialogRow {
 		return nil
 	}
 	var rows []dialogRow
-	accent, waiting := sidebar.StateColour(t.sess.Agent, t.sess.State), m.answering != "" || m.waiting(p)
+	accent, waiting := sidebar.StateColour(t.sess.Agent, t.sess.State), m.answering != "" || m.box.session == t.sess.Name && m.waiting(p)
 	for i, a := range p.asks[p.cur+1:] {
 		i += p.cur + 1
 		q := strings.Join(strings.Fields(a.Question), " ")
@@ -96,10 +96,17 @@ func (m Model) tabRows(t tile, w int) []dialogRow {
 		for r := range chipRows {
 			chipRows[r].hits = nil
 		}
+		if i == m.box.tab && m.focusMark(t, i) != "" {
+			chipRows[len(chipRows)-1].hits = []hit{{kind: hitFocus}}
+		}
 		rows = append(rows, chipRows...)
 	}
-	for _, a := range p.asks[:p.cur] {
-		rows = append(rows, dialogRow{text: rule + a.Header + "  answered" + reset})
+	for i, a := range p.asks[:p.cur] {
+		state := "  not answered"
+		if p.answered()[i] {
+			state = "  answered"
+		}
+		rows = append(rows, dialogRow{text: rule + a.Header + state + reset})
 	}
 	return rows
 }

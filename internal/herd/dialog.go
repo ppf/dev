@@ -21,6 +21,7 @@ type dialog struct {
 	// dropped: two prompts alike but for it are two dialogs
 	what   string
 	tabs   []string // Claude's question tabs ("Color", "Extras", "Submit"); nil for one plain question
+	done   []bool   // by tab: answered (☒, or ✔ Submit)
 	opts   []option
 	cursor int  // the row the agent's cursor is on, see row; -1 unknown
 	multi  bool // checkbox options
@@ -153,7 +154,7 @@ func parseDialog(capture string) (dialog, bool) {
 		i--
 	}
 	if i >= 0 && tabRow(plain[i]) {
-		d.tabs, d.top = parseTabs(plain[i]), i
+		d.tabs, d.done, d.top = parseTabs(plain[i]), tabsDone(plain[i]), i
 		// The rule above the tabs is the dialog's too
 		for j := i - 1; j >= 0; j-- {
 			if isTopRule(plain[j]) {
@@ -225,6 +226,17 @@ func submitRow(l string) bool {
 func tabRow(l string) bool {
 	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "←"))
 	return strings.HasPrefix(t, "☐ ") || strings.HasPrefix(t, "☒ ")
+}
+
+// tabsDone is by tab of a tab row whether its box is checked.
+func tabsDone(l string) []bool {
+	var done []bool
+	for _, f := range strings.Fields(l) {
+		if f == "☐" || f == "☒" || f == "✔" {
+			done = append(done, f != "☐")
+		}
+	}
+	return done
 }
 
 // parseTabs is a tab row's names, the box marks dropped.

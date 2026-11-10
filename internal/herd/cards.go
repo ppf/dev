@@ -43,6 +43,8 @@ const (
 	hitSubmit
 	// hitOpen switches to the worker, as g and ⏎ do.
 	hitOpen
+	// hitFocus is no cell (x0 == x1), only the row of the tab ←→ moved to, kept in view as the highlighted option is.
+	hitFocus
 	// hitMessage opens the reply box, as m does.
 	hitMessage
 	// hitPR opens its PR, as o does.
@@ -92,7 +94,7 @@ func (m Model) board() board {
 			h.y += len(b.lines)
 			h.tile = i
 			b.hits = append(b.hits, h)
-			if picking && t.sess.Name == m.box.session && h.kind == hitOption && h.k == m.box.hl {
+			if picking && t.sess.Name == m.box.session && (h.kind == hitOption && h.k == m.box.hl || h.kind == hitFocus) {
 				b.focus = h.y
 			}
 		}

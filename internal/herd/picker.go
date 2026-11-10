@@ -91,20 +91,32 @@ func (p *pick) question() bool {
 	return p != nil && (len(p.d.tabs) > 0 || p.cur >= 0) && p.d.title != reviewTitle
 }
 
-// whole reports a question of several tabs the board answers whole: every tab from the open one on a
-// single choice, each picked on the board and sent in one go (sendAll).
+// whole reports a question of several tabs the board answers whole: the tabs before the open one answered,
+// every tab from it on a single choice, each picked on the board and sent in one go (sendAll).
 func (p *pick) whole() bool {
-	if !p.question() || len(p.asks) < 2 || p.cur >= len(p.asks) || p.d.multi {
+	if !p.question() || len(p.asks) < 2 || p.cur >= len(p.asks) || p.d.multi || slices.Contains(p.answered()[:p.cur], false) {
 		return false
 	}
 	return !slices.ContainsFunc(p.asks[p.cur:], func(a agent.Ask) bool { return a.MultiSelect || len(a.Options) == 0 })
 }
 
-// qsig identifies p's question by its tabs' questions, the same on every tab.
+// answered is by question whether the screen's tab row shows it answered; all false when it shows none.
+func (p *pick) answered() []bool {
+	if len(p.d.done) == len(p.asks)+1 {
+		return p.d.done[:len(p.asks)]
+	}
+	return make([]bool, len(p.asks))
+}
+
+// qsig identifies p's question by its tabs' questions and options, the same on every tab.
 func (p *pick) qsig() string {
 	var b strings.Builder
 	for _, a := range p.asks {
-		b.WriteString(a.Question + "\x00")
+		b.WriteString(a.Question + "\x00" + strconv.FormatBool(a.MultiSelect))
+		for _, c := range a.Options {
+			b.WriteString("\x00" + c.Label)
+		}
+		b.WriteString("\x01")
 	}
 	return b.String()
 }

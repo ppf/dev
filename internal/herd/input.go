@@ -118,8 +118,9 @@ func (m *Model) syncPick() {
 			for i, a := range p.asks {
 				b.picks[i] = recommended(a)
 			}
+			b.tab = p.cur
 		}
-		b.tab = max(b.tab, p.cur)
+		b.tab = min(len(p.asks)-1, max(b.tab, p.cur))
 	}
 	if b.sent != "" && m.answering == "" {
 		// A capture mid-redraw can take an answer for done: the picker comes back after a few refreshes
@@ -278,6 +279,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Already typing it
 		return m, nil
 	case p.whole() && h.k < len(p.asks[p.cur].Options):
+		m.box.other, m.box.ed = false, editor{}
 		m.pickTab(p, p.cur, h.k)
 		return m, nil
 	}

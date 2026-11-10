@@ -24,16 +24,16 @@ func TestParseDialogGolden(t *testing.T) {
 		file string
 		want dialog
 	}{
-		{"claude-ask-q1", dialog{title: "Which color should the theme use?", tabs: []string{"Color", "Extras", "Submit"}, cursor: 0, opts: []option{
+		{"claude-ask-q1", dialog{title: "Which color should the theme use?", tabs: []string{"Color", "Extras", "Submit"}, done: []bool{false, false, true}, cursor: 0, opts: []option{
 			{num: 1, label: "Red", desc: "Warm and loud"}, {num: 2, label: "Green", desc: "Calm"}, {num: 3, label: "Blue", desc: "Cool and safe"},
 			{num: 4, label: "Type something."}, {num: 5, label: "Chat about this"}}}},
-		{"claude-ask-q2-checked", dialog{title: "Which extras do you want?", tabs: []string{"Color", "Extras", "Submit"}, cursor: 0, multi: true, submitAt: 4, opts: []option{
+		{"claude-ask-q2-checked", dialog{title: "Which extras do you want?", tabs: []string{"Color", "Extras", "Submit"}, done: []bool{true, true, true}, cursor: 0, multi: true, submitAt: 4, opts: []option{
 			{num: 1, label: "Tests", desc: "Add unit tests", checkbox: true, checked: true}, {num: 2, label: "Docs", desc: "Write README", checkbox: true},
 			{num: 3, label: "Lint", desc: "Run linter", checkbox: true, checked: true}, {num: 4, label: "Type something", checkbox: true}, {num: 5, label: "Chat about this"}}}},
-		{"claude-ask-multi-other-typed", dialog{title: "Which pets?", tabs: []string{"Pets", "Submit"}, cursor: 2, multi: true, submitAt: 3, opts: []option{
+		{"claude-ask-multi-other-typed", dialog{title: "Which pets?", tabs: []string{"Pets", "Submit"}, done: []bool{true, true}, cursor: 2, multi: true, submitAt: 3, opts: []option{
 			{num: 1, label: "Cat", desc: "Independent", checkbox: true}, {num: 2, label: "Dog", desc: "Loyal", checkbox: true, checked: true},
 			{num: 3, label: "a fish", checkbox: true, checked: true}, {num: 4, label: "Chat about this"}}}},
-		{"claude-ask-single", dialog{title: "Which size?", tabs: []string{"Size"}, cursor: 0, opts: []option{
+		{"claude-ask-single", dialog{title: "Which size?", tabs: []string{"Size"}, done: []bool{false}, cursor: 0, opts: []option{
 			{num: 1, label: "Small", desc: "Fast"}, {num: 2, label: "Large", desc: "Thorough"}, {num: 3, label: "Type something."}, {num: 4, label: "Chat about this"}}}},
 		{"claude-ask-review", dialog{title: "Ready to submit your answers?", what: "←☒Color☒Extras✔Submit→Reviewyouranswers●Whichcolorshouldthethemeuse?→Green●Whichextrasdoyouwant?→Tests,Lint", cursor: 0, opts: []option{{num: 1, label: "Submit answers"}, {num: 2, label: "Cancel"}}}},
 		{"claude-permission-write", dialog{title: "Do you want to create notes.txt?", what: "Createfilenotes.txt1hithere", cursor: 0, opts: []option{{num: 1, label: "Yes"},
