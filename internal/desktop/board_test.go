@@ -297,7 +297,9 @@ func TestBoardSettledTurn(t *testing.T) {
 	wrap := func(id string, input map[string]any) map[string]any {
 		return assistant("m", map[string]any{"type": "tool_use", "id": id, "name": wrapUpTool, "input": input})
 	}
-	typed := func(s string) map[string]any { return map[string]any{"type": "user", "message": map[string]any{"content": s}} }
+	typed := func(s string) map[string]any {
+		return map[string]any{"type": "user", "message": map[string]any{"content": s}}
+	}
 	recap := "Second run: counted 18 internal packages. Report format chosen: per package."
 	// The demo worker's turns: a blocked ask, the person's reply, a plain wrap_up and the bare marker
 	answered := []any{
