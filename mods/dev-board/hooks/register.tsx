@@ -106,6 +106,8 @@ const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, close
 const ICON_PX = 12
 // The to do list's items shown before `+N more`, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
+// Only GitHub's pull links can be read with gh
+const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
 const PR_LINK = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
@@ -126,6 +128,8 @@ const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false
 const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-2' })
 // The boss's to do list, null when empty or not read
 const todo = atom({ plugin: 'dev-board', key: 'todo' } as const, null, { shape: 'todo-1' })
+// The state of each to do item's PR link as `gh pr view` last said, by URL; '' when it could not be read
+const linkStates = atom({ plugin: 'dev-board', key: 'linkStates' } as const, {}, { shape: 'link-states-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -193,6 +197,16 @@ async function prChecks(run: Run, url: string): Promise<Omit<Checks, 'at'>> {
     return { checks: list.map(c => ({ name: String(c.name), bucket: String(c.bucket) })), error: '' }
   } catch (err) {
     return { checks: [], error: `gh pr checks: ${errorText(err)}` }
+  }
+}
+
+/** A PR's state (OPEN, MERGED, CLOSED) from `gh pr view`, '' when it could not be read. */
+async function prState(run: Run, url: string): Promise<string> {
+  try {
+    const ran = await run(['gh', 'pr', 'view', url, '--json', 'state'], { timeoutMs: 30_000 })
+    return ran.exitCode === 0 ? String(JSON.parse(ran.stdout).state ?? '') : ''
+  } catch {
+    return ''
   }
 }
 
@@ -398,6 +412,23 @@ export const register: Register = on => {
       lastTodoError = errorText(err)
       $.ui.log(`dev-board: no to do list: ${lastTodoError}`, { to: 'debug' })
     }
+    const readingLinks = new Set<string>()
+    /** Reads the state of each to do PR link not read for REFRESH_MS, off the render path; links gone from the list are dropped. */
+    const refreshLinkStates = async (list: Todo | null, now: number) => {
+      const urls = new Set((list?.items ?? []).flatMap(it => (it.link !== undefined && GH_PR_LINK.test(it.link) ? [it.link] : [])))
+      const read_ = await read($, linkStates)
+      if (Object.keys(read_).some(u => !urls.has(u))) {
+        await update($, linkStates, m => Object.fromEntries(Object.entries(m).filter(([u]) => urls.has(u))))
+      }
+      for (const url of urls) {
+        const at = read_[url]?.at
+        if (readingLinks.has(url) || (at !== undefined && now - at < REFRESH_MS)) continue
+        readingLinks.add(url)
+        void prState(run, url)
+          .then(state => update($, linkStates, m => ({ ...m, [url]: { at: now, state } })))
+          .finally(() => readingLinks.delete(url))
+      }
+    }
     /** Reads the to do list, off the board's path; one that can't be read shows no block. */
     const refreshTodo = async () => {
       if (isReadingTodo) return
@@ -419,6 +450,7 @@ export const register: Register = on => {
           await update($, todo, () => got)
           lastTodo = json
         }
+        void refreshLinkStates(got, now).catch(logTodo)
       } finally {
         isReadingTodo = false
       }
@@ -583,6 +615,7 @@ export const register: Register = on => {
     const deliveredRead = await read($, delivered)
     const picksRead = await read($, picks)
     const todoRead = await read($, todo)
+    const linkStatesRead = await read($, linkStates)
 
     const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
@@ -881,6 +914,9 @@ export const register: Register = on => {
     /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on, else its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
+      // No icon until the state is read, or when it could not be
+      const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
+      const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
       return (
         <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
@@ -903,7 +939,7 @@ export const register: Register = on => {
           ) : (
             it.link && (
               <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
-                {pr && PR_ICONS.OPEN && iconCell(`todo:item${it.id}:pr`, PR_ICONS.OPEN, `PR #${pr}`)}
+                {pr && prIcon && iconCell(`todo:item${it.id}:pr`, prIcon, `PR #${pr} ${state.toLowerCase()}`)}
                 <Text size={SIZE.meta}>
                   <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
                 </Text>
@@ -1011,6 +1047,39 @@ export const register: Register = on => {
         </Text>
       )
 
+      const isComposing = Input !== undefined && v.composing === w.id
+      // On the desktop the field replaces the actions row it was asked from, at the end of the open detail; else under line 1
+      const composeInDetail = isComposing && isDesktop && isOpen && !isAttention
+      const composeField = isComposing && (
+        <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+          {/* The label names the field (the row names the worker, so the desktop's is short); a one-line field does not grow on the desktop */}
+          <Box flexGrow={1} minWidth={0}>
+            <Input
+              key={`${w.id}:draft`}
+              label={isDesktop ? 'Message' : `Message ${label(w)}`}
+              {...(isDesktop ? { placeholder: `what to tell ${label(w)}…`, submitLabel: 'send' } : {})}
+              // The typed text first: a field moved to another parent (detail closed, status changed) is mounted again and shows it
+              value={drafts.get(`${e.surface}:${w.id}`) ?? v.unsent[w.id]}
+              autoFocus
+              onInput={(text, input) => {
+                drafts.set(`${input.surface}:${w.id}`, text)
+                // A given-back text follows the person's edits, so a redraw never puts the refused one back
+                if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
+              }}
+              onSubmit={text => void message(w, text)}
+            />
+          </Box>
+          <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
+          <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
+        </Box>
+      )
+      // Its error state: a text given back after a refusal (the toast said why) says what to do
+      const unsentHint = isDesktop && v.composing === w.id && v.unsent[w.id] !== undefined && (
+        <Text key={`${w.id}:unsent`} size={SIZE.meta} color={TONE.caution}>
+          not sent: press Send to try again, or Cancel
+        </Text>
+      )
+
       return (
         <Box key={`${w.id}:row`} flexDirection="row" alignItems="flex-start" columnGap={SPACE.inline} minWidth={0}>
           {dot(w, group)}
@@ -1057,31 +1126,8 @@ export const register: Register = on => {
             )}
             {w.notes.map(n => warn(n.key, `${n.kind}: ${n.text}`))}
             {showsNeeds(w) && warn(`${w.id}:needs`, `needs: ${w.needsAction}`)}
-            {Input !== undefined && v.composing === w.id && (
-              <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
-                {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
-                <Input
-                  key={`${w.id}:draft`}
-                  label={`Message ${label(w)}`}
-                  value={v.unsent[w.id]}
-                  autoFocus
-                  onInput={(text, input) => {
-                    drafts.set(`${input.surface}:${w.id}`, text)
-                    // A given-back text follows the person's edits, so a redraw never puts the refused one back
-                    if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
-                  }}
-                  onSubmit={text => void message(w, text)}
-                />
-                <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
-                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
-              </Box>
-            )}
-            {/* Its error state: a text given back after a refusal (the toast said why) says what to do */}
-            {isDesktop && v.composing === w.id && v.unsent[w.id] !== undefined && (
-              <Text key={`${w.id}:unsent`} size={SIZE.meta} color={TONE.caution}>
-                not sent: press Send to try again, or Cancel
-              </Text>
-            )}
+            {!composeInDetail && composeField}
+            {!composeInDetail && unsentHint}
             {isOpen && (
               <Box key={`${w.id}:detail`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
                 {w.name !== '' && w.title !== '' && w.title !== w.name && (
@@ -1112,7 +1158,9 @@ export const register: Register = on => {
                     not delivered: {delivery.why}
                   </Text>
                 )}
-                {!isAttention && (
+                {composeInDetail && composeField}
+                {composeInDetail && unsentHint}
+                {!isAttention && !composeInDetail && (
                   <Box key={`${w.id}:actions`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.inline}>
                     {buttons}
                   </Box>
@@ -1124,43 +1172,45 @@ export const register: Register = on => {
       )
     }
 
-    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own) that opens to a line each: dot, name, task count, time. */
+    /** An idle worker's line: dot, name, task count, time; indented one step under the open idle line's toggle when `isIndented`. */
+    const idleRow = (w: Worker, isIndented: boolean) => {
+      const done = w.plan.filter(s => s.status === 'completed').length
+      const since = sinceOf(w)
+      return (
+        <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} paddingLeft={isIndented ? SPACE.block : undefined} minWidth={0}>
+          {dot(w, 'Idle')}
+          <Box flexShrink={1} minWidth={0}>
+            {nameButton(w, false, true)}
+          </Box>
+          <Box flexGrow={1} />
+          {w.plan.length > 0 && (
+            <Text size={SIZE.meta} color={TONE.muted} tabular>
+              {`${done}/${w.plan.length}`}
+            </Text>
+          )}
+          {since !== '' && (
+            <Text size={SIZE.meta} color={TONE.muted} tabular>
+              {since}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+
+    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own; `▾ 3 idle` open) that opens to a line each: dot, name, task count, time; a lone one is drawn as its line, with no toggle. */
     const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
           <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
             <Text size={SIZE.meta} wrap="truncate-end">
-              {/* Open on the desktop, its lines below name them: the line counts them only */}
-              {v.idleOpen && isDesktop
+              {/* Open, its lines below name them: the line counts them only */}
+              {v.idleOpen
                 ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
-                : `${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
+                : `▸ ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>
-        {v.idleOpen &&
-          workers.map(w => {
-            const done = w.plan.filter(s => s.status === 'completed').length
-            const since = sinceOf(w)
-            return (
-              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
-                {dot(w, 'Idle')}
-                <Box flexShrink={1} minWidth={0}>
-                  {nameButton(w, false, true)}
-                </Box>
-                <Box flexGrow={1} />
-                {w.plan.length > 0 && (
-                  <Text size={SIZE.meta} color={TONE.muted} tabular>
-                    {`${done}/${w.plan.length}`}
-                  </Text>
-                )}
-                {since !== '' && (
-                  <Text size={SIZE.meta} color={TONE.muted} tabular>
-                    {since}
-                  </Text>
-                )}
-              </Box>
-            )
-          })}
+        {v.idleOpen && workers.map(w => idleRow(w, isDesktop))}
       </Box>
     )
 
@@ -1193,7 +1243,7 @@ export const register: Register = on => {
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
-          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet, workers.length)] : [])]
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length === 1 ? [idleRow(quiet[0] as Worker, false)] : quiet.length > 1 ? [idleList(quiet, workers.length)] : [])]
           return (
             <Box key={group} flexDirection="column" rowGap={SPACE.line}>
               <Box flexDirection="row" columnGap={SPACE.inline}>
