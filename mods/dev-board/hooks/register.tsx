@@ -371,7 +371,7 @@ export const register: Register = on => {
     const reading = new Set<string>()
     /**
      * Reads what is due (not read for REFRESH_MS) of the open PRs' checks and the delivery of the workers with a PR
-     * not busy. A busy worker's delivery is dropped: what it does may undo it. Entries gone from the board go too.
+     * that may be archived. The delivery of a busy or waiting worker is dropped: what it does may undo it. Entries gone from the board go too.
      */
     const refresh = async (workers: Worker[]) => {
       const now = await $.clock.now()
@@ -621,7 +621,7 @@ export const register: Register = on => {
     }
     const archive = async (w: Worker) => {
       if (!canArchive(w)) {
-        await $.ui.toast(`${label(w)} not archived: ${w.state === 'busy' ? 'running a turn' : `waiting (${w.statusText})`}`)
+        await $.ui.toast(`${label(w)} not archived: ${w.state === 'busy' ? 'running a turn' : `waiting${w.statusText === '' ? '' : ` (${w.statusText})`}`}`)
         return
       }
       // Checked again: the last check may be a minute old
