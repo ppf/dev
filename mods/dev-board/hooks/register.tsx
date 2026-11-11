@@ -1205,7 +1205,7 @@ export const register: Register = on => {
               {/* Open, its lines below name them: the line counts them only */}
               {v.idleOpen
                 ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
-                : `${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
+                : `▸ ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>

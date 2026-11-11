@@ -4,6 +4,9 @@ import type { Engine } from 'claude-code/testing'
 
 import type { TodoItem, Worker } from '../types'
 
+// No node types in this mod's tsconfig
+declare const setTimeout: (fn: (...args: any[]) => void, ms: number) => unknown
+
 const PANE = {
   plugin: 'dev-board',
   component: 'Pane',
@@ -21,7 +24,7 @@ const PANE = {
 const BAND = {
   plugin: 'dev-board',
   component: 'AbovePrompt',
-  props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 3, bodyColumns: 80, scroll: { offset: 0, bodyRows: 3 }, view: {} },
 } as const
 
 const worker = (fields: Partial<Worker>): Worker => ({
