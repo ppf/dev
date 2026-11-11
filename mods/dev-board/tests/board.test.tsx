@@ -484,7 +484,7 @@ test('the task list: a small bar and its count on the meta line; the steps in th
       expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', true], ['suggestion', false], ['subtle', false]])
       expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['inactive', 'regular', true], ['text', 'medium', false], ['subtle', 'regular', false]])
     } else {
-      expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', false], ['success', false], ['subtle', false]])
+      expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['subtle', false], ['success', false], ['subtle', false]])
       expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['subtle', 'regular', false], ['text', 'semibold', false], ['subtle', 'regular', false]])
     }
     // Above the buttons
@@ -986,7 +986,9 @@ test('idle and stopped workers share one line that opens to a line each; the res
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_i:fold' })).toBeFalsy()
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
-  expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
+  // Muted, not dimmed, on the desktop
+  expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: false })
+  expect((await ui.find({ type: 'Text', text: '▸ Idle, Stopped' }))?.props.color).toBe('subtle')
   for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
   }
@@ -1677,6 +1679,10 @@ test('a message not sent opens its field again, holding its text, until one is s
   // Under the field, what to do; none before a refusal, nor once sent
   expect((await ui.find({ type: 'Text', text: /^not sent:/ }))?.props).toMatchObject({ color: 'warning', size: 'footnote' })
   expect((await ui.find({ type: 'Text', text: /^not sent:/ }))?.text).toBe('not sent: press Send to try again, or Cancel')
+  // Not on the terminal, which has the toast only
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await terminal.find({ type: 'Text', text: /^not sent:/ })).toBeFalsy()
+  await terminal.unmount()
 
   // Send, the person typing nothing more, sends it again
   refuse = false
@@ -2136,12 +2142,13 @@ test('the desktop draws from its tokens only: five colors, two sizes, two weight
   expect([...used('Text', 'size')].sort()).toEqual(['footnote'])
   expect([...used('Text', 'weight')].sort()).toEqual(['regular', 'semibold'])
   expect([...used('Text', 'dimColor')]).toEqual([false])
+  expect([...used('Button', 'dimColor')]).toEqual([false])
   for (const prop of ['gap', 'rowGap', 'columnGap', 'paddingY']) {
     expect([...used('Box', prop)].every(v => [1, 'xs', 'sm', 'md'].includes(v as string | number))).toBe(true)
   }
-  // Sections a step further apart than a row's lines
+  // The to do list, warnings and sections md apart; a row's lines xs
   expect(all.find(el => el.type === 'Box' && el.props.gap !== undefined)?.props.gap).toBe('md')
-  // Only the bar fills: its done part green on the muted track
+  // Only the bar and the row hairlines fill: green on a 22% grey
   expect([...used('Box', 'backgroundColor')]).toEqual(['rgba(128, 128, 128, 0.22)', 'success'])
   // The icons' hues are the tones' (a merged PR muted), each about 4.2:1 on light and dark
   const hexes = new Set(all.filter(el => el.type === 'Svg').flatMap(el => String(el.props.source).match(/#[0-9A-Fa-f]{3,6}\b/g) ?? []))
@@ -2156,7 +2163,7 @@ test('the desktop draws from its tokens only: five colors, two sizes, two weight
 // The pane's width in cells, read as about 8 px a cell on the desktop: 390, 768 and 1440 px
 const WIDTHS = { 390: 48, 768: 96, 1440: 180 } as const
 
-test('at 390, 768 and 1440 px the desktop tree is the same, and what never shrinks on a row fits 390', async ($, on) => {
+test('the desktop reads no width: the same tree at 390, 768 and 1440 px, and what never shrinks on a row fits 390', async ($, on) => {
   await startFull($, on)
   const trees: string[] = []
   for (const bodyColumns of Object.values(WIDTHS)) {
@@ -2177,4 +2184,33 @@ test('at 390, 768 and 1440 px the desktop tree is the same, and what never shrin
     await ui.unmount()
   }
   expect(new Set(trees).size).toBe(1)
+})
+
+test('the terminal and the phones keep their own looks: theme greys, a caption, medium, dim text, the GitHub hues', async ($, on) => {
+  await startFull($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await openAll(ui)
+  const all = await ui.findAll({})
+  const used = (type: string, prop: string) => new Set(all.filter(el => el.type === type).map(el => el.props[prop]))
+  expect([...used('Text', 'color')]).toEqual(expect.arrayContaining(['suggestion', 'inactive']))
+  expect(used('Text', 'size').has('caption')).toBe(true)
+  expect(used('Text', 'weight').has('medium')).toBe(true)
+  expect(used('Text', 'dimColor').has(true)).toBe(true)
+  expect(used('Button', 'dimColor').has(true)).toBe(true)
+  expect(all.find(el => el.type === 'Box' && el.props.gap !== undefined)?.props.gap).toBe('sm')
+  const header = (group: string) => all.find(el => el.type === 'Text' && el.text === group)?.props.color
+  expect(['NEEDS YOU', 'WORKING', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'suggestion', 'warning', 'inactive'])
+  expect((await ui.find({ key: 'local_s:row' }))?.children[0]).toMatchObject({ props: { color: 'inactive' } })
+  // Back in the open idle line: it still names them, its names as a row's
+  await ui.press({ key: 'local_s:fold' })
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more · stopped')
+  const quiet = (await ui.find({ key: 'local_s:fold' }))?.children[0] as { props: Record<string, unknown> } | undefined
+  expect(quiet?.props.weight).toBe('semibold')
+  expect(Object.hasOwn(quiet?.props ?? {}, 'color')).toBe(false)
+  await ui.unmount()
+  const mobile = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  const svgs = (await mobile.findAll({ type: 'Svg' })).map(el => String(el.props.source)).join('')
+  for (const hex of ['#2DA44E', '#8957E5', '#E5484D']) expect(svgs).toContain(hex)
+  expect(svgs).not.toContain('#278D43')
+  await mobile.unmount()
 })

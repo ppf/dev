@@ -14,19 +14,19 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
-// The desktop pane's tokens, and nothing else there: five colors (theme keys, so light and dark follow the theme), two sizes, two weights, four spacing steps.
-// The terminal and the phones keep their own looks
+// The desktop pane's tokens: five colors (theme keys, so light and dark follow the theme), two sizes, two weights, four spacing steps;
+// besides them only BAR_TRACK's grey and the icons' white. The terminal and the phones keep their own looks
 const TONE = { text: 'text', muted: 'subtle', ok: 'success', caution: 'warning', danger: 'error' } as const
 // A tone in an SVG icon, which can't name a theme key: each about 4.2:1 on the light (#FFFFFF) and the dark (#181818) pane
 const TONE_HEX = { ok: '#278D43', caution: '#A27300', danger: '#E33C41', muted: '#7B7B7B' } as const
 const SIZE = { body: 'body', meta: 'footnote' } as const
 const WEIGHT = { regular: 'regular', strong: 'semibold' } as const
-// Across a row (cells), between a row's lines, between blocks, between sections
+// Across a row (cells), between a row's lines, a notice's padding (off the desktop also the gap between blocks), between the to do list, warnings and sections
 const SPACE = { inline: 1, line: 'xs', block: 'sm', section: 'md' } as const
 // The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
-// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop its header too
+// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop also its header, a question's header and the current step
 const DOT_COLORS = { 'Needs you': TONE.danger, Working: TONE.ok, Waiting: TONE.caution, Idle: TONE.muted } as const
 // The sections whose rows ask to be looked at: only they carry their buttons on line 1
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
@@ -823,7 +823,7 @@ export const register: Register = on => {
       return (
         <Box key={key} flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
-            <Text size={SIZE.meta} color={look.markColor ?? color} dimColor={isDim}>
+            <Text size={SIZE.meta} color={look.isDim && isDesktop ? TONE.muted : (look.markColor ?? color)} dimColor={isDim}>
               {look.mark}
             </Text>
           </Box>
@@ -957,7 +957,7 @@ export const register: Register = on => {
      */
     const nameButton = (w: Worker, isOpen: boolean, isQuiet = false) => (
       <Button key={`${w.id}:fold`} plain onPress={() => void fold(w.id, !isOpen)}>
-        <Text weight={isQuiet && isDesktop ? WEIGHT.regular : WEIGHT.strong} color={isQuiet && isDesktop ? TONE.muted : undefined} wrap="truncate-end">
+        <Text weight={isQuiet && isDesktop ? WEIGHT.regular : WEIGHT.strong} {...(isQuiet && isDesktop ? { color: TONE.muted } : {})} wrap="truncate-end">
           {label(w)}
         </Text>
       </Button>
@@ -1127,8 +1127,8 @@ export const register: Register = on => {
     const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
-          <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
-            <Text size={SIZE.meta} wrap="truncate-end">
+          <Button key="idle:fold" plain dimColor={!isDesktop} onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
+            <Text size={SIZE.meta} {...(isDesktop ? { color: TONE.muted } : {})} wrap="truncate-end">
               {/* Open on the desktop, its lines below name them: the line counts them only */}
               {v.idleOpen && isDesktop
                 ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
