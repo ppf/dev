@@ -17,7 +17,7 @@ const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill 
 // The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
-// The state dot says the tile's section, so a worker whose open dialog waits on the person is red, not busy's green; a stopped one is inactive
+// The dot says the tile's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green
 const DOT_COLORS = { 'Needs you': 'error', Working: 'success', Waiting: 'warning', Idle: 'subtle' } as const
 // The sections whose tiles ask to be looked at: only they take their color on the card and a main Open button
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
@@ -831,6 +831,7 @@ export const register: Register = on => {
           {isOpen ? '▾' : '▸'}
         </Button>
       )
+      // A stopped worker's dot is dimmer than an idle one's
       const dot = <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
       // A Text nested in a cut one wraps on the desktop (each Text sets its own white-space): what may be cut is one
       // Text of plain strings, the dot left outside it
