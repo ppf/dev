@@ -41,6 +41,9 @@ export type Worker = {
   /** What the tool call says it does (its input's description); absent from a dev older than this mod. */
   toolDescription?: string
   context: number | null
+  /** The model's family (opus, sonnet, haiku, fable) or else its id, and its effort level; "" when unknown, absent from a dev older than this mod. */
+  model?: string
+  effort?: string
   notes: Note[]
   status: Status
   statusText: string

@@ -152,7 +152,7 @@ test('the pane shows a tile per worker, on every surface', async ($, on) => {
     expect((await ui.find({ type: 'Text', text: /^Bash$/ }))?.text).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /^working/ })).toBeFalsy()
     expect((await ui.find({ type: 'Text', text: /^feature\/a$/ }))?.text).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /^context 42%$/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /^· 42%$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /Running the tests/ }))?.text).toBe('Running the tests.')
     expect((await ui.find({ type: 'Text', text: /last turn: completed/ }))?.text).toBe('last turn: completed')
     expect(await header(ui, 'local_b')).toBe('Worker B')
@@ -445,7 +445,7 @@ async function stepAt(ui: Mounted, key: string) {
   return { mark: mark?.children.join(''), markProps: mark?.props, text: text?.children.join(''), textProps: text?.props, shrink: cells.map(c => c.props.flexShrink) }
 }
 
-test('the task list: Tasks, a bar and its count above the steps; collapsed, the step at hand', async ($, on) => {
+test('the task list: Tasks, a bar and its count above the steps; collapsed, the step at hand on the same row', async ($, on) => {
   await start($, on, ok([worker({ plan: [...PLAN] })]))
   const folded = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await header(folded)).toBe('Worker A 1/3')
@@ -455,9 +455,14 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     await unfold(ui)
     // Open, the count moves from the header to the list
     expect(await header(ui)).toBe('Worker A')
-    // The label in the steps' text size, lined up with their marks; the toggle, its count and arrow, ends the row
-    const row = (await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined
+    // The label in the steps' text size, lined up with their marks; the toggle, its count and arrow; collapsed, the step at hand in a cell that shrinks
+    const tasksRow = (await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined
+    expect(tasksRow?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
+    expect(tasksRow?.children.map(c => c.props.flexShrink)).toEqual([0, 1])
+    expect(tasksRow?.children[1]?.props).toMatchObject({ minWidth: 0 })
+    const row = tasksRow?.children[0] as Cell | undefined
     expect(row?.children.map(c => (c as { type?: string }).type)).toEqual(['Text', 'Box', 'Button'])
+    expect((await ui.find({ key: 'local_a:plan' }))?.children.length).toBe(1)
     expect(row?.children[0]?.props).toMatchObject({ size: 'footnote', color: 'subtle' })
     expect(row?.children[0]?.children).toEqual(['Tasks'])
     expect((await ui.find({ key: 'local_a:tasks' }))?.props).toMatchObject({ plain: true })
@@ -478,6 +483,8 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     expect(await ui.find({ type: 'Text', text: 'Read the code' })).toBeFalsy()
     await ui.press({ key: 'local_a:tasks' })
     expect((await ui.find({ type: 'Text', text: /^1\/3 ▾$/ }))?.text).toBeTruthy()
+    // Expanded, the toggle ends the row, the steps under it
+    expect(((await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined)?.children.length).toBe(1)
     // A row per step: its mark and its text in cells of their own, the text cut to one line
     const steps = await Promise.all(PLAN.map((_, i) => stepAt(ui, `local_a:step${i}`)))
     expect(steps.map(s => s.shrink)).toEqual([[0, 1], [0, 1], [0, 1]])
@@ -531,8 +538,8 @@ test('a long task list by its shape: the count rows only where steps fold', asyn
 test('a collapsed task list with no step in progress shows the next pending one', async ($, on) => {
   await start($, on, ok([worker({ state: 'busy', status: 'working', plan: [PLAN[0], { content: 'Write the mod', status: 'pending' }, PLAN[2]] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const rows = ((await ui.find({ key: 'local_a:plan' }))?.children ?? []).slice(1) as { props: { key?: string } }[]
-  expect(await Promise.all(rows.map(async r => (await stepAt(ui, r.props.key ?? '')).text))).toEqual(['Write the mod'])
+  expect((await ui.find({ key: 'local_a:plan' }))?.children.length).toBe(1)
+  expect((await stepAt(ui, 'local_a:step1')).text).toBe('Write the mod')
   await ui.unmount()
 })
 
@@ -1180,7 +1187,7 @@ test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below t
     expect((await ui.find({ key: id }))?.props).toMatchObject({ flexDirection: 'column', minWidth: 0 })
   }
   const boxes = await ui.findAll({ type: 'Box' })
-  // Each tile's card; the open one's rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
+  // Each tile's card; the open one's rows, header row, title cell, status row and its status cell; the folded row and its title cell
   const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
   expect(shrinking.length).toBe(9)
   expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
@@ -1272,7 +1279,7 @@ test("an open tile's rows all start under its title, the fold button and dot bes
   const rows = await ui.find({ key: 'local_a:rows' })
   expect(rows?.props.flexDirection).toBe('column')
   const shown = JSON.stringify(rows?.children)
-  for (const row of ['pick one', 'local_a:meta', 'feature/a', 'context 10%', 'Done.', 'Write the mod', 'local_a:open']) {
+  for (const row of ['pick one', 'local_a:meta', 'feature/a', '· 10%', 'Done.', 'Write the mod', 'local_a:open']) {
     expect(shown).toContain(row)
   }
   expect(shown).not.toContain('local_a:fold')
@@ -1677,18 +1684,36 @@ test("a waiting tile shows no verdict its own marker overrides, only a detail it
   await ui.unmount()
 })
 
-test('the branch and context line: the branch cut at its start, the context pinned right; the PR on a row of its own under it', async ($, on) => {
-  await start($, on, ok([worker({ state: 'busy', status: 'working', context: 16, branch: 'feature/board-test-pass-801d74', prs: [OPEN_PR] })]))
+test('the status line: the status cut to fit, then the model, its effort and the context use, never cut; the branch and PR on rows of their own under it', async ($, on) => {
+  await start($, on, ok([worker({ state: 'busy', status: 'working', statusText: 'working', model: 'opus', effort: 'medium', context: 16, branch: 'feature/board-test-pass-801d74', prs: [OPEN_PR] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  // The branch cut at its start, its unique end kept, in the mono face; the context use pinned right, never cut
-  expect((await ui.find({ type: 'Text', text: 'feature/board-test-pass-801d74' }))?.props).toMatchObject({ mono: true, wrap: 'truncate-start' })
-  expect((await ui.find({ type: 'Text', text: 'context 16%' }))?.props.tabular).toBe(true)
   const meta = await ui.find({ key: 'local_a:meta' })
-  expect(meta?.props).toMatchObject({ flexDirection: 'row', justifyContent: 'space-between', minWidth: 0 })
+  expect(meta?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
   expect((meta?.children as { props: Record<string, unknown> }[]).map(c => c.props.flexShrink)).toEqual([1, 0])
+  expect(meta?.text).toBe('working· opus·medium · 16%')
+  expect((await ui.find({ type: 'Text', text: '· opus·medium · 16%' }))?.props.tabular).toBe(true)
+  // The branch cut at its start, its unique end kept, in the mono face
+  expect((await ui.find({ type: 'Text', text: 'feature/board-test-pass-801d74' }))?.props).toMatchObject({ mono: true, wrap: 'truncate-start' })
   const order = (await ui.findAll({})).map(el => el.key ?? el.text)
   expect(order.indexOf('local_a:meta')).toBeGreaterThan(-1)
-  expect(order.indexOf('local_a:meta')).toBeLessThan(order.indexOf(`local_a:${OPEN_PR.url}`))
+  expect(order.indexOf('local_a:meta')).toBeLessThan(order.indexOf('feature/board-test-pass-801d74'))
+  expect(order.indexOf('feature/board-test-pass-801d74')).toBeLessThan(order.indexOf(`local_a:${OPEN_PR.url}`))
+  await ui.unmount()
+})
+
+test('the model line: effort missing, the model alone; no branch, no branch row; a question shown, the model and context alone', async ($, on) => {
+  const ask = { toolUseId: 'tu1', askedAt: 1, answerable: true, questions: [{ header: '', question: 'Ship it?', multiSelect: false, options: [{ label: 'Yes', description: '' }] }] }
+  await start($, on, ok([
+    worker({ state: 'busy', status: 'working', statusText: 'Bash', model: 'haiku', effort: '', context: 9, branch: '' }),
+    worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'needs you', model: 'claude-x-1', effort: 'high', context: null, branch: '', ask }),
+    // A dev older than this mod: no model
+    worker({ id: 'local_c', title: 'Worker C', state: 'busy', status: 'working', statusText: 'Read', context: 5, branch: '' }),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'local_a:meta' }))?.text).toBe('Bash· haiku · 9%')
+  expect(await ui.find({ type: 'Text', text: 'feature/a' })).toBeFalsy()
+  expect((await ui.find({ key: 'local_b:meta' }))?.text).toBe('claude-x-1·high')
+  expect((await ui.find({ key: 'local_c:meta' }))?.text).toBe('Read· 5%')
   await ui.unmount()
 })
 
@@ -1782,9 +1807,17 @@ test('colour marks what asks for attention: Needs you and Waiting cards in their
   ])
   // The status row, first in its info: a caption under the title, red under Needs you, else muted
   const status = async (id: string) => {
-    const row = ((await ui.find({ key: `${id}:info` }))?.children as { props: Record<string, unknown> }[] | undefined)?.[0]?.props
-    return [row?.size, row?.color, row?.weight]
+    const row = (await ui.find({ key: `${id}:meta` }))?.children as { children: { props: Record<string, unknown> }[] }[] | undefined
+    const text = row?.[0]?.children[0]?.props
+    return [text?.size, text?.color, text?.weight]
   }
+  // The dot says the section, not the app's state: a busy worker under Needs you is red; a stopped one inactive
+  await unfold(ui, 'local_s')
+  const dot = async (id: string) => {
+    const tile = (await ui.findAll({ type: 'Box' })).find(b => b.props.borderStyle === 'quote' && JSON.stringify(b.children).includes(`${id}:rows`))
+    return (tile?.children[1] as { props: Record<string, unknown> } | undefined)?.props.color
+  }
+  expect(await Promise.all(['local_n', 'local_w', 'local_b', 'local_k', 'local_t', 'local_i', 'local_s'].map(dot))).toEqual(['error', 'warning', 'warning', 'success', 'success', 'subtle', 'inactive'])
   expect(await Promise.all(['local_n', 'local_w', 'local_k', 'local_i'].map(status))).toEqual([
     ['caption', 'error', 'semibold'],
     ['caption', 'subtle', 'regular'],
