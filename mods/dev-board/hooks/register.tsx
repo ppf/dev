@@ -42,7 +42,6 @@ const RECOMMENDED = /\s*\(recommended\)\s*$/i
 const BACKGROUND = /(^|\s·\s)\d+ background running$/
 // A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
 const RETAKE_MS = 10_000
-const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 // One glyph family so the marks line up: done recedes, the current step takes the section's color, pending stays quiet
 const STEP_LOOKS = {
   completed: { mark: '●', markColor: 'success', color: 'inactive', weight: 'regular', isDim: true },
@@ -814,10 +813,7 @@ export const register: Register = on => {
         </Box>
       )
 
-    /**
-     * One worker's row: the dot beside its lines. Line 1: name, what it says (cut), the quiet buttons of a row that asks to be
-     * looked at, its time; then its question, the meta line, its warnings, its message field, and, opened by the name, its detail.
-     */
+    /** One worker's row: the dot beside line 1 (name, what it says, buttons, time), then its question, meta, warnings, message field and detail. */
     const row = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
       const color = GROUP_COLORS[group]
       const done = w.plan.filter(s => s.status === 'completed').length
@@ -964,6 +960,7 @@ export const register: Register = on => {
         {v.idleOpen &&
           workers.map(w => {
             const done = w.plan.filter(s => s.status === 'completed').length
+            const since = sinceOf(w)
             return (
               <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
                 {dot(w, 'Idle')}
@@ -976,9 +973,9 @@ export const register: Register = on => {
                     {`${done}/${w.plan.length}`}
                   </Text>
                 )}
-                {sinceOf(w) !== '' && (
+                {since !== '' && (
                   <Text size="footnote" color="subtle" tabular>
-                    {sinceOf(w)}
+                    {since}
                   </Text>
                 )}
               </Box>
