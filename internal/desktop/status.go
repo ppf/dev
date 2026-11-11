@@ -24,8 +24,7 @@ const (
 	StatusWorking = "working"
 	// StatusWaiting: its last turn ended on `WAITING (…)` (a line of its last few): CI or a background job will wake it.
 	StatusWaiting = "waiting"
-	// StatusBlocked: the app's verdict on its last turn is blocked (it waits on the person), unless the turn's own
-	// end says nothing waits (settled).
+	// StatusBlocked: the app's verdict on its last turn is blocked (it waits on the person).
 	StatusBlocked = "blocked"
 	// StatusReviewReady: the app's verdict on its last turn is review_ready.
 	StatusReviewReady = "review ready"

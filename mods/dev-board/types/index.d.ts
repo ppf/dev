@@ -51,7 +51,7 @@ export type Worker = {
   plan: Step[]
   /** Absent from a dev older than this mod. */
   ask?: Ask | null
-  /** Its turn's newest wrap_up recap, "" for none; absent from a dev older than this mod. */
+  /** Its last turn's newest wrap_up recap, "" for none; absent from a dev older than this mod. */
   recap?: string
 }
 

@@ -98,8 +98,9 @@ type Worker struct {
 	// CreatedAt and LastActivityAt are the app's times, in milliseconds since the epoch.
 	CreatedAt      int64 `json:"createdAt"`
 	LastActivityAt int64 `json:"lastActivityAt"`
-	// Verdict is the app's summary of the last finished turn, e.g. completed, blocked or review_ready; a blocked
-	// one its turn settled (answered) is dropped, with its Detail and NeedsAction.
+	// Verdict is the app's summary of the last finished turn, e.g. completed, blocked or review_ready; a blocked one
+	// whose turn's end asks nothing (settled) is dropped with its Detail and NeedsAction, the worker idle (stopped
+	// when not running).
 	Verdict     string `json:"verdict"`
 	Detail      string `json:"detail"`
 	NeedsAction string `json:"needsAction"`
@@ -133,7 +134,7 @@ type Worker struct {
 	Plan []Step `json:"plan"`
 	// Ask is the question its open dialog asks, or its last turn's wrap_up ask; nil for none.
 	Ask *Pending `json:"ask"`
-	// Recap is its turn's newest wrap_up recap; "" for none.
+	// Recap is its last turn's newest wrap_up recap; "" for none or a call the app rejected.
 	Recap string `json:"recap"`
 }
 

@@ -149,13 +149,9 @@ type wrapUpInput struct {
 	} `json:"actions"`
 }
 
-// readWrapUp reads a wrap_up call's input; the zero input when it does not parse.
-func readWrapUp(b block) wrapUpInput {
-	var in wrapUpInput
-	if json.Unmarshal(b.Input, &in) != nil {
-		return wrapUpInput{}
-	}
-	return in
+// readWrapUp reads a wrap_up call's input; ok=false when it does not parse.
+func readWrapUp(b block) (in wrapUpInput, ok bool) {
+	return in, json.Unmarshal(b.Input, &in) == nil
 }
 
 // wrapUpAsk reads a wrap_up call's ask, its reply buttons the options (of the actions the app draws; app actions, e.g. commit, are no reply); ok=false for another tool or a wrap_up without one.
@@ -163,8 +159,8 @@ func wrapUpAsk(b block) (Pending, bool) {
 	if b.Name != wrapUpTool {
 		return Pending{}, false
 	}
-	in := readWrapUp(b)
-	if in.Ask == "" {
+	in, ok := readWrapUp(b)
+	if !ok || in.Ask == "" {
 		return Pending{}, false
 	}
 	q := agent.Ask{Question: in.Ask, Options: []agent.Choice{}}

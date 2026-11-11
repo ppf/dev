@@ -935,7 +935,7 @@ export const register: Register = on => {
                     {plainLine(line)}
                   </Text>
                 ))}
-                {/* A reply that is only a marker says nothing: its turn's recap does */}
+                {/* No reply line left to show (e.g. only a marker): its turn's recap says what it did */}
                 {lastLines.length === 0 && (w.recap ?? '') !== '' && (
                   <Text key={`${w.id}:recap`} size="footnote" dimColor wrap="wrap">
                     {plainLine(w.recap ?? '')}

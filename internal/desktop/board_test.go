@@ -342,7 +342,29 @@ func TestBoardSettledTurn(t *testing.T) {
 		{"a wrap_up the app refused", []any{
 			typed("Go."), wrap("w1", map[string]any{"recap": "Counted."}), errorResult("w1"), assistant("m", text("IDLE")),
 		}, true, StateBlocked, StatusIdle, ""},
+		{"an ask, not blocked", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted.", "ask": "Ship it now", "actions": []any{map[string]any{"label": "Yes"}}}),
+			toolResult("w1"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, "Counted."},
+		{"a reply more than the marker", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Pushed."}), toolResult("w1"), assistant("m", text("Pushed the fix.\n\nIDLE")),
+		}, true, StateBlocked, StatusIdle, "Pushed."},
+		{"a WAITING marker", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Pushed."}), toolResult("w1"), assistant("m", text("WAITING (CI on PR #80)")),
+		}, true, StateBlocked, StatusWaiting, "Pushed."},
+		{"a blocked ask after a plain wrap_up", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted."}), toolResult("w1"),
+			wrap("w2", map[string]any{"recap": "Counted.", "ask": "Ship it now", "blocked": true}), toolResult("w2"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusNeedsYou, "Counted."},
+		{"a plain wrap_up after a blocked ask", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted.", "ask": "Ship it now", "blocked": true}), toolResult("w1"),
+			wrap("w2", map[string]any{"recap": "Counted."}), toolResult("w2"), assistant("m", text("IDLE")),
+		}, true, StateIdle, StatusIdle, "Counted."},
 		{"no wrap_up", []any{typed("Per package"), assistant("m", text("IDLE"))}, true, StateBlocked, StatusIdle, ""},
+		{"a wrap_up whose input does not parse", []any{
+			typed("Go."), assistant("m", map[string]any{"type": "tool_use", "id": "w1", "name": wrapUpTool, "input": "not an object"}),
+			toolResult("w1"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, ""},
 		{"an earlier turn's wrap_up", []any{
 			typed("Go."), wrap("w1", map[string]any{"recap": "Counted."}), toolResult("w1"), typed("And now?"), assistant("m", text("IDLE")),
 		}, true, StateBlocked, StatusIdle, ""},
@@ -367,6 +389,29 @@ func TestBoardSettledTurn(t *testing.T) {
 				t.Errorf("verdict, detail, needs = %q, %q, %q, want the app's kept: %v", w.Verdict, w.Detail, w.NeedsAction, kept)
 			}
 		})
+	}
+}
+
+// Only a blocked verdict is dropped: a settled turn leaves another verdict, and a busy worker, as they are.
+func TestBoardSettledTurnOtherVerdicts(t *testing.T) {
+	p := fixture(t)
+	settledTurn := lines(t,
+		map[string]any{"type": "user", "message": map[string]any{"content": "Go."}},
+		assistant("m", map[string]any{"type": "tool_use", "id": "w1", "name": wrapUpTool, "input": map[string]any{"recap": "Done."}}),
+		toolResult("w1"),
+		assistant("m", text("IDLE")),
+	)
+	write(t, filepath.Join(p.Projects, "-wt-idle", "cli-idle.jsonl"), settledTurn)
+	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), settledTurn)
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := workers[0]; b.State != StateBusy || b.Verdict != StateBlocked {
+		t.Errorf("busy = %s, %q, want busy with the app's verdict kept", b.State, b.Verdict)
+	}
+	if w := workers[2]; w.State != StateIdle || w.Verdict != "completed" || w.Detail != "done" {
+		t.Errorf("idle = %s, %q, %q, want idle with the app's completed verdict and detail kept", w.State, w.Verdict, w.Detail)
 	}
 }
 

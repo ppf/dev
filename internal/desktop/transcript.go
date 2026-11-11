@@ -252,8 +252,8 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 					if p, ok := wrapUpAsk(b); ok {
 						t.wrapAsk = &p
 					}
-					in := readWrapUp(b)
-					t.wrapID, t.recap, t.wrapPlain = b.ID, in.Recap, in.Ask == "" && !in.Blocked
+					in, ok := readWrapUp(b)
+					t.wrapID, t.recap, t.wrapPlain = b.ID, in.Recap, ok && in.Ask == "" && !in.Blocked
 				}
 			case r.Type == "user" && b.Type == "tool_result":
 				if i := slices.IndexFunc(pending, func(u block) bool { return u.ID == b.ToolUseID }); i >= 0 {
@@ -378,7 +378,7 @@ func lastLines(text string) []string {
 	return lines[start:]
 }
 
-// questionAt is where the question lines end on starts, before any turn-end marker (inbox.QuestionAt); -1 for none.
+// questionAt is the index of the question lines end on, trailing turn-end markers aside (inbox.QuestionAt); -1 for none.
 func questionAt(lines []string) int {
 	for len(lines) > 0 {
 		if _, _, marker := Marker(lines[len(lines)-1:]); !marker {
