@@ -14,10 +14,11 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
-const STATE_COLORS = { busy: 'success', blocked: 'warning', idle: 'subtle', stopped: 'inactive' } as const
 // The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
+// The state dot says the tile's section, so a worker whose open dialog waits on the person is red, not busy's green; a stopped one is inactive
+const DOT_COLORS = { 'Needs you': 'error', Working: 'success', Waiting: 'warning', Idle: 'subtle' } as const
 // The sections whose tiles ask to be looked at: only they take their color on the card and a main Open button
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
@@ -87,7 +88,7 @@ const ICON_PX = 12
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
 // Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-7' })
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-8' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -764,15 +765,15 @@ export const register: Register = on => {
       )
     }
 
-    /** The task list: its label, a progress bar and the toggle with its count; collapsed, only the step at hand under it; expanded, the steps. */
+    /** The task list: its label, a progress bar and the toggle with its count; collapsed, the step at hand after them on the same row; expanded, the steps under it. */
     const taskList = (w: Worker, color: string, done: number, isExpanded: boolean) => {
       const atHand = w.plan.find(s => s.status === 'in_progress') ?? w.plan.find(s => s.status === 'pending')
       const cells = Math.round((done / w.plan.length) * BAR_CELLS)
-      const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: atHand ? [atHand] : [], more: 0 }
+      const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: [], more: 0 }
       return (
         <Box key={`${w.id}:plan`} flexDirection="column" minWidth={0}>
-          {/* The label lines up with the steps' marks; the toggle, a button the surface pads, ends the row */}
-          <Box flexDirection="row" alignItems="center" columnGap={1}>
+          {/* The label lines up with the steps' marks; the toggle, a button the surface pads, then collapsed the step at hand, cut to fit */}
+          <Box key={`${w.id}:tasksRow`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
             <Text size="footnote" color="subtle">
               Tasks
             </Text>
@@ -800,6 +801,11 @@ export const register: Register = on => {
                 {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
               </Text>
             </Button>
+            {!isExpanded && atHand && (
+              <Box flexShrink={1} minWidth={0}>
+                {stepRow(`${w.id}:step${w.plan.indexOf(atHand)}`, atHand.status, atHand.content, color)}
+              </Box>
+            )}
           </Box>
           {earlier > 0 && stepRow(`${w.id}:earlier`, 'completed', `${earlier} done`, color)}
           {steps.map(s => stepRow(`${w.id}:step${w.plan.indexOf(s)}`, s.status, s.content, color))}
@@ -822,7 +828,7 @@ export const register: Register = on => {
           {isOpen ? '▾' : '▸'}
         </Button>
       )
-      const dot = <Text color={STATE_COLORS[w.state]}>●</Text>
+      const dot = <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
       // A Text nested in a cut one wraps on the desktop (each Text sets its own white-space): what may be cut is one
       // Text of plain strings, the dot left outside it
       const name = (
@@ -899,6 +905,9 @@ export const register: Register = on => {
       // Working and Idle tiles ask nothing of the person, and a question's options shown answer it: their buttons recede to text
       const showsOptions = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent && hasOptions(w)
       const isQuiet = !isAttention || showsOptions
+      // The model and its effort, then the context use: `opus·medium · 9%`
+      const model = w.model && w.effort ? `${w.model}·${w.effort}` : (w.model ?? '')
+      const meta = [model, w.context === null ? '' : `${w.context}%`].filter(part => part !== '').join(' · ')
       const quiet = isQuiet ? ({ plain: true, dimColor: true } as const) : {}
 
       // Blocks one gap apart: the title, its question, what it does, its tasks, its buttons
@@ -920,25 +929,28 @@ export const register: Register = on => {
           </Box>
           {w.ask && questionRows(w, w.ask, color)}
           <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
-            {!w.ask && status}
-            {(w.branch !== '' || w.context !== null) && (
-              // The branch cut at its start, so its unique end shows; the context use pinned right
-              <Box key={`${w.id}:meta`} flexDirection="row" justifyContent="space-between" columnGap={1} minWidth={0}>
-                {w.branch !== '' && (
+            {((!w.ask && status) || meta !== '') && (
+              // One row: the status cut to fit, then the model and context use, never cut
+              <Box key={`${w.id}:meta`} flexDirection="row" columnGap={1} minWidth={0}>
+                {!w.ask && status && (
                   <Box flexShrink={1} minWidth={0}>
-                    <Text size="caption" color="subtle" mono wrap="truncate-start">
-                      {w.branch}
-                    </Text>
+                    {status}
                   </Box>
                 )}
-                {w.context !== null && (
+                {meta !== '' && (
                   <Box flexShrink={0}>
                     <Text size="caption" color="subtle" tabular>
-                      {`context ${w.context}%`}
+                      {!w.ask && status ? `· ${meta}` : meta}
                     </Text>
                   </Box>
                 )}
               </Box>
+            )}
+            {w.branch !== '' && (
+              // Cut at its start, so its unique end shows
+              <Text size="caption" color="subtle" mono wrap="truncate-start">
+                {w.branch}
+              </Text>
             )}
             {w.prs.map(pr => prRow(w, pr))}
             {verdict !== '' && (
