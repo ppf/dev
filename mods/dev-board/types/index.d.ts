@@ -70,6 +70,12 @@ export type Delivered = { at: number; isDelivered: boolean; why: string }
 /** The pane's own state: the worker a message is being typed for, rows whose detail the person opened (true) or closed, the text of a message not sent by worker id (drawn back into its field), whether the idle line is open. */
 export type View = { composing: string; details: Record<string, boolean>; unsent: Record<string, string>; idleOpen: boolean }
 
+/** One item of `dev todo --json`: `on` who it waits on when not the person, `link` e.g. its PR; `done` true for a ticked item still listed. */
+export type TodoItem = { id: number; text: string; on?: string; link?: string; done: boolean }
+
+/** The boss's to do list as last read: its items in dev's order (the person's first, then those on others), how long ago it changed (`12m`), whether it is stale (unchanged an hour). */
+export type Todo = { items: TodoItem[]; age: string; stale: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'dev-board': {
@@ -81,6 +87,7 @@ declare module 'claude-code' {
       bossAsked: Shaped<boolean>
       picks: Shaped<Record<string, Picks>>
       replyTo: Shaped<string>
+      todo: Shaped<Todo | null>
     }
   }
 }
