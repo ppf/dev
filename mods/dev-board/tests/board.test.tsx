@@ -2,7 +2,7 @@ import type { On, UiPane } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import type { Worker } from '../types'
+import type { TodoItem, Worker } from '../types'
 
 const PANE = {
   plugin: 'dev-board',
@@ -69,33 +69,40 @@ type Ran = { exitCode: number; stdout: string; stderr: string }
 const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 17m' }
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
-/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, open, mv (by argv[0]/argv[1]/argv[2]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'open' | 'mv', Ran | string | (() => Ran | string)>>
+/** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, dev todo, open, mv (by argv[0]/argv[1]/argv[2]). */
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'todo' | 'open' | 'mv', Ran | string | (() => Ran | string)>>
+
+// What a dev older than `dev todo` says to it
+const NO_TODO: Ran = { exitCode: 1, stdout: '', stderr: '❌ unknown flag: --json' }
 
 /** Every run of a command other than `dev desktop board`, with its stdin. */
 type OtherRun = { argv: readonly string[]; stdin?: string }
 
 /**
  * Starts the session with `dev desktop board` answering `answer()`'s run, or failing to start with that reason;
- * `others` answers the rest (gh's checks none, dev delivered exits 1, open passes by default); `env` adds to its environment;
+ * `others` answers the rest (gh's checks none, dev delivered exits 1, dev todo is unknown, open passes by default); `env` adds to its environment;
  * `panes` lists the mod's open panes (none by default).
  */
 async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string), others: Others = {}, env: Record<string, string> = {}, panes: () => UiPane[] = () => []) {
   const answer = typeof ran === 'function' ? ran : () => ran
   const runs: (readonly string[])[] = []
   const otherRuns: OtherRun[] = []
+  const todoRuns: (readonly string[])[] = []
   on('command.register', () => ({ value: { command: 'board' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.panes', () => ({ value: panes() }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
-    const other = others[e.argv[1] === 'delivered' ? 'delivered' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv')]
+    const isTodo = e.argv[1] === 'todo'
+    const other = others[e.argv[1] === 'delivered' || isTodo ? e.argv[1] as 'delivered' | 'todo' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv')]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
-        (e.argv[0] === 'gh' ? { exitCode: 1, stdout: '', stderr: 'no checks reported' } : e.argv[1] === 'delivered' ? { exitCode: 1, stdout: '', stderr: 'not delivered' } : { exitCode: 0, stdout: '', stderr: '' }))
+        (e.argv[0] === 'gh' ? { exitCode: 1, stdout: '', stderr: 'no checks reported' } : e.argv[1] === 'delivered' ? { exitCode: 1, stdout: '', stderr: 'not delivered' } : isTodo ? NO_TODO : { exitCode: 0, stdout: '', stderr: '' }))
     if (isBoard) {
       runs.push(e.argv)
+    } else if (isTodo) {
+      todoRuns.push(e.argv)
     } else {
       otherRuns.push({ argv: e.argv, stdin: e.init?.stdin })
     }
@@ -108,7 +115,7 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   const clock = mock.clock(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
-  return { runs, otherRuns, clock }
+  return { runs, otherRuns, todoRuns, clock }
 }
 
 const ok = (workers: Worker[], stderr = ''): Ran => ({ exitCode: 0, stdout: JSON.stringify(workers), stderr })
@@ -573,18 +580,20 @@ const CHECKS: Ran = {
   stderr: '',
 }
 
-/** A PR's row as read: its Texts and its icons, an Svg by its alt (desktop), a glyph as its text (terminal). */
+type El = string | { type: string; props?: Record<string, unknown>; children?: El[] }
+const linkText = (el: El): string => (typeof el === 'string' ? el : el.type === 'Link' ? String(el.props?.label) : (el.children ?? []).map(linkText).join(''))
+/** An element's Texts, Links by their label, and icons, an Svg by its alt (desktop), a glyph as its text (terminal). */
+const readEl = (el: El): string[] => {
+  if (typeof el === 'string') return []
+  if (el.type === 'Svg') return [`[${String(el.props?.alt)}]`]
+  if (el.type === 'Text' || el.type === 'Link') return [linkText(el)]
+  return (el.children ?? []).flatMap(readEl)
+}
+
+/** A PR's row as read: its Texts and its icons. */
 async function prRow(ui: Mounted, key = `local_a:${OPEN_PR.url}`) {
-  type El = string | { type: string; props?: Record<string, unknown>; children?: El[] }
-  const text = (el: El): string => (typeof el === 'string' ? el : el.type === 'Link' ? String(el.props?.label) : (el.children ?? []).map(text).join(''))
-  const read = (el: El): string[] => {
-    if (typeof el === 'string') return []
-    if (el.type === 'Svg') return [`[${String(el.props?.alt)}]`]
-    if (el.type === 'Text' || el.type === 'Link') return [text(el)]
-    return (el.children ?? []).flatMap(read)
-  }
   const row = await ui.find({ key })
-  return row === undefined ? undefined : (row.children as El[]).flatMap(read)
+  return row === undefined ? undefined : (row.children as El[]).flatMap(readEl)
 }
 
 test("an open PR on the meta line: its icon and link, then its CI icon and the checks that make it; read once a minute", async ($, on) => {
@@ -1885,4 +1894,185 @@ test('a thin rule parts the rows of a section: a faint line on the desktop, a bl
   const blank = await terminal.find({ key: 'Working:rule1' })
   expect([blank?.props.height, blank?.children.length]).toEqual([1, 0])
   await terminal.unmount()
+})
+
+const todoRan = (items: TodoItem[], minutesAgo = 12, stale = false): Ran => ({ exitCode: 0, stdout: JSON.stringify({ items, updated: -minutesAgo * 60, stale }), stderr: '' })
+const TODO: TodoItem[] = [
+  { id: 1, text: 'Answer Vince in Slack', done: false },
+  { id: 5, text: 'Merge PR #87', link: 'https://github.com/o/r/pull/87', done: false },
+  { id: 4, text: 'Staging access for lw', on: 'Marek (Ops)', done: false },
+]
+
+/** The to do block as read, a line per row: its Texts and icons, space-joined; undefined with no block. */
+async function todoRows(ui: Mounted) {
+  const block = await ui.find({ key: 'todo' })
+  return block === undefined ? undefined : (block.children as El[]).map(row => readEl(row).join(' '))
+}
+
+test('the to do list shows above the sections: header, then a row per item, on every surface', async ($, on) => {
+  const { todoRuns, clock } = await start($, on, ok(WORKERS), { todo: todoRan(TODO) })
+  expect(todoRuns[0]).toEqual(['dev', 'todo', '--json', '--boss', 'local_boss'])
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const pr = surface === 'desktop' ? '[PR #87]' : '○'
+    expect(await todoRows(ui)).toEqual(['TO DO 3 · 1 on others updated 12m', '☐ Answer Vince in Slack', `☐ Merge PR #87 ${pr} #87`, '◌ Staging access for lw on Marek (Ops)'])
+    // Above the worker sections
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts.indexOf('Answer Vince in Slack')).toBeLessThan(texts.indexOf('WORKING'))
+    await ui.unmount()
+  }
+  // Its age follows the clock
+  await clock.advance(60_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await todoRows(ui))?.[0]).toBe('TO DO 3 · 1 on others updated 13m')
+  await ui.unmount()
+})
+
+test('an item waiting on someone else: a dotted circle, its text quieter, who at the right in amber', async ($, on) => {
+  await start($, on, ok(WORKERS), { todo: todoRan([TODO[2] as TodoItem]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Staging access for lw on Marek (Ops)'])
+  expect((await ui.find({ type: 'Text', text: 'Staging access for lw' }))?.props.color).toBe('subtle')
+  expect((await ui.find({ type: 'Text', text: 'on Marek (Ops)' }))?.props.color).toBe('warning')
+  await ui.unmount()
+})
+
+test("an item's link opens as the board's PR links do: a PR its icon and number, another link ↗", async ($, on) => {
+  const other = { id: 2, text: 'Read the thread', link: 'https://example.slack.com/archives/C1/p2', done: false }
+  await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem, other]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 2 updated 12m', '☐ Merge PR #87 [PR #87] #87', '☐ Read the thread ↗'])
+  expect((await ui.findAll({ type: 'Link' })).filter(l => /87|slack/.test(String(l.props.href))).map(l => [l.props.label, l.props.href])).toEqual([
+    ['#87', 'https://github.com/o/r/pull/87'],
+    ['↗', 'https://example.slack.com/archives/C1/p2'],
+  ])
+  await ui.unmount()
+})
+
+test('nine items: the first five, then +4 more', async ($, on) => {
+  const nine = Array.from({ length: 9 }, (_, i) => ({ id: i + 1, text: `Item ${i + 1}`, done: false }))
+  await start($, on, ok(WORKERS), { todo: todoRan(nine) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '+4 more'])
+  await ui.unmount()
+})
+
+test('a stale list dims its age; a fresh one does not', async ($, on) => {
+  let isStale = false
+  const { clock } = await start($, on, ok(WORKERS), { todo: () => todoRan(TODO, 75, isStale) })
+  let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /^updated/ }))?.props.dimColor).toBe(false)
+  await ui.unmount()
+  isStale = true
+  await clock.advance(2000)
+  ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const age = await ui.find({ type: 'Text', text: /^updated/ })
+  expect([age?.text, age?.props.dimColor]).toEqual(['updated 1h 15m', true])
+  await ui.unmount()
+})
+
+test('a ticked item shows ticked and struck through while the list still carries it, not counted', async ($, on) => {
+  await start($, on, ok(WORKERS), { todo: todoRan([{ ...(TODO[0] as TodoItem), done: true }, TODO[2] as TodoItem]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '☑ Answer Vince in Slack', '◌ Staging access for lw on Marek (Ops)'])
+  const text = await ui.find({ type: 'Text', text: 'Answer Vince in Slack' })
+  expect([text?.props.strikethrough, text?.props.color]).toEqual([true, 'inactive'])
+  expect((await ui.find({ type: 'Text', text: '☑' }))?.props.color).toBe('success')
+  await ui.unmount()
+})
+
+/** The pane's Texts with no to do list read. */
+async function paneWithoutTodo($: Engine, on: On, todo: Others['todo']) {
+  const started = await start($, on, ok(WORKERS), { todo })
+  await started.clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+  expect(await ui.find({ key: 'todo' })).toBeUndefined()
+  await ui.unmount()
+  return { texts, ...started }
+}
+
+const BOARD_TEXTS = ['WORKING', '1', '●', 'Worker A', 'Bash', '42%', 'WAITING', '1', '●', 'Worker B', 'blocked · pick one', 'PR #78', 'no checks reported', 'IDLE', '1', '▸ Worker C']
+
+test('an empty list shows no block: the board as without one', async ($, on) => {
+  const { texts, todoRuns } = await paneWithoutTodo($, on, todoRan([]))
+  expect(todoRuns.length).toBe(6)
+  expect(texts.filter(t => t !== '')).toEqual(BOARD_TEXTS)
+})
+
+for (const [why, todo] of [
+  ['a dev without dev todo', NO_TODO],
+  ['a worker session dev todo refuses', { exitCode: 1, stdout: '', stderr: '❌ local_boss is a worker another session started, not a boss' }],
+  ['dev todo that cannot start', 'spawn dev ENOENT'],
+  ['dev todo printing what this mod does not read', { exitCode: 0, stdout: '{"todo":[]}', stderr: '' }],
+] as const) {
+  test(`${why}: no block, the board intact, no toast, one debug line however many polls`, async ($, on) => {
+    const toasts = collectToasts(on)
+    const logs: string[] = []
+    on('ui.log', (_, e) => {
+      logs.push(`${e.to}: ${e.text}`)
+      return { value: undefined }
+    })
+    const { texts, todoRuns } = await paneWithoutTodo($, on, todo)
+    expect(todoRuns.length).toBe(6)
+    expect(texts.filter(t => t !== '')).toEqual(BOARD_TEXTS)
+    expect(toasts).toEqual([])
+    const todoLogs = logs.filter(l => l.includes('to do'))
+    expect(todoLogs.length).toBe(1)
+    expect(todoLogs[0]).toMatch(/^debug: dev-board: no to do list: /)
+  })
+}
+
+test('a list emptied after it showed takes its block away', async ($, on) => {
+  let items = TODO
+  const { clock } = await start($, on, ok(WORKERS), { todo: () => todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'todo' })).toBeTruthy()
+  items = []
+  await clock.advance(2000)
+  expect(await ui.find({ key: 'todo' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a GitLab merge request or a PR link with a path past its number shows as a PR', async ($, on) => {
+  const links = ['https://gitlab.com/g/r/-/merge_requests/12', 'https://github.com/o/r/pull/87/files', 'https://github.com/o/r/pull/88#issuecomment-1', 'https://github.com/o/r/pulls']
+  await start($, on, ok(WORKERS), { todo: todoRan(links.map((link, i) => ({ id: i + 1, text: `L${i + 1}`, link, done: false }))) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await todoRows(ui))?.slice(1)).toEqual(['☐ L1 [PR #12] #12', '☐ L2 [PR #87] #87', '☐ L3 [PR #88] #88', '☐ L4 ↗'])
+  await ui.unmount()
+})
+
+test('a read that fails after the list showed takes the block away until one succeeds; a new cause, or one back after a good read, is logged once more', async ($, on) => {
+  const logs: string[] = []
+  on('ui.log', (_, e) => {
+    if (e.text.includes('to do')) logs.push(e.text)
+    return { value: undefined }
+  })
+  let answer: Ran = todoRan(TODO)
+  const { clock } = await start($, on, ok(WORKERS), { todo: () => answer })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'todo' })).toBeTruthy()
+  answer = { exitCode: 1, stdout: '', stderr: 'boom' }
+  await clock.advance(4000)
+  expect(await ui.find({ key: 'todo' })).toBeUndefined()
+  answer = todoRan(TODO)
+  await clock.advance(2000)
+  expect(await ui.find({ key: 'todo' })).toBeTruthy()
+  answer = NO_TODO
+  await clock.advance(4000)
+  // The same cause after a good read is said again
+  answer = todoRan(TODO)
+  await clock.advance(2000)
+  answer = NO_TODO
+  await clock.advance(4000)
+  expect(logs).toEqual(['dev-board: no to do list: boom', 'dev-board: no to do list: ❌ unknown flag: --json', 'dev-board: no to do list: ❌ unknown flag: --json'])
+  await ui.unmount()
+})
+
+test('a list with an item this mod does not read shows no block', async ($, on) => {
+  await start($, on, ok(WORKERS), { todo: todoRan([{ ...(TODO[0] as TodoItem), link: 87 as unknown as string }]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'todo' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'Worker A' }))?.text).toBeTruthy()
+  await ui.unmount()
 })

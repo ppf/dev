@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Step, Worker } from '../types'
+import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
 import { registerAsk } from './ask'
 import { listenForReplies, registerReply, writeReply } from './reply'
 
@@ -88,6 +88,9 @@ const CI_ICONS: Record<Rollup, Icon> = {
   running: icon('<circle cx="8" cy="8" r="6.2" fill="none" stroke="#BF8700" stroke-width="1.6"/><path d="M8 4.6V8l2.4 1.6" fill="none" stroke="#BF8700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>', '…', 'warning'),
 }
 const ICON_PX = 12
+// The to do list's items shown before `+N more`, as on the tmux board; a link's PR number, as dev reads it
+const TODO_SHOWN = 5
+const PR_LINK = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
@@ -105,6 +108,8 @@ const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: ''
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
 const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-2' })
+// The boss's to do list, null when empty or not read
+const todo = atom({ plugin: 'dev-board', key: 'todo' } as const, null, { shape: 'todo-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -136,6 +141,27 @@ async function poll(run: Run, boss: string): Promise<Board> {
   } catch (err) {
     return { workers: [], error: `${DEV_BIN} desktop board: ${errorText(err)}`, warnings: '' }
   }
+}
+
+/** How long ago, as dev says it: `now` under a minute, `12m`, `2h`, `1h 5m`. */
+function span(ms: number): string {
+  const m = Math.floor(ms / 60_000)
+  if (m < 1) return 'now'
+  if (m < 60) return `${m}m`
+  return m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+/** The boss's to do list from `dev todo --json`, null when empty; throws when it can't be read (a dev without `dev todo`, a worker's session). */
+async function readTodo(run: Run, boss: string, now: number): Promise<Todo | null> {
+  const ran = await run([DEV_BIN, 'todo', '--json', '--boss', boss], { timeoutMs: 10_000 })
+  if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `${DEV_BIN} todo exited ${ran.exitCode}`)
+  const list: { items?: TodoItem[]; updated?: number; stale?: boolean } = JSON.parse(ran.stdout)
+  const isOptional = (v: unknown) => v === undefined || typeof v === 'string'
+  const isRead = (it: TodoItem) => typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isOptional(it.link)
+  if (!Array.isArray(list?.items) || !list.items.every(isRead) || typeof list.updated !== 'number') {
+    throw new Error(`${DEV_BIN} todo printed a list this mod does not read`)
+  }
+  return list.items.length === 0 ? null : { items: list.items, age: span(now - list.updated * 1000), stale: list.stale === true }
 }
 
 /** A PR's CI checks from `gh pr checks`, or why it printed none (no checks yet, no gh). */
@@ -347,6 +373,40 @@ export const register: Register = on => {
     let isPolling = false
     let last = ''
     let isRetitling = false
+    let isReadingTodo = false
+    let lastTodo = ''
+    // Each cause said once: on a dev without `dev todo`, or in a worker's session, it fails on every tick
+    let lastTodoError = ''
+    const logTodo = (err: unknown) => {
+      if (errorText(err) === lastTodoError) return
+      lastTodoError = errorText(err)
+      $.ui.log(`dev-board: no to do list: ${lastTodoError}`, { to: 'debug' })
+    }
+    /** Reads the to do list, off the board's path; one that can't be read shows no block. */
+    const refreshTodo = async () => {
+      if (isReadingTodo) return
+      isReadingTodo = true
+      try {
+        const now = await $.clock.now()
+        const got = await readTodo(run, boss, now).then(
+          list => {
+            lastTodoError = ''
+            return list
+          },
+          (err: unknown) => {
+            logTodo(err)
+            return null
+          },
+        )
+        const json = JSON.stringify(got)
+        if (json !== lastTodo) {
+          await update($, todo, () => got)
+          lastTodo = json
+        }
+      } finally {
+        isReadingTodo = false
+      }
+    }
     /** Gives an open pane the title once per title (an open id only retitles); a failure is said once. */
     const retitle = async (title: string) => {
       titled = title
@@ -398,6 +458,7 @@ export const register: Register = on => {
       }
     }
     const tick = async () => {
+      void refreshTodo().catch(logTodo)
       // A slow run must not stack another on top
       if (isPolling) return
       isPolling = true
@@ -498,6 +559,7 @@ export const register: Register = on => {
     const checksRead = await read($, checks)
     const deliveredRead = await read($, delivered)
     const picksRead = await read($, picks)
+    const todoRead = await read($, todo)
 
     const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
@@ -792,6 +854,76 @@ export const register: Register = on => {
       )
     }
 
+    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on, else its link (a PR's icon and number). */
+    const todoRow = (it: TodoItem) => {
+      const pr = it.link?.match(PR_LINK)?.[1]
+      const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
+      return (
+        <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+          <Box flexShrink={0}>
+            <Text size="footnote" color={boxColor}>
+              {box}
+            </Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text color={it.done ? 'inactive' : it.on ? 'subtle' : undefined} strikethrough={it.done} wrap="truncate-end">
+              {it.text}
+            </Text>
+          </Box>
+          {it.on ? (
+            <Box flexShrink={1} minWidth={0}>
+              <Text size="footnote" color="warning" wrap="truncate-end">
+                {`on ${it.on}`}
+              </Text>
+            </Box>
+          ) : (
+            it.link && (
+              <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+                {pr && PR_ICONS.OPEN && iconCell(`todo:item${it.id}:pr`, PR_ICONS.OPEN, `PR #${pr}`)}
+                <Text size="footnote">
+                  <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
+                </Text>
+              </Box>
+            )
+          )}
+        </Box>
+      )
+    }
+
+    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `+N more`. */
+    const todoBlock = (t: Todo) => {
+      const open = t.items.filter(it => !it.done)
+      const onOthers = open.filter(it => it.on).length
+      const shownItems = t.items.slice(0, TODO_SHOWN)
+      return (
+        <Box key="todo" flexDirection="column" rowGap="xs" minWidth={0}>
+          <Box key="todo:head" flexDirection="row" columnGap={1} minWidth={0}>
+            <Text size="footnote" weight="semibold">
+              TO DO
+            </Text>
+            <Text size="footnote" color="subtle" tabular>
+              {open.length}
+            </Text>
+            {onOthers > 0 && (
+              <Text size="footnote" color="subtle">
+                {`· ${onOthers} on others`}
+              </Text>
+            )}
+            <Box flexGrow={1} />
+            <Text size="footnote" color="subtle" dimColor={t.stale} tabular>
+              {`updated ${t.age}`}
+            </Text>
+          </Box>
+          {shownItems.map(todoRow)}
+          {t.items.length > shownItems.length && (
+            <Text key="todo:more" size="footnote" color="subtle">
+              {`+${t.items.length - shownItems.length} more`}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+
     // A stopped worker's dot is dimmer than an idle one's
     const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
     const sinceOf = (w: Worker) => (w.since === '0m' ? 'now' : w.since)
@@ -1020,6 +1152,7 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
+        {todoRead !== null && todoBlock(todoRead)}
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
