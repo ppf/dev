@@ -116,10 +116,15 @@ type Worker struct {
 	Effort string `json:"effort"`
 	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
 	Notes []Note `json:"notes"`
+	// Background counts its background tasks still running (Bash commands, async agents) its Claude started; 0 when not running.
+	Background int `json:"background"`
 	// Status is finer than State (needs you, rate-limited, stuck, working, waiting, blocked, review ready,
-	// idle, stopped); StatusText is what it says: the question, what its tool call does (else the tool), what it waits on.
+	// idle, stopped); StatusText is what it says: the question, what its tool call does (else the tool; between
+	// calls what it last said or did this turn, and its background tasks running), what it waits on.
 	Status     string `json:"status"`
 	StatusText string `json:"statusText"`
+	// between is what a busy worker last said this turn (its text's first line), else what its last call did
+	between string
 	// Since is how long it has been in its live state (busy, idle) or, not running, since the app's last
 	// activity, e.g. 12m; "" when unknown.
 	Since string `json:"since"`
@@ -454,7 +459,13 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		w.Plan = t.plan
 	}
 	if w.State == StateBusy {
-		w.Tool, w.ToolDescription = t.tool, t.toolDescription
+		w.Tool, w.ToolDescription, w.between = t.tool, t.toolDescription, cmp.Or(t.said, t.did)
+	}
+	for _, at := range t.background {
+		// Its tasks end with the Claude that started them, no notification queued
+		if running && at.UnixMilli() >= l.StartedAt {
+			w.Background++
+		}
 	}
 	window := windows[t.model]
 	if window > 0 && t.tokens > 0 {

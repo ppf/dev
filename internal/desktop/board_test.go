@@ -327,7 +327,7 @@ func TestBoardJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"ask", "branch", "context", "createdAt", "detail", "effort", "id", "lastActivityAt", "lastLines",
+	want := []string{"ask", "background", "branch", "context", "createdAt", "detail", "effort", "id", "lastActivityAt", "lastLines",
 		"model", "name", "needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
 		"worktree"}
 	for _, w := range got {

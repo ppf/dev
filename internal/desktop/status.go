@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -68,7 +69,15 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 				return StatusStuck, n.Text
 			}
 		}
-		return StatusWorking, cmp.Or(w.ToolDescription, w.Tool)
+		what := cmp.Or(w.ToolDescription, w.Tool, w.between)
+		if w.Background == 0 {
+			return StatusWorking, what
+		}
+		running := fmt.Sprintf("%d background running", w.Background)
+		if what == "" {
+			return StatusWorking, running
+		}
+		return StatusWorking, what + " · " + running
 	}
 	// The worker's own IDLE marker says only that nothing runs: its question still waits on the person
 	if w.Ask != nil && w.Ask.Blocked {
