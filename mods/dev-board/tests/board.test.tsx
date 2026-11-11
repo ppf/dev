@@ -2109,7 +2109,7 @@ test('a list with an item this mod does not read shows no block', async ($, on) 
 })
 
 /** A board with every part the desktop draws: each section, PRs of each state with CI, a task list, notes, a need, a question, the to do list. */
-async function startFull($: Parameters<typeof start>[0], on: Parameters<typeof start>[1]) {
+async function startFull($: Engine, on: On) {
   const prs = [OPEN_PR, { number: 7, url: 'https://github.com/o/r/pull/7', state: 'MERGED' }, { number: 9, url: 'https://github.com/o/r/pull/9', state: 'CLOSED' }]
   const workers = [
     ...BY_STATUS.map(w => ({ ...w, name: w.title.toLowerCase(), since: '41m', model: 'opus', effort: 'high', context: 40, plan: [...PLAN], prs, lastLines: ['Done.'], recap: 'All done.' })),
@@ -2140,7 +2140,7 @@ test('the desktop draws from its tokens only: five colors, two sizes, two weight
     expect([...used('Box', prop)].every(v => [1, 'xs', 'sm', 'md'].includes(v as string | number))).toBe(true)
   }
   // Sections a step further apart than a row's lines
-  expect((all.find(el => el.type === 'Box' && el.props.gap !== undefined))?.props.gap).toBe('md')
+  expect(all.find(el => el.type === 'Box' && el.props.gap !== undefined)?.props.gap).toBe('md')
   // Only the bar fills: its done part green on the muted track
   expect([...used('Box', 'backgroundColor')]).toEqual(['rgba(128, 128, 128, 0.22)', 'success'])
   // The icons' hues are the tones' (a merged PR muted), each about 4.2:1 on light and dark

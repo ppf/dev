@@ -75,7 +75,6 @@ const icon = (body: string, glyph: string, color: string): Icon => ({
 })
 const stroke = (hex: string) => `fill="none" stroke="${hex}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`
 type Hues = { open: string; merged: string; closed: string; passed: string; failed: string; running: string }
-/** The PR and CI icons in the given hues. */
 const iconsIn = (hue: Hues) => ({
   pr: {
     OPEN: icon(
