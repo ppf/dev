@@ -140,7 +140,7 @@ func (m Model) waiting(p *pick) bool {
 
 // handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
 // here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
-// fold or unfold it, ctrl+c quit.
+// fold or unfold it, t fold or open the to do block, ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -209,6 +209,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.snap.tiles) > 0 {
 			m.fold(m.snap.tiles[i])
 		}
+	case "t":
+		m.todoFolded = !m.todoFolded
 	case "ctrl+c":
 		return m, tea.Quit
 	}

@@ -112,6 +112,7 @@ On each note:
 <!-- boss-core:rollup -->
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user (real decisions only, each with its context and your recommended answer), what's next.
 - **Propose improvements sparingly:** in a roll-up, or when idle with nothing pending (never mid-task), at most one or two, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky tests, recurring review findings, missing tooling, rough UX the user hit). One line each: why it's worth it and a rough size. Start one only on the user's yes, even when it looks clear and safe; don't propose again one they declined.
+- **Keep the to do list current** at each roll-up with `dev todo` (`set`, `add [--on <who>] [--link <PR>]`, `done <n>`; `dev todo --help`): what waits on the user, ticked when done.
 <!-- /boss-core:rollup -->
 - **At each roll-up, check `get_usage` too,** and say so when the 5-hour or weekly usage is high.
 

@@ -29,27 +29,37 @@ func (m Model) View() string {
 	return strings.Join(m.render(), "\n")
 }
 
-// render lays out exactly m.height lines: the board scrolled to the selected card, then the bottom rows.
+// render lays out exactly m.height lines: the to do block, the board under it scrolled to the selected card,
+// then the bottom rows.
 func (m Model) render() []string {
 	w, h := m.width, m.height
 	lines := make([]string, h)
 	bottom := m.bottom()
 	gh := h - len(bottom)
 	copy(lines[gh:], bottom)
+	top := m.todoRows(gh)
+	copy(lines, top)
+	board, gh := lines[len(top):], gh-len(top)
 	if len(m.snap.tiles) == 0 {
 		if gh > 0 {
-			lines[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
+			board[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 		}
 		return lines
 	}
 	b := m.board()
 	off := b.offset(index(m.snap.tiles, m.selected), gh)
-	copy(lines[:gh], b.lines[off:])
+	copy(board[:gh], b.lines[off:])
 	return lines
 }
 
-// boardHeight is the rows the board gets above the bottom rows.
-func (m Model) boardHeight() int { return m.height - len(m.bottom()) }
+// boardTop is the row the board starts at, under the to do block, when gh rows are above the bottom rows.
+func (m Model) boardTop(gh int) int { return len(m.todoRows(gh)) }
+
+// boardHeight is the rows the board gets between the to do block and the bottom rows.
+func (m Model) boardHeight() int {
+	gh := m.height - len(m.bottom())
+	return gh - m.boardTop(gh)
+}
 
 // bottom is the rows under the cards: the reply box while open, else one row of hints or a message.
 func (m Model) bottom() []string {
@@ -76,11 +86,18 @@ func (m Model) bottom() []string {
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
-	if len(tiles) > 0 && len(m.board().lines) > m.height-1 {
+	if gh := m.height - 1; len(tiles) > 0 && len(m.board().lines) > gh-m.boardTop(gh) {
 		// Where the selection is on a board taller than the pane; first, so a narrow row cuts the hint
 		pages = fmt.Sprintf("%d/%d  ", sel+1, len(tiles))
 	}
 	hint := "j/k select  g/⏎ go  m message  v screen  f fold  x kill"
+	todo := ""
+	if len(m.snap.todo.Items) > 0 {
+		todo = "t fold to do  "
+		if m.todoFolded {
+			todo = "t open to do  "
+		}
+	}
 	if sel < len(tiles) {
 		// o only offers what openPR does: the PR, or why its lookup failed
 		switch s := tiles[sel].sess; {
@@ -90,7 +107,7 @@ func (m Model) bottom() []string {
 			hint = "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
 		}
 	}
-	return []string{sidebar.HintRow(pages+hint, w)}
+	return []string{sidebar.HintRow(pages+todo+hint, w)}
 }
 
 // boxRows is the reply box bound to t, boxed like t's card in t's colour: a top border naming what it does and
