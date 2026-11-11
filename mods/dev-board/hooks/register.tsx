@@ -911,6 +911,8 @@ export const register: Register = on => {
       // The model and its effort, then the context use: `opus·medium · 9%`
       const model = w.model && w.effort ? `${w.model}·${w.effort}` : (w.model ?? '')
       const meta = [model, w.context === null ? '' : `${w.context}%`].filter(part => part !== '').join(' · ')
+      // A question shown stands in for the status
+      const shownStatus = !w.ask && status
       const quiet = isQuiet ? ({ plain: true, dimColor: true } as const) : {}
 
       // Blocks one gap apart: the title, its question, what it does, its tasks, its buttons
@@ -932,18 +934,18 @@ export const register: Register = on => {
           </Box>
           {w.ask && questionRows(w, w.ask, color)}
           <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
-            {((!w.ask && status) || meta !== '') && (
+            {(shownStatus || meta !== '') && (
               // One row: the status cut to fit, then the model and context use, never cut
               <Box key={`${w.id}:meta`} flexDirection="row" columnGap={1} minWidth={0}>
-                {!w.ask && status && (
+                {shownStatus && (
                   <Box flexShrink={1} minWidth={0}>
-                    {status}
+                    {shownStatus}
                   </Box>
                 )}
                 {meta !== '' && (
                   <Box flexShrink={0}>
                     <Text size="caption" color="subtle" tabular>
-                      {!w.ask && status ? `· ${meta}` : meta}
+                      {shownStatus ? `· ${meta}` : meta}
                     </Text>
                   </Box>
                 )}
