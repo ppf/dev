@@ -1058,7 +1058,8 @@ export const register: Register = on => {
               key={`${w.id}:draft`}
               label={isDesktop ? 'Message' : `Message ${label(w)}`}
               {...(isDesktop ? { placeholder: `what to tell ${label(w)}…`, submitLabel: 'send' } : {})}
-              value={v.unsent[w.id]}
+              // The typed text first: a field moved to another parent (detail closed, status changed) is mounted again and shows it
+              value={drafts.get(`${e.surface}:${w.id}`) ?? v.unsent[w.id]}
               autoFocus
               onInput={(text, input) => {
                 drafts.set(`${input.surface}:${w.id}`, text)

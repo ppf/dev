@@ -1185,6 +1185,28 @@ test('Message… on a Needs you row opens under line 1; on the terminal under li
   await terminal.unmount()
 })
 
+test('a field moved while typing (detail closed, or Working → Waiting) is drawn again with the typed text, and Send sends it', async ($, on) => {
+  const texts = submits(on)
+  let workers = [worker({ state: 'busy', status: 'working' })]
+  const { clock } = await start($, on, () => ok(workers))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
+  await ui.press({ key: 'local_a:message' })
+  await ui.input({ key: 'local_a:draft', text: 'half typed', kind: 'change' })
+  // Detail closed: the field moves under line 1
+  await ui.press({ key: 'local_a:fold' })
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('half typed')
+  // Detail open and the worker waits: its buttons move to line 1, the field with them
+  await ui.press({ key: 'local_a:fold' })
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('half typed')
+  workers = [worker({ state: 'busy', status: 'waiting', statusText: 'Auto-fix: PR #80' })]
+  await clock.advance(2000)
+  expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('half typed')
+  await ui.press({ key: 'local_a:send' })
+  expect(texts).toEqual(['dev-board: message Worker A (local_a): half typed'])
+  await ui.unmount()
+})
+
 test('a verdict the status says, with no detail, shows no line', async ($, on) => {
   await start($, on, ok([worker({ state: 'blocked', status: 'blocked', verdict: 'blocked' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
