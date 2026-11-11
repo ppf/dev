@@ -64,6 +64,9 @@ export type Check = { name: string; bucket: string }
 /** A PR's checks as last read (`at`, the clock's ms), or why they could not be. */
 export type Checks = { at: number; checks: Check[]; error: string }
 
+/** A to do PR link's state as `gh pr view` last said (`at`, the clock's ms); '' when it could not be read. */
+export type LinkState = { at: number; state: string }
+
 /** Whether `dev delivered` last passed (`at`, the clock's ms) for a worker's worktree, else why not. */
 export type Delivered = { at: number; isDelivered: boolean; why: string }
 
@@ -88,6 +91,7 @@ declare module 'claude-code' {
       picks: Shaped<Record<string, Picks>>
       replyTo: Shaped<string>
       todo: Shaped<Todo | null>
+      linkStates: Shaped<Record<string, LinkState>>
     }
   }
 }

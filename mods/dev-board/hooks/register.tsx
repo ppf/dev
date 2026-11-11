@@ -106,6 +106,8 @@ const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, close
 const ICON_PX = 12
 // The to do list's items shown before `+N more`, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
+// Only GitHub's pull links can be read with gh
+const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
 const PR_LINK = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
@@ -126,6 +128,8 @@ const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false
 const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 'picks-2' })
 // The boss's to do list, null when empty or not read
 const todo = atom({ plugin: 'dev-board', key: 'todo' } as const, null, { shape: 'todo-1' })
+// The state of each to do item's PR link as `gh pr view` last said, by URL; '' when it could not be read
+const linkStates = atom({ plugin: 'dev-board', key: 'linkStates' } as const, {}, { shape: 'link-states-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -193,6 +197,16 @@ async function prChecks(run: Run, url: string): Promise<Omit<Checks, 'at'>> {
     return { checks: list.map(c => ({ name: String(c.name), bucket: String(c.bucket) })), error: '' }
   } catch (err) {
     return { checks: [], error: `gh pr checks: ${errorText(err)}` }
+  }
+}
+
+/** A PR's state (OPEN, MERGED, CLOSED) from `gh pr view`, '' when it could not be read. */
+async function prState(run: Run, url: string): Promise<string> {
+  try {
+    const ran = await run(['gh', 'pr', 'view', url, '--json', 'state'], { timeoutMs: 30_000 })
+    return ran.exitCode === 0 ? String(JSON.parse(ran.stdout).state ?? '') : ''
+  } catch {
+    return ''
   }
 }
 
@@ -398,6 +412,23 @@ export const register: Register = on => {
       lastTodoError = errorText(err)
       $.ui.log(`dev-board: no to do list: ${lastTodoError}`, { to: 'debug' })
     }
+    const readingLinks = new Set<string>()
+    /** Reads the state of each to do PR link not read for REFRESH_MS, off the render path; links gone from the list are dropped. */
+    const refreshLinkStates = async (list: Todo | null, now: number) => {
+      const urls = new Set((list?.items ?? []).flatMap(it => (it.link !== undefined && GH_PR_LINK.test(it.link) ? [it.link] : [])))
+      const read_ = await read($, linkStates)
+      if (Object.keys(read_).some(u => !urls.has(u))) {
+        await update($, linkStates, m => Object.fromEntries(Object.entries(m).filter(([u]) => urls.has(u))))
+      }
+      for (const url of urls) {
+        const at = read_[url]?.at
+        if (readingLinks.has(url) || (at !== undefined && now - at < REFRESH_MS)) continue
+        readingLinks.add(url)
+        void prState(run, url)
+          .then(state => update($, linkStates, m => ({ ...m, [url]: { at: now, state } })))
+          .finally(() => readingLinks.delete(url))
+      }
+    }
     /** Reads the to do list, off the board's path; one that can't be read shows no block. */
     const refreshTodo = async () => {
       if (isReadingTodo) return
@@ -419,6 +450,7 @@ export const register: Register = on => {
           await update($, todo, () => got)
           lastTodo = json
         }
+        void refreshLinkStates(got, now).catch(logTodo)
       } finally {
         isReadingTodo = false
       }
@@ -583,6 +615,7 @@ export const register: Register = on => {
     const deliveredRead = await read($, delivered)
     const picksRead = await read($, picks)
     const todoRead = await read($, todo)
+    const linkStatesRead = await read($, linkStates)
 
     const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
@@ -881,6 +914,9 @@ export const register: Register = on => {
     /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on, else its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
+      // No icon until the state is read, or when it could not be
+      const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
+      const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
       return (
         <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
@@ -903,7 +939,7 @@ export const register: Register = on => {
           ) : (
             it.link && (
               <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
-                {pr && PR_ICONS.OPEN && iconCell(`todo:item${it.id}:pr`, PR_ICONS.OPEN, `PR #${pr}`)}
+                {pr && prIcon && iconCell(`todo:item${it.id}:pr`, prIcon, `PR #${pr} ${state.toLowerCase()}`)}
                 <Text size={SIZE.meta}>
                   <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
                 </Text>
@@ -1142,7 +1178,7 @@ export const register: Register = on => {
             const done = w.plan.filter(s => s.status === 'completed').length
             const since = sinceOf(w)
             return (
-              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} paddingLeft={isDesktop ? SPACE.block : undefined} minWidth={0}>
                 {dot(w, 'Idle')}
                 <Box flexShrink={1} minWidth={0}>
                   {nameButton(w, false, true)}

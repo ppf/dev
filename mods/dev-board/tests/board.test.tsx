@@ -991,6 +991,8 @@ test('idle and stopped workers share one line that opens to a line each; the res
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
   }
   await ui.press({ key: 'idle:fold' })
+  // Open rows sit one step in, their dots under the toggle's text
+  expect((await ui.find({ key: 'local_i:header' }))?.props.paddingLeft).toBe('sm')
   // Open, its lines name them: the line counts them only
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
   // A line each: dot, name (dim, regular: they ask nothing), task count, time
@@ -1016,6 +1018,7 @@ test('idle and stopped workers share one line that opens to a line each; the res
   const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await terminal.press({ key: 'idle:fold' })
   expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
+  expect((await terminal.find({ key: 'local_i:header' }))?.props.paddingLeft).toBeUndefined()
   await terminal.unmount()
 })
 
@@ -1934,6 +1937,8 @@ const TODO: TodoItem[] = [
   { id: 4, text: 'Staging access for lw', on: 'Marek (Ops)', done: false },
 ]
 
+const VIEW_OPEN: Ran = { exitCode: 0, stdout: '{"state":"OPEN"}', stderr: '' }
+
 /** The to do block as read, a line per row: its Texts and icons, space-joined; undefined with no block. */
 async function todoRows(ui: Mounted) {
   const block = await ui.find({ key: 'todo' })
@@ -1941,11 +1946,11 @@ async function todoRows(ui: Mounted) {
 }
 
 test('the to do list shows above the sections: header, then a row per item, on every surface', async ($, on) => {
-  const { todoRuns, clock } = await start($, on, ok(WORKERS), { todo: todoRan(TODO) })
+  const { todoRuns, clock } = await start($, on, ok(WORKERS), { todo: todoRan(TODO), gh: VIEW_OPEN })
   expect(todoRuns[0]).toEqual(['dev', 'todo', '--json', '--boss', 'local_boss'])
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    const pr = surface === 'desktop' ? '[PR #87]' : '○'
+    const pr = surface === 'desktop' ? '[PR #87 open]' : '○'
     expect(await todoRows(ui)).toEqual(['TO DO 3 · 1 on others updated 12m', '☐ Answer Vince in Slack', `☐ Merge PR #87 ${pr} #87`, '◌ Staging access for lw on Marek (Ops)'])
     // Above the worker sections
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
@@ -1956,6 +1961,31 @@ test('the to do list shows above the sections: header, then a row per item, on e
   await clock.advance(60_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await todoRows(ui))?.[0]).toBe('TO DO 3 · 1 on others updated 13m')
+  await ui.unmount()
+})
+
+test("a to do PR link's icon follows the PR's state, none before it is read or when gh fails; read once a minute, dropped with the link", async ($, on) => {
+  let state: Ran = { exitCode: 0, stdout: '{"state":"MERGED"}', stderr: '' }
+  const { otherRuns, clock } = await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem]), gh: () => state })
+  const views = () => otherRuns.filter(r => r.argv[1] === 'pr' && r.argv[2] === 'view')
+  expect(views()[0]?.argv).toEqual(['gh', 'pr', 'view', 'https://github.com/o/r/pull/87', '--json', 'state'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 [PR #87 merged] #87')
+  const before = views().length
+  await clock.advance(30_000)
+  expect(views().length).toBe(before)
+  expect(views().every(r => r.argv[3] === 'https://github.com/o/r/pull/87')).toBe(true)
+  // Failing gh: the last good state is replaced by none
+  state = { exitCode: 1, stdout: '', stderr: 'no gh' }
+  await clock.advance(60_000)
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 #87')
+  await ui.unmount()
+})
+
+test('a to do PR link shows no state icon until gh has answered', async ($, on) => {
+  await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem]), gh: { exitCode: 1, stdout: '', stderr: 'boom' } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 #87')
   await ui.unmount()
 })
 
@@ -1970,9 +2000,9 @@ test('an item waiting on someone else: a dotted circle, its text quieter, who at
 
 test("an item's link opens as the board's PR links do: a PR its icon and number, another link ↗", async ($, on) => {
   const other = { id: 2, text: 'Read the thread', link: 'https://example.slack.com/archives/C1/p2', done: false }
-  await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem, other]) })
+  await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem, other]), gh: VIEW_OPEN })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 2 updated 12m', '☐ Merge PR #87 [PR #87] #87', '☐ Read the thread ↗'])
+  expect(await todoRows(ui)).toEqual(['TO DO 2 updated 12m', '☐ Merge PR #87 [PR #87 open] #87', '☐ Read the thread ↗'])
   expect((await ui.findAll({ type: 'Link' })).filter(l => /87|slack/.test(String(l.props.href))).map(l => [l.props.label, l.props.href])).toEqual([
     ['#87', 'https://github.com/o/r/pull/87'],
     ['↗', 'https://example.slack.com/archives/C1/p2'],
@@ -2070,11 +2100,11 @@ test('a list emptied after it showed takes its block away', async ($, on) => {
   await ui.unmount()
 })
 
-test('a GitLab merge request or a PR link with a path past its number shows as a PR', async ($, on) => {
+test('a GitLab merge request or a PR link with a path past its number shows as a PR; only GitHub links get a state icon', async ($, on) => {
   const links = ['https://gitlab.com/g/r/-/merge_requests/12', 'https://github.com/o/r/pull/87/files', 'https://github.com/o/r/pull/88#issuecomment-1', 'https://github.com/o/r/pulls']
-  await start($, on, ok(WORKERS), { todo: todoRan(links.map((link, i) => ({ id: i + 1, text: `L${i + 1}`, link, done: false }))) })
+  await start($, on, ok(WORKERS), { todo: todoRan(links.map((link, i) => ({ id: i + 1, text: `L${i + 1}`, link, done: false }))), gh: VIEW_OPEN })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await todoRows(ui))?.slice(1)).toEqual(['☐ L1 [PR #12] #12', '☐ L2 [PR #87] #87', '☐ L3 [PR #88] #88', '☐ L4 ↗'])
+  expect((await todoRows(ui))?.slice(1)).toEqual(['☐ L1 #12', '☐ L2 [PR #87 open] #87', '☐ L3 [PR #88 open] #88', '☐ L4 ↗'])
   await ui.unmount()
 })
 
