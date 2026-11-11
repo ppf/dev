@@ -14,12 +14,12 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
-// The pane's sections, in order; an Idle tile is folded unless it asks for the person, until they (un)fold it
+// The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
-// The dot says the tile's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green
+// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green
 const DOT_COLORS = { 'Needs you': 'error', Working: 'success', Waiting: 'warning', Idle: 'subtle' } as const
-// The sections whose tiles ask to be looked at: only they take their color on the card and a main Open button
+// The sections whose rows ask to be looked at: only they carry their buttons on line 1
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   'needs you': 'Needs you',
@@ -38,19 +38,20 @@ const LIST_WORDS = new Set(['pick', 'choose', 'select', 'reply', 'answer', 'one'
 // An option label's `(Recommended)` suffix, which the board shows as a ★ before the label
 const RECOMMENDED = /\s*\(recommended\)\s*$/i
 
+// What dev adds to a busy worker's status text for its background work, left out where a reply line is compared with it
+const BACKGROUND = /(^|\s·\s)\d+ background running$/
 // A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
 const RETAKE_MS = 10_000
-const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 // One glyph family so the marks line up: done recedes, the current step takes the section's color, pending stays quiet
 const STEP_LOOKS = {
   completed: { mark: '●', markColor: 'success', color: 'inactive', weight: 'regular', isDim: true },
   in_progress: { mark: '◐', markColor: undefined, color: 'text', weight: 'medium', isDim: false },
   pending: { mark: '○', markColor: 'subtle', color: 'subtle', weight: 'regular', isDim: false },
 } as const
-// An expanded list's rows at most, its count rows included; the progress bar's width in cells
+// A detail's task list rows at most, its count rows included; the progress bar's width in cells
 const MAX_STEPS = 7
-const BAR_CELLS = 10
-// The desktop bar's empty track: a faint grey that reads as empty on light and dark alike (the theme's greys draw a full-looking bar)
+const BAR_CELLS = 5
+// The desktop bar's empty track and the rule between rows: a faint grey that reads as empty on light and dark alike (the theme's greys draw a full-looking bar)
 const BAR_TRACK = 'rgba(128, 128, 128, 0.22)'
 // A PR's CI checks summed up: any failed (or cancelled), else any still running, else passed (passed or skipped)
 type Rollup = 'failed' | 'running' | 'passed'
@@ -99,7 +100,7 @@ const MAX_SENT = 500
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
-const view = atom({ plugin: 'dev-board', key: 'view' } as const, { expanded: [], composing: '', tiles: {}, unsent: {} }, { shape: 'view-3' })
+const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: '', details: {}, unsent: {}, idleOpen: false }, { shape: 'view-4' })
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
@@ -237,15 +238,15 @@ const hasOptions = (w: Worker) => w.ask?.questions.some(q => q.options.length > 
 /** Whether a worker may be archived: not running a turn, nor waiting on something that will wake it (its own `WAITING (…)` marker). */
 const canArchive = (w: Worker) => w.state !== 'busy' && w.status !== 'waiting'
 
-/** Whether the tile shows what a worker not running needs (a blocked one's status says it, a question's options ask it). */
+/** Whether the row shows what a worker not running needs (a blocked one's status says it, a question's options ask it). */
 const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && !hasOptions(w)
 
-/** Whether the tile shows the person something to act on: a health note, a need or a question. */
+/** Whether the row shows the person something to act on: a health note, a need or a question. */
 const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w) || w.ask != null
 
 /**
  * The status and what it says, e.g. `blocked · pick one`; the status left out where its section says it (`allow Bash: rm -rf bin`
- * under Needs you), save a working worker's between tools, so its row stays as the tool comes and goes.
+ * under Needs you), save a working worker's between tools, so line 1 keeps a status as the tool comes and goes.
  */
 const statusLine = (w: Worker, group: (typeof GROUPS)[number]) =>
   w.status === 'working' && w.statusText === '' ? 'working' : [w.status === group.toLowerCase() ? '' : w.status, w.statusText].filter(s => s !== '').join(' · ')
@@ -268,7 +269,7 @@ const plainLine = (line: string) =>
 const wholeWord = (text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u')
 
 /**
- * Whether a reply line says what the tile does above it: the status (`Blocked: pick one` beside `blocked · pick one`), a
+ * Whether a reply line says what the row does above it: the status (`Blocked: pick one` beside `blocked · pick one`), a
  * question it asks or the need its options answer, their first 40 characters alike, case, inline markdown, end punctuation
  * and a leading `<status>:` aside; or a question's options, every one named as a whole word, among list words only.
  */
@@ -276,7 +277,7 @@ function repeatsTile(line: string, w: Worker): boolean {
   const said = (s: string) => plainLine(s).trim().toLowerCase().replace(/[.!?…]+$/, '')
   const text = said(line)
   const rest = text.startsWith(`${w.status}:`) ? text.slice(w.status.length + 1).trimStart() : text
-  const shown = [w.statusText, hasOptions(w) ? w.needsAction : '', ...(w.ask?.questions.map(q => q.question) ?? [])].map(said)
+  const shown = [w.statusText.replace(BACKGROUND, ''), hasOptions(w) ? w.needsAction : '', ...(w.ask?.questions.map(q => q.question) ?? [])].map(said)
   if (shown.some(what => what !== '' && rest.slice(0, 40) === what.slice(0, 40))) return true
   return (w.ask?.questions ?? []).some(q => {
     const labels = q.options.map(o => said(o.label)).filter(l => l !== '')
@@ -290,18 +291,6 @@ function repeatsTile(line: string, w: Worker): boolean {
     // What is left only leads in and joins them: `A is safe; B deletes data` says more
     return left.split(/[^\p{L}\p{N}]+/u).every(word => word === '' || LIST_WORDS.has(word))
   })
-}
-
-/**
- * The verdict on its last turn in words (`review ready`) and its detail; where the status says the verdict, or a waiting
- * worker's own marker says it is not done, only a detail the status row lacks.
- */
-function verdictLine(w: Worker): string {
-  if (w.verdict === '') return ''
-  const verdict = w.verdict.replaceAll('_', ' ')
-  if (verdict === w.status || w.status === 'waiting') return w.detail === w.statusText ? '' : w.detail
-  if (w.detail === '') return verdict
-  return `${verdict}: ${w.detail}`
 }
 
 /** An open PR's checks summed up; none while not read, unreadable, or with no checks. */
@@ -322,7 +311,7 @@ function ciNames(c: Checks, rollup: Rollup): string {
   return c.checks.filter(k => makes(k.bucket)).map(k => k.name).join(' ')
 }
 
-/** What an expanded list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
+/** What the detail's task list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
 function shownSteps(plan: Step[]): { earlier: number; steps: Step[]; more: number } {
   if (plan.length <= MAX_STEPS) return { earlier: 0, steps: plan, more: 0 }
   const open = plan.findIndex(s => s.status !== 'completed')
@@ -368,8 +357,6 @@ export const register: Register = on => {
         await $.ui.toast(`pane not retitled: ${errorText(err)}`)
       }
     }
-    // Each worker's ask on the last poll that listed them
-    let lastAsked: Map<string, string | undefined> | undefined
     // The PR URLs and worker ids being read: a slow gh or fetch must not stack another
     const reading = new Set<string>()
     /**
@@ -418,27 +405,10 @@ export const register: Register = on => {
         const polled = await poll(run, boss)
         const json = JSON.stringify(polled)
         if (json !== last) {
-          if (lastAsked === undefined) {
-            // After a reload, the board it stored is the last poll
-            const stored = await read($, board)
-            if (stored !== null && stored.error === '') lastAsked = new Map(stored.workers.map(w => [w.id, w.ask?.toolUseId]))
-          }
           await update($, board, () => polled)
           last = json
           // Picks for a question no longer asked go; a failed poll, listing no workers, says nothing of them
           const asked = new Map(polled.workers.map(w => [w.id, w.ask?.toolUseId]))
-          if (polled.error === '') {
-            // A new question opens a tile the person folded
-            const before = lastAsked
-            const newlyAsking = new Set(polled.workers.filter(w => w.ask != null && before !== undefined && w.ask.toolUseId !== before.get(w.id)).map(w => w.id))
-            lastAsked = asked
-            if (newlyAsking.size > 0) {
-              await update($, view, s => {
-                const tiles = Object.fromEntries(Object.entries(s.tiles).filter(([id]) => !newlyAsking.has(id)))
-                return Object.keys(tiles).length === Object.keys(s.tiles).length ? s : { ...s, tiles }
-              })
-            }
-          }
           const held = await read($, picks)
           if (polled.error === '' && Object.entries(held).some(([id, p]) => asked.get(id) !== p.toolUseId)) {
             await update($, picks, m => Object.fromEntries(Object.entries(m).filter(([id, p]) => asked.get(id) === p.toolUseId)))
@@ -506,7 +476,7 @@ export const register: Register = on => {
     // The mobile app draws no field
     const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
-    /** The pane's one message in place of tiles: a glyph, its text and a dim hint, centred. */
+    /** The pane's one message in place of rows: a glyph, its text and a dim hint, centred. */
     const notice = (key: string, text: string, glyph?: { mark: string; color: string }, hint?: string) => (
       <Box key={key} flexDirection="column" alignItems="center" paddingY="sm" minWidth={0}>
         {glyph && <Text color={glyph.color}>{glyph.mark}</Text>}
@@ -529,11 +499,7 @@ export const register: Register = on => {
     const deliveredRead = await read($, delivered)
     const picksRead = await read($, picks)
 
-    const toggle = (id: string) =>
-      update($, view, s => ({ ...s, expanded: s.expanded.includes(id) ? s.expanded.filter(x => x !== id) : [...s.expanded, id] }))
-    // Folding drops the tile's message field rather than keep it hidden
-    const fold = (id: string, isOpen: boolean) =>
-      update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen }, composing: !isOpen && s.composing === id ? '' : s.composing }))
+    const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
       for (const key of drafts.keys()) if (key.endsWith(`:${id}`)) drafts.delete(key)
     }
@@ -738,25 +704,25 @@ export const register: Register = on => {
       ]
     }
 
-    /** A PR's row: its state icon, link and state, its CI icon, then the names of the checks that make it, or why they could not be read, cut to fit. */
-    const prRow = (w: Worker, pr: PR) => {
+    /** A PR on the meta line: its state icon, link, CI icon, then the names of the checks that make it, or why they could not be read, cut to fit. */
+    const prPart = (w: Worker, pr: PR) => {
       const c = checksRead[pr.url]
       const rollup = ciRollup(pr, c)
       const why = pr.state === 'OPEN' && c !== undefined ? c.error : ''
       const after = rollup && c ? ciNames(c, rollup) : why
       const [state, ci] = prIcons(w, pr, rollup)
       return (
-        <Box key={`${w.id}:${pr.url}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+        <Box key={`${w.id}:${pr.url}`} flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
           {state}
           <Box flexShrink={0}>
-            <Text size="caption">
-              <Link href={pr.url} label={`PR #${pr.number}`} /> <Text color={PR_COLORS[pr.state] ?? 'inactive'}>{pr.state.toLowerCase()}</Text>
+            <Text size="footnote">
+              <Link href={pr.url} label={`PR #${pr.number}`} />
             </Text>
           </Box>
           {ci}
           {after !== '' && (
             <Box flexShrink={1} minWidth={0}>
-              <Text size="caption" color="subtle" dimColor={why !== ''} wrap="truncate-end">
+              <Text size="footnote" color="subtle" dimColor={why !== ''} wrap="truncate-end">
                 {after}
               </Text>
             </Box>
@@ -784,51 +750,41 @@ export const register: Register = on => {
       )
     }
 
-    /** The task list: its label, a progress bar and the toggle with its count; collapsed, the step at hand after them on the same row; expanded, the steps under it. */
-    const taskList = (w: Worker, color: string, done: number, isExpanded: boolean) => {
-      const atHand = w.plan.find(s => s.status === 'in_progress') ?? w.plan.find(s => s.status === 'pending')
+    /** The task progress: a small bar (done steps green on a faint track) and `done/total`. */
+    const progress = (w: Worker, done: number) => {
       const cells = Math.round((done / w.plan.length) * BAR_CELLS)
-      const { earlier, steps, more } = isExpanded ? shownSteps(w.plan) : { earlier: 0, steps: [], more: 0 }
+      return (
+        <Box key={`${w.id}:progress`} flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+          {e.surface === 'terminal' ? (
+            // Whole cells: a fifth of a row would draw nothing
+            <Box key={`${w.id}:bar`}>
+              <Text>
+                <Text color="success">{'━'.repeat(cells)}</Text>
+                <Text color="inactive" dimColor>
+                  {'─'.repeat(BAR_CELLS - cells)}
+                </Text>
+              </Text>
+            </Box>
+          ) : (
+            <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
+              <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor={BAR_TRACK}>
+                <Box flexGrow={done} backgroundColor="success" />
+                <Box flexGrow={w.plan.length - done} />
+              </Box>
+            </Box>
+          )}
+          <Text size="footnote" color="subtle" tabular>
+            {`${done}/${w.plan.length}`}
+          </Text>
+        </Box>
+      )
+    }
+
+    /** The task list in full: a row per step, folded past MAX_STEPS. */
+    const taskList = (w: Worker, color: string) => {
+      const { earlier, steps, more } = shownSteps(w.plan)
       return (
         <Box key={`${w.id}:plan`} flexDirection="column" minWidth={0}>
-          {/* The label lines up with the steps' marks; the toggle, a button the surface pads, then collapsed the step at hand, cut to fit */}
-          <Box key={`${w.id}:tasksRow`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
-            {/* Never squeezed: a desktop Text not cut wraps anywhere once squeezed */}
-            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
-              <Text size="footnote" color="subtle">
-                Tasks
-              </Text>
-              {e.surface === 'terminal' ? (
-                // Whole cells: a fifth of a row would draw nothing
-                <Box key={`${w.id}:bar`}>
-                  <Text>
-                    <Text color="success">{'━'.repeat(cells)}</Text>
-                    <Text color="inactive" dimColor>
-                      {'─'.repeat(BAR_CELLS - cells)}
-                    </Text>
-                  </Text>
-                </Box>
-              ) : (
-                <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
-                  <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor={BAR_TRACK}>
-                    <Box flexGrow={done} backgroundColor="success" />
-                    <Box flexGrow={w.plan.length - done} />
-                  </Box>
-                </Box>
-              )}
-              {/* No label: the desktop draws a label in place of the children */}
-              <Button key={`${w.id}:tasks`} plain dimColor onPress={() => void toggle(w.id)}>
-                <Text size="footnote" tabular>
-                  {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
-                </Text>
-              </Button>
-            </Box>
-            {!isExpanded && atHand && (
-              <Box flexShrink={1} minWidth={0}>
-                {stepRow(`${w.id}:step${w.plan.indexOf(atHand)}`, atHand.status, atHand.content, color)}
-              </Box>
-            )}
-          </Box>
           {earlier > 0 && stepRow(`${w.id}:earlier`, 'completed', `${earlier} done`, color)}
           {steps.map(s => stepRow(`${w.id}:step${w.plan.indexOf(s)}`, s.status, s.content, color))}
           {more > 0 && stepRow(`${w.id}:more`, 'pending', `${more} more`, color)}
@@ -836,184 +792,113 @@ export const register: Register = on => {
       )
     }
 
-    /** One worker's tile: folded, one row; open, the fold button and dot beside its rows, every one under the name. */
-    const tile = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
-      const color = GROUP_COLORS[group]
-      const done = w.plan.filter(s => s.status === 'completed').length
-      const isExpanded = v.expanded.includes(w.id)
-      const delivery = canArchive(w) ? deliveredRead[w.id] : undefined
-      const verdict = verdictLine(w)
-      const isAttention = ATTENTION_GROUPS.includes(group)
-      // No label: the desktop draws a label in place of the children, the whole title instead of the arrow
-      const foldButton = (
-        <Button key={`${w.id}:fold`} plain dimColor onPress={() => void fold(w.id, !isOpen)}>
-          {isOpen ? '▾' : '▸'}
-        </Button>
-      )
-      // A stopped worker's dot is dimmer than an idle one's
-      const dot = <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
-      // A Text nested in a cut one wraps on the desktop (each Text sets its own white-space): what may be cut is one
-      // Text of plain strings, the dot left outside it
-      const name = (
-        <Text weight="semibold" color={isOpen ? undefined : 'subtle'} wrap="truncate-end">
+    // A stopped worker's dot is dimmer than an idle one's
+    const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
+    const sinceOf = (w: Worker) => (w.since === '0m' ? 'now' : w.since)
+    /** The worker's name, the button that opens or closes its detail; no label, as the desktop draws a label in place of the children. */
+    const nameButton = (w: Worker, isOpen: boolean) => (
+      <Button key={`${w.id}:fold`} plain onPress={() => void fold(w.id, !isOpen)}>
+        <Text weight="semibold" wrap="truncate-end">
           {label(w)}
         </Text>
-      )
-      const progress = w.plan.length > 0 && (
-        <Text size="footnote" color="subtle" tabular>
-          {`${done}/${w.plan.length}`}
-        </Text>
-      )
-      const statusText = plainLine(statusLine(w, group))
-      // Open, a caption under the title; folded, the size of the row it sits in
-      const status = statusText !== '' && (
-        <Text
-          size={isOpen ? 'caption' : 'footnote'}
-          color={group === 'Needs you' ? 'error' : 'subtle'}
-          weight={group === 'Needs you' ? 'semibold' : 'regular'}
-          wrap="truncate-end"
-        >
-          {isOpen ? statusText : `· ${statusText}`}
-        </Text>
-      )
-      const sinceText = w.since === '0m' ? 'now' : w.since
-      const since = sinceText !== '' && (
-        <Text size="footnote" color="subtle" tabular>
-          {isOpen ? sinceText : `· ${sinceText}`}
-        </Text>
-      )
-      // Folded or open, the same card: the arrow, dot and name stay put as its body opens under them
-      const card = (rows: ReturnType<typeof h>) => (
-        <Box
-          flexDirection="row"
-          alignItems="flex-start"
-          columnGap={1}
-          borderStyle="quote"
-          borderColor={isAttention ? color : 'inactive'}
-          borderDimColor={!isAttention}
-          paddingLeft={1}
-          minWidth={0}
-        >
-          {foldButton}
-          {dot}
-          {rows}
+      </Button>
+    )
+    /** The thin rule between two rows: a faint hairline where the surface draws one, a blank row on the terminal. */
+    const rule = (key: string) =>
+      e.surface === 'terminal' ? (
+        <Box key={key} height={1} />
+      ) : (
+        <Box key={key} flexDirection="row" alignItems="center" height={1} minWidth={0}>
+          <Box flexGrow={1} height="8%" backgroundColor={BAR_TRACK} />
         </Box>
       )
-      if (!isOpen) {
-        // The name and status are cut, the rest kept
-        return card(
-          <Box key={`${w.id}:header`} flexDirection="row" alignItems="flex-start" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-            <Box flexShrink={1} minWidth={0}>
-              {name}
-            </Box>
-            {w.prs.flatMap(pr => prIcons(w, pr))}
-            {progress && <Box flexShrink={0}>{progress}</Box>}
-            {status && (
-              <Box flexShrink={1} minWidth={0}>
-                {status}
-              </Box>
-            )}
-            {since && <Box flexShrink={0}>{since}</Box>}
-            {/* Outside the cut text, so truncation never hides it */}
-            {asksForPerson(w) && (
-              <Text size="footnote" color="warning">
-                ⚠
-              </Text>
-            )}
-          </Box>,
-        )
-      }
 
-      const lastLines = w.lastLines.filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w)).slice(-(verdict === '' ? MAX_LAST_LINES : 1))
-      // Working and Idle tiles ask nothing of the person, and a question's options shown answer it: their buttons recede to text
-      const showsOptions = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent && hasOptions(w)
-      const isQuiet = !isAttention || showsOptions
-      // The model and its effort, then the context use: `opus·medium · 9%`
+    /** One worker's row: the dot beside line 1 (name, what it says, buttons, time), then its question, meta, warnings, message field and detail. */
+    const row = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
+      const color = GROUP_COLORS[group]
+      const done = w.plan.filter(s => s.status === 'completed').length
+      const delivery = canArchive(w) ? deliveredRead[w.id] : undefined
+      const isAttention = ATTENTION_GROUPS.includes(group)
+      const lastLines = w.lastLines.filter(line => !isFence(line) && !isMarker(line) && !repeatsTile(line, w))
+      // The question's own rows say it while it waits; once sent, line 1 does
+      const isAsking = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent
+      const says = isAsking ? '' : plainLine(w.ask?.questions[0]?.question || statusLine(w, group) || w.detail || (lastLines.at(-1) ?? ''))
+      const since = sinceOf(w)
+      // The model and its effort, the context use, each PR, the task progress: `opus·medium · 9% · ○ PR #93 ✓ · ━━─── 2/5`
       const model = w.model && w.effort ? `${w.model}·${w.effort}` : (w.model ?? '')
-      const meta = [model, w.context === null ? '' : `${w.context}%`].filter(part => part !== '').join(' · ')
-      // A question shown stands in for the status
-      const shownStatus = !w.ask && status
-      const quiet = isQuiet ? ({ plain: true, dimColor: true } as const) : {}
+      const meta = [
+        model !== '' && (
+          <Text key={`${w.id}:model`} size="footnote" color="subtle">
+            {model}
+          </Text>
+        ),
+        w.context !== null && (
+          <Text key={`${w.id}:context`} size="footnote" color="subtle" tabular>
+            {`${w.context}%`}
+          </Text>
+        ),
+        ...w.prs.map(pr => prPart(w, pr)),
+        w.plan.length > 0 && progress(w, done),
+      ].filter(part => part !== false)
+      const buttons = [
+        <Button key={`${w.id}:open`} label="Open" plain dimColor onPress={() => void openSession(w)} />,
+        Input !== undefined && <Button key={`${w.id}:message`} label="Message…" plain dimColor onPress={() => void compose(w.id)} />,
+        delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" plain dimColor onPress={() => void archive(w)} />,
+      ]
+      const warn = (key: string, text: string) => (
+        <Text key={key} size="footnote" color="warning" weight="medium">
+          ⚠ {text}
+        </Text>
+      )
 
-      // Blocks one gap apart: the title, its question, what it does, its tasks, its buttons
-      return card(
-        <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
-          <Box key={`${w.id}:head`} flexDirection="column" minWidth={0}>
-            {/* Never wraps: the name is cut, its time kept at the right */}
-            <Box key={`${w.id}:header`} flexDirection="row" columnGap={1} minWidth={0}>
+      return (
+        <Box key={`${w.id}:row`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
+          {dot(w, group)}
+          <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
+            {/* Never wraps: the name and what it says are cut, the buttons and time kept at the right */}
+            <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+              <Box flexShrink={1} minWidth={0}>
+                {nameButton(w, isOpen)}
+              </Box>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {name}
-              </Box>
-              <Box flexShrink={0}>{since}</Box>
-            </Box>
-            {w.name !== '' && w.title !== '' && w.title !== w.name && (
-              <Text key={`${w.id}:title`} size="caption" color="subtle" wrap="truncate-end">
-                {w.title}
-              </Text>
-            )}
-          </Box>
-          {w.ask && questionRows(w, w.ask, color)}
-          <Box key={`${w.id}:info`} flexDirection="column" minWidth={0}>
-            {(shownStatus || meta !== '') && (
-              // One row: the status cut to fit, then the model and context use, never cut
-              <Box key={`${w.id}:meta`} flexDirection="row" columnGap={1} minWidth={0}>
-                {shownStatus && (
-                  <Box flexShrink={1} minWidth={0}>
-                    {shownStatus}
-                  </Box>
-                )}
-                {meta !== '' && (
-                  <Box flexShrink={0}>
-                    <Text size="caption" color="subtle" tabular>
-                      {shownStatus ? `· ${meta}` : meta}
-                    </Text>
-                  </Box>
+                {says !== '' && (
+                  <Text size="footnote" color={group === 'Needs you' ? 'error' : 'subtle'} weight={group === 'Needs you' ? 'semibold' : 'regular'} wrap="truncate-end">
+                    {says}
+                  </Text>
                 )}
               </Box>
-            )}
-            {w.branch !== '' && (
-              // Cut at its start, so its unique end shows
-              <Text size="caption" color="subtle" mono wrap="truncate-start">
-                {w.branch}
-              </Text>
-            )}
-            {w.prs.map(pr => prRow(w, pr))}
-            {verdict !== '' && (
-              <Text size="footnote" dimColor={w.state === 'busy'} wrap="truncate-end">
-                {w.state === 'busy' ? 'last turn: ' : ''}
-                {verdict}
-              </Text>
-            )}
-            {showsNeeds(w) && (
-              <Text size="footnote" color="warning" weight="medium">
-                needs: {w.needsAction}
-              </Text>
-            )}
-            {delivery?.isDelivered === false && (
-              <Text size="footnote" color="subtle">
-                not delivered: {delivery.why}
-              </Text>
-            )}
-            {w.notes.map(n => (
-              <Text key={n.key} size="footnote" color="warning" weight="medium">
-                {n.kind}: {n.text}
-              </Text>
-            ))}
-            {lastLines.map((line, i) => (
-              <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
-                {plainLine(line)}
-              </Text>
-            ))}
-          </Box>
-          {w.plan.length > 0 && taskList(w, color, done, isExpanded)}
-          <Box key={`${w.id}:actions`} flexDirection="column" rowGap="xs" minWidth={0}>
-            <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-              <Button key={`${w.id}:open`} label="Open" variant={isQuiet ? undefined : 'primary'} {...quiet} onPress={() => void openSession(w)} />
-              {Input !== undefined && <Button key={`${w.id}:message`} label="Message…" {...quiet} onPress={() => void compose(w.id)} />}
-              {delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" onPress={() => void archive(w)} />}
+              {isAttention && (
+                <Box flexDirection="row" columnGap={1} flexShrink={0}>
+                  {buttons}
+                </Box>
+              )}
+              {since !== '' && (
+                <Box flexShrink={0}>
+                  <Text size="footnote" color="subtle" tabular>
+                    {since}
+                  </Text>
+                </Box>
+              )}
             </Box>
+            {w.ask && questionRows(w, w.ask, color)}
+            {meta.length > 0 && (
+              <Box key={`${w.id}:meta`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+                {meta.flatMap((part, i) =>
+                  i === 0
+                    ? [part]
+                    : [
+                        <Text key={`${w.id}:dot${i}`} size="footnote" color="subtle">
+                          ·
+                        </Text>,
+                        part,
+                      ],
+                )}
+              </Box>
+            )}
+            {w.notes.map(n => warn(n.key, `${n.kind}: ${n.text}`))}
+            {showsNeeds(w) && warn(`${w.id}:needs`, `needs: ${w.needsAction}`)}
             {Input !== undefined && v.composing === w.id && (
-              <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+              <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
                 {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
                 <Input
                   key={`${w.id}:draft`}
@@ -1031,13 +916,79 @@ export const register: Register = on => {
                 <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
               </Box>
             )}
+            {isOpen && (
+              <Box key={`${w.id}:detail`} flexDirection="column" rowGap="xs" minWidth={0}>
+                {w.branch !== '' && (
+                  // Cut at its start, so its unique end shows
+                  <Text size="caption" color="subtle" mono wrap="truncate-start">
+                    {w.branch}
+                  </Text>
+                )}
+                {w.plan.length > 0 && taskList(w, color)}
+                {lastLines.slice(-MAX_LAST_LINES).map((line, i) => (
+                  <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
+                    {plainLine(line)}
+                  </Text>
+                ))}
+                {delivery?.isDelivered === false && (
+                  <Text size="footnote" color="subtle">
+                    not delivered: {delivery.why}
+                  </Text>
+                )}
+                {!isAttention && (
+                  <Box key={`${w.id}:actions`} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                    {buttons}
+                  </Box>
+                )}
+              </Box>
+            )}
           </Box>
-        </Box>,
+        </Box>
       )
     }
-    // A status a newer dev adds shows under Working, unfolded, rather than not at all
+
+    /** The idle workers not asking for the person, in one line (`▸ 3 idle · a, b, c`) that opens to a line each: dot, name, task count, time. */
+    const idleList = (workers: Worker[]) => (
+      <Box key="idle" flexDirection="column" rowGap="xs" minWidth={0}>
+        <Box flexDirection="row" minWidth={0}>
+          <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
+            <Text size="footnote" wrap="truncate-end">
+              {`${v.idleOpen ? '▾' : '▸'} ${workers.length} idle · ${workers.map(label).join(', ')}`}
+            </Text>
+          </Button>
+        </Box>
+        {v.idleOpen &&
+          workers.map(w => {
+            const done = w.plan.filter(s => s.status === 'completed').length
+            const since = sinceOf(w)
+            return (
+              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+                {dot(w, 'Idle')}
+                <Box flexShrink={1} minWidth={0}>
+                  {nameButton(w, false)}
+                </Box>
+                <Box flexGrow={1} />
+                {w.plan.length > 0 && (
+                  <Text size="footnote" color="subtle" tabular>
+                    {`${done}/${w.plan.length}`}
+                  </Text>
+                )}
+                {since !== '' && (
+                  <Text size="footnote" color="subtle" tabular>
+                    {since}
+                  </Text>
+                )}
+              </Box>
+            )
+          })}
+      </Box>
+    )
+
+    // A status a newer dev adds shows under Working rather than not at all
     const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working') === group) }))
       .filter(s => s.workers.length > 0)
+    /** Whether a worker gets a full row: any but Idle, or an idle one asking for the person, being messaged or opened. */
+    const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.details[w.id] === true
 
     return (
       <Box flexDirection="column" gap="sm">
@@ -1059,21 +1010,23 @@ export const register: Register = on => {
           </Box>
         )}
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
-        {sections.map(({ group, workers }) => (
-          <Box key={group} flexDirection="column" rowGap="xs">
-            <Box flexDirection="row" columnGap={1}>
-              <Text size="footnote" weight="semibold" color={GROUP_COLORS[group]}>
-                {group.toUpperCase()}
-              </Text>
-              <Text size="footnote" color="subtle" tabular>
-                {workers.length}
-              </Text>
+        {sections.map(({ group, workers }) => {
+          const quiet = workers.filter(w => !isFull(w, group))
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet)] : [])]
+          return (
+            <Box key={group} flexDirection="column" rowGap="xs">
+              <Box flexDirection="row" columnGap={1}>
+                <Text size="footnote" weight="semibold" color={GROUP_COLORS[group]}>
+                  {group.toUpperCase()}
+                </Text>
+                <Text size="footnote" color="subtle" tabular>
+                  {workers.length}
+                </Text>
+              </Box>
+              {items.flatMap((item, i) => (i === 0 ? [item] : [rule(`${group}:rule${i}`), item]))}
             </Box>
-            {workers.map(w => (
-              <Box key={w.id} flexDirection="column" minWidth={0}>{tile(w, group, v.tiles[w.id] ?? (group !== 'Idle' || asksForPerson(w) || v.composing === w.id))}</Box>
-            ))}
-          </Box>
-        ))}
+          )
+        })}
       </Box>
     )
   })
