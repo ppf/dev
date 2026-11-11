@@ -182,6 +182,18 @@ Notes sit in `$XDG_STATE_HOME/dev/inbox/` (one locked file per boss), a worker's
 tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
 ```
 
+### To do list
+
+```bash
+dev todo set "Answer Vince in Slack" "Approve PR #84"   # replace the list (no arguments: stdin, one item per line)
+dev todo add "Staging access" --on "Marek (Ops)"       # add one; --on: who it waits on, --link: e.g. its PR
+dev todo done 2 3                                     # tick by number
+dev todo clear                                        # empty: no block
+dev todo [--json] [--boss <session|local_id>]         # print it
+```
+
+A boss keeps a short list of what waits on you (its skill's roll-up rule). A `dev boss` shows it at the top of the previews pane (a desktop board reads `--json`): a `TO DO n · k on others ──── updated <age>` block above the cards, which stays put while they scroll; up to 5 items (at most half the pane), then `+N more`; items waiting on someone else last, with who; a PR link as `○ #87`. A ticked item shows ☑ for 5 seconds, then leaves; `updated` dims once the list is an hour old; `t` folds the block to its header; an empty list shows no block. The list belongs to the boss session `dev todo` runs in: a `dev boss` session in tmux (keyed as its inbox is, so a tmux server restart starts a new one), else the desktop app session (`$CLAUDE_CODE_HOST_SESSION_ID`) unless a boss started it; `--boss` names one; anywhere else it fails. It outlives the coordinator's `/clear`. Numbers stay with their items until the list is empty; `set` numbers from 1. Kept in `$XDG_STATE_HOME/dev/todo/`. `--json` prints `{items: [{id, text, on?, link?, done}], updated, stale}`: `updated` in unix seconds (0: never), items in board order. `todo` is a subcommand, so no project can be named `todo`.
+
 ## Desktop worker board
 
 ```bash

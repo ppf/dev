@@ -304,21 +304,37 @@ func records(dir, boss string) ([]record, []error, error) {
 
 // createdAt is when the app created boss's record, found among paths.
 func createdAt(dir string, paths []string, boss string) (time.Time, error) {
+	r, err := own(dir, paths, boss)
+	return time.UnixMilli(r.CreatedAt), err
+}
+
+// own is session id's own app record among paths.
+func own(dir string, paths []string, id string) (record, error) {
 	for _, path := range paths {
-		if filepath.Base(path) != boss+".json" {
+		if filepath.Base(path) != id+".json" {
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return time.Time{}, err
+			return record{}, err
 		}
 		var r record
 		if err := json.Unmarshal(data, &r); err != nil {
-			return time.Time{}, fmt.Errorf("%s: %w", path, err)
+			return record{}, fmt.Errorf("%s: %w", path, err)
 		}
-		return time.UnixMilli(r.CreatedAt), nil
+		return r, nil
 	}
-	return time.Time{}, fmt.Errorf("no app session record for %s in %s", boss, dir)
+	return record{}, fmt.Errorf("no app session record for %s in %s", id, dir)
+}
+
+// Spawned reports whether app session id is a worker another session started, not a user fork; no record in dir is an error.
+func Spawned(dir, id string) (bool, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*", "*", "local_*.json"))
+	if err != nil {
+		return false, err
+	}
+	r, err := own(dir, paths, id)
+	return r.SpawnedFrom != nil && !r.SpawnedFrom.UserFork, err
 }
 
 // liveSessions reads the live session files whose Claude still runs (a crash leaves its file behind).

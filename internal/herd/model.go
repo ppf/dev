@@ -2,6 +2,7 @@ package herd
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 // pollInterval is how often the previews refresh while on screen.
@@ -84,6 +86,8 @@ type snapshot struct {
 	focused bool   // own pane is its window's active pane
 	zoomed  bool   // own window is zoomed
 	client  string // tty of the client viewing own session; "" lets tmux pick
+	todo    todo.List
+	todoErr error // why the to do list could not be read
 }
 
 // Model is the Bubble Tea previews pane.
@@ -108,6 +112,9 @@ type Model struct {
 	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
 	expands       map[string]bool // by session: its card shows more of its screen (v)
 	size          paneSize        // how fit last sized the pane
+	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
+	findTodo      bool            // refresh looks up todo until it's found
+	todoFolded    bool            // the to do block shows as its header only (t)
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -138,7 +145,8 @@ const watchInterval = 15 * time.Second
 
 type refreshMsg struct {
 	snap   snapshot
-	inputs int // m.inputs when the refresh started
+	todo   *todo.Store // the list found this refresh
+	inputs int         // m.inputs when the refresh started
 	err    error
 }
 
@@ -154,7 +162,7 @@ func Run(c *tmux.Client, pane string) error {
 func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
-	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host}
+	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).
@@ -168,7 +176,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -222,6 +230,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.snap, m.err = msg.snap, nil
+			if msg.todo != nil {
+				m.todo = msg.todo
+			}
 			if msg.inputs == m.inputs {
 				m.focused = msg.snap.focused
 			}
@@ -307,8 +318,22 @@ func (m Model) refresh() tea.Cmd {
 		if err != nil {
 			return refreshMsg{err: err}
 		}
+		// Looked up here, not at start: a restored boss's previews start before its session is marked one
+		store := m.todo
+		if store == nil && m.findTodo {
+			if s, err := todo.ForPane(m.c, m.pane); err != nil {
+				if !errors.Is(err, todo.ErrNotBoss) {
+					snap.todoErr = err
+				}
+			} else {
+				store = &s
+			}
+		}
+		if store != nil {
+			snap.todo, snap.todoErr = store.Read(m.clk.Now())
+		}
 		if !snap.visible {
-			return refreshMsg{snap: snap, inputs: inputs}
+			return refreshMsg{snap: snap, todo: store, inputs: inputs}
 		}
 		for _, i := range captures(snap.tiles, selected, folds) {
 			out, err := m.c.Run("capture-pane", "-p", "-e", "-t", snap.tiles[i].pane)
@@ -352,7 +377,7 @@ func (m Model) refresh() tea.Cmd {
 		}
 		// A dialog found gone moves its card out of Needs you
 		sortBySection(snap.tiles)
-		return refreshMsg{snap: snap, inputs: inputs}
+		return refreshMsg{snap: snap, todo: store, inputs: inputs}
 	}
 }
 
