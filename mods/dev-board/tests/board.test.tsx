@@ -822,6 +822,23 @@ test('Archive checks delivery again when pressed, and says why not', async ($, o
   await ui.unmount()
 })
 
+test('no Archive nor dev delivered for a waiting worker with a delivered PR; the same worker idle gets it', async ($, on) => {
+  const toasts = collectToasts(on)
+  let workers = [worker({ status: 'waiting', statusText: 'background: CI on PR #80', prs: [OPEN_PR] })]
+  const { otherRuns, clock } = await start($, on, () => ok(workers), { delivered: DELIVERED })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await unfold(ui)
+  expect(otherRuns.filter(r => r.argv[1] === 'delivered').length).toBe(0)
+  expect(await ui.find({ key: 'local_a:archive' })).toBeFalsy()
+  expect(await ui.findAll({ type: 'Text', text: /not delivered/ })).toEqual([])
+  workers = [worker({ prs: [OPEN_PR] })]
+  await clock.advance(2000)
+  await unfold(ui)
+  expect(await ui.find({ key: 'local_a:archive' })).toBeTruthy()
+  await ui.unmount()
+  expect(toasts).toEqual([])
+})
+
 test('a worker going busy drops its delivery: Archive waits for a new check', async ($, on) => {
   let workers = [worker({ prs: [OPEN_PR] })]
   const { otherRuns, clock } = await start($, on, () => ok(workers), { delivered: DELIVERED })
