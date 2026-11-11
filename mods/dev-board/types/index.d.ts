@@ -66,7 +66,7 @@ export type Checks = { at: number; checks: Check[]; error: string }
 export type Delivered = { at: number; isDelivered: boolean; why: string }
 
 /** The pane's own state: the worker a message is being typed for, rows whose detail the person opened (true) or closed, the text of a message not sent by worker id (drawn back into its field), whether the idle line is open. */
-export type View = { composing: string; tiles: Record<string, boolean>; unsent: Record<string, string>; idleOpen: boolean }
+export type View = { composing: string; details: Record<string, boolean>; unsent: Record<string, string>; idleOpen: boolean }
 
 declare module 'claude-code' {
   interface PluginState {

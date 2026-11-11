@@ -14,12 +14,12 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
-// The pane's sections, in order; idle workers not asking for the person share one line
+// The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
 // The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green
 const DOT_COLORS = { 'Needs you': 'error', Working: 'success', Waiting: 'warning', Idle: 'subtle' } as const
-// The sections whose rows ask to be looked at: only they carry Open and Message… on their first line
+// The sections whose rows ask to be looked at: only they carry their buttons on line 1
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   'needs you': 'Needs you',
@@ -100,7 +100,7 @@ const MAX_SENT = 500
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
-const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: '', tiles: {}, unsent: {}, idleOpen: false }, { shape: 'view-4' })
+const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: '', details: {}, unsent: {}, idleOpen: false }, { shape: 'view-4' })
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
@@ -246,7 +246,7 @@ const asksForPerson = (w: Worker) => w.notes.length > 0 || showsNeeds(w) || w.as
 
 /**
  * The status and what it says, e.g. `blocked · pick one`; the status left out where its section says it (`allow Bash: rm -rf bin`
- * under Needs you), save a working worker's between tools, so its row stays as the tool comes and goes.
+ * under Needs you), save a working worker's between tools, so line 1 keeps a status as the tool comes and goes.
  */
 const statusLine = (w: Worker, group: (typeof GROUPS)[number]) =>
   w.status === 'working' && w.statusText === '' ? 'working' : [w.status === group.toLowerCase() ? '' : w.status, w.statusText].filter(s => s !== '').join(' · ')
@@ -311,7 +311,7 @@ function ciNames(c: Checks, rollup: Rollup): string {
   return c.checks.filter(k => makes(k.bucket)).map(k => k.name).join(' ')
 }
 
-/** What an expanded list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
+/** What the detail's task list shows past MAX_STEPS: the done steps before the last one folded into a count, then the steps past the room (the current one aside) into `n more`. */
 function shownSteps(plan: Step[]): { earlier: number; steps: Step[]; more: number } {
   if (plan.length <= MAX_STEPS) return { earlier: 0, steps: plan, more: 0 }
   const open = plan.findIndex(s => s.status !== 'completed')
@@ -499,7 +499,7 @@ export const register: Register = on => {
     const deliveredRead = await read($, delivered)
     const picksRead = await read($, picks)
 
-    const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, tiles: { ...s.tiles, [id]: isOpen } }))
+    const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
       for (const key of drafts.keys()) if (key.endsWith(`:${id}`)) drafts.delete(key)
     }
@@ -824,7 +824,7 @@ export const register: Register = on => {
       const isAsking = w.ask != null && !picksFor(w.ask, picksRead[w.id])?.isSent
       const says = isAsking ? '' : plainLine(w.ask?.questions[0]?.question || statusLine(w, group) || w.detail || (lastLines.at(-1) ?? ''))
       const since = sinceOf(w)
-      // The model and its effort, the context use, each PR, the task progress: `opus·medium · 9% · PR #93 ✓ · ━━─ 2/5`
+      // The model and its effort, the context use, each PR, the task progress: `opus·medium · 9% · ○ PR #93 ✓ · ━━─── 2/5`
       const model = w.model && w.effort ? `${w.model}·${w.effort}` : (w.model ?? '')
       const meta = [
         model !== '' && (
@@ -988,7 +988,7 @@ export const register: Register = on => {
     const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working') === group) }))
       .filter(s => s.workers.length > 0)
     /** Whether a worker gets a full row: any but Idle, or an idle one asking for the person, being messaged or opened. */
-    const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.tiles[w.id] === true
+    const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.details[w.id] === true
 
     return (
       <Box flexDirection="column" gap="sm">
@@ -1012,7 +1012,7 @@ export const register: Register = on => {
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
-          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.tiles[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet)] : [])]
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet)] : [])]
           return (
             <Box key={group} flexDirection="column" rowGap="xs">
               <Box flexDirection="row" columnGap={1}>

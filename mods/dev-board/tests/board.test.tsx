@@ -203,7 +203,7 @@ test('a dev that cannot start shows why', async ($, on) => {
   await ui.unmount()
 })
 
-test('warnings show above the tiles, a row each: ⚠, then its line without dev\'s prefix', async ($, on) => {
+test('warnings show above the rows, a row each: ⚠, then its line without dev\'s prefix', async ($, on) => {
   await start($, on, ok(WORKERS, '⚠ dev desktop board: x.json: unexpected end of JSON input\n⚠ dev desktop board: dev-board mod changed 19:17, after this session started 17:27: start a new session to load it'))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await textsOf(ui, 'warnings')).toEqual([
@@ -963,7 +963,7 @@ const BY_STATUS = [
 ]
 
 test('idle and stopped workers share one line that opens to a line each; the rest get rows', async ($, on) => {
-  await start($, on, ok(BY_STATUS.map(w => (w.status === 'idle' ? { ...w, plan: [PLAN[0]], since: '15m' } : w))))
+  const { clock } = await start($, on, ok(BY_STATUS.map(w => (w.status === 'idle' ? { ...w, plan: [PLAN[0]], since: '15m' } : w))))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_i:fold' })).toBeFalsy()
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ 2 idle · Idle, Stopped')
@@ -981,6 +981,11 @@ test('idle and stopped workers share one line that opens to a line each; the res
   expect(await ui.find({ key: 'local_i:row' })).toBeTruthy()
   expect(await ui.find({ key: 'local_i:open' })).toBeTruthy()
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 idle · Stopped')
+  // Closed again, it goes back into the line, which stays open across a poll
+  await ui.press({ key: 'local_i:fold' })
+  await clock.advance(2000)
+  expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle · Idle, Stopped')
   await ui.unmount()
 })
 
@@ -1049,7 +1054,7 @@ test('sections group the workers by status, with counts, needs you first; empty 
   let workers = BY_STATUS
   const { clock } = await start($, on, () => ok(workers))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  // Section headers, their counts and the tiles' headers, in order: a tile by its name
+  // Section headers, their counts and the rows' first lines, in order: a row by its name
   const rows = async () => {
     const els = (await ui.findAll({})).filter(el => el.key?.endsWith(':header') || (el.type === 'Text' && /^(NEEDS YOU|WORKING|WAITING|IDLE|\d+)$/.test(el.text)))
     return Promise.all(els.map(async el => (el.key === undefined ? el.text : (await header(ui, el.key.replace(/:header$/, '')))?.split(' ')[0])))
@@ -1112,6 +1117,9 @@ test('Open, Message… and Archive are dim text: on line 1 for Needs you and Wai
   await unfold(ui, 'local_k')
   await unfold(ui, 'local_i')
   expect(JSON.stringify((await ui.find({ key: 'local_k:detail' }))?.children)).toContain('local_k:open')
+  // A Needs you row's detail holds no second set
+  await unfold(ui, 'local_n')
+  expect((await ui.findAll({ type: 'Button' })).filter(b => b.key === 'local_n:open').length).toBe(1)
   const looks = async (key: string) => {
     const { plain, dimColor, variant } = (await ui.find({ key }))?.props ?? {}
     return [plain, dimColor, variant]
@@ -1125,7 +1133,7 @@ test('Open, Message… and Archive are dim text: on line 1 for Needs you and Wai
   await ui.unmount()
 })
 
-test("on a tile asking a question, Open and Message… are dim text: the question's options are its buttons", async ($, on) => {
+test("on a row asking a question, Open and Message… are dim text: the question's options are its buttons", async ($, on) => {
   await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const looks = async (key: string) => {
@@ -1178,7 +1186,7 @@ test('rows shrink to the pane: the name and what it says are cut, the time kept'
   await ui.unmount()
 })
 
-test("a review-ready tile says its detail once, on the status row", async ($, on) => {
+test("a review-ready row says its detail once, on line 1", async ($, on) => {
   await start($, on, ok([worker({ status: 'review ready', statusText: 'PR #80 green', verdict: 'review_ready', detail: 'PR #80 green' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.findAll({ type: 'Text', text: /review|green/ })).map(t => t.text)).toEqual(['review ready · PR #80 green'])
@@ -1243,14 +1251,15 @@ test('a reply line saying what the status says is left out', async ($, on) => {
 test('a reply line saying what a busy status says is left out, its background count aside', async ($, on) => {
   await start($, on, ok([
     worker({ state: 'busy', status: 'working', statusText: 'Count hook files · 2 background running', lastLines: ['Done.', 'Count hook files.'] }),
-    worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working', statusText: '1 background running', lastLines: ['Waiting on it.'] }),
+    // The count alone strips to nothing, which repeats nothing
+    worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working', statusText: '1 background running', lastLines: ['Waiting on it.', '1 background running'] }),
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
   await unfold(ui, 'local_b')
   expect(await ui.find({ type: 'Text', text: /^Count hook files\.$/ })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: 'Done.' }))?.text).toBeTruthy()
-  expect((await ui.find({ type: 'Text', text: 'Waiting on it.' }))?.text).toBeTruthy()
+  expect(await textsOf(ui, 'local_b:detail')).toEqual(['feature/a', 'Waiting on it.', '1 background running'])
   await ui.unmount()
 })
 
@@ -1332,7 +1341,7 @@ const DB = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [
 const FEATURES = { question: 'Which features?', header: 'Features', multiSelect: true, options: [{ label: 'Auth', description: 'sign-in' }, { label: 'Search', description: 'full text' }] }
 const asking = (ask: Worker['ask']) => worker({ state: 'busy', status: 'needs you', statusText: 'Which DB? (Postgres / Mongo)', ask })
 
-test('a question shows on its tile: header and question, its options one per row where any is described (button, then its description beside it), the first leading', async ($, on) => {
+test('a question shows under line 1: header and question, its options one per row where any is described (button, then its description beside it), the first leading', async ($, on) => {
   await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -1580,7 +1589,7 @@ test('a wrap_up ask without reply buttons shows the question, answered with Mess
   await ui.unmount()
 })
 
-test('an idle tile asking a question is open', async ($, on) => {
+test('an idle worker asking a question keeps its own row', async ($, on) => {
   await start($, on, ok([worker({ state: 'idle', status: 'idle', ask: { toolUseId: 'w1', questions: [FILE], askedAt: 0, answerable: false, reply: true } })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_a:q0:o0:pick' })).toBeTruthy()
@@ -1626,7 +1635,7 @@ test('a message not sent opens its field again, holding its text, until one is s
   await ui.unmount()
 })
 
-test("a message not sent leaves another tile's open field alone, its text kept for its own", async ($, on) => {
+test("a message not sent leaves another row's open field alone, its text kept for its own", async ($, on) => {
   let release = () => {}
   on('prompt.submit', () => new Promise(resolve => (release = () => resolve({ drop: 'blocked by a hook' }))))
   await start($, on, ok([worker({ state: 'busy', status: 'working' }), worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'working' })]))
@@ -1646,7 +1655,7 @@ test("a message not sent leaves another tile's open field alone, its text kept f
   await ui.unmount()
 })
 
-test('a working tile keeps its status row between tools, so its height holds', async ($, on) => {
+test('a working row keeps a status on line 1 between tools', async ($, on) => {
   let tool = 'Bash'
   const { clock } = await start($, on, () => ok([worker({ state: 'busy', status: 'working', statusText: tool, tool })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -1674,7 +1683,7 @@ test('reply lines drop turn-end markers and show a link as its text', async ($, 
   await ui.unmount()
 })
 
-test('a reply line asking the question the tile shows is not said again', async ($, on) => {
+test('a reply line asking the question the row shows is not said again', async ($, on) => {
   await start($, on, ok([{ ...asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true }), lastLines: ['I need a pick.', '**Which DB?**'] }]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await unfold(ui)
