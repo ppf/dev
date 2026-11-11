@@ -53,8 +53,8 @@ func newDesktopBoardCmd() *cobra.Command {
 		Short: "List a desktop boss session's workers: state, branch, PRs, context use",
 		Long: `List the unarchived sessions a Claude desktop app session started (its workers): live state
 (busy, blocked, idle, stopped), title, branch, PRs and the share of the context window in use. --json adds
-the app's verdict on the last turn and what it needs, the last lines of the newest assistant text, the
-tool in flight, the question its open dialog asks (from its dev-board mod's questions/ file, which dev
+the app's verdict on the last turn and what it needs, the app's model (its family: opus, sonnet, haiku,
+fable, else its id) and effort, the last lines of the newest assistant text, the tool in flight, the question its open dialog asks (from its dev-board mod's questions/ file, which dev
 desktop answer answers, else its transcript) or the wrap_up ask its last turn ended on (listening while its
 mod's fresh questions/<id>.listen heartbeat names it: its reply file is then submitted as its next prompt), a finer status (needs you, rate-limited, stuck, working,
 waiting, blocked, review ready, idle, stopped) and what it says, how long it has been in its state, its task list (update_plan) and health

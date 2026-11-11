@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -109,6 +110,10 @@ type Worker struct {
 	ToolDescription string `json:"toolDescription"`
 	// Context is the share of the model's context window in use, in whole percent; nil when unknown.
 	Context *int `json:"context"`
+	// Model is the app's model for the session, its family (opus, sonnet, haiku, fable) or else its id; Effort its
+	// effort level, e.g. medium; "" when unknown.
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
 	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
 	Notes []Note `json:"notes"`
 	// Background counts its background tasks still running (Bash commands, async agents) its Claude started; 0 when not running.
@@ -138,6 +143,8 @@ type record struct {
 	IsArchived     bool   `json:"isArchived"`
 	CreatedAt      int64  `json:"createdAt"`
 	LastActivityAt int64  `json:"lastActivityAt"`
+	Model          string `json:"model"`
+	Effort         string `json:"effort"`
 	SpawnedFrom    *struct {
 		SessionID string `json:"sessionId"`
 		Name      string `json:"name"`
@@ -375,6 +382,8 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		PRs:            []PR{},
 		CreatedAt:      r.CreatedAt,
 		LastActivityAt: r.LastActivityAt,
+		Model:          modelFamily(r.Model),
+		Effort:         r.Effort,
 		LastLines:      []string{},
 		Notes:          []Note{},
 		Plan:           []Step{},
@@ -490,6 +499,16 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	}
 	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	return w, errors.Join(err, hookErr, askErr)
+}
+
+// modelFamily is the family a model id names (claude-opus-5-5 is opus), else the id.
+func modelFamily(id string) string {
+	for _, family := range []string{"opus", "sonnet", "haiku", "fable"} {
+		if strings.Contains(id, family) {
+			return family
+		}
+	}
+	return id
 }
 
 func findLive(lives []live, r record) (live, bool) {

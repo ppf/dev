@@ -98,6 +98,7 @@ func fixture(t *testing.T) Paths {
 	rec(boss, map[string]any{"createdAt": now - 60_000, "title": "boss"})
 	rec("local_busy", map[string]any{
 		"cliSessionId": "cli-busy", "title": "Busy one", "branch": "feature/busy", "worktreePath": "/wt/busy",
+		"model": "claude-opus-5-5[1m]", "effort": "medium",
 		"createdAt": now - 3000, "spawnedFrom": map[string]any{"sessionId": boss, "name": "busy"},
 		"prs": []any{map[string]any{"prNumber": 78, "url": "https://github.com/o/r/pull/78", "state": "OPEN", "own": true}},
 		// A busy worker's summary is its previous turn's
@@ -108,7 +109,7 @@ func fixture(t *testing.T) Paths {
 		"postTurnSummary": map[string]any{"status_category": "blocked", "status_detail": "asks", "needs_action": "pick one"},
 	})
 	rec("local_idle", map[string]any{
-		"cliSessionId": "cli-old", "title": "Idle one", "createdAt": now - 1000, "spawnedFrom": from,
+		"cliSessionId": "cli-old", "title": "Idle one", "createdAt": now - 1000, "spawnedFrom": from, "model": "claude-haiku-5-5",
 		"postTurnSummary": map[string]any{"status_category": "completed", "status_detail": "done", "needs_action": ""},
 	})
 	rec("local_fork", map[string]any{"cliSessionId": "cli-f", "spawnedFrom": map[string]any{"sessionId": boss, "userFork": true, "btw": true}})
@@ -194,6 +195,10 @@ func TestBoard(t *testing.T) {
 	}
 	if busy.Context == nil || *busy.Context != 25 {
 		t.Errorf("busy context = %v, want 25", busy.Context)
+	}
+	if busy.Model != "opus" || busy.Effort != "medium" || idle.Model != "haiku" || idle.Effort != "" || blocked.Model != "" {
+		t.Errorf("models = %q %q, %q %q, %q, want opus medium, haiku without effort, none", busy.Model, busy.Effort,
+			idle.Model, idle.Effort, blocked.Model)
 	}
 
 	if blocked.State != StateBlocked || blocked.NeedsAction != "pick one" || blocked.Detail != "asks" {
@@ -322,8 +327,8 @@ func TestBoardJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"ask", "background", "branch", "context", "createdAt", "detail", "id", "lastActivityAt", "lastLines", "name",
-		"needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
+	want := []string{"ask", "background", "branch", "context", "createdAt", "detail", "effort", "id", "lastActivityAt", "lastLines",
+		"model", "name", "needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
 		"worktree"}
 	for _, w := range got {
 		keys := slices.Sorted(maps.Keys(w))
@@ -346,6 +351,17 @@ func TestBoardJSON(t *testing.T) {
 	pr := got[0]["prs"].([]any)[0].(map[string]any)
 	if keys := slices.Sorted(maps.Keys(pr)); !slices.Equal(keys, []string{"number", "state", "url"}) {
 		t.Errorf("PR keys = %v", keys)
+	}
+}
+
+func TestModelFamily(t *testing.T) {
+	for id, want := range map[string]string{
+		"claude-opus-5-5": "opus", "claude-opus-5-5[1m]": "opus", "claude-sonnet-5-5": "sonnet", "claude-haiku-5-5": "haiku",
+		"claude-fable-5-2": "fable", "gpt-x": "gpt-x", "": "",
+	} {
+		if got := modelFamily(id); got != want {
+			t.Errorf("modelFamily(%q) = %q, want %q", id, got, want)
+		}
 	}
 }
 
