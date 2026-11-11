@@ -167,7 +167,7 @@ test('the pane shows a row per worker, on every surface', async ($, on) => {
     expect(await header(ui, 'local_b')).toBe('Worker B blocked · pick one')
     expect((await ui.findAll({ type: 'Text', text: /blocked|pick one|two ways/ })).map(t => t.text)).toEqual(['blocked · pick one'])
     expect(await ui.find({ key: 'local_b:https://github.com/o/r/pull/78' })).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBe('▸ Worker C')
+    expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBe('Worker C')
     await ui.press({ key: 'local_a:fold' })
     await ui.unmount()
   }
@@ -1004,8 +1004,9 @@ test('idle and stopped workers share one line that opens to a line each; the res
   await ui.press({ key: 'local_i:fold' })
   expect(await ui.find({ key: 'local_i:row' })).toBeTruthy()
   expect(await ui.find({ key: 'local_i:open' })).toBeTruthy()
-  // Below a row of the section's own, the line says how many more it holds
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more')
+  // One quiet worker left: its line is drawn directly, with no toggle
+  expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
+  expect(await ui.find({ key: 'local_s:header' })).toBeTruthy()
   // Closed again, it goes back into the line, which stays open across a poll
   await ui.press({ key: 'local_i:fold' })
   await clock.advance(2000)
@@ -1017,7 +1018,7 @@ test('idle and stopped workers share one line that opens to a line each; the res
   // The terminal's open line still names them
   const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await terminal.press({ key: 'idle:fold' })
-  expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
+  expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
   expect((await terminal.find({ key: 'local_i:header' }))?.props.paddingLeft).toBeUndefined()
   await terminal.unmount()
 })
@@ -1045,7 +1046,9 @@ test('an answered worker dev reads as idle joins the idle line: no need, no deta
   // What dev prints once a plain wrap_up and a bare IDLE marker end the turn the app's summary called blocked
   await start($, on, ok([worker({ name: 'demo-ask', lastLines: ['IDLE'], recap: 'Report format chosen: per package.' })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ demo-ask')
+  // Alone in the idle line: drawn as its line, no toggle
+  expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
+  expect((await header(ui))?.startsWith('● demo-ask')).toBe(true)
   expect(await ui.find({ key: 'local_a:row' })).toBeFalsy()
   expect(await ui.find({ type: 'Text', text: /needs:|awaiting/ })).toBeFalsy()
   await ui.unmount()
@@ -1142,7 +1145,7 @@ test('sections group the workers by status, with counts, needs you first; empty 
 
   workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
   await clock.advance(2000)
-  expect(await rows()).toEqual(['WORKING', '1', 'Working', 'IDLE', '1'])
+  expect(await rows()).toEqual(['WORKING', '1', 'Working', 'IDLE', '1', '●'])
   await ui.unmount()
 })
 
@@ -1158,8 +1161,25 @@ test('a message being typed keeps its row as the worker goes idle; closing the d
   expect(await ui.find({ key: 'local_a:draft' })).toBeTruthy()
   expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
   await ui.press({ key: 'local_a:cancel' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Worker A')
+  expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
+  expect(await ui.find({ key: 'local_a:header' })).toBeTruthy()
   await ui.unmount()
+})
+
+test('Message… on a Needs you row opens under line 1; on the terminal under line 1 whatever the detail; Cancel brings the actions back', async ($, on) => {
+  await start($, on, ok(BY_STATUS))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'local_n:message' })
+  expect(await ui.find({ key: 'local_n:compose' })).toBeTruthy()
+  expect(JSON.stringify((await ui.find({ key: 'local_n:detail' }))?.children ?? '')).not.toContain('compose')
+  await ui.unmount()
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await unfold(terminal, 'local_k')
+  await terminal.press({ key: 'local_k:message' })
+  expect(JSON.stringify((await terminal.find({ key: 'local_k:detail' }))?.children)).not.toContain('local_k:compose')
+  expect((await terminal.find({ key: 'local_k:draft' }))?.props).toMatchObject({ label: 'Message Working' })
+  expect((await terminal.find({ key: 'local_k:draft' }))?.props.placeholder).toBeUndefined()
+  await terminal.unmount()
 })
 
 test('a verdict the status says, with no detail, shows no line', async ($, on) => {
@@ -1354,12 +1374,17 @@ test('Message… opens one row: a short field, Send and Cancel', async ($, on) =
   await ui.press({ key: 'local_a:message' })
   const field = await ui.find({ key: 'local_a:draft' })
   // Named by its label, not its key
-  expect(field?.props).toMatchObject({ label: 'Message demo-waiting', autoFocus: true })
-  expect(field?.props.submitLabel).toBeUndefined()
+  expect(field?.props).toMatchObject({ label: 'Message', placeholder: 'what to tell demo-waiting…', submitLabel: 'send', autoFocus: true })
   expect((await ui.find({ key: 'local_a:send' }))?.props).toMatchObject({ label: 'Send', variant: 'primary' })
   expect((await ui.find({ key: 'local_a:cancel' }))?.props).toMatchObject({ label: 'Cancel', plain: true })
-  const row = (await ui.findAll({ type: 'Box' })).find(b => b.children.some(c => (c as { props?: { key?: string } }).props?.key === 'local_a:draft'))
+  const row = await ui.find({ key: 'local_a:compose' })
   expect(row?.props.flexDirection).toBe('row')
+  // The field takes the row's free width
+  const slot = (await ui.findAll({ type: 'Box' })).find(b => b.children.some(c => (c as { props?: { key?: string } }).props?.key === 'local_a:draft'))
+  expect(slot?.props).toMatchObject({ flexGrow: 1, minWidth: 0 })
+  // Desktop: at the end of the open detail, in place of the actions row
+  expect(JSON.stringify((await ui.find({ key: 'local_a:detail' }))?.children)).toContain('local_a:compose')
+  expect(await ui.find({ key: 'local_a:actions' })).toBeFalsy()
 
   // Send sends what was typed
   await ui.input({ key: 'local_a:draft', text: ' add tests ', kind: 'change' })
@@ -1390,15 +1415,18 @@ test('Message… opens one row: a short field, Send and Cancel', async ($, on) =
   await ui.press({ key: 'local_a:cancel' })
   expect(texts).toEqual(['dev-board: message demo-waiting (local_a): add tests'])
 
-  // Closed by Message… again, its text goes too
-  await ui.press({ key: 'local_a:message' })
-  await ui.input({ key: 'local_a:draft', text: 'stale', kind: 'change' })
-  await ui.press({ key: 'local_a:message' })
-  await ui.press({ key: 'local_a:message' })
-  await ui.press({ key: 'local_a:send' })
-  await ui.press({ key: 'local_a:cancel' })
-  expect(texts).toEqual(['dev-board: message demo-waiting (local_a): add tests'])
   await ui.unmount()
+
+  // The terminal keeps its Message… button beside the field: closed by Message… again, its text goes too
+  const tty = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await tty.press({ key: 'local_a:message' })
+  await tty.input({ key: 'local_a:draft', text: 'stale', kind: 'change' })
+  await tty.press({ key: 'local_a:message' })
+  await tty.press({ key: 'local_a:message' })
+  await tty.press({ key: 'local_a:send' })
+  await tty.press({ key: 'local_a:cancel' })
+  expect(texts).toEqual(['dev-board: message demo-waiting (local_a): add tests'])
+  await tty.unmount()
 })
 
 const DB = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: 'relational' }, { label: 'Mongo', description: '' }] }
@@ -2058,7 +2086,7 @@ async function paneWithoutTodo($: Engine, on: On, todo: Others['todo']) {
   return { texts, ...started }
 }
 
-const BOARD_TEXTS = ['WORKING', '1', '●', 'Worker A', 'Bash', '42%', 'WAITING', '1', '●', 'Worker B', 'blocked · pick one', 'PR #78', 'no checks reported', 'IDLE', '1', '▸ Worker C']
+const BOARD_TEXTS = ['WORKING', '1', '●', 'Worker A', 'Bash', '42%', 'WAITING', '1', '●', 'Worker B', 'blocked · pick one', 'PR #78', 'no checks reported', 'IDLE', '1', '●', 'Worker C']
 
 test('an empty list shows no block: the board as without one', async ($, on) => {
   const { texts, todoRuns } = await paneWithoutTodo($, on, todoRan([]))
@@ -2232,9 +2260,9 @@ test('the terminal and the phones keep their own looks: theme greys, a caption, 
   const header = (group: string) => all.find(el => el.type === 'Text' && el.text === group)?.props.color
   expect(['NEEDS YOU', 'WORKING', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'suggestion', 'warning', 'inactive'])
   expect((await ui.find({ key: 'local_s:row' }))?.children[0]).toMatchObject({ props: { color: 'inactive' } })
-  // Back in the open idle line: it still names them, its names as a row's
+  // Back as the one quiet worker: its line, no toggle, its name as a row's
   await ui.press({ key: 'local_s:fold' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more · stopped')
+  expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
   const quiet = (await ui.find({ key: 'local_s:fold' }))?.children[0] as { props: Record<string, unknown> } | undefined
   expect(quiet?.props.weight).toBe('semibold')
   expect(Object.hasOwn(quiet?.props ?? {}, 'color')).toBe(false)

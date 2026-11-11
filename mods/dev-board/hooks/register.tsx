@@ -1047,6 +1047,38 @@ export const register: Register = on => {
         </Text>
       )
 
+      const isComposing = Input !== undefined && v.composing === w.id
+      // On the desktop the field replaces the actions row it was asked from, at the end of the open detail; else under line 1
+      const composeInDetail = isComposing && isDesktop && isOpen && !isAttention
+      const composeField = isComposing && (
+        <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+          {/* The label names the field (the row names the worker, so the desktop's is short); a one-line field does not grow on the desktop */}
+          <Box flexGrow={1} minWidth={0}>
+            <Input
+              key={`${w.id}:draft`}
+              label={isDesktop ? 'Message' : `Message ${label(w)}`}
+              {...(isDesktop ? { placeholder: `what to tell ${label(w)}…`, submitLabel: 'send' } : {})}
+              value={v.unsent[w.id]}
+              autoFocus
+              onInput={(text, input) => {
+                drafts.set(`${input.surface}:${w.id}`, text)
+                // A given-back text follows the person's edits, so a redraw never puts the refused one back
+                if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
+              }}
+              onSubmit={text => void message(w, text)}
+            />
+          </Box>
+          <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
+          <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
+        </Box>
+      )
+      // Its error state: a text given back after a refusal (the toast said why) says what to do
+      const unsentHint = isDesktop && v.composing === w.id && v.unsent[w.id] !== undefined && (
+        <Text key={`${w.id}:unsent`} size={SIZE.meta} color={TONE.caution}>
+          not sent: press Send to try again, or Cancel
+        </Text>
+      )
+
       return (
         <Box key={`${w.id}:row`} flexDirection="row" alignItems="flex-start" columnGap={SPACE.inline} minWidth={0}>
           {dot(w, group)}
@@ -1093,31 +1125,8 @@ export const register: Register = on => {
             )}
             {w.notes.map(n => warn(n.key, `${n.kind}: ${n.text}`))}
             {showsNeeds(w) && warn(`${w.id}:needs`, `needs: ${w.needsAction}`)}
-            {Input !== undefined && v.composing === w.id && (
-              <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
-                {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
-                <Input
-                  key={`${w.id}:draft`}
-                  label={`Message ${label(w)}`}
-                  value={v.unsent[w.id]}
-                  autoFocus
-                  onInput={(text, input) => {
-                    drafts.set(`${input.surface}:${w.id}`, text)
-                    // A given-back text follows the person's edits, so a redraw never puts the refused one back
-                    if (v.unsent[w.id] !== undefined) void update($, view, s => ({ ...s, unsent: { ...s.unsent, [w.id]: text } }))
-                  }}
-                  onSubmit={text => void message(w, text)}
-                />
-                <Button key={`${w.id}:send`} label="Send" variant="primary" onPress={press => void sendDraft(w, press.surface)} />
-                <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
-              </Box>
-            )}
-            {/* Its error state: a text given back after a refusal (the toast said why) says what to do */}
-            {isDesktop && v.composing === w.id && v.unsent[w.id] !== undefined && (
-              <Text key={`${w.id}:unsent`} size={SIZE.meta} color={TONE.caution}>
-                not sent: press Send to try again, or Cancel
-              </Text>
-            )}
+            {!composeInDetail && composeField}
+            {!composeInDetail && unsentHint}
             {isOpen && (
               <Box key={`${w.id}:detail`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
                 {w.name !== '' && w.title !== '' && w.title !== w.name && (
@@ -1148,7 +1157,9 @@ export const register: Register = on => {
                     not delivered: {delivery.why}
                   </Text>
                 )}
-                {!isAttention && (
+                {composeInDetail && composeField}
+                {composeInDetail && unsentHint}
+                {!isAttention && !composeInDetail && (
                   <Box key={`${w.id}:actions`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.inline}>
                     {buttons}
                   </Box>
@@ -1160,43 +1171,45 @@ export const register: Register = on => {
       )
     }
 
-    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own) that opens to a line each: dot, name, task count, time. */
+    /** An idle worker's line: dot, name, task count, time; indented one step under the open idle line's toggle when `isIndented`. */
+    const idleRow = (w: Worker, isIndented: boolean) => {
+      const done = w.plan.filter(s => s.status === 'completed').length
+      const since = sinceOf(w)
+      return (
+        <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} paddingLeft={isIndented ? SPACE.block : undefined} minWidth={0}>
+          {dot(w, 'Idle')}
+          <Box flexShrink={1} minWidth={0}>
+            {nameButton(w, false, true)}
+          </Box>
+          <Box flexGrow={1} />
+          {w.plan.length > 0 && (
+            <Text size={SIZE.meta} color={TONE.muted} tabular>
+              {`${done}/${w.plan.length}`}
+            </Text>
+          )}
+          {since !== '' && (
+            <Text size={SIZE.meta} color={TONE.muted} tabular>
+              {since}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+
+    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own; `▾ 3 idle` open) that opens to a line each: dot, name, task count, time; a lone one is drawn as its line, with no toggle. */
     const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
           <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
             <Text size={SIZE.meta} wrap="truncate-end">
-              {/* Open on the desktop, its lines below name them: the line counts them only */}
-              {v.idleOpen && isDesktop
+              {/* Open, its lines below name them: the line counts them only */}
+              {v.idleOpen
                 ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
                 : `${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>
-        {v.idleOpen &&
-          workers.map(w => {
-            const done = w.plan.filter(s => s.status === 'completed').length
-            const since = sinceOf(w)
-            return (
-              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} paddingLeft={isDesktop ? SPACE.block : undefined} minWidth={0}>
-                {dot(w, 'Idle')}
-                <Box flexShrink={1} minWidth={0}>
-                  {nameButton(w, false, true)}
-                </Box>
-                <Box flexGrow={1} />
-                {w.plan.length > 0 && (
-                  <Text size={SIZE.meta} color={TONE.muted} tabular>
-                    {`${done}/${w.plan.length}`}
-                  </Text>
-                )}
-                {since !== '' && (
-                  <Text size={SIZE.meta} color={TONE.muted} tabular>
-                    {since}
-                  </Text>
-                )}
-              </Box>
-            )
-          })}
+        {v.idleOpen && workers.map(w => idleRow(w, isDesktop))}
       </Box>
     )
 
@@ -1229,7 +1242,7 @@ export const register: Register = on => {
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
-          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet, workers.length)] : [])]
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length === 1 ? [idleRow(quiet[0] as Worker, false)] : quiet.length > 1 ? [idleList(quiet, workers.length)] : [])]
           return (
             <Box key={group} flexDirection="column" rowGap={SPACE.line}>
               <Box flexDirection="row" columnGap={SPACE.inline}>
