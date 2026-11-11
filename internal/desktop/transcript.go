@@ -2,12 +2,14 @@ package desktop
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -31,6 +33,12 @@ type transcript struct {
 	tool    string
 	// toolDescription is what the newest unanswered tool use says it does (a describedTools input's description), else ""
 	toolDescription string
+	// said is the first line of the newest assistant text since the last prompt, did what the newest answered tool use
+	// of that turn says it does; "" for none
+	said, did string
+	// background holds the background tasks (a Bash command run in or moved to the background, an async agent) started
+	// and not ended, by task id, with when they started
+	background map[string]time.Time
 	// ask is the newest unanswered tool use's questions when it is an AskUserQuestion, else nil
 	ask *Pending
 	// wrapAsk is the ask the newest wrap_up ended its turn on, nil once a prompt came after it or the call failed
@@ -50,8 +58,11 @@ type row struct {
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
 	// A /compact summary, written as a user row
-	IsCompactSummary bool `json:"isCompactSummary"`
-	Message          struct {
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	Timestamp        string `json:"timestamp"`
+	// ToolUseResult is what Claude Code keeps of a tool result row's outcome (backgroundTaskId, an async agent's id)
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Message       struct {
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
@@ -152,15 +163,36 @@ func tail(path string, n int64) ([]byte, int64, error) {
 	return data, off, nil
 }
 
+// taskNotification is a background task's id and status in the notification Claude Code queues for it.
+var taskNotification = regexp.MustCompile(`(?s)<task-id>([^<]+)</task-id>.*?<status>([a-z_]+)</status>`)
+
+// endedStatuses are a task notification's statuses that end its task.
+var endedStatuses = map[string]bool{"completed": true, "failed": true, "killed": true, "stopped": true}
+
 // parseTranscript reads the main thread's rows: the newest assistant text and usage, the newest tool use
-// without a result, and the task list calls. A line that does not parse is skipped, and counted unless it is
-// the last, unended one (being written).
+// without a result, the task list calls, and the background tasks still running. A line that does not parse
+// is skipped, and counted unless it is the last, unended one (being written).
 func parseTranscript(data []byte) (transcript, []planOp) {
-	t := transcript{lines: []string{}, answered: map[string]bool{}}
+	t := transcript{lines: []string{}, answered: map[string]bool{}, background: map[string]time.Time{}}
 	var pending []block
 	var ops []planOp
+	ended := map[string]bool{}
 	lines := bytes.Split(data, []byte{'\n'})
 	for i, line := range lines {
+		// A finished task's notification is queued as it ends, also mid-turn, before the model reads it
+		if bytes.Contains(line, []byte(`"type":"queue-operation"`)) && bytes.Contains(line, []byte("<task-id>")) {
+			var q struct {
+				Content string `json:"content"`
+			}
+			if json.Unmarshal(line, &q) == nil {
+				for _, m := range taskNotification.FindAllStringSubmatch(q.Content, -1) {
+					if endedStatuses[m[2]] {
+						ended[m[1]] = true
+					}
+				}
+			}
+			continue
+		}
 		// Most bytes are other rows (attachments, request shapes): only these two are parsed
 		if !bytes.Contains(line, []byte(`"type":"assistant"`)) && !bytes.Contains(line, []byte(`"type":"user"`)) {
 			continue
@@ -185,7 +217,7 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			pending, t.wrapAsk = nil, nil
 			if isPrompt(r, blocks) {
 				// The last turn's text (its IDLE or WAITING marker too) is no longer what it says
-				t.lines = []string{}
+				t.lines, t.said, t.did = []string{}, "", ""
 			}
 			continue
 		}
@@ -200,7 +232,7 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 		for _, b := range blocks {
 			switch {
 			case r.Type == "assistant" && b.Type == "text" && strings.TrimSpace(b.Text) != "":
-				t.lines = lastLines(b.Text)
+				t.lines, t.said = lastLines(b.Text), firstLine(b.Text)
 			case r.Type == "assistant" && b.Type == "tool_use":
 				pending = append(pending, b)
 				if b.Name == wrapUpTool {
@@ -211,6 +243,10 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 					}
 				}
 			case r.Type == "user" && b.Type == "tool_result":
+				if i := slices.IndexFunc(pending, func(u block) bool { return u.ID == b.ToolUseID }); i >= 0 {
+					t.did = cmp.Or(description(pending[i]), t.did)
+					background(t.background, ended, pending[i].Name, r)
+				}
 				pending = without(pending, b.ToolUseID)
 				t.answered[b.ToolUseID] = true
 				if b.IsError && t.wrapAsk != nil && t.wrapAsk.ToolUseID == b.ToolUseID {
@@ -220,20 +256,54 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			}
 		}
 	}
+	for id := range ended {
+		delete(t.background, id)
+	}
 	if len(pending) > 0 {
 		last := pending[len(pending)-1]
-		t.tool = last.Name
-		var in struct {
-			Description string `json:"description"`
-		}
-		if describedTools[last.Name] && json.Unmarshal(last.Input, &in) == nil {
-			t.toolDescription = cut(strings.Join(strings.Fields(in.Description), " "))
-		}
+		t.tool, t.toolDescription = last.Name, description(last)
 		if p, ok := askInput(last); ok {
 			t.ask = &p
 		}
 	}
 	return t, ops
+}
+
+// description is what tool use b says it does, on one line: a describedTools input's description, else "".
+func description(b block) string {
+	var in struct {
+		Description string `json:"description"`
+	}
+	if !describedTools[b.Name] || json.Unmarshal(b.Input, &in) != nil {
+		return ""
+	}
+	return cut(strings.Join(strings.Fields(in.Description), " "))
+}
+
+// background notes in started the background task tool result row r of a name tool use started, and in ended the
+// one a TaskStop stopped (it queues no notification).
+func background(started map[string]time.Time, ended map[string]bool, name string, r row) {
+	var res struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+		IsAsync          bool   `json:"isAsync"`
+		AgentID          string `json:"agentId"`
+		TaskID           string `json:"task_id"`
+	}
+	// Some tools' results are a string
+	if json.Unmarshal(r.ToolUseResult, &res) != nil {
+		return
+	}
+	id := res.BackgroundTaskID
+	if res.IsAsync {
+		id = cmp.Or(id, res.AgentID)
+	}
+	if id != "" {
+		at, _ := time.Parse(time.RFC3339Nano, r.Timestamp)
+		started[id] = at
+	}
+	if name == "TaskStop" && res.TaskID != "" {
+		ended[res.TaskID] = true
+	}
 }
 
 // describedTools are the tools whose input's description says what the call does; others' (an MCP tool's issue
@@ -293,6 +363,16 @@ func lastLines(text string) []string {
 		start = min(start, i)
 	}
 	return lines[start:]
+}
+
+// firstLine is text's first line with words, not a code fence, cut to lineRunes; "" for none.
+func firstLine(text string) string {
+	for l := range strings.SplitSeq(text, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "```") {
+			return cut(l)
+		}
+	}
+	return ""
 }
 
 // cut cuts s to lineRunes.

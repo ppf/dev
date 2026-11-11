@@ -1,6 +1,10 @@
 package desktop
 
 import (
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -36,6 +40,12 @@ func TestStatus(t *testing.T) {
 		{"stuck", Worker{State: StateBusy, Tool: "Bash", Notes: stuck}, Hook{}, false, StatusStuck, "no progress for 17m"},
 		{"working", Worker{State: StateBusy, Tool: "Bash"}, Hook{}, false, StatusWorking, "Bash"},
 		{"working, saying what its call does", Worker{State: StateBusy, Tool: "Bash", ToolDescription: "Count hook files"}, Hook{}, false, StatusWorking, "Count hook files"},
+		{"working between calls, saying what it last said", Worker{State: StateBusy, between: "Counting the hook files."}, Hook{}, false, StatusWorking, "Counting the hook files."},
+		{"a call in flight wins over what it said", Worker{State: StateBusy, Tool: "Read", between: "Counting."}, Hook{}, false, StatusWorking, "Read"},
+		{"working, its background tasks running", Worker{State: StateBusy, ToolDescription: "Count hook files", Background: 2}, Hook{}, false, StatusWorking, "Count hook files · 2 background running"},
+		{"working, only background tasks to say", Worker{State: StateBusy, Background: 1}, Hook{}, false, StatusWorking, "1 background running"},
+		{"stuck says nothing of its background tasks", Worker{State: StateBusy, Notes: stuck, Background: 1}, Hook{}, false, StatusStuck, "no progress for 17m"},
+		{"an idle worker's background tasks leave its status be", Worker{State: StateIdle, Background: 1, LastLines: []string{"WAITING (CI)"}}, Hook{}, false, StatusWaiting, "CI"},
 		{"waiting on Auto-fix", Worker{State: StateIdle, LastLines: []string{"PR open.", "WAITING (Auto-fix: PR #80)"}}, Hook{}, false, StatusWaiting, "Auto-fix: PR #80"},
 		{"waiting, in bold", Worker{State: StateBlocked, LastLines: []string{"**WAITING (background: CI, ~5 min)**"}}, Hook{}, false, StatusWaiting, "background: CI, ~5 min"},
 		{"IDLE says nothing runs", Worker{State: StateBlocked, NeedsAction: "x", LastLines: []string{"`IDLE`"}}, Hook{}, false, StatusIdle, ""},
@@ -78,5 +88,68 @@ func TestMarker(t *testing.T) {
 		if st, what, ok := Marker(tt.lines); st != tt.status || what != tt.what || ok != tt.ok {
 			t.Errorf("Marker(%q) = %q %q %v, want %q %q %v", tt.lines, st, what, ok, tt.status, tt.what, tt.ok)
 		}
+	}
+}
+
+// testdata/status-*.jsonl: what a busy turn last said, else what its last described call did, else nothing; the
+// last turn's are over.
+func TestParseTranscriptBetween(t *testing.T) {
+	for file, want := range map[string][2]string{
+		"status-said.jsonl": {"Counting the **hook** files first.", "Count hook files"},
+		"status-did.jsonl":  {"", "Run the tests"},
+		"status-none.jsonl": {"", ""},
+	} {
+		data, err := os.ReadFile(filepath.Join("testdata", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := parseTranscript(data)
+		if got.said != want[0] || got.did != want[1] {
+			t.Errorf("%s: said, did = %q, %q, want %q, %q", file, got.said, got.did, want[0], want[1])
+		}
+	}
+}
+
+// testdata/background.jsonl: a background Bash command and an async agent still run; one finished mid-turn
+// (its notification only queued), one at its turn's end, one TaskStop stopped; a running status ends nothing.
+func TestParseTranscriptBackground(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "background.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := parseTranscript(data)
+	ids := slices.Sorted(maps.Keys(got.background))
+	if want := []string{"a-run", "b-old", "b-poll", "b-run"}; !slices.Equal(ids, want) {
+		t.Errorf("background = %v, want %v", ids, want)
+	}
+	if want := time.Date(2026, 11, 11, 10, 0, 2, 0, time.UTC); !got.background["b-run"].Equal(want) {
+		t.Errorf("b-run started %v, want %v", got.background["b-run"], want)
+	}
+	if got.said != "The build failed: reading its log." {
+		t.Errorf("said = %q, want the reply after the notification", got.said)
+	}
+}
+
+// A busy worker counts the background tasks its Claude started, not one from before a restart; a stopped one none.
+func TestBoardBackground(t *testing.T) {
+	p := fixture(t)
+	data, err := os.ReadFile(filepath.Join("testdata", "background.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), string(data))
+	started := time.Date(2026, 11, 11, 9, 30, 0, 0, time.UTC).UnixMilli()
+	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "startedAt": started})
+	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := workers[0]
+	if b.Background != 3 || b.StatusText != "The build failed: reading its log. · 3 background running" {
+		t.Errorf("busy = %d %q, want 3 background running after what it said", b.Background, b.StatusText)
+	}
+	if workers[1].Background != 0 {
+		t.Errorf("stopped worker background = %d, want 0: its tasks ended with its Claude", workers[1].Background)
 	}
 }
