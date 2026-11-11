@@ -160,7 +160,7 @@ test('the pane shows a row per worker, on every surface', async ($, on) => {
     expect(await header(ui, 'local_b')).toBe('Worker B blocked · pick one')
     expect((await ui.findAll({ type: 'Text', text: /blocked|pick one|two ways/ })).map(t => t.text)).toEqual(['blocked · pick one'])
     expect(await ui.find({ key: 'local_b:https://github.com/o/r/pull/78' })).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBe('▸ 1 idle · Worker C')
+    expect((await ui.find({ type: 'Text', text: /Worker C/ }))?.text).toBe('▸ Worker C')
     await ui.press({ key: 'local_a:fold' })
     await ui.unmount()
   }
@@ -966,13 +966,13 @@ test('idle and stopped workers share one line that opens to a line each; the res
   const { clock } = await start($, on, ok(BY_STATUS.map(w => (w.status === 'idle' ? { ...w, plan: [PLAN[0]], since: '15m' } : w))))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_i:fold' })).toBeFalsy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ 2 idle · Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
   expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
   for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
   }
   await ui.press({ key: 'idle:fold' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle · Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
   // A line each: dot, name, task count, time
   expect(await header(ui, 'local_i')).toBe('● Idle 1/1 15m')
   expect(await ui.find({ key: 'local_i:open' })).toBeFalsy()
@@ -980,12 +980,13 @@ test('idle and stopped workers share one line that opens to a line each; the res
   await ui.press({ key: 'local_i:fold' })
   expect(await ui.find({ key: 'local_i:row' })).toBeTruthy()
   expect(await ui.find({ key: 'local_i:open' })).toBeTruthy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 idle · Stopped')
+  // Below a row of the section's own, the line says how many more it holds
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more · Stopped')
   // Closed again, it goes back into the line, which stays open across a poll
   await ui.press({ key: 'local_i:fold' })
   await clock.advance(2000)
   expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle · Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
   await ui.unmount()
 })
 
@@ -1005,6 +1006,34 @@ test('a status this mod does not know shows under Working', async ($, on) => {
   expect(await header(ui)).toBe('Worker A paused')
   await unfold(ui)
   expect(await ui.find({ key: 'local_a:open' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('an answered worker dev reads as idle joins the idle line: no need, no detail on line 1', async ($, on) => {
+  // What dev prints once a plain wrap_up and a bare IDLE marker end the turn the app's summary called blocked
+  await start($, on, ok([worker({ name: 'demo-ask', lastLines: ['IDLE'], recap: 'Report format chosen: per package.' })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ demo-ask')
+  expect(await ui.find({ key: 'local_a:row' })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /needs:|awaiting/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('the detail shows the title where it differs from the name, and the recap where no reply line shows', async ($, on) => {
+  await start($, on, ok([
+    worker({ name: 'demo-ask', title: 'Board demo: blocked wrap_up question', lastLines: ['**IDLE**'], recap: 'Report format chosen: **per package**.' }),
+    worker({ id: 'local_b', name: 'same', title: 'same', lastLines: ['Pushed.', 'IDLE'], recap: 'Pushed the fix.' }),
+    // A dev older than this mod prints no recap
+    worker({ id: 'local_c', title: 'Worker C', lastLines: ['IDLE'], recap: undefined }),
+  ]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const id of ['local_a', 'local_b', 'local_c']) await unfold(ui, id)
+  const detail = async (id: string) => (await textsOf(ui, `${id}:detail`))?.filter(t => !['Open', 'Message…'].includes(t))
+  expect(await detail('local_a')).toEqual(['Board demo: blocked wrap_up question', 'feature/a', 'Report format chosen: per package.'])
+  // The whole recap, wrapped; a reply line is cut to one row
+  expect(await ui.find({ type: 'Text', text: /^Report format/ })).toMatchObject({ props: { wrap: 'wrap', dimColor: true } })
+  expect(await detail('local_b')).toEqual(['feature/a', 'Pushed.'])
+  expect(await detail('local_c')).toEqual(['feature/a'])
   await ui.unmount()
 })
 
@@ -1097,7 +1126,7 @@ test('a message being typed keeps its row as the worker goes idle; closing the d
   expect(await ui.find({ key: 'local_a:draft' })).toBeTruthy()
   expect(await ui.find({ key: 'idle:fold' })).toBeFalsy()
   await ui.press({ key: 'local_a:cancel' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ 1 idle · Worker A')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Worker A')
   await ui.unmount()
 })
 
@@ -1722,7 +1751,7 @@ test('the meta line leaves out what a worker lacks: no effort, the model alone; 
   await ui.unmount()
 })
 
-test('a named worker is titled by its name alone; one without a name by its title', async ($, on) => {
+test('a named worker is titled by its name alone, its title in the detail; one without a name by its title', async ($, on) => {
   await start($, on, ok([
     worker({ name: 'fix-login', title: 'Fix the login redirect loop', status: 'working', state: 'busy' }),
     worker({ id: 'local_b', title: 'Worker B', status: 'working', state: 'busy' }),
@@ -1730,8 +1759,10 @@ test('a named worker is titled by its name alone; one without a name by its titl
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await header(ui)).toBe('fix-login working')
   expect(await header(ui, 'local_b')).toBe('Worker B working')
-  await unfold(ui)
   expect(await ui.find({ type: 'Text', text: /Fix the login/ })).toBeFalsy()
+  // Its title, unlike its name, shows in the detail
+  await unfold(ui)
+  expect((await ui.find({ type: 'Text', text: /Fix the login/ }))?.text).toBe('Fix the login redirect loop')
   await ui.unmount()
 })
 

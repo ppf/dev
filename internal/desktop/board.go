@@ -98,7 +98,9 @@ type Worker struct {
 	// CreatedAt and LastActivityAt are the app's times, in milliseconds since the epoch.
 	CreatedAt      int64 `json:"createdAt"`
 	LastActivityAt int64 `json:"lastActivityAt"`
-	// Verdict is the app's summary of the last finished turn, e.g. completed, blocked or review_ready.
+	// Verdict is the app's summary of the last finished turn, e.g. completed, blocked or review_ready; a blocked one
+	// whose turn's end asks nothing (settled) is dropped with its Detail and NeedsAction, the worker idle (stopped
+	// when not running).
 	Verdict     string `json:"verdict"`
 	Detail      string `json:"detail"`
 	NeedsAction string `json:"needsAction"`
@@ -132,6 +134,8 @@ type Worker struct {
 	Plan []Step `json:"plan"`
 	// Ask is the question its open dialog asks, or its last turn's wrap_up ask; nil for none.
 	Ask *Pending `json:"ask"`
+	// Recap is its last turn's newest wrap_up recap; "" for none or a call the app rejected.
+	Recap string `json:"recap"`
 }
 
 type record struct {
@@ -455,6 +459,15 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		t.lines[i] = cut(l)
 	}
 	w.LastLines = t.lines
+	w.Recap = t.recap
+	if w.State == StateBlocked && settled(t) {
+		// The app's summary mislabels a turn its wrap_up says asks nothing
+		w.Verdict, w.Detail, w.NeedsAction = "", "", ""
+		w.State = StateStopped
+		if running {
+			w.State = StateIdle
+		}
+	}
 	if t.plan != nil {
 		w.Plan = t.plan
 	}
@@ -499,6 +512,14 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	}
 	w.Status, w.StatusText = status(w, h, r.InterruptedAwaitingPerson, now)
 	return w, errors.Join(err, hookErr, askErr)
+}
+
+// settled is whether t's turn ended with nothing waiting on the person: its wrap_up has no ask, is not blocked
+// and its recap asks nothing (no "?"), no reply of the turn ended on a question, and its last reply is the bare
+// IDLE marker. No wrap_up leaves the app's verdict standing.
+func settled(t transcript) bool {
+	st, _, ok := Marker(t.lines)
+	return t.wrapPlain && !strings.Contains(t.recap, "?") && !t.asked && len(t.lines) == 1 && ok && st == StatusIdle
 }
 
 // modelFamily is the family a model id names (claude-opus-5-5 is opus), else the id.

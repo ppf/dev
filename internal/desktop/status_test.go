@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,8 +149,11 @@ func TestBoardBackground(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Moved to tomorrow: a Claude that started before this test process would be taken for a reused pid
+	day := time.Now().UTC().AddDate(0, 0, 1)
+	data = []byte(strings.ReplaceAll(string(data), "2026-11-11T", day.Format("2006-01-02T")))
 	write(t, filepath.Join(p.Projects, "-wt-busy", "cli-busy.jsonl"), string(data))
-	started := time.Date(2026, 11, 11, 9, 30, 0, 0, time.UTC).UnixMilli()
+	started := time.Date(day.Year(), day.Month(), day.Day(), 9, 30, 0, 0, time.UTC).UnixMilli()
 	writeJSON(t, filepath.Join(p.Live, "1.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-busy", "status": "busy", "startedAt": started})
 	write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), string(data))
 	workers, _, err := Board(p, boss, time.Now())

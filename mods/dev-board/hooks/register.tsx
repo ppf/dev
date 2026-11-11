@@ -92,7 +92,7 @@ const ICON_PX = 12
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
 // Change the tag when Board's, Worker's, PR's, Note's, Step's, Ask's or Question's fields change: the atom then declines what an earlier version stored
-const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-8' })
+const board = atom({ plugin: 'dev-board', key: 'board' } as const, null, { shape: 'board-9' })
 // The keys of the notes already sent to the boss, newest last, so a reload sends none again
 const sent = atom({ plugin: 'dev-board', key: 'sent' } as const, [], { shape: 'sent-1' })
 const MAX_SENT = 500
@@ -918,6 +918,11 @@ export const register: Register = on => {
             )}
             {isOpen && (
               <Box key={`${w.id}:detail`} flexDirection="column" rowGap="xs" minWidth={0}>
+                {w.name !== '' && w.title !== '' && w.title !== w.name && (
+                  <Text key={`${w.id}:title`} size="footnote" color="subtle" wrap="truncate-end">
+                    {w.title}
+                  </Text>
+                )}
                 {w.branch !== '' && (
                   // Cut at its start, so its unique end shows
                   <Text size="caption" color="subtle" mono wrap="truncate-start">
@@ -930,6 +935,12 @@ export const register: Register = on => {
                     {plainLine(line)}
                   </Text>
                 ))}
+                {/* No reply line left to show (e.g. only a marker): its turn's recap says what it did */}
+                {lastLines.length === 0 && (w.recap ?? '') !== '' && (
+                  <Text key={`${w.id}:recap`} size="footnote" dimColor wrap="wrap">
+                    {plainLine(w.recap ?? '')}
+                  </Text>
+                )}
                 {delivery?.isDelivered === false && (
                   <Text size="footnote" color="subtle">
                     not delivered: {delivery.why}
@@ -947,13 +958,13 @@ export const register: Register = on => {
       )
     }
 
-    /** The idle workers not asking for the person, in one line (`▸ 3 idle · a, b, c`) that opens to a line each: dot, name, task count, time. */
-    const idleList = (workers: Worker[]) => (
+    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own) that opens to a line each: dot, name, task count, time. */
+    const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap="xs" minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
           <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
             <Text size="footnote" wrap="truncate-end">
-              {`${v.idleOpen ? '▾' : '▸'} ${workers.length} idle · ${workers.map(label).join(', ')}`}
+              {`${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>
@@ -1012,7 +1023,7 @@ export const register: Register = on => {
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
-          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet)] : [])]
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet, workers.length)] : [])]
           return (
             <Box key={group} flexDirection="column" rowGap="xs">
               <Box flexDirection="row" columnGap={1}>

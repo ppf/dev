@@ -43,6 +43,12 @@ type transcript struct {
 	ask *Pending
 	// wrapAsk is the ask the newest wrap_up ended its turn on, nil once a prompt came after it or the call failed
 	wrapAsk *Pending
+	// wrapID is the newest wrap_up's id this turn, recap its recap, wrapPlain whether it has no ask and is not
+	// blocked; "", "", false for none or a call that failed
+	wrapID, recap string
+	wrapPlain     bool
+	// asked is whether a reply this turn ended on a question
+	asked bool
 	// answered holds the ids of the tool uses with a result
 	answered map[string]bool
 	model    string
@@ -220,8 +226,8 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			// A prompt starts a new turn: a tool use left unanswered before it (a crash) runs no more, a wrap_up ask is answered
 			pending, t.wrapAsk = nil, nil
 			if isPrompt(r, blocks) {
-				// The last turn's text (its IDLE or WAITING marker too) is no longer what it says
-				t.lines, t.said, t.did = []string{}, "", ""
+				// The last turn's text (its IDLE or WAITING marker too) and wrap_up are no longer what it says
+				t.lines, t.said, t.did, t.wrapID, t.recap, t.wrapPlain, t.asked = []string{}, "", "", "", "", false, false
 			}
 			continue
 		}
@@ -237,6 +243,7 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			switch {
 			case r.Type == "assistant" && b.Type == "text" && strings.TrimSpace(b.Text) != "":
 				t.lines, t.said = lastLines(b.Text), firstLine(b.Text)
+				t.asked = t.asked || questionAt(t.lines) >= 0
 			case r.Type == "assistant" && b.Type == "tool_use":
 				pending = append(pending, b)
 				if b.Name == wrapUpTool {
@@ -245,6 +252,8 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 					if p, ok := wrapUpAsk(b); ok {
 						t.wrapAsk = &p
 					}
+					in, ok := readWrapUp(b)
+					t.wrapID, t.recap, t.wrapPlain = b.ID, in.Recap, ok && in.Ask == "" && !in.Blocked
 				}
 			case r.Type == "user" && b.Type == "tool_result":
 				if i := slices.IndexFunc(pending, func(u block) bool { return u.ID == b.ToolUseID }); i >= 0 {
@@ -255,9 +264,9 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 				}
 				pending = without(pending, b.ToolUseID)
 				t.answered[b.ToolUseID] = true
-				if b.IsError && t.wrapAsk != nil && t.wrapAsk.ToolUseID == b.ToolUseID {
-					// A call the app rejected (its input invalid) showed no question
-					t.wrapAsk = nil
+				if b.IsError && b.ToolUseID == t.wrapID {
+					// A call the app rejected (its input invalid) showed nothing
+					t.wrapAsk, t.wrapID, t.recap, t.wrapPlain = nil, "", "", false
 				}
 			}
 		}
@@ -363,17 +372,21 @@ func lastLines(text string) []string {
 		}
 	}
 	start := max(0, len(lines)-lastLineCount)
-	asked := lines
-	for len(asked) > 0 {
-		if _, _, marker := Marker(asked[len(asked)-1:]); !marker {
-			break
-		}
-		asked = asked[:len(asked)-1]
-	}
-	if i := inbox.QuestionAt(asked); i >= 0 {
+	if i := questionAt(lines); i >= 0 {
 		start = min(start, i)
 	}
 	return lines[start:]
+}
+
+// questionAt is the index of the question lines end on, trailing turn-end markers aside (inbox.QuestionAt); -1 for none.
+func questionAt(lines []string) int {
+	for len(lines) > 0 {
+		if _, _, marker := Marker(lines[len(lines)-1:]); !marker {
+			break
+		}
+		lines = lines[:len(lines)-1]
+	}
+	return inbox.QuestionAt(lines)
 }
 
 // firstLine is text's first line with words, not a code fence, cut to lineRunes; "" for none.
