@@ -479,9 +479,14 @@ test('the task list: a small bar and its count on the meta line; the steps in th
     expect(steps.map(s => s.shrink)).toEqual([[0, 1], [0, 1], [0, 1]])
     expect(steps.map(s => [s.mark, s.text])).toEqual([['●', 'Read the code'], ['◐', 'Write the mod'], ['○', 'Open the PR']])
     expect(steps.every(s => s.textProps?.wrap === 'truncate-end')).toBe(true)
-    // Done recedes, the current step stands out in the section's color, pending stays quiet
-    expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', true], ['suggestion', false], ['subtle', false]])
-    expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['inactive', 'regular', true], ['text', 'medium', false], ['subtle', 'regular', false]])
+    // Done recedes, the current step stands out in the section's color, pending stays quiet; the desktop in its tokens: muted not dimmed, semibold, Working's green
+    if (surface === 'terminal') {
+      expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', true], ['suggestion', false], ['subtle', false]])
+      expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['inactive', 'regular', true], ['text', 'medium', false], ['subtle', 'regular', false]])
+    } else {
+      expect(steps.map(s => [s.markProps?.color, s.markProps?.dimColor])).toEqual([['success', false], ['success', false], ['subtle', false]])
+      expect(steps.map(s => [s.textProps?.color, s.textProps?.weight, s.textProps?.dimColor])).toEqual([['subtle', 'regular', false], ['text', 'semibold', false], ['subtle', 'regular', false]])
+    }
     // Above the buttons
     const order = (await ui.findAll({})).map(el => el.key ?? el.text)
     expect(order.indexOf('local_a:plan')).toBeGreaterThan(-1)
@@ -684,13 +689,18 @@ test("the meta line shows each PR's icons in order, line 1 none", async ($, on) 
 
 test('checks that could not be read say why', async ($, on) => {
   await start($, on, ok([worker({ prs: [OPEN_PR] })]), { gh: 'spawn gh ENOENT' })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await unfold(ui)
-  const row = await prRow(ui)
-  expect(row?.slice(0, 2)).toEqual(['[PR #80 open]', 'PR #80'])
-  expect(row?.[2]).toMatch(/^gh pr checks: .*ENOENT/)
-  expect((await ui.find({ type: 'Text', text: /ENOENT/ }))?.props).toMatchObject({ dimColor: true, wrap: 'truncate-end' })
-  await ui.unmount()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await unfold(ui)
+    if (surface === 'desktop') {
+      const row = await prRow(ui)
+      expect(row?.slice(0, 2)).toEqual(['[PR #80 open]', 'PR #80'])
+      expect(row?.[2]).toMatch(/^gh pr checks: .*ENOENT/)
+    }
+    // Dimmer than check names; the desktop's muted tone, no dim on top
+    expect((await ui.find({ type: 'Text', text: /ENOENT/ }))?.props).toMatchObject({ color: 'subtle', dimColor: surface === 'terminal', wrap: 'truncate-end' })
+    await ui.unmount()
+  }
 })
 
 test('a merged PR reads no checks', async ($, on) => {
@@ -981,22 +991,31 @@ test('idle and stopped workers share one line that opens to a line each; the res
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
   }
   await ui.press({ key: 'idle:fold' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
-  // A line each: dot, name, task count, time
+  // Open, its lines name them: the line counts them only
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
+  // A line each: dot, name (muted, regular: they ask nothing), task count, time
   expect(await header(ui, 'local_i')).toBe('● Idle 1/1 15m')
+  expect((await ui.find({ type: 'Text', text: 'Idle' }))?.props).toMatchObject({ color: 'subtle', weight: 'regular' })
   expect(await ui.find({ key: 'local_i:open' })).toBeFalsy()
   // Its name opens its row with its detail
   await ui.press({ key: 'local_i:fold' })
   expect(await ui.find({ key: 'local_i:row' })).toBeTruthy()
   expect(await ui.find({ key: 'local_i:open' })).toBeTruthy()
   // Below a row of the section's own, the line says how many more it holds
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more · Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 1 more')
   // Closed again, it goes back into the line, which stays open across a poll
   await ui.press({ key: 'local_i:fold' })
   await clock.advance(2000)
   expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
+  await ui.press({ key: 'idle:fold' })
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
   await ui.unmount()
+  // The terminal's open line still names them
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await terminal.press({ key: 'idle:fold' })
+  expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▾ Idle, Stopped')
+  await terminal.unmount()
 })
 
 test('an idle worker with a health note keeps its own row, the note under it with ⚠', async ($, on) => {
@@ -1040,7 +1059,7 @@ test('the detail shows the title where it differs from the name, and the recap w
   const detail = async (id: string) => (await textsOf(ui, `${id}:detail`))?.filter(t => !['Open', 'Message…'].includes(t))
   expect(await detail('local_a')).toEqual(['Board demo: blocked wrap_up question', 'feature/a', 'Report format chosen: per package.'])
   // The whole recap, wrapped; a reply line is cut to one row
-  expect(await ui.find({ type: 'Text', text: /^Report format/ })).toMatchObject({ props: { wrap: 'wrap', dimColor: true } })
+  expect(await ui.find({ type: 'Text', text: /^Report format/ })).toMatchObject({ props: { wrap: 'wrap', color: 'subtle' } })
   expect(await detail('local_b')).toEqual(['feature/a', 'Pushed.'])
   expect(await detail('local_c')).toEqual(['feature/a'])
   await ui.unmount()
@@ -1146,7 +1165,7 @@ test('a verdict the status says, with no detail, shows no line', async ($, on) =
   await ui.unmount()
 })
 
-test('Open, Message… and Archive are dim text: on line 1 for Needs you and Waiting rows, else in the detail', async ($, on) => {
+test('Open, Message… and Archive are text buttons (dim but on the desktop): on line 1 for Needs you and Waiting rows, else in the detail', async ($, on) => {
   await start($, on, ok([...BY_STATUS, worker({ id: 'local_p', title: 'Delivered', status: 'review ready', prs: [OPEN_PR] })]), { delivered: DELIVERED })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const onLine1 = async (id: string) => JSON.stringify((await ui.find({ key: `${id}:header` }))?.children).includes(`${id}:open`)
@@ -1163,7 +1182,8 @@ test('Open, Message… and Archive are dim text: on line 1 for Needs you and Wai
     return [plain, dimColor, variant]
   }
   const keys = ['local_n:open', 'local_w:message', 'local_k:open', 'local_k:message', 'local_i:open', 'local_p:archive']
-  expect(await Promise.all(keys.map(looks))).toEqual(keys.map(() => [true, true, undefined]))
+  // Full strength on the desktop, so they don't read as the status text beside them
+  expect(await Promise.all(keys.map(looks))).toEqual(keys.map(() => [true, false, undefined]))
   // Archive shows for a delivered worker not busy with a PR, after Open and Message…
   const row = async (id: string) => (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith(`${id}:`) && k !== `${id}:fold`)
   expect(await row('local_i')).toEqual(['local_i:open', 'local_i:message'])
@@ -1171,16 +1191,18 @@ test('Open, Message… and Archive are dim text: on line 1 for Needs you and Wai
   await ui.unmount()
 })
 
-test("on a row asking a question, Open and Message… are dim text: the question's options are its buttons", async ($, on) => {
+test("on a row asking a question, Open and Message… are plain text (dim on the terminal): the question's options are its buttons", async ($, on) => {
   await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const looks = async (key: string) => {
-    const { plain, dimColor, variant } = (await ui.find({ key }))?.props ?? {}
-    return [plain, dimColor, variant]
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const looks = async (key: string) => {
+      const { plain, dimColor, variant } = (await ui.find({ key }))?.props ?? {}
+      return [plain, dimColor, variant]
+    }
+    expect(await looks('local_a:open')).toEqual([true, surface === 'terminal', undefined])
+    expect(await looks('local_a:message')).toEqual([true, surface === 'terminal', undefined])
+    await ui.unmount()
   }
-  expect(await looks('local_a:open')).toEqual([true, true, undefined])
-  expect(await looks('local_a:message')).toEqual([true, true, undefined])
-  await ui.unmount()
 })
 
 test("a reply's last lines drop their inline markdown, code kept as is", async ($, on) => {
@@ -1396,7 +1418,7 @@ test('a question shows under line 1: header and question, its options one per ro
     expect(await pick(1)).toEqual(['Mongo', undefined])
     // The description sits beside its option, the label not repeated; an option without one has no caption
     const about = await ui.find({ type: 'Text', text: /^relational$/ })
-    expect([about?.text, about?.props.size, about?.props.color, about?.props.wrap]).toEqual(['relational', 'caption', 'subtle', 'truncate-end'])
+    expect([about?.text, about?.props.size, about?.props.color, about?.props.wrap]).toEqual(['relational', surface === 'terminal' ? 'caption' : 'footnote', 'subtle', 'truncate-end'])
     expect(await ui.find({ type: 'Text', text: /Mongo/ })).toBeFalsy()
     // The question replaces the status row that says it in one line; one press answers it, so no Send
     expect(await ui.find({ type: 'Text', text: /Postgres \/ Mongo/ })).toBeFalsy()
@@ -1623,7 +1645,7 @@ test('a wrap_up ask without reply buttons shows the question, answered with Mess
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Text', text: /^Which file should I describe\?$/ }))?.text).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /^answer it with Message…$/ }))?.text).toBeTruthy()
-  expect((await ui.find({ key: 'local_a:message' }))?.props).toMatchObject({ plain: true, dimColor: true })
+  expect((await ui.find({ key: 'local_a:message' }))?.props).toMatchObject({ plain: true, dimColor: false })
   await ui.unmount()
 })
 
@@ -1652,10 +1674,14 @@ test('a message not sent opens its field again, holding its text, until one is s
   await ui.input({ key: 'local_a:draft', text: 'use option B' })
   expect(toasts.at(-1)).toBe('message for Worker A not sent: blocked by a hook')
   expect((await ui.find({ key: 'local_a:draft' }))?.props.value).toBe('use option B')
+  // Under the field, what to do; none before a refusal, nor once sent
+  expect((await ui.find({ type: 'Text', text: /^not sent:/ }))?.props).toMatchObject({ color: 'warning', size: 'footnote' })
+  expect((await ui.find({ type: 'Text', text: /^not sent:/ }))?.text).toBe('not sent: press Send to try again, or Cancel')
 
   // Send, the person typing nothing more, sends it again
   refuse = false
   await ui.press({ key: 'local_a:send' })
+  expect(await ui.find({ type: 'Text', text: /^not sent:/ })).toBeFalsy()
   expect(texts).toEqual(['dev-board: message Worker A (local_a): use option B', 'dev-board: message Worker A (local_a): use option B'])
 
   // Edited after a refusal, a redraw shows the edit, and Send sends it
@@ -1715,8 +1741,8 @@ test('reply lines drop turn-end markers and show a link as its text', async ($, 
   // Each detail ends in its reply lines
   expect(await textsOf(ui, 'local_b:detail')).toEqual(['feature/a', 'Pushed.'])
   expect(await textsOf(ui, 'local_a:detail')).toEqual(['feature/a', 'See RESULT.md, shot, Foo and [a](b).'])
-  // Dim, not italic: italic grey at that size reads as noise
-  expect((await ui.findAll({ type: 'Text', text: 'Pushed.' })).map(t => [t.props.dimColor, t.props.italic])).toEqual([[true, undefined]])
+  // Muted, not italic: italic grey at that size reads as noise
+  expect((await ui.findAll({ type: 'Text', text: 'Pushed.' })).map(t => [t.props.color, t.props.dimColor, t.props.italic])).toEqual([['subtle', undefined, undefined]])
   expect((await ui.findAll({ type: 'Text', text: /IDLE|WAITING/ })).map(t => t.text)).toEqual(['WAITING', 'IDLE'])
   await ui.unmount()
 })
@@ -1779,11 +1805,11 @@ test('colour only on the dot, the section header and a Needs you line; no border
   await start($, on, ok(BY_STATUS.map(w => ({ ...w, statusText: 'on it' }))))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle !== undefined)).toEqual([])
-  // The dot says the section, not the app's state: a busy worker under Needs you is red; a stopped one inactive
+  // The dot says the section, not the app's state: a busy worker under Needs you is red; a stopped one muted as an idle one (inactive on the terminal)
   const dot = async (id: string, key = `${id}:row`) => ((await ui.find({ key }))?.children[0] as { props: Record<string, unknown> } | undefined)?.props.color
   expect(await Promise.all(['local_n', 'local_w', 'local_b', 'local_k', 'local_t'].map(id => dot(id)))).toEqual(['error', 'warning', 'warning', 'success', 'success'])
   await ui.press({ key: 'idle:fold' })
-  expect(await Promise.all(['local_i', 'local_s'].map(id => dot(id, `${id}:header`)))).toEqual(['subtle', 'inactive'])
+  expect(await Promise.all(['local_i', 'local_s'].map(id => dot(id, `${id}:header`)))).toEqual(['subtle', 'subtle'])
   // What line 1 says: red under Needs you, else muted
   const says = async (id: string) => {
     const cell = (await ui.find({ key: `${id}:header` }))?.children[1] as { children: { props: Record<string, unknown> }[] } | undefined
@@ -1957,18 +1983,20 @@ test('nine items: the first five, then +4 more', async ($, on) => {
   await ui.unmount()
 })
 
-test('a stale list dims its age; a fresh one does not', async ($, on) => {
+test('a stale list dims its age on the terminal; a fresh one does not; the desktop keeps it muted, the age saying it', async ($, on) => {
   let isStale = false
   const { clock } = await start($, on, ok(WORKERS), { todo: () => todoRan(TODO, 75, isStale) })
-  let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /^updated/ }))?.props.dimColor).toBe(false)
-  await ui.unmount()
+  const fresh = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await fresh.find({ type: 'Text', text: /^updated/ }))?.props.dimColor).toBe(false)
+  await fresh.unmount()
   isStale = true
   await clock.advance(2000)
-  ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const age = await ui.find({ type: 'Text', text: /^updated/ })
-  expect([age?.text, age?.props.dimColor]).toEqual(['updated 1h 15m', true])
-  await ui.unmount()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const age = await ui.find({ type: 'Text', text: /^updated/ })
+    expect([age?.text, age?.props.color, age?.props.dimColor]).toEqual(['updated 1h 15m', 'subtle', surface === 'terminal'])
+    await ui.unmount()
+  }
 })
 
 test('a ticked item shows ticked and struck through while the list still carries it, not counted', async ($, on) => {
@@ -1976,9 +2004,12 @@ test('a ticked item shows ticked and struck through while the list still carries
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '☑ Answer Vince in Slack', '◌ Staging access for lw on Marek (Ops)'])
   const text = await ui.find({ type: 'Text', text: 'Answer Vince in Slack' })
-  expect([text?.props.strikethrough, text?.props.color]).toEqual([true, 'inactive'])
+  expect([text?.props.strikethrough, text?.props.color]).toEqual([true, 'subtle'])
   expect((await ui.find({ type: 'Text', text: '☑' }))?.props.color).toBe('success')
   await ui.unmount()
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await terminal.find({ type: 'Text', text: 'Answer Vince in Slack' }))?.props.color).toBe('inactive')
+  await terminal.unmount()
 })
 
 /** The pane's Texts with no to do list read. */
@@ -2075,4 +2106,75 @@ test('a list with an item this mod does not read shows no block', async ($, on) 
   expect(await ui.find({ key: 'todo' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: 'Worker A' }))?.text).toBeTruthy()
   await ui.unmount()
+})
+
+/** A board with every part the desktop draws: each section, PRs of each state with CI, a task list, notes, a need, a question, the to do list. */
+async function startFull($: Parameters<typeof start>[0], on: Parameters<typeof start>[1]) {
+  const prs = [OPEN_PR, { number: 7, url: 'https://github.com/o/r/pull/7', state: 'MERGED' }, { number: 9, url: 'https://github.com/o/r/pull/9', state: 'CLOSED' }]
+  const workers = [
+    ...BY_STATUS.map(w => ({ ...w, name: w.title.toLowerCase(), since: '41m', model: 'opus', effort: 'high', context: 40, plan: [...PLAN], prs, lastLines: ['Done.'], recap: 'All done.' })),
+    worker({ id: 'local_q', name: 'asker', state: 'busy', status: 'needs you', ask: { toolUseId: 'tu1', questions: [DB, FEATURES], askedAt: 1, answerable: true } }),
+    worker({ id: 'local_o', name: 'noted', status: 'idle', needsAction: 'reply yes', notes: [STUCK], branch: 'feature/very/long/branch-name' }),
+  ]
+  await start($, on, ok(workers), { gh: CHECKS, delivered: DELIVERED, todo: todoRan(TODO, 75, true) })
+}
+
+/** Opens everything a row can show: the idle line, each detail, a message field. */
+async function openAll(ui: Mounted) {
+  await ui.press({ key: 'idle:fold' })
+  for (const b of await ui.findAll({ type: 'Button' })) if (b.key?.endsWith(':fold') && b.key !== 'idle:fold') await unfold(ui, b.key.replace(/:fold$/, ''))
+  await ui.press({ key: 'local_k:message' })
+}
+
+test('the desktop draws from its tokens only: five colors, two sizes, two weights, its spacing steps, no dim text', async ($, on) => {
+  await startFull($, on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await openAll(ui)
+  const all = await ui.findAll({})
+  const used = (type: string, prop: string) => new Set(all.filter(el => el.type === type).map(el => el.props[prop]).filter(v => v !== undefined))
+  expect([...used('Text', 'color')].sort()).toEqual(['error', 'subtle', 'success', 'text', 'warning'])
+  expect([...used('Text', 'size')].sort()).toEqual(['footnote'])
+  expect([...used('Text', 'weight')].sort()).toEqual(['regular', 'semibold'])
+  expect([...used('Text', 'dimColor')]).toEqual([false])
+  for (const prop of ['gap', 'rowGap', 'columnGap', 'paddingY']) {
+    expect([...used('Box', prop)].every(v => [1, 'xs', 'sm', 'md'].includes(v as string | number))).toBe(true)
+  }
+  // Sections a step further apart than a row's lines
+  expect((all.find(el => el.type === 'Box' && el.props.gap !== undefined))?.props.gap).toBe('md')
+  // Only the bar fills: its done part green on the muted track
+  expect([...used('Box', 'backgroundColor')]).toEqual(['rgba(128, 128, 128, 0.22)', 'success'])
+  // The icons' hues are the tones' (a merged PR muted), each about 4.2:1 on light and dark
+  const hexes = new Set(all.filter(el => el.type === 'Svg').flatMap(el => String(el.props.source).match(/#[0-9A-Fa-f]{3,6}\b/g) ?? []))
+  expect([...hexes].every(hex => ['#278D43', '#7B7B7B', '#A27300', '#E33C41', '#fff'].includes(hex))).toBe(true)
+  expect(all.find(el => el.type === 'Svg' && el.props.alt === 'PR #7 merged')?.props.source).toContain('#7B7B7B')
+  // A section's header takes its dot's color: Working green, not the accent
+  const header = (group: string) => all.find(el => el.type === 'Text' && el.text === group)?.props.color
+  expect(['NEEDS YOU', 'WORKING', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'success', 'warning', 'subtle'])
+  await ui.unmount()
+})
+
+// The pane's width in cells, read as about 8 px a cell on the desktop: 390, 768 and 1440 px
+const WIDTHS = { 390: 48, 768: 96, 1440: 180 } as const
+
+test('at 390, 768 and 1440 px the desktop tree is the same, and what never shrinks on a row fits 390', async ($, on) => {
+  await startFull($, on)
+  const trees: string[] = []
+  for (const bodyColumns of Object.values(WIDTHS)) {
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'desktop' })
+    // What is open is the session's, so the later mounts find it open
+    if (trees.length === 0) await openAll(ui)
+    const all = await ui.findAll({})
+    trees.push(JSON.stringify(all.map(el => [el.type, el.key, el.text])))
+    // A row Box that neither wraps nor shrinks below its content holds text that fits the narrow width
+    const rigid = all.filter(el => el.type === 'Box' && el.props.flexDirection === 'row' && el.props.flexWrap !== 'wrap' && el.props.minWidth !== 0)
+    expect(rigid.map(el => shown(el as Drawn)).filter(text => text.length > WIDTHS[390] - 8)).toEqual([])
+    // Line 1 shrinks its name and what it says; its fixed parts (dot, buttons, time) fit
+    for (const id of ['local_n', 'local_w', 'local_p', 'local_q']) {
+      const cells = ((await ui.find({ key: `${id}:header` }))?.children ?? []) as (Drawn & { props: Record<string, unknown> })[]
+      const fixed = cells.filter(c => c.props.flexShrink === 0).map(shown).join(' ')
+      expect(fixed.length).toBeLessThan(WIDTHS[390] / 2)
+    }
+    await ui.unmount()
+  }
+  expect(new Set(trees).size).toBe(1)
 })

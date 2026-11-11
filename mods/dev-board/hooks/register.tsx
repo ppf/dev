@@ -14,11 +14,20 @@ const PERIOD_MS = 2000
 const REFRESH_MS = 60_000
 const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
+// The desktop pane's tokens, and nothing else there: five colors (theme keys, so light and dark follow the theme), two sizes, two weights, four spacing steps.
+// The terminal and the phones keep their own looks
+const TONE = { text: 'text', muted: 'subtle', ok: 'success', caution: 'warning', danger: 'error' } as const
+// A tone in an SVG icon, which can't name a theme key: each about 4.2:1 on the light (#FFFFFF) and the dark (#181818) pane
+const TONE_HEX = { ok: '#278D43', caution: '#A27300', danger: '#E33C41', muted: '#7B7B7B' } as const
+const SIZE = { body: 'body', meta: 'footnote' } as const
+const WEIGHT = { regular: 'regular', strong: 'semibold' } as const
+// Across a row (cells), between a row's lines, between blocks, between sections
+const SPACE = { inline: 1, line: 'xs', block: 'sm', section: 'md' } as const
 // The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
-// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green
-const DOT_COLORS = { 'Needs you': 'error', Working: 'success', Waiting: 'warning', Idle: 'subtle' } as const
+// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop its header too
+const DOT_COLORS = { 'Needs you': TONE.danger, Working: TONE.ok, Waiting: TONE.caution, Idle: TONE.muted } as const
 // The sections whose rows ask to be looked at: only they carry their buttons on line 1
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
@@ -65,28 +74,36 @@ const icon = (body: string, glyph: string, color: string): Icon => ({
   color,
 })
 const stroke = (hex: string) => `fill="none" stroke="${hex}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`
-const PR_ICONS: Record<string, Icon> = {
-  OPEN: icon(
-    `<g ${stroke('#2DA44E')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V6.5a2 2 0 0 0-2-2H7.5M9.3 2.7 7.5 4.5l1.8 1.8"/></g>`,
-    '○',
-    'success',
-  ),
-  MERGED: icon(
-    `<g ${stroke('#8957E5')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="8.5" r="1.8"/><path d="M4 5.3v5.4M4 5.3c0 2.2 2.2 3.2 6.2 3.2"/></g>`,
-    '◆',
-    'merged',
-  ),
-  CLOSED: icon(
-    `<g ${stroke('#E5484D')}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7.5M10.2 2.2l3.6 3.6M13.8 2.2l-3.6 3.6"/></g>`,
-    '✕',
-    'error',
-  ),
-}
-const CI_ICONS: Record<Rollup, Icon> = {
-  passed: icon('<circle cx="8" cy="8" r="7" fill="#2DA44E"/><path d="m4.8 8.2 2.2 2.2 4.2-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>', '✓', 'success'),
-  failed: icon('<circle cx="8" cy="8" r="7" fill="#E5484D"/><path d="m5.5 5.5 5 5m0-5-5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>', '✗', 'error'),
-  running: icon('<circle cx="8" cy="8" r="6.2" fill="none" stroke="#BF8700" stroke-width="1.6"/><path d="M8 4.6V8l2.4 1.6" fill="none" stroke="#BF8700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>', '…', 'warning'),
-}
+type Hues = { open: string; merged: string; closed: string; passed: string; failed: string; running: string }
+/** The PR and CI icons in the given hues. */
+const iconsIn = (hue: Hues) => ({
+  pr: {
+    OPEN: icon(
+      `<g ${stroke(hue.open)}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V6.5a2 2 0 0 0-2-2H7.5M9.3 2.7 7.5 4.5l1.8 1.8"/></g>`,
+      '○',
+      'success',
+    ),
+    MERGED: icon(
+      `<g ${stroke(hue.merged)}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="8.5" r="1.8"/><path d="M4 5.3v5.4M4 5.3c0 2.2 2.2 3.2 6.2 3.2"/></g>`,
+      '◆',
+      'merged',
+    ),
+    CLOSED: icon(
+      `<g ${stroke(hue.closed)}><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7.5M10.2 2.2l3.6 3.6M13.8 2.2l-3.6 3.6"/></g>`,
+      '✕',
+      'error',
+    ),
+  } as Record<string, Icon>,
+  ci: {
+    passed: icon(`<circle cx="8" cy="8" r="7" fill="${hue.passed}"/><path d="m4.8 8.2 2.2 2.2 4.2-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`, '✓', 'success'),
+    failed: icon(`<circle cx="8" cy="8" r="7" fill="${hue.failed}"/><path d="m5.5 5.5 5 5m0-5-5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`, '✗', 'error'),
+    running: icon(`<circle cx="8" cy="8" r="6.2" fill="none" stroke="${hue.running}" stroke-width="1.6"/><path d="M8 4.6V8l2.4 1.6" fill="none" stroke="${hue.running}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`, '…', 'warning'),
+  } as Record<Rollup, Icon>,
+})
+// GitHub's hues, about 3.1-3.2:1 on white for the green and amber
+const ICONS = iconsIn({ open: '#2DA44E', merged: '#8957E5', closed: '#E5484D', passed: '#2DA44E', failed: '#E5484D', running: '#BF8700' })
+// The tones' hues; a merged PR is done, so muted
+const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, closed: TONE_HEX.danger, passed: TONE_HEX.ok, failed: TONE_HEX.danger, running: TONE_HEX.caution })
 const ICON_PX = 12
 // The to do list's items shown before `+N more`, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
@@ -537,15 +554,22 @@ export const register: Register = on => {
     // The mobile app draws no field
     const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : undefined
+    // The desktop draws from the tokens only: a dim text is the muted tone there, a caption the meta size, a medium weight the strong one
+    const isDesktop = e.surface === 'desktop'
+    const { pr: PR_ICONS, ci: CI_ICONS } = isDesktop ? DESKTOP_ICONS : ICONS
+    const faint = isDesktop ? { color: TONE.muted } : { dimColor: true }
+    const small = isDesktop ? SIZE.meta : 'caption'
+    const medium = isDesktop ? WEIGHT.strong : 'medium'
+    const sectionColor = (group: (typeof GROUPS)[number]) => (isDesktop ? DOT_COLORS : GROUP_COLORS)[group]
     /** The pane's one message in place of rows: a glyph, its text and a dim hint, centred. */
     const notice = (key: string, text: string, glyph?: { mark: string; color: string }, hint?: string) => (
-      <Box key={key} flexDirection="column" alignItems="center" paddingY="sm" minWidth={0}>
+      <Box key={key} flexDirection="column" alignItems="center" paddingY={SPACE.block} minWidth={0}>
         {glyph && <Text color={glyph.color}>{glyph.mark}</Text>}
-        <Text size="footnote" color="subtle" wrap="wrap">
+        <Text size={SIZE.meta} color={TONE.muted} wrap="wrap">
           {text}
         </Text>
         {hint !== undefined && (
-          <Text size="footnote" dimColor wrap="wrap">
+          <Text size={SIZE.meta} {...faint} wrap="wrap">
             {hint}
           </Text>
         )}
@@ -669,14 +693,14 @@ export const register: Register = on => {
       const held = picksFor(a, picksRead[w.id])
       if (held?.isSent) {
         return (
-          <Text key={`${w.id}:sent`} size="footnote" color="subtle">
+          <Text key={`${w.id}:sent`} size={SIZE.meta} color={TONE.muted}>
             sent: {Object.values(answersOf(a, held)).join('; ')}; waiting for the worker
           </Text>
         )
       }
 
       return (
-        <Box key={`${w.id}:ask`} flexDirection="column" rowGap="xs" minWidth={0}>
+        <Box key={`${w.id}:ask`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
           {a.questions.map((q, qi) => {
             const chosen = held?.picks[q.question] ?? []
             const mark = (isChosen: boolean) => {
@@ -689,17 +713,17 @@ export const register: Register = on => {
             const lead = Math.max(0, q.options.findIndex(o => RECOMMENDED.test(o.label)))
 
             return (
-              <Box key={`${w.id}:q${qi}`} flexDirection="column" rowGap="xs" minWidth={0}>
+              <Box key={`${w.id}:q${qi}`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
                 <Box flexDirection="column" minWidth={0}>
                   {q.header !== '' && (
-                    <Text size="caption" color={color} weight="semibold">
+                    <Text size={small} color={color} weight={WEIGHT.strong}>
                       {q.header}
                     </Text>
                   )}
-                  <Text weight="semibold">{q.question}</Text>
+                  <Text weight={WEIGHT.strong}>{q.question}</Text>
                 </Box>
                 {q.options.length > 0 && (
-                  <Box key={`${w.id}:q${qi}:options`} flexDirection={isDescribed ? 'column' : 'row'} flexWrap={isDescribed ? undefined : 'wrap'} columnGap={1} rowGap="xs" minWidth={0}>
+                  <Box key={`${w.id}:q${qi}:options`} flexDirection={isDescribed ? 'column' : 'row'} flexWrap={isDescribed ? undefined : 'wrap'} columnGap={SPACE.inline} rowGap={SPACE.line} minWidth={0}>
                     {q.options.map((o, oi) => {
                       const isChosen = chosen.includes(o.label)
                       // Without the worker's mod watching, only its own dialog answers: the option opens it
@@ -710,10 +734,10 @@ export const register: Register = on => {
                       const button = <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${shown === o.label ? '' : '★ '}${shown}`} variant={isPrimary ? 'primary' : undefined} onPress={press} />
                       if (!isDescribed) return button
                       return (
-                        <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" columnGap={1} alignItems="center" minWidth={0}>
+                        <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" columnGap={SPACE.inline} alignItems="center" minWidth={0}>
                           {button}
                           {o.description !== '' && (
-                            <Text key={`${w.id}:q${qi}:o${oi}:about`} size="caption" color="subtle" wrap="truncate-end">
+                            <Text key={`${w.id}:q${qi}:o${oi}:about`} size={small} color={TONE.muted} wrap="truncate-end">
                               {o.description}
                             </Text>
                           )}
@@ -726,12 +750,12 @@ export const register: Register = on => {
             )
           })}
           {!a.answerable && !a.reply && (
-            <Text size="footnote" color="subtle">
+            <Text size={SIZE.meta} color={TONE.muted}>
               answered in its session: an option opens it
             </Text>
           )}
           {a.reply && a.questions.every(q => q.options.length === 0) && Input !== undefined && (
-            <Text size="footnote" color="subtle">
+            <Text size={SIZE.meta} color={TONE.muted}>
               answer it with Message…
             </Text>
           )}
@@ -774,17 +798,17 @@ export const register: Register = on => {
       const after = rollup && c ? ciNames(c, rollup) : why
       const [state, ci] = prIcons(w, pr, rollup)
       return (
-        <Box key={`${w.id}:${pr.url}`} flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
+        <Box key={`${w.id}:${pr.url}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={1} minWidth={0}>
           {state}
           <Box flexShrink={0}>
-            <Text size="footnote">
+            <Text size={SIZE.meta}>
               <Link href={pr.url} label={`PR #${pr.number}`} />
             </Text>
           </Box>
           {ci}
           {after !== '' && (
             <Box flexShrink={1} minWidth={0}>
-              <Text size="footnote" color="subtle" dimColor={why !== ''} wrap="truncate-end">
+              <Text size={SIZE.meta} color={TONE.muted} dimColor={!isDesktop && why !== ''} wrap="truncate-end">
                 {after}
               </Text>
             </Box>
@@ -796,15 +820,16 @@ export const register: Register = on => {
     /** A step's row: its mark and its text in cells of their own, the text cut to one line; a count of steps looks as they do. */
     const stepRow = (key: string, status: Step['status'], text: string, color: string) => {
       const look = STEP_LOOKS[status] ?? STEP_LOOKS.pending
+      const isDim = !isDesktop && look.isDim
       return (
-        <Box key={key} flexDirection="row" columnGap={1} minWidth={0}>
+        <Box key={key} flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
-            <Text size="footnote" color={look.markColor ?? color} dimColor={look.isDim}>
+            <Text size={SIZE.meta} color={look.markColor ?? color} dimColor={isDim}>
               {look.mark}
             </Text>
           </Box>
           <Box flexShrink={1} minWidth={0}>
-            <Text size="footnote" color={look.color} weight={look.weight} dimColor={look.isDim} wrap="truncate-end">
+            <Text size={SIZE.meta} color={look.isDim && isDesktop ? TONE.muted : look.color} weight={look.weight === 'medium' ? medium : look.weight} dimColor={isDim} wrap="truncate-end">
               {text}
             </Text>
           </Box>
@@ -816,7 +841,7 @@ export const register: Register = on => {
     const progress = (w: Worker, done: number) => {
       const cells = Math.round((done / w.plan.length) * BAR_CELLS)
       return (
-        <Box key={`${w.id}:progress`} flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+        <Box key={`${w.id}:progress`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
           {e.surface === 'terminal' ? (
             // Whole cells: a fifth of a row would draw nothing
             <Box key={`${w.id}:bar`}>
@@ -835,7 +860,7 @@ export const register: Register = on => {
               </Box>
             </Box>
           )}
-          <Text size="footnote" color="subtle" tabular>
+          <Text size={SIZE.meta} color={TONE.muted} tabular>
             {`${done}/${w.plan.length}`}
           </Text>
         </Box>
@@ -859,28 +884,28 @@ export const register: Register = on => {
       const pr = it.link?.match(PR_LINK)?.[1]
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
       return (
-        <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+        <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
-            <Text size="footnote" color={boxColor}>
+            <Text size={SIZE.meta} color={boxColor}>
               {box}
             </Text>
           </Box>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text color={it.done ? 'inactive' : it.on ? 'subtle' : undefined} strikethrough={it.done} wrap="truncate-end">
+            <Text color={it.done ? (isDesktop ? TONE.muted : 'inactive') : it.on ? TONE.muted : undefined} strikethrough={it.done} wrap="truncate-end">
               {it.text}
             </Text>
           </Box>
           {it.on ? (
             <Box flexShrink={1} minWidth={0}>
-              <Text size="footnote" color="warning" wrap="truncate-end">
+              <Text size={SIZE.meta} color={TONE.caution} wrap="truncate-end">
                 {`on ${it.on}`}
               </Text>
             </Box>
           ) : (
             it.link && (
-              <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+              <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
                 {pr && PR_ICONS.OPEN && iconCell(`todo:item${it.id}:pr`, PR_ICONS.OPEN, `PR #${pr}`)}
-                <Text size="footnote">
+                <Text size={SIZE.meta}>
                   <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
                 </Text>
               </Box>
@@ -896,27 +921,27 @@ export const register: Register = on => {
       const onOthers = open.filter(it => it.on).length
       const shownItems = t.items.slice(0, TODO_SHOWN)
       return (
-        <Box key="todo" flexDirection="column" rowGap="xs" minWidth={0}>
-          <Box key="todo:head" flexDirection="row" columnGap={1} minWidth={0}>
-            <Text size="footnote" weight="semibold">
+        <Box key="todo" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
+          <Box key="todo:head" flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
+            <Text size={SIZE.meta} weight={WEIGHT.strong}>
               TO DO
             </Text>
-            <Text size="footnote" color="subtle" tabular>
+            <Text size={SIZE.meta} color={TONE.muted} tabular>
               {open.length}
             </Text>
             {onOthers > 0 && (
-              <Text size="footnote" color="subtle">
+              <Text size={SIZE.meta} color={TONE.muted}>
                 {`· ${onOthers} on others`}
               </Text>
             )}
             <Box flexGrow={1} />
-            <Text size="footnote" color="subtle" dimColor={t.stale} tabular>
+            <Text size={SIZE.meta} color={TONE.muted} dimColor={!isDesktop && t.stale} tabular>
               {`updated ${t.age}`}
             </Text>
           </Box>
           {shownItems.map(todoRow)}
           {t.items.length > shownItems.length && (
-            <Text key="todo:more" size="footnote" color="subtle">
+            <Text key="todo:more" size={SIZE.meta} color={TONE.muted}>
               {`+${t.items.length - shownItems.length} more`}
             </Text>
           )}
@@ -925,12 +950,15 @@ export const register: Register = on => {
     }
 
     // A stopped worker's dot is dimmer than an idle one's
-    const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' ? 'inactive' : DOT_COLORS[group]}>●</Text>
+    const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' && !isDesktop ? 'inactive' : DOT_COLORS[group]}>●</Text>
     const sinceOf = (w: Worker) => (w.since === '0m' ? 'now' : w.since)
-    /** The worker's name, the button that opens or closes its detail; no label, as the desktop draws a label in place of the children. */
-    const nameButton = (w: Worker, isOpen: boolean) => (
+    /**
+     * The worker's name, the button that opens or closes its detail; no label, as the desktop draws a label in place of the children.
+     * A quiet one (the open idle line's) is muted and regular on the desktop, so it doesn't compete with the rows asking for the person.
+     */
+    const nameButton = (w: Worker, isOpen: boolean, isQuiet = false) => (
       <Button key={`${w.id}:fold`} plain onPress={() => void fold(w.id, !isOpen)}>
-        <Text weight="semibold" wrap="truncate-end">
+        <Text weight={isQuiet && isDesktop ? WEIGHT.regular : WEIGHT.strong} color={isQuiet && isDesktop ? TONE.muted : undefined} wrap="truncate-end">
           {label(w)}
         </Text>
       </Button>
@@ -947,7 +975,7 @@ export const register: Register = on => {
 
     /** One worker's row: the dot beside line 1 (name, what it says, buttons, time), then its question, meta, warnings, message field and detail. */
     const row = (w: Worker, group: (typeof GROUPS)[number], isOpen: boolean) => {
-      const color = GROUP_COLORS[group]
+      const color = sectionColor(group)
       const done = w.plan.filter(s => s.status === 'completed').length
       const delivery = canArchive(w) ? deliveredRead[w.id] : undefined
       const isAttention = ATTENTION_GROUPS.includes(group)
@@ -960,12 +988,12 @@ export const register: Register = on => {
       const model = w.model && w.effort ? `${w.model}·${w.effort}` : (w.model ?? '')
       const meta = [
         model !== '' && (
-          <Text key={`${w.id}:model`} size="footnote" color="subtle">
+          <Text key={`${w.id}:model`} size={SIZE.meta} color={TONE.muted}>
             {model}
           </Text>
         ),
         w.context !== null && (
-          <Text key={`${w.id}:context`} size="footnote" color="subtle" tabular>
+          <Text key={`${w.id}:context`} size={SIZE.meta} color={TONE.muted} tabular>
             {`${w.context}%`}
           </Text>
         ),
@@ -973,40 +1001,40 @@ export const register: Register = on => {
         w.plan.length > 0 && progress(w, done),
       ].filter(part => part !== false)
       const buttons = [
-        <Button key={`${w.id}:open`} label="Open" plain dimColor onPress={() => void openSession(w)} />,
-        Input !== undefined && <Button key={`${w.id}:message`} label="Message…" plain dimColor onPress={() => void compose(w.id)} />,
-        delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" plain dimColor onPress={() => void archive(w)} />,
+        <Button key={`${w.id}:open`} label="Open" plain dimColor={!isDesktop} onPress={() => void openSession(w)} />,
+        Input !== undefined && <Button key={`${w.id}:message`} label="Message…" plain dimColor={!isDesktop} onPress={() => void compose(w.id)} />,
+        delivery?.isDelivered === true && <Button key={`${w.id}:archive`} label="Archive" plain dimColor={!isDesktop} onPress={() => void archive(w)} />,
       ]
       const warn = (key: string, text: string) => (
-        <Text key={key} size="footnote" color="warning" weight="medium">
+        <Text key={key} size={SIZE.meta} color={TONE.caution} weight={medium}>
           ⚠ {text}
         </Text>
       )
 
       return (
-        <Box key={`${w.id}:row`} flexDirection="row" alignItems="flex-start" columnGap={1} minWidth={0}>
+        <Box key={`${w.id}:row`} flexDirection="row" alignItems="flex-start" columnGap={SPACE.inline} minWidth={0}>
           {dot(w, group)}
-          <Box key={`${w.id}:rows`} flexDirection="column" rowGap="xs" flexGrow={1} flexShrink={1} minWidth={0}>
+          <Box key={`${w.id}:rows`} flexDirection="column" rowGap={SPACE.line} flexGrow={1} flexShrink={1} minWidth={0}>
             {/* Never wraps: the name and what it says are cut, the buttons and time kept at the right */}
-            <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+            <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
               <Box flexShrink={1} minWidth={0}>
                 {nameButton(w, isOpen)}
               </Box>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {says !== '' && (
-                  <Text size="footnote" color={group === 'Needs you' ? 'error' : 'subtle'} weight={group === 'Needs you' ? 'semibold' : 'regular'} wrap="truncate-end">
+                  <Text size={SIZE.meta} color={group === 'Needs you' ? TONE.danger : TONE.muted} weight={group === 'Needs you' ? WEIGHT.strong : WEIGHT.regular} wrap="truncate-end">
                     {says}
                   </Text>
                 )}
               </Box>
               {isAttention && (
-                <Box flexDirection="row" columnGap={1} flexShrink={0}>
+                <Box flexDirection="row" columnGap={SPACE.inline} flexShrink={0}>
                   {buttons}
                 </Box>
               )}
               {since !== '' && (
                 <Box flexShrink={0}>
-                  <Text size="footnote" color="subtle" tabular>
+                  <Text size={SIZE.meta} color={TONE.muted} tabular>
                     {since}
                   </Text>
                 </Box>
@@ -1014,12 +1042,12 @@ export const register: Register = on => {
             </Box>
             {w.ask && questionRows(w, w.ask, color)}
             {meta.length > 0 && (
-              <Box key={`${w.id}:meta`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+              <Box key={`${w.id}:meta`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
                 {meta.flatMap((part, i) =>
                   i === 0
                     ? [part]
                     : [
-                        <Text key={`${w.id}:dot${i}`} size="footnote" color="subtle">
+                        <Text key={`${w.id}:dot${i}`} size={SIZE.meta} color={TONE.muted}>
                           ·
                         </Text>,
                         part,
@@ -1030,7 +1058,7 @@ export const register: Register = on => {
             {w.notes.map(n => warn(n.key, `${n.kind}: ${n.text}`))}
             {showsNeeds(w) && warn(`${w.id}:needs`, `needs: ${w.needsAction}`)}
             {Input !== undefined && v.composing === w.id && (
-              <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={1} minWidth={0}>
+              <Box key={`${w.id}:compose`} flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
                 {/* Its label names the field; a one-line field does not grow on the desktop, so no placeholder to hold */}
                 <Input
                   key={`${w.id}:draft`}
@@ -1048,38 +1076,44 @@ export const register: Register = on => {
                 <Button key={`${w.id}:cancel`} label="Cancel" plain onPress={() => void message(w, '')} />
               </Box>
             )}
+            {/* Its error state: a text given back after a refusal (the toast said why) says what to do */}
+            {isDesktop && v.composing === w.id && v.unsent[w.id] !== undefined && (
+              <Text key={`${w.id}:unsent`} size={SIZE.meta} color={TONE.caution}>
+                not sent: press Send to try again, or Cancel
+              </Text>
+            )}
             {isOpen && (
-              <Box key={`${w.id}:detail`} flexDirection="column" rowGap="xs" minWidth={0}>
+              <Box key={`${w.id}:detail`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
                 {w.name !== '' && w.title !== '' && w.title !== w.name && (
-                  <Text key={`${w.id}:title`} size="footnote" color="subtle" wrap="truncate-end">
+                  <Text key={`${w.id}:title`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
                     {w.title}
                   </Text>
                 )}
                 {w.branch !== '' && (
                   // Cut at its start, so its unique end shows
-                  <Text size="caption" color="subtle" mono wrap="truncate-start">
+                  <Text size={small} color={TONE.muted} mono wrap="truncate-start">
                     {w.branch}
                   </Text>
                 )}
                 {w.plan.length > 0 && taskList(w, color)}
                 {lastLines.slice(-MAX_LAST_LINES).map((line, i) => (
-                  <Text key={`${w.id}:line${i}`} size="footnote" dimColor wrap="truncate-end">
+                  <Text key={`${w.id}:line${i}`} size={SIZE.meta} {...faint} wrap="truncate-end">
                     {plainLine(line)}
                   </Text>
                 ))}
                 {/* No reply line left to show (e.g. only a marker): its turn's recap says what it did */}
                 {lastLines.length === 0 && (w.recap ?? '') !== '' && (
-                  <Text key={`${w.id}:recap`} size="footnote" dimColor wrap="wrap">
+                  <Text key={`${w.id}:recap`} size={SIZE.meta} {...faint} wrap="wrap">
                     {plainLine(w.recap ?? '')}
                   </Text>
                 )}
                 {delivery?.isDelivered === false && (
-                  <Text size="footnote" color="subtle">
+                  <Text size={SIZE.meta} color={TONE.muted}>
                     not delivered: {delivery.why}
                   </Text>
                 )}
                 {!isAttention && (
-                  <Box key={`${w.id}:actions`} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                  <Box key={`${w.id}:actions`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.inline}>
                     {buttons}
                   </Box>
                 )}
@@ -1092,11 +1126,14 @@ export const register: Register = on => {
 
     /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own) that opens to a line each: dot, name, task count, time. */
     const idleList = (workers: Worker[], sectionCount: number) => (
-      <Box key="idle" flexDirection="column" rowGap="xs" minWidth={0}>
+      <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
           <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
-            <Text size="footnote" wrap="truncate-end">
-              {`${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
+            <Text size={SIZE.meta} wrap="truncate-end">
+              {/* Open on the desktop, its lines below name them: the line counts them only */}
+              {v.idleOpen && isDesktop
+                ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
+                : `${v.idleOpen ? '▾' : '▸'} ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>
@@ -1105,19 +1142,19 @@ export const register: Register = on => {
             const done = w.plan.filter(s => s.status === 'completed').length
             const since = sinceOf(w)
             return (
-              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+              <Box key={`${w.id}:header`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
                 {dot(w, 'Idle')}
                 <Box flexShrink={1} minWidth={0}>
-                  {nameButton(w, false)}
+                  {nameButton(w, false, true)}
                 </Box>
                 <Box flexGrow={1} />
                 {w.plan.length > 0 && (
-                  <Text size="footnote" color="subtle" tabular>
+                  <Text size={SIZE.meta} color={TONE.muted} tabular>
                     {`${done}/${w.plan.length}`}
                   </Text>
                 )}
                 {since !== '' && (
-                  <Text size="footnote" color="subtle" tabular>
+                  <Text size={SIZE.meta} color={TONE.muted} tabular>
                     {since}
                   </Text>
                 )}
@@ -1134,17 +1171,17 @@ export const register: Register = on => {
     const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.details[w.id] === true
 
     return (
-      <Box flexDirection="column" gap="sm">
+      <Box flexDirection="column" gap={isDesktop ? SPACE.section : SPACE.block}>
         {b.error !== '' && notice('error', b.error, { mark: '⚠', color: 'error' }, b.error === NOT_DESKTOP ? undefined : `retries every ${PERIOD_MS / 1000} s`)}
         {b.warnings !== '' && (
           <Box key="warnings" flexDirection="column" minWidth={0}>
             {b.warnings.split('\n').filter(line => line.trim() !== '').map((line, i) => (
-              <Box key={`warning${i}`} flexDirection="row" columnGap={1} minWidth={0}>
-                <Text size="footnote" color="warning">
+              <Box key={`warning${i}`} flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
+                <Text size={SIZE.meta} color={TONE.caution}>
                   ⚠
                 </Text>
                 <Box flexShrink={1} minWidth={0}>
-                  <Text size="footnote" color="subtle" wrap="wrap">
+                  <Text size={SIZE.meta} color={TONE.muted} wrap="wrap">
                     {line.replace(WARNING_PREFIX, '')}
                   </Text>
                 </Box>
@@ -1158,12 +1195,12 @@ export const register: Register = on => {
           const quiet = workers.filter(w => !isFull(w, group))
           const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length > 0 ? [idleList(quiet, workers.length)] : [])]
           return (
-            <Box key={group} flexDirection="column" rowGap="xs">
-              <Box flexDirection="row" columnGap={1}>
-                <Text size="footnote" weight="semibold" color={GROUP_COLORS[group]}>
+            <Box key={group} flexDirection="column" rowGap={SPACE.line}>
+              <Box flexDirection="row" columnGap={SPACE.inline}>
+                <Text size={SIZE.meta} weight={WEIGHT.strong} color={sectionColor(group)}>
                   {group.toUpperCase()}
                 </Text>
-                <Text size="footnote" color="subtle" tabular>
+                <Text size={SIZE.meta} color={TONE.muted} tabular>
                   {workers.length}
                 </Text>
               </Box>
