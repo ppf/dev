@@ -291,6 +291,83 @@ func TestBoardRunningBlocked(t *testing.T) {
 	}
 }
 
+// A blocked verdict on a turn whose own end asks nothing (a plain wrap_up, then the bare IDLE marker) is the
+// app's mislabel: dropped. A question in the turn, a blocked wrap_up or none keeps it.
+func TestBoardSettledTurn(t *testing.T) {
+	wrap := func(id string, input map[string]any) map[string]any {
+		return assistant("m", map[string]any{"type": "tool_use", "id": id, "name": wrapUpTool, "input": input})
+	}
+	typed := func(s string) map[string]any { return map[string]any{"type": "user", "message": map[string]any{"content": s}} }
+	recap := "Second run: counted 18 internal packages. Report format chosen: per package."
+	// The demo worker's turns: a blocked ask, the person's reply, a plain wrap_up and the bare marker
+	answered := []any{
+		typed("Count the packages, then ask the report format."),
+		wrap("w1", map[string]any{"recap": "Counted.", "ask": "Which report format do you want?", "blocked": true,
+			"actions": []any{map[string]any{"label": "Per package"}, map[string]any{"label": "Total only"}}}),
+		toolResult("w1"),
+		assistant("m", text("The report format is still open: Per package or Total only?")),
+		typed("Per package"),
+		assistant("m", text("Reply: \"Per package\".")),
+		wrap("w2", map[string]any{"recap": recap}),
+		toolResult("w2"),
+		assistant("m", text("IDLE")),
+	}
+	cases := []struct {
+		name      string
+		rows      []any
+		isRunning bool
+		state     string
+		status    string
+		recap     string
+	}{
+		{"answered, running", answered, true, StateIdle, StatusIdle, recap},
+		{"answered, stopped", answered, false, StateStopped, StatusStopped, recap},
+		{"a question in the reply before the marker", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Which format do you want: per package or total?"}), toolResult("w1"),
+			assistant("m", text("Which format do you want?\n\nIDLE")),
+		}, true, StateBlocked, StatusIdle, "Which format do you want: per package or total?"},
+		{"a question in the recap alone", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Which format do you want? Counting is done."}), toolResult("w1"),
+			assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, "Which format do you want? Counting is done."},
+		{"a question in an earlier reply", []any{
+			typed("Go."), assistant("m", text("Which format do you want?")), wrap("w1", map[string]any{"recap": "Counted."}), toolResult("w1"),
+			assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, "Counted."},
+		{"a blocked wrap_up without an ask", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted.", "blocked": true}), toolResult("w1"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, "Counted."},
+		{"a wrap_up the app refused", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted."}), errorResult("w1"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, ""},
+		{"no wrap_up", []any{typed("Per package"), assistant("m", text("IDLE"))}, true, StateBlocked, StatusIdle, ""},
+		{"an earlier turn's wrap_up", []any{
+			typed("Go."), wrap("w1", map[string]any{"recap": "Counted."}), toolResult("w1"), typed("And now?"), assistant("m", text("IDLE")),
+		}, true, StateBlocked, StatusIdle, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := fixture(t)
+			if c.isRunning {
+				writeJSON(t, filepath.Join(p.Live, "3.json"), map[string]any{"pid": os.Getpid(), "sessionId": "cli-blocked", "status": "idle"})
+			}
+			write(t, filepath.Join(p.Projects, "-wt-blocked", "cli-blocked.jsonl"), lines(t, c.rows...))
+			workers, _, err := Board(p, boss, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := workers[1]
+			if w.State != c.state || w.Status != c.status || w.Recap != c.recap {
+				t.Errorf("state, status, recap = %s, %s, %q, want %s, %s, %q", w.State, w.Status, w.Recap, c.state, c.status, c.recap)
+			}
+			kept := c.state == StateBlocked
+			if (w.Verdict == StateBlocked) != kept || (w.Detail == "asks") != kept || (w.NeedsAction == "pick one") != kept {
+				t.Errorf("verdict, detail, needs = %q, %q, %q, want the app's kept: %v", w.Verdict, w.Detail, w.NeedsAction, kept)
+			}
+		})
+	}
+}
+
 func TestBoardReusedPID(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("process start times are read on macOS only")
@@ -328,7 +405,7 @@ func TestBoardJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"ask", "background", "branch", "context", "createdAt", "detail", "effort", "id", "lastActivityAt", "lastLines",
-		"model", "name", "needsAction", "notes", "plan", "prs", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
+		"model", "name", "needsAction", "notes", "plan", "prs", "recap", "since", "state", "status", "statusText", "title", "tool", "toolDescription", "verdict",
 		"worktree"}
 	for _, w := range got {
 		keys := slices.Sorted(maps.Keys(w))

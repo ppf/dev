@@ -138,19 +138,32 @@ func askInput(b block) (Pending, bool) {
 // wrapUpActions is how many of a wrap_up call's actions the app draws: it drops the rest.
 const wrapUpActions = 2
 
+// wrapUpInput is what the board reads of a wrap_up call's input.
+type wrapUpInput struct {
+	Recap   string `json:"recap"`
+	Ask     string `json:"ask"`
+	Blocked bool   `json:"blocked"`
+	Actions []struct {
+		Label  string `json:"label"`
+		Action string `json:"action"`
+	} `json:"actions"`
+}
+
+// readWrapUp reads a wrap_up call's input; the zero input when it does not parse.
+func readWrapUp(b block) wrapUpInput {
+	var in wrapUpInput
+	if json.Unmarshal(b.Input, &in) != nil {
+		return wrapUpInput{}
+	}
+	return in
+}
+
 // wrapUpAsk reads a wrap_up call's ask, its reply buttons the options (of the actions the app draws; app actions, e.g. commit, are no reply); ok=false for another tool or a wrap_up without one.
 func wrapUpAsk(b block) (Pending, bool) {
 	if b.Name != wrapUpTool {
 		return Pending{}, false
 	}
-	var in struct {
-		Ask     string `json:"ask"`
-		Blocked bool   `json:"blocked"`
-		Actions []struct {
-			Label  string `json:"label"`
-			Action string `json:"action"`
-		} `json:"actions"`
-	}
+	var in wrapUpInput
 	if json.Unmarshal(b.Input, &in) != nil || in.Ask == "" {
 		return Pending{}, false
 	}

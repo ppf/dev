@@ -51,6 +51,8 @@ export type Worker = {
   plan: Step[]
   /** Absent from a dev older than this mod. */
   ask?: Ask | null
+  /** Its turn's newest wrap_up recap, "" for none; absent from a dev older than this mod. */
+  recap?: string
 }
 
 /** The last poll: its workers, or why it failed or did not run; warnings are its stderr. */
