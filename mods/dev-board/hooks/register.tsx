@@ -774,33 +774,36 @@ export const register: Register = on => {
         <Box key={`${w.id}:plan`} flexDirection="column" minWidth={0}>
           {/* The label lines up with the steps' marks; the toggle, a button the surface pads, then collapsed the step at hand, cut to fit */}
           <Box key={`${w.id}:tasksRow`} flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
-            <Text size="footnote" color="subtle">
-              Tasks
-            </Text>
-            {e.surface === 'terminal' ? (
-              // Whole cells: a fifth of a row would draw nothing
-              <Box key={`${w.id}:bar`}>
-                <Text>
-                  <Text color="success">{'━'.repeat(cells)}</Text>
-                  <Text color="inactive" dimColor>
-                    {'─'.repeat(BAR_CELLS - cells)}
-                  </Text>
-                </Text>
-              </Box>
-            ) : (
-              <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
-                <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor={BAR_TRACK}>
-                  <Box flexGrow={done} backgroundColor="success" />
-                  <Box flexGrow={w.plan.length - done} />
-                </Box>
-              </Box>
-            )}
-            {/* No label: the desktop draws a label in place of the children */}
-            <Button key={`${w.id}:tasks`} plain dimColor onPress={() => void toggle(w.id)}>
-              <Text size="footnote" tabular>
-                {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
+            {/* Never squeezed: a desktop Text not cut wraps anywhere once squeezed */}
+            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={0}>
+              <Text size="footnote" color="subtle">
+                Tasks
               </Text>
-            </Button>
+              {e.surface === 'terminal' ? (
+                // Whole cells: a fifth of a row would draw nothing
+                <Box key={`${w.id}:bar`}>
+                  <Text>
+                    <Text color="success">{'━'.repeat(cells)}</Text>
+                    <Text color="inactive" dimColor>
+                      {'─'.repeat(BAR_CELLS - cells)}
+                    </Text>
+                  </Text>
+                </Box>
+              ) : (
+                <Box key={`${w.id}:bar`} flexDirection="row" alignItems="center" width={BAR_CELLS} height={1}>
+                  <Box flexDirection="row" flexGrow={1} height="20%" backgroundColor={BAR_TRACK}>
+                    <Box flexGrow={done} backgroundColor="success" />
+                    <Box flexGrow={w.plan.length - done} />
+                  </Box>
+                </Box>
+              )}
+              {/* No label: the desktop draws a label in place of the children */}
+              <Button key={`${w.id}:tasks`} plain dimColor onPress={() => void toggle(w.id)}>
+                <Text size="footnote" tabular>
+                  {`${done}/${w.plan.length} ${isExpanded ? '▾' : '▸'}`}
+                </Text>
+              </Button>
+            </Box>
             {!isExpanded && atHand && (
               <Box flexShrink={1} minWidth={0}>
                 {stepRow(`${w.id}:step${w.plan.indexOf(atHand)}`, atHand.status, atHand.content, color)}

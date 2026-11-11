@@ -456,10 +456,12 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     // Open, the count moves from the header to the list
     expect(await header(ui)).toBe('Worker A')
     // The label in the steps' text size, lined up with their marks; the toggle, its count and arrow; collapsed, the step at hand in a cell that shrinks
-    const row = (await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined
-    expect(row?.children.map(c => (c as { type?: string }).type)).toEqual(['Text', 'Box', 'Button', 'Box'])
-    expect(row?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
-    expect(row?.children[3]?.props).toMatchObject({ flexShrink: 1, minWidth: 0 })
+    const tasksRow = (await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined
+    expect(tasksRow?.props).toMatchObject({ flexDirection: 'row', minWidth: 0 })
+    expect(tasksRow?.children.map(c => c.props.flexShrink)).toEqual([0, 1])
+    expect(tasksRow?.children[1]?.props).toMatchObject({ minWidth: 0 })
+    const row = tasksRow?.children[0] as Cell | undefined
+    expect(row?.children.map(c => (c as { type?: string }).type)).toEqual(['Text', 'Box', 'Button'])
     expect((await ui.find({ key: 'local_a:plan' }))?.children.length).toBe(1)
     expect(row?.children[0]?.props).toMatchObject({ size: 'footnote', color: 'subtle' })
     expect(row?.children[0]?.children).toEqual(['Tasks'])
@@ -482,7 +484,7 @@ test('the task list: Tasks, a bar and its count above the steps; collapsed, the 
     await ui.press({ key: 'local_a:tasks' })
     expect((await ui.find({ type: 'Text', text: /^1\/3 ▾$/ }))?.text).toBeTruthy()
     // Expanded, the toggle ends the row, the steps under it
-    expect(((await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined)?.children.map(c => (c as { type?: string }).type)).toEqual(['Text', 'Box', 'Button'])
+    expect(((await ui.find({ key: 'local_a:plan' }))?.children[0] as Cell | undefined)?.children.length).toBe(1)
     // A row per step: its mark and its text in cells of their own, the text cut to one line
     const steps = await Promise.all(PLAN.map((_, i) => stepAt(ui, `local_a:step${i}`)))
     expect(steps.map(s => s.shrink)).toEqual([[0, 1], [0, 1], [0, 1]])
@@ -1185,7 +1187,7 @@ test('tiles shrink to the pane: the boxes the cut rows sit in may shrink below t
     expect((await ui.find({ key: id }))?.props).toMatchObject({ flexDirection: 'column', minWidth: 0 })
   }
   const boxes = await ui.findAll({ type: 'Box' })
-  // Each tile's card; the open one's rows, header row, title cell, meta row and its branch cell; the folded row and its title cell
+  // Each tile's card; the open one's rows, header row, title cell, status row and its status cell; the folded row and its title cell
   const shrinking = boxes.filter(b => b.props.borderStyle !== undefined || b.props.flexShrink === 1 || (b.props.flexDirection === 'row' && b.props.minWidth !== undefined))
   expect(shrinking.length).toBe(9)
   expect(shrinking.every(b => b.props.minWidth === 0)).toBe(true)
