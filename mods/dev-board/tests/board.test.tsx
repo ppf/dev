@@ -1368,29 +1368,57 @@ const DB = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [
 const FEATURES = { question: 'Which features?', header: 'Features', multiSelect: true, options: [{ label: 'Auth', description: 'sign-in' }, { label: 'Search', description: 'full text' }] }
 const asking = (ask: Worker['ask']) => worker({ state: 'busy', status: 'needs you', statusText: 'Which DB? (Postgres / Mongo)', ask })
 
-test('a question shows on its tile: header and question, its options buttons in one wrapping row, the first leading, their descriptions a caption under it', async ($, on) => {
+test('a question shows on its tile: header and question, its options one per row where any is described (button, then its description beside it), the first leading', async ($, on) => {
   await start($, on, ok([asking({ toolUseId: 'tu1', questions: [DB], askedAt: 1, answerable: true })]))
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /^DB$/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /^Which DB\?$/ }))?.text).toBeTruthy()
     const options = await ui.find({ key: 'local_a:q0:options' })
-    expect([options?.props.flexDirection, options?.props.flexWrap]).toEqual(['row', 'wrap'])
-    expect((options?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:q0:o0:pick', 'local_a:q0:o1:pick'])
+    expect(options?.props.flexDirection).toBe('column')
+    expect((options?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:q0:o0', 'local_a:q0:o1'])
     const pick = async (oi: number) => {
       const { label, variant } = (await ui.find({ key: `local_a:q0:o${oi}:pick` }))?.props ?? {}
       return [label, variant]
     }
     expect(await pick(0)).toEqual(['Postgres', 'primary'])
     expect(await pick(1)).toEqual(['Mongo', undefined])
-    // An option without a description is left out of the caption
-    const about = await ui.find({ type: 'Text', text: /relational/ })
-    expect([about?.text, about?.props.size, about?.props.color]).toEqual(['Postgres: relational', 'caption', 'subtle'])
+    // The description sits beside its option, the label not repeated; an option without one has no caption
+    const about = await ui.find({ type: 'Text', text: /^relational$/ })
+    expect([about?.text, about?.props.size, about?.props.color, about?.props.wrap]).toEqual(['relational', 'caption', 'subtle', 'truncate-end'])
+    expect(await ui.find({ type: 'Text', text: /Mongo/ })).toBeFalsy()
     // The question replaces the status row that says it in one line; one press answers it, so no Send
     expect(await ui.find({ type: 'Text', text: /Postgres \/ Mongo/ })).toBeFalsy()
     expect(await ui.find({ key: 'local_a:answer' })).toBeFalsy()
     await ui.unmount()
   }
+})
+
+const SHIP = { question: 'Ship it?', header: '', multiSelect: false, options: [{ label: 'Yes', description: '' }, { label: 'Yes, but slowly (recommended)', description: 'after review' }, { label: 'No (Recommended)', description: '' }] }
+
+test('a question without descriptions keeps one wrapping row of buttons', async ($, on) => {
+  await start($, on, ok([asking({ toolUseId: 'tu1', questions: [{ ...SHIP, options: SHIP.options.map(o => ({ ...o, description: '' })) }], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const options = await ui.find({ key: 'local_a:q0:options' })
+  expect([options?.props.flexDirection, options?.props.flexWrap]).toEqual(['row', 'wrap'])
+  expect((options?.children as { props: { key?: string } }[]).map(c => c.props.key)).toEqual(['local_a:q0:o0:pick', 'local_a:q0:o1:pick', 'local_a:q0:o2:pick'])
+  await ui.unmount()
+})
+
+test('a recommended option shows a star without its suffix, leads, and answers with its own label', async ($, on) => {
+  const { otherRuns } = await start($, on, ok([asking({ toolUseId: 'tu1', questions: [SHIP], askedAt: 1, answerable: true })]))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const pick = async (oi: number) => {
+    const { label, variant } = (await ui.find({ key: `local_a:q0:o${oi}:pick` }))?.props ?? {}
+    return [label, variant]
+  }
+  expect(await pick(0)).toEqual(['Yes', undefined])
+  expect(await pick(1)).toEqual(['★ Yes, but slowly', 'primary'])
+  expect(await pick(2)).toEqual(['★ No', undefined])
+  await ui.press({ key: 'local_a:q0:o2:pick' })
+  const answers = otherRuns.filter(r => r.argv[2] === 'answer')
+  expect(JSON.parse(answers[0]?.stdin ?? '')).toEqual({ 'Ship it?': 'No (Recommended)' })
+  await ui.unmount()
 })
 
 test('pressing an option answers the worker with that pick', async ($, on) => {

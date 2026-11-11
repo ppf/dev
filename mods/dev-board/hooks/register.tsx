@@ -35,6 +35,9 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
 const MAX_LAST_LINES = 2
 // The words a reply line listing a question's options may hold besides them, e.g. `Pick a reply: Per package, or Total only.`
 const LIST_WORDS = new Set(['pick', 'choose', 'select', 'reply', 'answer', 'one', 'of', 'a', 'an', 'the', 'or', 'and', 'either', 'with', 'please', 'which', 'do', 'you', 'want', 'prefer', 'should', 'i'])
+// An option label's `(Recommended)` suffix, which the board shows as a ★ before the label
+const RECOMMENDED = /\s*\(recommended\)\s*$/i
+
 // A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
 const RETAKE_MS = 10_000
 const PR_COLORS: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
@@ -633,7 +636,7 @@ export const register: Register = on => {
       await send($, ask('archive', w, 'dev delivered exited 0'), `archive of ${label(w)}`)
     }
 
-    /** The question a worker waits on: each question's header and text, its options as buttons in one wrapping row (their descriptions a caption under it), and Send where it takes more than one press; unanswerable from here, a note that the options open its session. */
+    /** The question a worker waits on: each question's header and text, its options as buttons in one wrapping row, or one per row with its description beside it where any has one, and Send where it takes more than one press; unanswerable from here, a note that the options open its session. */
     const questionRows = (w: Worker, a: Ask, color: string) => {
       const held = picksFor(a, picksRead[w.id])
       if (held?.isSent) {
@@ -653,7 +656,9 @@ export const register: Register = on => {
               if (q.multiSelect) return isChosen ? '☑ ' : '☐ '
               return isChosen ? '◉ ' : '○ '
             }
-            const described = q.options.filter(o => o.description !== '').map(o => `${o.label}: ${o.description}`).join(' · ')
+            const isDescribed = q.options.some(o => o.description !== '')
+            // One press: the recommended option leads (else the first), as in the app's own next-step box; toggles: the picked ones
+            const lead = Math.max(0, q.options.findIndex(o => RECOMMENDED.test(o.label)))
 
             return (
               <Box key={`${w.id}:q${qi}`} flexDirection="column" rowGap="xs" minWidth={0}>
@@ -666,21 +671,28 @@ export const register: Register = on => {
                   <Text weight="semibold">{q.question}</Text>
                 </Box>
                 {q.options.length > 0 && (
-                  <Box key={`${w.id}:q${qi}:options`} flexDirection="row" flexWrap="wrap" columnGap={1} rowGap="xs" minWidth={0}>
+                  <Box key={`${w.id}:q${qi}:options`} flexDirection={isDescribed ? 'column' : 'row'} flexWrap={isDescribed ? undefined : 'wrap'} columnGap={1} rowGap="xs" minWidth={0}>
                     {q.options.map((o, oi) => {
                       const isChosen = chosen.includes(o.label)
                       // Without the worker's mod watching, only its own dialog answers: the option opens it
                       const press = () => void (a.answerable || a.reply ? pick(w, a, q.question, o.label, q.multiSelect) : openSession(w))
-                      // One press: the first option leads, as in the app's own next-step box; toggles: the picked ones
-                      const isPrimary = isOnePress(a) ? oi === 0 : isChosen
-                      return <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${o.label}`} variant={isPrimary ? 'primary' : undefined} onPress={press} />
+                      const isPrimary = isOnePress(a) ? oi === lead : isChosen
+                      // The pick sent stays the option's own label, suffix included
+                      const shown = o.label.replace(RECOMMENDED, '')
+                      const button = <Button key={`${w.id}:q${qi}:o${oi}:pick`} label={`${mark(isChosen)}${shown === o.label ? '' : '★ '}${shown}`} variant={isPrimary ? 'primary' : undefined} onPress={press} />
+                      if (!isDescribed) return button
+                      return (
+                        <Box key={`${w.id}:q${qi}:o${oi}`} flexDirection="row" columnGap={1} alignItems="center" minWidth={0}>
+                          {button}
+                          {o.description !== '' && (
+                            <Text key={`${w.id}:q${qi}:o${oi}:about`} size="caption" color="subtle" wrap="truncate-end">
+                              {o.description}
+                            </Text>
+                          )}
+                        </Box>
+                      )
                     })}
                   </Box>
-                )}
-                {described !== '' && (
-                  <Text key={`${w.id}:q${qi}:about`} size="caption" color="subtle" wrap="wrap">
-                    {described}
-                  </Text>
                 )}
               </Box>
             )
