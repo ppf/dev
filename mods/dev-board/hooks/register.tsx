@@ -231,6 +231,9 @@ function paneTitle(workers: Worker[]): string {
 /** Whether the worker's question has options, its buttons until a reply is sent. */
 const hasOptions = (w: Worker) => w.ask?.questions.some(q => q.options.length > 0) === true
 
+/** Whether a worker may be archived: not running a turn, nor waiting on something that will wake it (its own `WAITING (…)` marker). */
+const canArchive = (w: Worker) => w.state !== 'busy' && w.status !== 'waiting'
+
 /** Whether the tile shows what a worker not running needs (a blocked one's status says it, a question's options ask it). */
 const showsNeeds = (w: Worker) => w.needsAction !== '' && w.state !== 'busy' && w.status !== 'blocked' && !hasOptions(w)
 
@@ -368,13 +371,13 @@ export const register: Register = on => {
     const reading = new Set<string>()
     /**
      * Reads what is due (not read for REFRESH_MS) of the open PRs' checks and the delivery of the workers with a PR
-     * not busy. A busy worker's delivery is dropped: what it does may undo it. Entries gone from the board go too.
+     * that may be archived. The delivery of a busy or waiting worker is dropped: what it does may undo it. Entries gone from the board go too.
      */
     const refresh = async (workers: Worker[]) => {
       const now = await $.clock.now()
       const due = (at: number | undefined, key: string) => !reading.has(key) && (at === undefined || now - at >= REFRESH_MS)
       const openPRs = workers.flatMap(w => w.prs.filter(pr => pr.state === 'OPEN'))
-      const candidates = workers.filter(w => w.prs.length > 0 && w.state !== 'busy' && w.worktree !== '')
+      const candidates = workers.filter(w => w.prs.length > 0 && canArchive(w) && w.worktree !== '')
       const keep = <T,>(m: Record<string, T>, keys: Set<string>) =>
         Object.keys(m).every(k => keys.has(k)) ? m : Object.fromEntries(Object.entries(m).filter(([k]) => keys.has(k)))
       const readChecks = await read($, checks)
@@ -617,6 +620,10 @@ export const register: Register = on => {
       return why === ''
     }
     const archive = async (w: Worker) => {
+      if (!canArchive(w)) {
+        await $.ui.toast(`${label(w)} not archived: ${w.state === 'busy' ? 'running a turn' : `waiting${w.statusText === '' ? '' : ` (${w.statusText})`}`}`)
+        return
+      }
       // Checked again: the last check may be a minute old
       const got = await deliveredCheck((argv, init) => $.process.run(argv, init), w.worktree)
       if (!got.isDelivered) {
@@ -822,7 +829,7 @@ export const register: Register = on => {
       const color = GROUP_COLORS[group]
       const done = w.plan.filter(s => s.status === 'completed').length
       const isExpanded = v.expanded.includes(w.id)
-      const delivery = w.state === 'busy' ? undefined : deliveredRead[w.id]
+      const delivery = canArchive(w) ? deliveredRead[w.id] : undefined
       const verdict = verdictLine(w)
       const isAttention = ATTENTION_GROUPS.includes(group)
       // No label: the desktop draws a label in place of the children, the whole title instead of the arrow
