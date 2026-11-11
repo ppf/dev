@@ -26,8 +26,8 @@ const SPACE = { inline: 1, line: 'xs', block: 'sm', section: 'md' } as const
 // The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
-// The dot says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop also its header, a question's header and the current step
-const DOT_COLORS = { 'Needs you': TONE.danger, Working: TONE.ok, Waiting: TONE.caution, Idle: TONE.muted } as const
+// A row's dot, by section: it says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop also its header, a question's header and the current step
+const SECTION_COLORS = { 'Needs you': TONE.danger, Working: TONE.ok, Waiting: TONE.caution, Idle: TONE.muted } as const
 // The sections whose rows ask to be looked at: only they carry their buttons on line 1
 const ATTENTION_GROUPS: readonly (typeof GROUPS)[number][] = ['Needs you', 'Waiting']
 const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
@@ -559,7 +559,7 @@ export const register: Register = on => {
     const faint = isDesktop ? { color: TONE.muted } : { dimColor: true }
     const small = isDesktop ? SIZE.meta : 'caption'
     const medium = isDesktop ? WEIGHT.strong : 'medium'
-    const sectionColor = (group: (typeof GROUPS)[number]) => (isDesktop ? DOT_COLORS : GROUP_COLORS)[group]
+    const sectionColor = (group: (typeof GROUPS)[number]) => (isDesktop ? SECTION_COLORS : GROUP_COLORS)[group]
     /** The pane's one message in place of rows: a glyph, its text and a dim hint, centred. */
     const notice = (key: string, text: string, glyph?: { mark: string; color: string }, hint?: string) => (
       <Box key={key} flexDirection="column" alignItems="center" paddingY={SPACE.block} minWidth={0}>
@@ -949,15 +949,16 @@ export const register: Register = on => {
     }
 
     // A stopped worker's dot is dimmer than an idle one's
-    const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' && !isDesktop ? 'inactive' : DOT_COLORS[group]}>●</Text>
+    const dot = (w: Worker, group: (typeof GROUPS)[number]) => <Text color={w.state === 'stopped' && !isDesktop ? 'inactive' : SECTION_COLORS[group]}>●</Text>
     const sinceOf = (w: Worker) => (w.since === '0m' ? 'now' : w.since)
     /**
      * The worker's name, the button that opens or closes its detail; no label, as the desktop draws a label in place of the children.
-     * A quiet one (the open idle line's) is muted and regular on the desktop, so it doesn't compete with the rows asking for the person.
+     * A quiet one (the open idle line's) is dim and regular on the desktop, so it doesn't compete with the rows asking for the person;
+     * a dim Button is the muted grey at rest and full under the pointer or the focus.
      */
     const nameButton = (w: Worker, isOpen: boolean, isQuiet = false) => (
-      <Button key={`${w.id}:fold`} plain onPress={() => void fold(w.id, !isOpen)}>
-        <Text weight={isQuiet && isDesktop ? WEIGHT.regular : WEIGHT.strong} {...(isQuiet && isDesktop ? { color: TONE.muted } : {})} wrap="truncate-end">
+      <Button key={`${w.id}:fold`} plain {...(isQuiet && isDesktop ? { dimColor: true } : {})} onPress={() => void fold(w.id, !isOpen)}>
+        <Text weight={isQuiet && isDesktop ? WEIGHT.regular : WEIGHT.strong} wrap="truncate-end">
           {label(w)}
         </Text>
       </Button>
@@ -1127,8 +1128,8 @@ export const register: Register = on => {
     const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
-          <Button key="idle:fold" plain dimColor={!isDesktop} onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
-            <Text size={SIZE.meta} {...(isDesktop ? { color: TONE.muted } : {})} wrap="truncate-end">
+          <Button key="idle:fold" plain dimColor onPress={() => void update($, view, s => ({ ...s, idleOpen: !s.idleOpen }))}>
+            <Text size={SIZE.meta} wrap="truncate-end">
               {/* Open on the desktop, its lines below name them: the line counts them only */}
               {v.idleOpen && isDesktop
                 ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`

@@ -986,18 +986,17 @@ test('idle and stopped workers share one line that opens to a line each; the res
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_i:fold' })).toBeFalsy()
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
-  // Muted, not dimmed, on the desktop
-  expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: false })
-  expect((await ui.find({ type: 'Text', text: '▸ Idle, Stopped' }))?.props.color).toBe('subtle')
+  expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
   for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
   }
   await ui.press({ key: 'idle:fold' })
   // Open, its lines name them: the line counts them only
   expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
-  // A line each: dot, name (muted, regular: they ask nothing), task count, time
+  // A line each: dot, name (dim, regular: they ask nothing), task count, time
   expect(await header(ui, 'local_i')).toBe('● Idle 1/1 15m')
-  expect((await ui.find({ type: 'Text', text: 'Idle' }))?.props).toMatchObject({ color: 'subtle', weight: 'regular' })
+  expect((await ui.find({ key: 'local_i:fold' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: 'Idle' }))?.props.weight).toBe('regular')
   expect(await ui.find({ key: 'local_i:open' })).toBeFalsy()
   // Its name opens its row with its detail
   await ui.press({ key: 'local_i:fold' })
@@ -2142,7 +2141,9 @@ test('the desktop draws from its tokens only: five colors, two sizes, two weight
   expect([...used('Text', 'size')].sort()).toEqual(['footnote'])
   expect([...used('Text', 'weight')].sort()).toEqual(['regular', 'semibold'])
   expect([...used('Text', 'dimColor')]).toEqual([false])
-  expect([...used('Button', 'dimColor')]).toEqual([false])
+  // A dim Button (muted at rest, full under the pointer) only on the quiet idle line: its toggle and names
+  const dimButtons = all.filter(el => el.type === 'Button' && el.props.dimColor === true).map(el => el.key)
+  expect(dimButtons.every(key => key === 'idle:fold' || ['local_i:fold', 'local_s:fold'].includes(key ?? ''))).toBe(true)
   for (const prop of ['gap', 'rowGap', 'columnGap', 'paddingY']) {
     expect([...used('Box', prop)].every(v => [1, 'xs', 'sm', 'md'].includes(v as string | number))).toBe(true)
   }
