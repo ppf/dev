@@ -163,8 +163,11 @@ func tail(path string, n int64) ([]byte, int64, error) {
 	return data, off, nil
 }
 
-// taskNotification is a background task's id and status in the notification Claude Code queues for it.
-var taskNotification = regexp.MustCompile(`(?s)<task-id>([^<]+)</task-id>.*?<status>([a-z_]+)</status>`)
+// taskID and taskStatus are a background task's id and status in the notification Claude Code queues for it.
+var (
+	taskID     = regexp.MustCompile(`<task-id>([^<]+)</task-id>`)
+	taskStatus = regexp.MustCompile(`<status>([a-z_]+)</status>`)
+)
 
 // endedStatuses are a task notification's statuses that end its task.
 var endedStatuses = map[string]bool{"completed": true, "failed": true, "killed": true, "stopped": true}
@@ -185,9 +188,10 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 				Content string `json:"content"`
 			}
 			if json.Unmarshal(line, &q) == nil {
-				for _, m := range taskNotification.FindAllStringSubmatch(q.Content, -1) {
-					if endedStatuses[m[2]] {
-						ended[m[1]] = true
+				for _, n := range strings.Split(q.Content, "<task-notification>")[1:] {
+					id, st := taskID.FindStringSubmatch(n), taskStatus.FindStringSubmatch(n)
+					if id != nil && st != nil && endedStatuses[st[1]] {
+						ended[id[1]] = true
 					}
 				}
 			}
@@ -245,7 +249,9 @@ func parseTranscript(data []byte) (transcript, []planOp) {
 			case r.Type == "user" && b.Type == "tool_result":
 				if i := slices.IndexFunc(pending, func(u block) bool { return u.ID == b.ToolUseID }); i >= 0 {
 					t.did = cmp.Or(description(pending[i]), t.did)
-					background(t.background, ended, pending[i].Name, r)
+					if !background(t.background, ended, pending[i].Name, r) {
+						t.broken++
+					}
 				}
 				pending = without(pending, b.ToolUseID)
 				t.answered[b.ToolUseID] = true
@@ -281,8 +287,8 @@ func description(b block) string {
 }
 
 // background notes in started the background task tool result row r of a name tool use started, and in ended the
-// one a TaskStop stopped (it queues no notification).
-func background(started map[string]time.Time, ended map[string]bool, name string, r row) {
+// one a TaskStop stopped (it queues no notification); false when the start's time does not parse.
+func background(started map[string]time.Time, ended map[string]bool, name string, r row) bool {
 	var res struct {
 		BackgroundTaskID string `json:"backgroundTaskId"`
 		IsAsync          bool   `json:"isAsync"`
@@ -291,19 +297,24 @@ func background(started map[string]time.Time, ended map[string]bool, name string
 	}
 	// Some tools' results are a string
 	if json.Unmarshal(r.ToolUseResult, &res) != nil {
-		return
+		return true
 	}
 	id := res.BackgroundTaskID
 	if res.IsAsync {
 		id = cmp.Or(id, res.AgentID)
 	}
-	if id != "" {
-		at, _ := time.Parse(time.RFC3339Nano, r.Timestamp)
-		started[id] = at
-	}
 	if name == "TaskStop" && res.TaskID != "" {
 		ended[res.TaskID] = true
 	}
+	if id == "" {
+		return true
+	}
+	at, err := time.Parse(time.RFC3339Nano, r.Timestamp)
+	if err != nil {
+		return false
+	}
+	started[id] = at
+	return true
 }
 
 // describedTools are the tools whose input's description says what the call does; others' (an MCP tool's issue

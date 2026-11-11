@@ -125,6 +125,17 @@ func TestParseTranscriptBackground(t *testing.T) {
 	if want := time.Date(2026, 11, 11, 10, 0, 2, 0, time.UTC); !got.background["b-run"].Equal(want) {
 		t.Errorf("b-run started %v, want %v", got.background["b-run"], want)
 	}
+	if got.broken != 0 {
+		t.Errorf("broken = %d, want 0", got.broken)
+	}
+	bad, _ := parseTranscript([]byte(lines(t,
+		assistant("claude-opus-5-5", described("u1", "Bash", "Watch CI")),
+		map[string]any{"type": "user", "timestamp": "yesterday", "toolUseResult": map[string]any{"backgroundTaskId": "b1"},
+			"message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": "u1", "content": "ok"}}}},
+	)))
+	if len(bad.background) != 0 || bad.broken != 1 {
+		t.Errorf("background, broken = %v, %d, want none and 1: a start whose time does not parse is reported", bad.background, bad.broken)
+	}
 	if got.said != "The build failed: reading its log." {
 		t.Errorf("said = %q, want the reply after the notification", got.said)
 	}
