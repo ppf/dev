@@ -163,8 +163,8 @@ func wrapUpAsk(b block) (Pending, bool) {
 	if b.Name != wrapUpTool {
 		return Pending{}, false
 	}
-	var in wrapUpInput
-	if json.Unmarshal(b.Input, &in) != nil || in.Ask == "" {
+	in := readWrapUp(b)
+	if in.Ask == "" {
 		return Pending{}, false
 	}
 	q := agent.Ask{Question: in.Ask, Options: []agent.Choice{}}
