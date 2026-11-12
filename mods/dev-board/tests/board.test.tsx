@@ -552,17 +552,17 @@ test('no task list: no bar, no count, no steps', async ($, on) => {
   await ui.unmount()
 })
 
-test('needs you sorts first, says what it asks, and the band counts it', async ($, on) => {
+test('needs you sorts below work in progress, says what it asks, and the band counts it', async ($, on) => {
   await start($, on, ok([
     worker({ state: 'busy', status: 'working', since: '12m' }),
     worker({ id: 'local_b', title: 'Worker B', state: 'busy', status: 'needs you', statusText: 'allow Bash: rm -rf bin', since: '5m' }),
   ]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const headers = (await ui.findAll({})).flatMap(el => (el.key?.endsWith(':header') ? [el.key] : []))
-  expect(headers).toEqual(['local_b:header', 'local_a:header'])
-  expect([await header(ui, 'local_b'), await header(ui)]).toEqual(['Worker B allow Bash: rm -rf bin 5m', 'Worker A working 12m'])
+  expect(headers).toEqual(['local_a:header', 'local_b:header'])
+  expect([await header(ui), await header(ui, 'local_b')]).toEqual(['Worker A working 12m', 'Worker B allow Bash: rm -rf bin 5m'])
   // A working worker between tools says so, its row kept
-  expect((await ui.findAll({ type: 'Text', text: /^(allow|needs you|working)/ })).map(t => t.text)).toEqual(['allow Bash: rm -rf bin', 'working'])
+  expect((await ui.findAll({ type: 'Text', text: /^(allow|needs you|working)/ })).map(t => t.text)).toEqual(['working', 'allow Bash: rm -rf bin'])
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   // The worker that needs you is not counted busy too
@@ -1038,7 +1038,7 @@ test('an idle worker with a health note keeps its own row, the note under it wit
 test('a status this mod does not know shows under Working', async ($, on) => {
   await start($, on, ok([worker({ state: 'busy', status: 'paused' as Worker['status'] })]))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.findAll({ type: 'Text', text: /^(WORKING$|paused)/ })).map(t => t.text)).toEqual(['WORKING', 'paused'])
+  expect((await ui.findAll({ type: 'Text', text: /^(WORK IN PROGRESS$|paused)/ })).map(t => t.text)).toEqual(['WORK IN PROGRESS', 'paused'])
   expect(await header(ui)).toBe('Worker A paused')
   await unfold(ui)
   expect(await ui.find({ key: 'local_a:open' })).toBeTruthy()
@@ -1117,24 +1117,24 @@ test('a detail opened or closed sticks across polls and status changes, per work
   await again.unmount()
 })
 
-test('sections group the workers by status, with counts, needs you first; empty ones hidden', async ($, on) => {
+test('sections group the workers by status, with counts, work in progress first, then needs you; empty ones hidden', async ($, on) => {
   let workers = BY_STATUS
   const { clock } = await start($, on, () => ok(workers))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   // Section headers, their counts and the rows' first lines, in order: a row by its name
   const rows = async () => {
-    const els = (await ui.findAll({})).filter(el => el.key?.endsWith(':header') || (el.type === 'Text' && /^(NEEDS YOU|WORKING|WAITING|IDLE|\d+)$/.test(el.text)))
+    const els = (await ui.findAll({})).filter(el => el.key?.endsWith(':header') || (el.type === 'Text' && /^(NEEDS YOU|WORK IN PROGRESS|WAITING|IDLE|\d+)$/.test(el.text)))
     return Promise.all(els.map(async el => (el.key === undefined ? el.text : (await header(ui, el.key.replace(/:header$/, '')))?.split(' ')[0])))
   }
   expect(await rows()).toEqual([
-    'NEEDS YOU',
-    '1',
-    'Needs',
-    'WORKING',
+    'WORK IN PROGRESS',
     '3',
     'Working',
     'Stuck',
     'Limited',
+    'NEEDS YOU',
+    '1',
+    'Needs',
     'WAITING',
     '3',
     'Waiting',
@@ -1148,7 +1148,7 @@ test('sections group the workers by status, with counts, needs you first; empty 
 
   workers = BY_STATUS.filter(w => w.status === 'idle' || w.status === 'working')
   await clock.advance(2000)
-  expect(await rows()).toEqual(['WORKING', '1', 'Working', 'IDLE', '1', '●'])
+  expect(await rows()).toEqual(['WORK IN PROGRESS', '1', 'Working', 'IDLE', '1', '●'])
   await ui.unmount()
 })
 
@@ -1998,16 +1998,18 @@ async function todoRows(ui: Mounted) {
   return block === undefined ? undefined : (block.children as El[]).map(row => readEl(row).join(' '))
 }
 
-test('the to do list shows above the sections: header, then a row per item, on every surface', async ($, on) => {
+test('the to do list shows below work in progress, above the other sections: header, then a row per item, on every surface', async ($, on) => {
   const { todoRuns, clock } = await start($, on, ok(WORKERS), { todo: todoRan(TODO), gh: VIEW_OPEN })
   expect(todoRuns[0]).toEqual(['dev', 'todo', '--json', '--boss', 'local_boss'])
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const pr = surface === 'desktop' ? '[PR #87 open]' : '○'
     expect(await todoRows(ui)).toEqual(['TO DO 3 · 1 on others updated 12m', '☐ Answer Vince in Slack', `☐ Merge PR #87 ${pr} #87`, '◌ Staging access for lw on Marek (Ops)'])
-    // Above the worker sections
+    // Work in progress first, then the list, then the other sections
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-    expect(texts.indexOf('Answer Vince in Slack')).toBeLessThan(texts.indexOf('WORKING'))
+    expect(texts.indexOf('WORK IN PROGRESS')).toBeGreaterThan(-1)
+    expect(texts.indexOf('WORK IN PROGRESS')).toBeLessThan(texts.indexOf('Answer Vince in Slack'))
+    expect(texts.indexOf('Answer Vince in Slack')).toBeLessThan(texts.indexOf('WAITING'))
     await ui.unmount()
   }
   // Its age follows the clock
@@ -2111,7 +2113,7 @@ async function paneWithoutTodo($: Engine, on: On, todo: Others['todo']) {
   return { texts, ...started }
 }
 
-const BOARD_TEXTS = ['WORKING', '1', '●', 'Worker A', 'Bash', '42%', 'WAITING', '1', '●', 'Worker B', 'blocked · pick one', 'PR #78', 'no checks reported', 'IDLE', '1', '●', 'Worker C']
+const BOARD_TEXTS = ['WORK IN PROGRESS', '1', '●', 'Worker A', 'Bash', '42%', 'WAITING', '1', '●', 'Worker B', 'blocked · pick one', 'PR #78', 'no checks reported', 'IDLE', '1', '●', 'Worker C']
 
 test('an empty list shows no block: the board as without one', async ($, on) => {
   const { texts, todoRuns } = await paneWithoutTodo($, on, todoRan([]))
@@ -2240,7 +2242,7 @@ test('the desktop draws from its tokens only: five colors, two sizes, two weight
   expect(all.find(el => el.type === 'Svg' && el.props.alt === 'PR #7 merged')?.props.source).toContain('#7B7B7B')
   // A section's header takes its dot's color: Working green, not the accent
   const header = (group: string) => all.find(el => el.type === 'Text' && el.text === group)?.props.color
-  expect(['NEEDS YOU', 'WORKING', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'success', 'warning', 'subtle'])
+  expect(['NEEDS YOU', 'WORK IN PROGRESS', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'success', 'warning', 'subtle'])
   await ui.unmount()
 })
 
@@ -2283,7 +2285,7 @@ test('the terminal and the phones keep their own looks: theme greys, a caption, 
   expect(used('Button', 'dimColor').has(true)).toBe(true)
   expect(all.find(el => el.type === 'Box' && el.props.gap !== undefined)?.props.gap).toBe('sm')
   const header = (group: string) => all.find(el => el.type === 'Text' && el.text === group)?.props.color
-  expect(['NEEDS YOU', 'WORKING', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'suggestion', 'warning', 'inactive'])
+  expect(['NEEDS YOU', 'WORK IN PROGRESS', 'WAITING', 'IDLE'].map(header)).toEqual(['error', 'suggestion', 'warning', 'inactive'])
   expect((await ui.find({ key: 'local_s:row' }))?.children[0]).toMatchObject({ props: { color: 'inactive' } })
   // Back as the one quiet worker: its line, no toggle, its name as a row's
   await ui.press({ key: 'local_s:fold' })
