@@ -261,10 +261,14 @@ function bossLineOf(messages: readonly SessionMessage[]): BossLine | null {
   return goal === '' && step === '' ? null : { goal, step }
 }
 
-/** Reads the boss's own line from its transcript, storing it when it changed. */
+/** Reads the boss's own line from its transcript, storing it when it changed; a failure is a debug line. */
 async function refreshBossLine($: EngineInterface) {
-  const got = bossLineOf(await $.session.messages())
-  if (JSON.stringify(got) !== JSON.stringify(await read($, bossLine))) await update($, bossLine, () => got)
+  try {
+    const got = bossLineOf(await $.session.messages())
+    if (JSON.stringify(got) !== JSON.stringify(await read($, bossLine))) await update($, bossLine, () => got)
+  } catch (err) {
+    $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' })
+  }
 }
 
 /** Sends the boss a prompt, saying in a toast whether it was queued; whether it was. */
@@ -454,7 +458,7 @@ export const register: Register = on => {
       return next(e)
     }
     await listenForReplies($, boss)
-    void refreshBossLine($).catch((err: unknown) => $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' }))
+    void refreshBossLine($)
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
@@ -617,11 +621,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The boss's own calls that change its line; a subagent's are not the boss's
+  // The boss's own calls that change its line, read while its board is open (/board reads it on opening); a subagent's are not the boss's
   for (const tool of [UPDATE_PLAN, WRAP_UP, MARK_CHAPTER]) {
     on('tool.call', { tool }, async ($, e, next) => {
       const done = await next(e)
-      if (e.agentId === undefined) void refreshBossLine($).catch((err: unknown) => $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' }))
+      if (e.agentId === undefined) {
+        void $.ui.panes().then(
+          panes => panes.some(p => p.id === PANE) && refreshBossLine($),
+          (err: unknown) => $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' }),
+        )
+      }
       return done
     })
   }
@@ -630,6 +639,7 @@ export const register: Register = on => {
   let isAskingBoss = false
   on('command.run', { command: 'board' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: paneTitle((await read($, board))?.workers ?? []) })
+    void refreshBossLine($)
     titled = undefined
     // Sent from a timer: one sent from this hook would wait on the turn the command holds, and the host refuses it.
     // Marked as the timer fires, so a timer that never fires leaves it to the next /board; a refused prompt is not retried

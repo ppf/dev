@@ -2244,10 +2244,10 @@ const PLAN_ITEMS = [
 ]
 
 /** Starts a boss whose transcript is `messages()`, with tool calls answered; the pane's boss line as read, undefined with none. */
-async function startBoss($: Engine, on: On, messages: () => unknown[]) {
+async function startBoss($: Engine, on: On, messages: () => unknown[], panes: () => UiPane[] = () => []) {
   on('session.messages', () => ({ value: messages() as never }))
   on('tool.call', () => ({ result: {} }))
-  const started = await start($, on, ok(WORKERS), { todo: todoRan(TODO) })
+  const started = await start($, on, ok(WORKERS), { todo: todoRan(TODO) }, {}, panes)
   const line = async () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
     const el = await ui.find({ key: 'boss' })
@@ -2284,9 +2284,25 @@ for (const [why, messages, read] of [
   })
 }
 
-test("the boss line follows the boss's own task list and chapter calls, not its subagents'", async ($, on) => {
+test("with its board open, the boss line follows the boss's own task list and chapter calls, not its subagents'; closed, /board reads it", async ($, on) => {
   let messages: unknown[] = []
-  const { line, clock } = await startBoss($, on, () => messages)
+  let panes: UiPane[] = []
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  submits(on)
+  collectToasts(on)
+  const { line, clock } = await startBoss($, on, () => messages, () => panes)
+  expect((await line()).read).toBeUndefined()
+  messages = [called('mcp__ccd_session__mark_chapter', { title: 'Closed' })]
+  await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Closed' })
+  await clock.settle()
+  expect((await line()).read).toBeUndefined()
+  expect(await runBoard($)).toBeTruthy()
+  await clock.settle()
+  expect((await line()).read).toBe('Closed')
+  panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
+  messages = []
+  await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Cleared' })
+  await clock.settle()
   expect((await line()).read).toBeUndefined()
   messages = [called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })]
   await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', agentId: 'a1', items: PLAN_ITEMS })
@@ -2309,7 +2325,8 @@ async function startFull($: Engine, on: On) {
     worker({ id: 'local_q', name: 'asker', state: 'busy', status: 'needs you', ask: { toolUseId: 'tu1', questions: [DB, FEATURES], askedAt: 1, answerable: true } }),
     worker({ id: 'local_o', name: 'noted', status: 'idle', needsAction: 'reply yes', notes: [STUCK], branch: 'feature/very/long/branch-name' }),
   ]
-  await start($, on, ok(workers), { gh: CHECKS, delivered: DELIVERED, todo: todoRan(TODO, 75, true) })
+  on('session.messages', () => ({ value: [called('mcp__ccd_session__mark_chapter', { title: 'Board owner state' }), called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })] as never }))
+  await start($, on, ok(workers), { gh: CHECKS, delivered: DELIVERED, todo: todoRan([...TODO, { id: 9, text: 'Pick a DB', on: 'asker', done: false }], 75, true) })
 }
 
 /** Opens everything a row can show: the idle line, each detail, a message field. */
