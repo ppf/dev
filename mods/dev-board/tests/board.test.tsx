@@ -2300,17 +2300,26 @@ test("with its board open, the boss line follows the boss's own task list and ch
   await clock.settle()
   expect((await line()).read).toBe('Closed')
   panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
-  messages = []
-  await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Cleared' })
+  messages = [...messages, called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })]
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: PLAN_ITEMS })
   await clock.settle()
-  expect((await line()).read).toBeUndefined()
+  expect((await line()).read).toBe('Closed ◐ Read the code')
+  // Its newest messages only: the chapter and the list set before them stay; a wrap_up ends the list
+  messages = [called('mcp__ccd_turn__update_plan', { advance: true }, true)]
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed ◐ Read the code')
+  messages = [called('mcp__ccd_turn__wrap_up', { recap: 'done' })]
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'done' })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed')
   messages = [called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })]
   await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', agentId: 'a1', items: PLAN_ITEMS })
   await clock.settle()
-  expect((await line()).read).toBeUndefined()
+  expect((await line()).read).toBe('Closed')
   await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: PLAN_ITEMS })
   await clock.settle()
-  expect((await line()).read).toBe('◐ Read the code')
+  expect((await line()).read).toBe('Closed ◐ Read the code')
   messages = [...messages, called('mcp__ccd_session__mark_chapter', { title: 'Verify' })]
   await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Verify' })
   await clock.settle()

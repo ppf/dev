@@ -230,16 +230,23 @@ function ownerOf(on: string, workers: Worker[]): Worker | undefined {
 /**
  * The boss's own line from its transcript: its latest chapter's title and the step its task list has in progress,
  * the list replayed as `internal/desktop/plan.go` does from its last items call (calls that failed change nothing); null for neither.
+ * The transcript read holds only its newest messages: a chapter or list set before them stays as `prior` had it, until a wrap_up ends the list.
  */
-function bossLineOf(messages: readonly SessionMessage[]): BossLine | null {
-  let goal = ''
+function bossLineOf(messages: readonly SessionMessage[], prior: BossLine | null): BossLine | null {
+  let goal = prior?.goal ?? ''
   let steps: Step[] = []
+  let hasItems = false
+  let isWrapped = false
   for (const use of messages.flatMap(m => m.toolUses)) {
     if (use.isError) continue
     const input = use.input
     if (use.tool === MARK_CHAPTER && typeof input.title === 'string') goal = input.title
-    if (use.tool === WRAP_UP) steps = steps.map(s => ({ ...s, status: 'completed' }))
+    if (use.tool === WRAP_UP) {
+      steps = steps.map(s => ({ ...s, status: 'completed' }))
+      isWrapped = true
+    }
     if (use.tool !== UPDATE_PLAN) continue
+    if (Array.isArray(input.items)) hasItems = true
     if (Array.isArray(input.items)) steps = (input.items as Step[]).map(s => ({ content: String(s?.content ?? ''), status: s?.status ?? 'pending' }))
     for (const n of Array.isArray(input.done) ? input.done : []) {
       const s = typeof n === 'number' ? steps[n - 1] : undefined
@@ -257,15 +264,16 @@ function bossLineOf(messages: readonly SessionMessage[]): BossLine | null {
       steps = steps.map(s => (s === start ? { ...s, status: 'in_progress' } : s.status === 'in_progress' ? { ...s, status: 'pending' } : s))
     }
   }
-  const step = steps.find(s => s.status === 'in_progress')?.content ?? ''
+  const step = hasItems ? (steps.find(s => s.status === 'in_progress')?.content ?? '') : isWrapped ? '' : (prior?.step ?? '')
   return goal === '' && step === '' ? null : { goal, step }
 }
 
 /** Reads the boss's own line from its transcript, storing it when it changed; a failure is a debug line. */
 async function refreshBossLine($: EngineInterface) {
   try {
-    const got = bossLineOf(await $.session.messages())
-    if (JSON.stringify(got) !== JSON.stringify(await read($, bossLine))) await update($, bossLine, () => got)
+    const prior = await read($, bossLine)
+    const got = bossLineOf(await $.session.messages(), prior)
+    if (JSON.stringify(got) !== JSON.stringify(prior)) await update($, bossLine, () => got)
   } catch (err) {
     $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' })
   }
