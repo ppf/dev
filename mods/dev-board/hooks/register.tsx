@@ -23,7 +23,7 @@ const SIZE = { body: 'body', meta: 'footnote' } as const
 const WEIGHT = { regular: 'regular', strong: 'semibold' } as const
 // Across a row (cells), between a row's lines, a notice's padding (off the desktop also the gap between blocks), between the to do list, warnings and sections
 const SPACE = { inline: 1, line: 'xs', block: 'sm', section: 'md' } as const
-// The pane's sections, in order (Working drawn above the to do list); idle workers without a row of their own (isFull) share one line
+// The pane's sections, in order; idle workers without a row of their own (isFull) share one line
 const GROUPS = ['Needs you', 'Working', 'Waiting', 'Idle'] as const
 const GROUP_COLORS = { 'Needs you': 'error', Working: 'suggestion', Waiting: 'warning', Idle: 'inactive' } as const
 // A row's dot, by section: it says the row's section, not the app's state, so a worker whose open dialog waits on the person is red, not busy's green; on the desktop also its header, a question's header and the current step
@@ -1220,25 +1220,6 @@ export const register: Register = on => {
     /** Whether a worker gets a full row: any but Idle, or an idle one asking for the person, being messaged or opened. */
     const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.details[w.id] === true
 
-    /** A section: its header (`WORK IN PROGRESS` for Working, else the group), its count, its rows. */
-    const section = ({ group, workers }: { group: (typeof GROUPS)[number]; workers: Worker[] }) => {
-      const quiet = workers.filter(w => !isFull(w, group))
-      const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length === 1 ? [idleRow(quiet[0] as Worker, false)] : quiet.length > 1 ? [idleList(quiet, workers.length)] : [])]
-      return (
-        <Box key={group} flexDirection="column" rowGap={SPACE.line}>
-          <Box flexDirection="row" columnGap={SPACE.inline}>
-            <Text size={SIZE.meta} weight={WEIGHT.strong} color={sectionColor(group)}>
-              {group === 'Working' ? 'WORK IN PROGRESS' : group.toUpperCase()}
-            </Text>
-            <Text size={SIZE.meta} color={TONE.muted} tabular>
-              {workers.length}
-            </Text>
-          </Box>
-          {items.flatMap((item, i) => (i === 0 ? [item] : [rule(`${group}:rule${i}`), item]))}
-        </Box>
-      )
-    }
-
     return (
       <Box flexDirection="column" gap={isDesktop ? SPACE.section : SPACE.block}>
         {b.error !== '' && notice('error', b.error, { mark: '⚠', color: 'error' }, b.error === NOT_DESKTOP ? undefined : `retries every ${PERIOD_MS / 1000} s`)}
@@ -1258,10 +1239,25 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        {sections.filter(s => s.group === 'Working').map(section)}
         {todoRead !== null && todoBlock(todoRead)}
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
-        {sections.filter(s => s.group !== 'Working').map(section)}
+        {sections.map(({ group, workers }) => {
+          const quiet = workers.filter(w => !isFull(w, group))
+          const items = [...workers.filter(w => isFull(w, group)).map(w => row(w, group, v.details[w.id] === true)), ...(quiet.length === 1 ? [idleRow(quiet[0] as Worker, false)] : quiet.length > 1 ? [idleList(quiet, workers.length)] : [])]
+          return (
+            <Box key={group} flexDirection="column" rowGap={SPACE.line}>
+              <Box flexDirection="row" columnGap={SPACE.inline}>
+                <Text size={SIZE.meta} weight={WEIGHT.strong} color={sectionColor(group)}>
+                  {group.toUpperCase()}
+                </Text>
+                <Text size={SIZE.meta} color={TONE.muted} tabular>
+                  {workers.length}
+                </Text>
+              </Box>
+              {items.flatMap((item, i) => (i === 0 ? [item] : [rule(`${group}:rule${i}`), item]))}
+            </Box>
+          )
+        })}
       </Box>
     )
   })
