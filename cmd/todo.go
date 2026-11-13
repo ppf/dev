@@ -50,7 +50,7 @@ coordinator's /clear; a ticked item shows ticked for a few seconds, then leaves.
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, link, done), updated (unix seconds), stale`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, link, done, until), updated (unix seconds), stale`)
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
 	return cmd
@@ -90,9 +90,11 @@ func newTodoSetCmd(boss *string) *cobra.Command {
 
 func newTodoAddCmd(boss *string) *cobra.Command {
 	var it todo.Item
+	var until string
+	var replaces int
 	cmd := &cobra.Command{
 		Use:   "add <item>",
-		Short: "Add an item; prints its number",
+		Short: "Add an item (or put it in place of an open one, --replaces); prints its number",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := todoStore(*boss)
@@ -104,6 +106,19 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return errors.New("empty item")
 			}
 			now := time.Now()
+			if until != "" {
+				t, err := todo.ParseUntil(until, now)
+				if err != nil {
+					return err
+				}
+				it.Until = t.Unix()
+			}
+			if cmd.Flags().Changed("replaces") {
+				if err := s.Replace(replaces, it, now); err != nil {
+					return err
+				}
+				return printCount(cmd.OutOrStdout(), s, "replaced "+strconv.Itoa(replaces)+" · ", now)
+			}
 			id, err := s.Add(it, now)
 			if err != nil {
 				return err
@@ -113,6 +128,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&it.On, "on", "", "who it waits on, when not the user (shown last)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
+	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the --on, --link, --until not given")
 	return cmd
 }
 
@@ -186,6 +203,8 @@ func todoStore(boss string) (todo.Store, error) {
 	return todo.Store{}, errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
 }
 
+var errDesktopWorker = errors.New("a worker another session started: the to do list is its boss's")
+
 // desktopTodo is the list of desktop app session id, which must have an app record and not be a worker.
 func desktopTodo(id string) (todo.Store, error) {
 	home, err := os.UserHomeDir()
@@ -197,7 +216,7 @@ func desktopTodo(id string) (todo.Store, error) {
 		return todo.Store{}, err
 	}
 	if worker {
-		return todo.Store{}, fmt.Errorf("%s is a worker another session started: the to do list is its boss's", id)
+		return todo.Store{}, fmt.Errorf("%s is %w", id, errDesktopWorker)
 	}
 	return todo.Desktop(id)
 }
@@ -231,6 +250,9 @@ func todoLine(it todo.Shown) string {
 	parts := []string{strconv.Itoa(it.ID), box, it.Text}
 	if it.On != "" {
 		parts = append(parts, "on "+it.On)
+	}
+	if it.Until != 0 {
+		parts = append(parts, "until "+time.Unix(it.Until, 0).Format(todo.UntilLayout))
 	}
 	if it.Link != "" {
 		parts = append(parts, it.Link)

@@ -192,3 +192,106 @@ func TestClean(t *testing.T) {
 		t.Errorf("Clean = %q", got)
 	}
 }
+
+// An item with Until ticks by itself at that time, shows ticked for doneShown, then leaves; it is no longer open
+// for done or Replace.
+func TestUntil(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "meeting", Until: now.Unix() + 60}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "b"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(t, s, now.Add(59*time.Second)); !slices.Equal(ids(l), []string{"1 meeting", "2 b"}) || l.Items[0].Until != now.Unix()+60 {
+		t.Errorf("before until: %+v", l)
+	}
+	if got := ids(read(t, s, now.Add(time.Minute))); !slices.Equal(got, []string{"1 meeting done", "2 b"}) {
+		t.Errorf("at until: %v", got)
+	}
+	if got := ids(read(t, s, now.Add(time.Minute+doneShown))); !slices.Equal(got, []string{"2 b"}) {
+		t.Errorf("doneShown after until: %v", got)
+	}
+	if err := s.Done([]int{1}, now.Add(time.Minute)); err == nil {
+		t.Error("done on an expired item: want an error")
+	}
+	if err := s.Replace(1, Item{Text: "x"}, now.Add(time.Minute)); err == nil {
+		t.Error("replace of an expired item: want an error")
+	}
+}
+
+// Replace puts the new item in the old one's place and number, keeping the On, Link and Until it doesn't set;
+// a number that isn't open changes nothing.
+func TestReplace(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if err := s.Set([]string{"a", "b", "c"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(2, Item{Text: "b2"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(read(t, s, now)); !slices.Equal(got, []string{"1 a", "2 b2", "3 c"}) {
+		t.Errorf("after replace: %v", got)
+	}
+	if _, err := s.Add(Item{Text: "d", On: "Marek", Link: "https://x/pull/1", Until: now.Unix() + 60}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(4, Item{Text: "d2", On: "Ola"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(9, Item{Text: "z"}, now); err == nil || err.Error() != "no open item 9" {
+		t.Errorf("err = %v, want no open item 9", err)
+	}
+	l := read(t, s, now)
+	if got := ids(l); !slices.Equal(got, []string{"1 a", "2 b2", "3 c", "4 d2 on Ola"}) || l.Items[3].Link != "https://x/pull/1" || l.Items[3].Until != now.Unix()+60 {
+		t.Errorf("after replace keeping link and until: %+v", l)
+	}
+	if id, err := s.Add(Item{Text: "e"}, now); err != nil || id != 5 {
+		t.Errorf("next add = %d, %v; want 5", id, err)
+	}
+}
+
+func TestParseUntil(t *testing.T) {
+	warsaw, err := time.LoadLocation("Europe/Warsaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 13, 14, 0, 0, 0, warsaw)
+	for _, tt := range []struct {
+		in, want string // want "" for an error
+	}{
+		{"15:30", "2026-11-13 15:30"},
+		{"2026-11-16", "2026-11-17 00:00"},
+		{"2026-11-16 10:00", "2026-11-16 10:00"},
+		{"13:59", ""},
+		{"2026-11-12", ""},
+		{"tomorrow", ""},
+		{"25:00", ""},
+	} {
+		got, err := ParseUntil(tt.in, now)
+		if tt.want == "" {
+			if err == nil {
+				t.Errorf("ParseUntil(%q) = %v, want an error", tt.in, got)
+			}
+			continue
+		}
+		if err != nil || got.Format("2006-01-02 15:04") != tt.want || got.Location() != warsaw {
+			t.Errorf("ParseUntil(%q) = %v, %v; want %s in Warsaw", tt.in, got, err, tt.want)
+		}
+	}
+}
+
+// Reminder lists the open items with their number, who they wait on and until when; "" with none open.
+func TestReminder(t *testing.T) {
+	l := List{Items: []Shown{{ID: 1, Text: "a"}, {ID: 2, Text: "b", Done: true}, {ID: 3, Text: "c", On: "Marek", Until: time.Date(2026, 11, 16, 10, 0, 0, 0, time.Local).Unix()}}}
+	want := "[dev todo] Your open to do list:\n1. a\n3. c (on Marek) (until 2026-11-16 10:00)\n" +
+		`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".`
+	if got := l.Reminder(); got != want {
+		t.Errorf("Reminder = %q, want %q", got, want)
+	}
+	if got := (List{Items: []Shown{{ID: 2, Text: "b", Done: true}}}).Reminder(); got != "" {
+		t.Errorf("all done: %q, want none", got)
+	}
+}

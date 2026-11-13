@@ -208,6 +208,9 @@ func cleanTail(s string) string {
 	return s
 }
 
+// Header starts every batch as the coordinator gets it.
+const Header = "[dev boss inbox]"
+
 // Batch is the notes taken from an inbox at once, and how many older ones were dropped.
 type Batch struct {
 	Notes   []Note
@@ -221,7 +224,7 @@ func (bt Batch) String() string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[dev boss inbox] %d worker update(s):", len(bt.Notes))
+	fmt.Fprintf(&b, "%s %d worker update(s):", Header, len(bt.Notes))
 	for _, n := range bt.Notes {
 		b.WriteString("\n- " + n.String())
 	}
