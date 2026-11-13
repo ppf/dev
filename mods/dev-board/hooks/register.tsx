@@ -104,7 +104,7 @@ const ICONS = iconsIn({ open: '#2DA44E', merged: '#8957E5', closed: '#E5484D', p
 // The tones' hues; a merged PR is done, so muted
 const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, closed: TONE_HEX.danger, passed: TONE_HEX.ok, failed: TONE_HEX.danger, running: TONE_HEX.caution })
 const ICON_PX = 12
-// The to do list's items shown before `+N more`, as on the tmux board; a link's PR number, as dev reads it
+// The to do list's items shown before its `▸ N more` toggle, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
 // Only GitHub's pull links can be read with gh
 const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
@@ -125,7 +125,7 @@ const MAX_SENT = 500
 const checks = atom({ plugin: 'dev-board', key: 'checks' } as const, {}, { shape: 'checks-1' })
 // By worker id
 const delivered = atom({ plugin: 'dev-board', key: 'delivered' } as const, {}, { shape: 'delivered-2' })
-const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: '', details: {}, unsent: {}, idleOpen: false }, { shape: 'view-4' })
+const view = atom({ plugin: 'dev-board', key: 'view' } as const, { composing: '', details: {}, unsent: {}, idleOpen: false, todoOpen: false }, { shape: 'view-5' })
 // Whether /board asked this session to be the boss, so it asks once per session
 const bossAsked = atom({ plugin: 'dev-board', key: 'bossAsked' } as const, false, { shape: 'boss-asked-1' })
 // The person's picks on the workers' questions, by worker id
@@ -1064,17 +1064,27 @@ export const register: Register = on => {
       </Box>
     )
 
-    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `+N more`. */
+    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▸ N more` that opens the rest (`▾ show fewer` open; the open header's `▾ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
     const todoBlock = (t: Todo) => {
       const open = t.items.filter(it => !it.done)
       const onOthers = open.filter(it => it.on).length
-      const shownItems = t.items.slice(0, TODO_SHOWN)
+      const shownItems = v.todoOpen ? t.items : t.items.slice(0, TODO_SHOWN)
+      const foldable = t.items.length > TODO_SHOWN
+      const toggleTodo = () => void update($, view, s => ({ ...s, todoOpen: !s.todoOpen }))
       return (
         <Box key="todo" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
           <Box key="todo:head" flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
-            <Text size={SIZE.meta} weight={WEIGHT.strong}>
-              TO DO
-            </Text>
+            {foldable && v.todoOpen ? (
+              <Button key="todo:head:fold" plain onPress={toggleTodo}>
+                <Text size={SIZE.meta} weight={WEIGHT.strong}>
+                  ▾ TO DO
+                </Text>
+              </Button>
+            ) : (
+              <Text size={SIZE.meta} weight={WEIGHT.strong}>
+                TO DO
+              </Text>
+            )}
             <Text size={SIZE.meta} color={TONE.muted} tabular>
               {open.length}
             </Text>
@@ -1089,10 +1099,14 @@ export const register: Register = on => {
             </Text>
           </Box>
           {shownItems.map(todoRow)}
-          {t.items.length > shownItems.length && (
-            <Text key="todo:more" size={SIZE.meta} color={TONE.muted}>
-              {`+${t.items.length - shownItems.length} more`}
-            </Text>
+          {foldable && (
+            <Box key="todo:more" flexDirection="row" minWidth={0}>
+              <Button key="todo:fold" plain dimColor onPress={toggleTodo}>
+                <Text size={SIZE.meta} wrap="truncate-end">
+                  {v.todoOpen ? '▾ show fewer' : `▸ ${t.items.length - TODO_SHOWN} more`}
+                </Text>
+              </Button>
+            </Box>
           )}
         </Box>
       )
