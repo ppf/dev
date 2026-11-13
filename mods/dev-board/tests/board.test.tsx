@@ -2063,11 +2063,30 @@ test("an item's link opens as the board's PR links do: a PR its icon and number,
   await ui.unmount()
 })
 
-test('nine items: the first five, then +4 more', async ($, on) => {
+test('nine items: the first five, then a toggle that opens the rest and folds them again', async ($, on) => {
   const nine = Array.from({ length: 9 }, (_, i) => ({ id: i + 1, text: `Item ${i + 1}`, done: false }))
   await start($, on, ok(WORKERS), { todo: todoRan(nine) })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '▸ 4 more'])
+    expect(await ui.find({ key: 'todo:head:fold' })).toBeFalsy()
+    expect((await ui.find({ key: 'todo:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
+    await ui.press({ key: 'todo:fold' })
+    expect((await todoRows(ui))?.slice(0, 2)).toEqual(['▾ TO DO 9 updated 12m', '☐ Item 1'])
+    expect((await todoRows(ui))?.slice(-2)).toEqual(['☐ Item 9', '▾ show fewer'])
+    // The open header folds it too
+    await ui.press({ key: 'todo:head:fold' })
+    expect((await todoRows(ui))?.at(-1)).toBe('▸ 4 more')
+    await ui.unmount()
+  }
+})
+
+test('a list of five or fewer has no toggle', async ($, on) => {
+  const five = Array.from({ length: 5 }, (_, i) => ({ id: i + 1, text: `Item ${i + 1}`, done: false }))
+  await start($, on, ok(WORKERS), { todo: todoRan(five) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '+4 more'])
+  expect(await ui.find({ key: 'todo:fold' })).toBeFalsy()
+  expect(await ui.find({ key: 'todo:head:fold' })).toBeFalsy()
   await ui.unmount()
 })
 
