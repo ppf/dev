@@ -133,3 +133,12 @@ func firstDiff(a, b string) string {
 	}
 	return ""
 }
+
+// A boss that writes a worker's state into an item's text makes it look like the user's own.
+func TestTodoOwnerRule(t *testing.T) {
+	for name, text := range byName {
+		if strings.Contains(text, "dev todo") && !strings.Contains(text, "add --on <worker name>") {
+			t.Errorf("%s/SKILL.md: dev todo rule without --on for a worker's item", name)
+		}
+	}
+}

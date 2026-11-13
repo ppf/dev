@@ -79,6 +79,9 @@ export type TodoItem = { id: number; text: string; on?: string; link?: string; d
 /** The boss's to do list as last read: its items in dev's order (the person's first, then those on others), how long ago it changed (`12m`), whether it is stale (unchanged an hour). */
 export type Todo = { items: TodoItem[]; age: string; stale: boolean }
 
+/** The boss session's own line: its latest chapter title and its task list's current step, each '' for none. */
+export type BossLine = { goal: string; step: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'dev-board': {
@@ -92,6 +95,7 @@ declare module 'claude-code' {
       replyTo: Shaped<string>
       todo: Shaped<Todo | null>
       linkStates: Shaped<Record<string, LinkState>>
+      bossLine: Shaped<BossLine | null>
     }
   }
 }
