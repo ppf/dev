@@ -2196,6 +2196,136 @@ test('a list with an item this mod does not read shows no block', async ($, on) 
   await ui.unmount()
 })
 
+test("a to do item on a worker on the board shows the worker's dot and state, its name opening the worker's row", async ($, on) => {
+  const workers = [
+    worker({ id: 'local_c', name: 'companion-1000', state: 'busy', status: 'working' }),
+    worker({ id: 'local_i', name: 'docs', status: 'idle' }),
+    worker({ id: 'local_j', name: 'other', status: 'idle' }),
+  ]
+  const items: TodoItem[] = [
+    { id: 1, text: 'Rework companion 10:00', on: ' Companion-1000', done: false },
+    { id: 2, text: 'Read the docs PR', on: 'docs', done: false },
+    { id: 3, text: 'Staging access for lw', on: 'Marek (Ops)', done: false },
+    { id: 4, text: 'Approve the deploy', done: false },
+  ]
+  await start($, on, ok(workers), { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual([
+    'TO DO 4 · 3 on others updated 12m',
+    '◌ Rework companion 10:00 ● companion-1000 · working',
+    '◌ Read the docs PR ● docs · idle',
+    '◌ Staging access for lw on Marek (Ops)',
+    '☐ Approve the deploy',
+  ])
+  const dots = ((await ui.findAll({ type: 'Text', text: '●' })) as { props: Record<string, unknown> }[]).map(el => el.props.color)
+  expect(dots.slice(0, 2)).toEqual(['success', 'subtle'])
+  await ui.press({ key: 'todo:item1:owner' })
+  expect(await ui.find({ key: 'local_c:detail' })).toBeTruthy()
+  // An idle worker in the shared idle line gets its row, open
+  expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
+  await ui.press({ key: 'todo:item2:owner' })
+  expect(await ui.find({ key: 'local_i:detail' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a ticked item on a worker shows ticked, with no live state', async ($, on) => {
+  await start($, on, ok([worker({ name: 'companion-1000', state: 'busy', status: 'working' })]), { todo: todoRan([{ id: 1, text: 'Rework companion', on: 'companion-1000', done: true }]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await todoRows(ui))?.[1]).toBe('☑ Rework companion on companion-1000')
+  await ui.unmount()
+})
+
+/** An assistant message calling one tool; `isError` for a call that failed. */
+const called = (tool: string, input: Record<string, unknown>, isError = false) => ({ role: 'assistant' as const, text: '', toolUses: [{ tool_use_id: tool, tool, input, ...(isError ? { isError: true as const } : {}) }] })
+const PLAN_ITEMS = [
+  { content: 'Read the code', status: 'in_progress' },
+  { content: 'Write the fix', status: 'pending' },
+  { content: 'Run the tests', status: 'pending' },
+]
+
+/** Starts a boss whose transcript is `messages()`, with tool calls answered; the pane's boss line as read, undefined with none. */
+async function startBoss($: Engine, on: On, messages: () => unknown[], panes: () => UiPane[] = () => []) {
+  on('session.messages', () => ({ value: messages() as never }))
+  on('tool.call', () => ({ result: {} }))
+  const started = await start($, on, ok(WORKERS), { todo: todoRan(TODO) }, {}, panes)
+  const line = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const el = await ui.find({ key: 'boss' })
+    const read = el === undefined ? undefined : readEl(el as El).join(' ')
+    const keys = ((await ui.findAll({})) as { key?: string }[]).map(e => e.key)
+    await ui.unmount()
+    return { read, isAboveTodo: el === undefined || keys.indexOf('boss') < keys.indexOf('todo') }
+  }
+  return { ...started, line }
+}
+
+test("the boss's own line tops the board: its chapter, then the step its task list is on", async ($, on) => {
+  const { line } = await startBoss($, on, () => [
+    called('mcp__ccd_session__mark_chapter', { title: 'Old chapter' }),
+    called('mcp__ccd_session__mark_chapter', { title: 'Board owner state' }),
+    called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS, scope: 'first_task' }),
+    called('mcp__ccd_turn__update_plan', { advance: true }),
+    // Refused: changes nothing
+    called('mcp__ccd_turn__update_plan', { advance: true }, true),
+  ])
+  expect(await line()).toEqual({ read: 'Board owner state ◐ Write the fix', isAboveTodo: true })
+})
+
+for (const [why, messages, read] of [
+  ['done and start move the current step', [called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS }), called('mcp__ccd_turn__update_plan', { done: [1], start: 3 })], '◐ Run the tests'],
+  ['wrap_up checks the list off: the chapter alone', [called('mcp__ccd_session__mark_chapter', { title: 'Fix' }), called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS }), called('mcp__ccd_turn__wrap_up', { recap: 'done' })], 'Fix'],
+  ['a new items call replaces the list', [called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS }), called('mcp__ccd_turn__update_plan', { items: [{ content: 'Next', status: 'in_progress' }] })], '◐ Next'],
+  ['advance past the last step leaves none current', [called('mcp__ccd_turn__update_plan', { items: [{ content: 'Only', status: 'in_progress' }] }), called('mcp__ccd_turn__update_plan', { advance: true })], undefined],
+  ['no chapter and no list: no line', [], undefined],
+] as const) {
+  test(`the boss line: ${why}`, async ($, on) => {
+    const { line } = await startBoss($, on, () => [...messages])
+    expect((await line()).read).toBe(read)
+  })
+}
+
+test("with its board open, the boss line follows the boss's own task list and chapter calls, not its subagents'; closed, /board reads it", async ($, on) => {
+  let messages: unknown[] = []
+  let panes: UiPane[] = []
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  submits(on)
+  collectToasts(on)
+  const { line, clock } = await startBoss($, on, () => messages, () => panes)
+  expect((await line()).read).toBeUndefined()
+  messages = [called('mcp__ccd_session__mark_chapter', { title: 'Closed' })]
+  await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Closed' })
+  await clock.settle()
+  expect((await line()).read).toBeUndefined()
+  expect(await runBoard($)).toBeTruthy()
+  await clock.settle()
+  expect((await line()).read).toBe('Closed')
+  panes = [{ id: 'board', title: 'Workers', isShown: true, isFocused: false, isPlaced: true }]
+  messages = [...messages, called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })]
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: PLAN_ITEMS })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed ◐ Read the code')
+  // Its newest messages only: the chapter and the list set before them stay; a wrap_up ends the list
+  messages = [called('mcp__ccd_turn__update_plan', { advance: true }, true)]
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed ◐ Read the code')
+  messages = [called('mcp__ccd_turn__wrap_up', { recap: 'done' })]
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'done' })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed')
+  messages = [called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })]
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', agentId: 'a1', items: PLAN_ITEMS })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed')
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: PLAN_ITEMS })
+  await clock.settle()
+  expect((await line()).read).toBe('Closed ◐ Read the code')
+  messages = [...messages, called('mcp__ccd_session__mark_chapter', { title: 'Verify' })]
+  await $.tool.call({ tool: 'mcp__ccd_session__mark_chapter', title: 'Verify' })
+  await clock.settle()
+  expect((await line()).read).toBe('Verify ◐ Read the code')
+})
+
 /** A board with every part the desktop draws: each section, PRs of each state with CI, a task list, notes, a need, a question, the to do list. */
 async function startFull($: Engine, on: On) {
   const prs = [OPEN_PR, { number: 7, url: 'https://github.com/o/r/pull/7', state: 'MERGED' }, { number: 9, url: 'https://github.com/o/r/pull/9', state: 'CLOSED' }]
@@ -2204,7 +2334,8 @@ async function startFull($: Engine, on: On) {
     worker({ id: 'local_q', name: 'asker', state: 'busy', status: 'needs you', ask: { toolUseId: 'tu1', questions: [DB, FEATURES], askedAt: 1, answerable: true } }),
     worker({ id: 'local_o', name: 'noted', status: 'idle', needsAction: 'reply yes', notes: [STUCK], branch: 'feature/very/long/branch-name' }),
   ]
-  await start($, on, ok(workers), { gh: CHECKS, delivered: DELIVERED, todo: todoRan(TODO, 75, true) })
+  on('session.messages', () => ({ value: [called('mcp__ccd_session__mark_chapter', { title: 'Board owner state' }), called('mcp__ccd_turn__update_plan', { items: PLAN_ITEMS })] as never }))
+  await start($, on, ok(workers), { gh: CHECKS, delivered: DELIVERED, todo: todoRan([...TODO, { id: 9, text: 'Pick a DB', on: 'asker', done: false }], 75, true) })
 }
 
 /** Opens everything a row can show: the idle line, each detail, a message field. */

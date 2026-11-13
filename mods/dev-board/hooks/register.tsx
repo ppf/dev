@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, SessionMessage } from 'claude-code'
 
-import type { Ask, Board, Checks, Delivered, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
+import type { Ask, Board, BossLine, Checks, Delivered, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
 import { registerAsk } from './ask'
 import { listenForReplies, registerReply, writeReply } from './reply'
 
@@ -109,6 +109,10 @@ const TODO_SHOWN = 5
 // Only GitHub's pull links can be read with gh
 const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
 const PR_LINK = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/
+// The desktop app's tools the boss's own line is read from: update_plan sets and moves its task list, wrap_up checks it off, mark_chapter names what it works on
+const UPDATE_PLAN = 'mcp__ccd_turn__update_plan'
+const WRAP_UP = 'mcp__ccd_turn__wrap_up'
+const MARK_CHAPTER = 'mcp__ccd_session__mark_chapter'
 
 type Run = (argv: string[], init?: { timeoutMs?: number; stdin?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
@@ -130,6 +134,8 @@ const picks = atom({ plugin: 'dev-board', key: 'picks' } as const, {}, { shape: 
 const todo = atom({ plugin: 'dev-board', key: 'todo' } as const, null, { shape: 'todo-1' })
 // The state of each to do item's PR link as `gh pr view` last said, by URL; '' when it could not be read
 const linkStates = atom({ plugin: 'dev-board', key: 'linkStates' } as const, {}, { shape: 'link-states-1' })
+// The boss session's own line, null when it has neither a chapter nor a current step
+const bossLine = atom({ plugin: 'dev-board', key: 'bossLine' } as const, null, { shape: 'boss-line-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -211,6 +217,67 @@ async function prState(run: Run, url: string): Promise<string> {
 }
 
 const label = (w: Worker) => w.name || w.title
+
+/** A worker's section; a status a newer dev adds counts as Working rather than nowhere. */
+const groupOf = (w: Worker) => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working')
+
+/** The worker a to do item's `on` names: its board label, name or title, case and spaces aside. */
+function ownerOf(on: string, workers: Worker[]): Worker | undefined {
+  const key = on.trim().toLowerCase()
+  return workers.find(w => [label(w), w.name, w.title].some(n => n !== '' && n.trim().toLowerCase() === key))
+}
+
+/**
+ * The boss's own line from its transcript: its latest chapter's title and the step its task list has in progress,
+ * the list replayed as `internal/desktop/plan.go` does from its last items call (calls that failed change nothing); null for neither.
+ * The transcript read holds only its newest messages: a chapter or list set before them stays as `prior` had it, until a wrap_up ends the list.
+ */
+function bossLineOf(messages: readonly SessionMessage[], prior: BossLine | null): BossLine | null {
+  let goal = prior?.goal ?? ''
+  let steps: Step[] = []
+  let hasItems = false
+  let isWrapped = false
+  for (const use of messages.flatMap(m => m.toolUses)) {
+    if (use.isError) continue
+    const input = use.input
+    if (use.tool === MARK_CHAPTER && typeof input.title === 'string') goal = input.title
+    if (use.tool === WRAP_UP) {
+      steps = steps.map(s => ({ ...s, status: 'completed' }))
+      isWrapped = true
+    }
+    if (use.tool !== UPDATE_PLAN) continue
+    if (Array.isArray(input.items)) hasItems = true
+    if (Array.isArray(input.items)) steps = (input.items as Step[]).map(s => ({ content: String(s?.content ?? ''), status: s?.status ?? 'pending' }))
+    for (const n of Array.isArray(input.done) ? input.done : []) {
+      const s = typeof n === 'number' ? steps[n - 1] : undefined
+      if (s) s.status = 'completed'
+    }
+    if (input.advance === true) {
+      const current = steps.findIndex(s => s.status === 'in_progress')
+      if (current >= 0) (steps[current] as Step).status = 'completed'
+      const next = steps.findIndex((s, i) => i > current && s.status === 'pending')
+      if (next >= 0) (steps[next] as Step).status = 'in_progress'
+    }
+    const start = typeof input.start === 'number' ? steps[input.start - 1] : undefined
+    if (start) {
+      // One step runs at a time
+      steps = steps.map(s => (s === start ? { ...s, status: 'in_progress' } : s.status === 'in_progress' ? { ...s, status: 'pending' } : s))
+    }
+  }
+  const step = hasItems ? (steps.find(s => s.status === 'in_progress')?.content ?? '') : isWrapped ? '' : (prior?.step ?? '')
+  return goal === '' && step === '' ? null : { goal, step }
+}
+
+/** Reads the boss's own line from its transcript, storing it when it changed; a failure is a debug line. */
+async function refreshBossLine($: EngineInterface) {
+  try {
+    const prior = await read($, bossLine)
+    const got = bossLineOf(await $.session.messages(), prior)
+    if (JSON.stringify(got) !== JSON.stringify(prior)) await update($, bossLine, () => got)
+  } catch (err) {
+    $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' })
+  }
+}
 
 /** Sends the boss a prompt, saying in a toast whether it was queued; whether it was. */
 async function send($: EngineInterface, text: string, what: string): Promise<boolean> {
@@ -399,6 +466,7 @@ export const register: Register = on => {
       return next(e)
     }
     await listenForReplies($, boss)
+    void refreshBossLine($)
     const run: Run = (argv, init) => $.process.run(argv, init)
     let isPolling = false
     let last = ''
@@ -561,10 +629,25 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The boss's own calls that change its line, read while its board is open (/board reads it on opening); a subagent's are not the boss's
+  for (const tool of [UPDATE_PLAN, WRAP_UP, MARK_CHAPTER]) {
+    on('tool.call', { tool }, async ($, e, next) => {
+      const done = await next(e)
+      if (e.agentId === undefined) {
+        void $.ui.panes().then(
+          panes => panes.some(p => p.id === PANE) && refreshBossLine($),
+          (err: unknown) => $.ui.log(`dev-board: boss line not read: ${errorText(err)}`, { to: 'debug' }),
+        )
+      }
+      return done
+    })
+  }
+
   // Whether a boss prompt waits on its timer; a reload cancels both
   let isAskingBoss = false
   on('command.run', { command: 'board' }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: paneTitle((await read($, board))?.workers ?? []) })
+    void refreshBossLine($)
     titled = undefined
     // Sent from a timer: one sent from this hook would wait on the turn the command holds, and the host refuses it.
     // Marked as the timer fires, so a timer that never fires leaves it to the next /board; a refused prompt is not retried
@@ -616,6 +699,7 @@ export const register: Register = on => {
     const picksRead = await read($, picks)
     const todoRead = await read($, todo)
     const linkStatesRead = await read($, linkStates)
+    const bossLineRead = await read($, bossLine)
 
     const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
@@ -911,13 +995,14 @@ export const register: Register = on => {
       )
     }
 
-    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on, else its link (a PR's icon and number). */
+    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on (a worker on the board with its section's dot and state, opening its row), else its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
       // No icon until the state is read, or when it could not be
       const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
       const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
+      const owner = it.on && !it.done ? ownerOf(it.on, b.workers) : undefined
       return (
         <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
@@ -930,7 +1015,16 @@ export const register: Register = on => {
               {it.text}
             </Text>
           </Box>
-          {it.on ? (
+          {owner !== undefined ? (
+            <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={1} minWidth={0}>
+              {dot(owner, groupOf(owner))}
+              <Button key={`todo:item${it.id}:owner`} plain dimColor={!isDesktop} onPress={() => void fold(owner.id, true)}>
+                <Text size={SIZE.meta} wrap="truncate-end">
+                  {`${label(owner)} · ${groupOf(owner).toLowerCase()}`}
+                </Text>
+              </Button>
+            </Box>
+          ) : it.on ? (
             <Box flexShrink={1} minWidth={0}>
               <Text size={SIZE.meta} color={TONE.caution} wrap="truncate-end">
                 {`on ${it.on}`}
@@ -949,6 +1043,26 @@ export const register: Register = on => {
         </Box>
       )
     }
+
+    /** The boss's own line at the top: what it works on (its chapter), then the step it is on. */
+    const bossRow = (l: BossLine) => (
+      <Box key="boss" flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+        {l.goal !== '' && (
+          <Box flexShrink={1} minWidth={0}>
+            <Text weight={WEIGHT.strong} wrap="truncate-end">
+              {l.goal}
+            </Text>
+          </Box>
+        )}
+        {l.step !== '' && (
+          <Box flexShrink={2} minWidth={0}>
+            <Text size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
+              {`${STEP_LOOKS.in_progress.mark} ${l.step}`}
+            </Text>
+          </Box>
+        )}
+      </Box>
+    )
 
     /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `+N more`. */
     const todoBlock = (t: Todo) => {
@@ -1214,14 +1328,14 @@ export const register: Register = on => {
       </Box>
     )
 
-    // A status a newer dev adds shows under Working rather than not at all
-    const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working') === group) }))
+    const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => groupOf(w) === group) }))
       .filter(s => s.workers.length > 0)
     /** Whether a worker gets a full row: any but Idle, or an idle one asking for the person, being messaged or opened. */
     const isFull = (w: Worker, group: (typeof GROUPS)[number]) => group !== 'Idle' || asksForPerson(w) || v.composing === w.id || v.details[w.id] === true
 
     return (
       <Box flexDirection="column" gap={isDesktop ? SPACE.section : SPACE.block}>
+        {bossLineRead !== null && bossRow(bossLineRead)}
         {b.error !== '' && notice('error', b.error, { mark: '⚠', color: 'error' }, b.error === NOT_DESKTOP ? undefined : `retries every ${PERIOD_MS / 1000} s`)}
         {b.warnings !== '' && (
           <Box key="warnings" flexDirection="column" minWidth={0}>
