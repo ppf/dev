@@ -988,7 +988,7 @@ test('idle and stopped workers share one line that opens to a line each; the res
   const { clock } = await start($, on, ok(BY_STATUS.map(w => (w.status === 'idle' ? { ...w, plan: [PLAN[0]], since: '15m' } : w))))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'local_i:fold' })).toBeFalsy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▶ Idle, Stopped')
   expect((await ui.find({ key: 'idle:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
   for (const id of ['local_w', 'local_r', 'local_b', 'local_k', 'local_t', 'local_l', 'local_n']) {
     expect(await ui.find({ key: `${id}:row` })).toBeTruthy()
@@ -997,7 +997,7 @@ test('idle and stopped workers share one line that opens to a line each; the res
   // Open rows sit one step in, their dots under the toggle's text
   expect((await ui.find({ key: 'local_i:header' }))?.props.paddingLeft).toBe('sm')
   // Open, its lines name them: the line counts them only
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▼ 2 idle')
   // A line each: dot, name (dim, regular: they ask nothing), task count, time
   expect(await header(ui, 'local_i')).toBe('● Idle 1/1 15m')
   expect((await ui.find({ key: 'local_i:fold' }))?.props.dimColor).toBe(true)
@@ -1014,14 +1014,14 @@ test('idle and stopped workers share one line that opens to a line each; the res
   await ui.press({ key: 'local_i:fold' })
   await clock.advance(2000)
   expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▼ 2 idle')
   await ui.press({ key: 'idle:fold' })
-  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▸ Idle, Stopped')
+  expect((await ui.find({ key: 'idle:fold' }))?.text).toBe('▶ Idle, Stopped')
   await ui.unmount()
   // The terminal's open line still names them
   const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await terminal.press({ key: 'idle:fold' })
-  expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▾ 2 idle')
+  expect((await terminal.find({ key: 'idle:fold' }))?.text).toBe('▼ 2 idle')
   expect((await terminal.find({ key: 'local_i:header' }))?.props.paddingLeft).toBeUndefined()
   await terminal.unmount()
 })
@@ -2068,15 +2068,15 @@ test('nine items: the first five, then a toggle that opens the rest and folds th
   await start($, on, ok(WORKERS), { todo: todoRan(nine) })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '▸ 4 more'])
+    expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '▶ 4 more'])
     expect(await ui.find({ key: 'todo:head:fold' })).toBeFalsy()
     expect((await ui.find({ key: 'todo:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
     await ui.press({ key: 'todo:fold' })
-    expect((await todoRows(ui))?.slice(0, 2)).toEqual(['▾ TO DO 9 updated 12m', '☐ Item 1'])
-    expect((await todoRows(ui))?.slice(-2)).toEqual(['☐ Item 9', '▾ show fewer'])
+    expect((await todoRows(ui))?.slice(0, 2)).toEqual(['▼ TO DO 9 updated 12m', '☐ Item 1'])
+    expect((await todoRows(ui))?.slice(-2)).toEqual(['☐ Item 9', '▼ show fewer'])
     // The open header folds it too
     await ui.press({ key: 'todo:head:fold' })
-    expect((await todoRows(ui))?.at(-1)).toBe('▸ 4 more')
+    expect((await todoRows(ui))?.at(-1)).toBe('▶ 4 more')
     await ui.unmount()
   }
 })

@@ -104,7 +104,7 @@ const ICONS = iconsIn({ open: '#2DA44E', merged: '#8957E5', closed: '#E5484D', p
 // The tones' hues; a merged PR is done, so muted
 const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, closed: TONE_HEX.danger, passed: TONE_HEX.ok, failed: TONE_HEX.danger, running: TONE_HEX.caution })
 const ICON_PX = 12
-// The to do list's items shown before its `▸ N more` toggle, as on the tmux board; a link's PR number, as dev reads it
+// The to do list's items shown before its `▶ N more` toggle, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
 // Only GitHub's pull links can be read with gh
 const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
@@ -1064,7 +1064,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▸ N more` that opens the rest (`▾ show fewer` open; the open header's `▾ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
+    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▶ N more` that opens the rest (`▼ show fewer` open; the open header's `▼ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
     const todoBlock = (t: Todo) => {
       const open = t.items.filter(it => !it.done)
       const onOthers = open.filter(it => it.on).length
@@ -1074,17 +1074,15 @@ export const register: Register = on => {
       return (
         <Box key="todo" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
           <Box key="todo:head" flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
-            {foldable && v.todoOpen ? (
+            {/* Button has no weight prop and the desktop draws its children regular, so the bold title sits beside the arrow button */}
+            {foldable && v.todoOpen && (
               <Button key="todo:head:fold" plain onPress={toggleTodo}>
-                <Text size={SIZE.meta} weight={WEIGHT.strong}>
-                  ▾ TO DO
-                </Text>
+                <Text size={SIZE.meta}>▼</Text>
               </Button>
-            ) : (
-              <Text size={SIZE.meta} weight={WEIGHT.strong}>
-                TO DO
-              </Text>
             )}
+            <Text size={SIZE.meta} weight={WEIGHT.strong}>
+              TO DO
+            </Text>
             <Text size={SIZE.meta} color={TONE.muted} tabular>
               {open.length}
             </Text>
@@ -1103,7 +1101,7 @@ export const register: Register = on => {
             <Box key="todo:more" flexDirection="row" minWidth={0}>
               <Button key="todo:fold" plain dimColor onPress={toggleTodo}>
                 <Text size={SIZE.meta} wrap="truncate-end">
-                  {v.todoOpen ? '▾ show fewer' : `▸ ${t.items.length - TODO_SHOWN} more`}
+                  {v.todoOpen ? '▼ show fewer' : `▶ ${t.items.length - TODO_SHOWN} more`}
                 </Text>
               </Button>
             </Box>
@@ -1325,7 +1323,7 @@ export const register: Register = on => {
       )
     }
 
-    /** The idle workers not asking for the person, in one line (`▸ a, b, c`; `▸ 2 more · a, b` below rows of the section's own; `▾ 3 idle` open) that opens to a line each: dot, name, task count, time; a lone one is drawn as its line, with no toggle. */
+    /** The idle workers not asking for the person, in one line (`▶ a, b, c`; `▶ 2 more · a, b` below rows of the section's own; `▼ 3 idle` open) that opens to a line each: dot, name, task count, time; a lone one is drawn as its line, with no toggle. */
     const idleList = (workers: Worker[], sectionCount: number) => (
       <Box key="idle" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
         <Box flexDirection="row" minWidth={0}>
@@ -1333,8 +1331,8 @@ export const register: Register = on => {
             <Text size={SIZE.meta} wrap="truncate-end">
               {/* Open, its lines below name them: the line counts them only */}
               {v.idleOpen
-                ? `▾ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
-                : `▸ ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
+                ? `▼ ${workers.length} ${workers.length === sectionCount ? 'idle' : 'more'}`
+                : `▶ ${workers.length === sectionCount ? '' : `${workers.length} more · `}${workers.map(label).join(', ')}`}
             </Text>
           </Button>
         </Box>
