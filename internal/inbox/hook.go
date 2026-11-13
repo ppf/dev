@@ -3,11 +3,14 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 // bossEvent is the part of the coordinator's own hook input BossHook reads.
@@ -22,7 +25,9 @@ type bossEvent struct {
 // done notification); on UserPromptSubmit it adds them as context to the user's prompt. out is the hook's
 // stdout JSON, "" for none. A Stop already continuing from a block (stop_hook_active) is let through, so
 // a boss never loops on its own hook. A UserPromptSubmit showing the batch sent over the socket clears it (Arrived).
-// Any pane but a coordinator's is left alone.
+// Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
+// list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
+// notes still out. Any pane but a coordinator's is left alone.
 func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool, err error) {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil || e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
@@ -38,12 +43,26 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		}
 	}
 	bt, err := b.Box.Take()
-	if err != nil || len(bt.Notes) == 0 {
+	if err != nil {
 		return "", false, err
 	}
-	var v any = map[string]any{"decision": "block", "reason": bt.String()}
+	if len(bt.Notes) == 0 && (e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, Header)) {
+		return "", false, nil
+	}
+	text := bt.String()
+	list, listErr := openList(c, pane)
+	switch {
+	case text == "":
+		text = list
+	case list != "":
+		text += "\n\n" + list
+	}
+	if text == "" {
+		return "", false, listErr
+	}
+	var v any = map[string]any{"decision": "block", "reason": text}
 	if e.Name == "UserPromptSubmit" {
-		v = map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": e.Name, "additionalContext": bt.String()}}
+		v = promptContext(text)
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -52,7 +71,28 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		}
 		return "", false, err
 	}
-	return string(data), e.Name == "Stop", nil
+	return string(data), e.Name == "Stop", listErr
+}
+
+// openList is the open to do list of the boss session pane is in (todo.List.Reminder), "" when none is open.
+func openList(c *tmux.Client, pane string) (string, error) {
+	s, err := todo.ForPane(c, pane)
+	if err != nil {
+		return "", err
+	}
+	l, err := s.Read(time.Now())
+	return l.Reminder(), err
+}
+
+// promptContext is a UserPromptSubmit hook's output adding text to the prompt.
+func promptContext(text string) any {
+	return map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "UserPromptSubmit", "additionalContext": text}}
+}
+
+// PromptContext is promptContext as the hook's stdout JSON.
+func PromptContext(text string) (string, error) {
+	data, err := json.Marshal(promptContext(text))
+	return string(data), err
 }
 
 // WorkerHook queues a note for the boss that started pane's session when the hook event is one a boss

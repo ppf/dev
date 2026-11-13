@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -47,6 +50,13 @@ func newStateCmd() *cobra.Command {
 				}
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+				}
+				out, err := sideSessionsTodo(input)
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: todo: "+err.Error())
+				}
+				if out != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), out)
 				}
 				return nil
 			}
@@ -152,4 +162,33 @@ func newStateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&codex, "codex", false, "Codex hook: find the pane by the hook's cwd instead of TMUX_PANE")
 	return cmd
+}
+
+// sideSessionsTodo is the UserPromptSubmit output adding a desktop app boss's open to do list to a turn that
+// brings its workers' notes (<side-sessions-event>), so it ticks what they closed; "" for any other prompt, a
+// worker, or no open item.
+func sideSessionsTodo(input []byte) (string, error) {
+	var e struct {
+		Name   string `json:"hook_event_name"`
+		Prompt string `json:"prompt"`
+	}
+	id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID")
+	if json.Unmarshal(input, &e) != nil || e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") || id == "" {
+		return "", nil
+	}
+	s, err := desktopTodo(id)
+	if errors.Is(err, errDesktopWorker) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	l, err := s.Read(time.Now())
+	if err != nil {
+		return "", err
+	}
+	if text := l.Reminder(); text != "" {
+		return inbox.PromptContext(text)
+	}
+	return "", nil
 }

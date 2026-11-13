@@ -30,13 +30,18 @@ const (
 	stale = time.Hour
 )
 
-// Item is one thing waiting on the user. Done is when it was ticked, unix seconds; 0 while open.
+// UntilLayout is how an item's Until time is written: local date and minute.
+const UntilLayout = "2006-01-02 15:04"
+
+// Item is one thing waiting on the user. Done is when it was ticked, unix seconds; 0 while open. Until, when
+// set, ticks it by itself at that time, unix seconds.
 type Item struct {
-	ID   int    `json:"id"`
-	Text string `json:"text"`
-	On   string `json:"on,omitempty"` // who it waits on, when not the user
-	Link string `json:"link,omitempty"`
-	Done int64  `json:"done,omitempty"`
+	ID    int    `json:"id"`
+	Text  string `json:"text"`
+	On    string `json:"on,omitempty"` // who it waits on, when not the user
+	Link  string `json:"link,omitempty"`
+	Done  int64  `json:"done,omitempty"`
+	Until int64  `json:"until,omitempty"`
 }
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty.
@@ -55,13 +60,14 @@ type List struct {
 	Stale   bool    `json:"stale"`
 }
 
-// Shown is an item on a board.
+// Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never).
 type Shown struct {
-	ID   int    `json:"id"`
-	Text string `json:"text"`
-	On   string `json:"on,omitempty"`
-	Link string `json:"link,omitempty"`
-	Done bool   `json:"done"`
+	ID    int    `json:"id"`
+	Text  string `json:"text"`
+	On    string `json:"on,omitempty"`
+	Link  string `json:"link,omitempty"`
+	Done  bool   `json:"done"`
+	Until int64  `json:"until,omitempty"`
 }
 
 // Open counts the items not ticked, and of them those waiting on someone else.
@@ -138,7 +144,7 @@ func (s Store) Read(now time.Time) (List, error) {
 	f.prune(now)
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Link: it.Link, Done: it.Done != 0})
+		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Link: it.Link, Done: it.Done != 0, Until: it.Until})
 	}
 	slices.SortStableFunc(l.Items, func(a, b Shown) int {
 		return cmp.Compare(min(len(a.On), 1), min(len(b.On), 1))
@@ -172,6 +178,22 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	return id, err
 }
 
+// Replace puts it in the place of open item id, keeping its number and the On, Link and Until it doesn't set;
+// an id that isn't one is an error.
+func (s Store) Replace(id int, it Item, now time.Time) error {
+	return s.update(now, func(f *file) error {
+		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
+		if i < 0 {
+			return fmt.Errorf("no open item %d", id)
+		}
+		old := f.Items[i]
+		it.ID, it.Done = id, 0
+		it.On, it.Link, it.Until = cmp.Or(it.On, old.On), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
+		f.Items[i] = it
+		return nil
+	})
+}
+
 // Done ticks the open items ids; an id that isn't one changes nothing and is an error.
 func (s Store) Done(ids []int, now time.Time) error {
 	return s.update(now, func(f *file) error {
@@ -194,8 +216,13 @@ func (s Store) Clear(now time.Time) error {
 	})
 }
 
-// prune drops the items ticked over doneShown ago.
+// prune ticks the open items whose Until has come, as at Until, and drops the items ticked over doneShown ago.
 func (f *file) prune(now time.Time) {
+	for i, it := range f.Items {
+		if it.Done == 0 && it.Until != 0 && now.Unix() >= it.Until {
+			f.Items[i].Done = it.Until
+		}
+	}
 	f.Items = slices.DeleteFunc(f.Items, func(it Item) bool {
 		return it.Done != 0 && now.Sub(time.Unix(it.Done, 0)) >= doneShown
 	})
@@ -248,6 +275,48 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// ParseUntil reads an --until time in now's location: "15:30" today, "2026-11-16" the end of that day,
+// "2026-11-16 10:00". A time not after now is an error: its item would tick at once.
+func ParseUntil(s string, now time.Time) (time.Time, error) {
+	loc := now.Location()
+	t, err := time.ParseInLocation("15:04", s, loc)
+	if err == nil {
+		y, m, d := now.Date()
+		t = time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, loc)
+	} else if t, err = time.ParseInLocation(time.DateOnly, s, loc); err == nil {
+		t = t.AddDate(0, 0, 1)
+	} else if t, err = time.ParseInLocation(UntilLayout, s, loc); err != nil {
+		return time.Time{}, fmt.Errorf("until %q: want 15:30, 2026-11-16 or \"2026-11-16 10:00\"", s)
+	}
+	if !t.After(now) {
+		return time.Time{}, fmt.Errorf("until %q: %s has passed", s, t.Format(UntilLayout))
+	}
+	return t, nil
+}
+
+// Reminder is the open items for a boss reading worker notes, numbered, with a line asking it to tick what the
+// notes closed; "" when none is open.
+func (l List) Reminder() string {
+	var b strings.Builder
+	for _, it := range l.Items {
+		if it.Done {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%d. %s", it.ID, it.Text)
+		if it.On != "" {
+			b.WriteString(" (on " + it.On + ")")
+		}
+		if it.Until != 0 {
+			b.WriteString(" (until " + time.Unix(it.Until, 0).Format(UntilLayout) + ")")
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "[dev todo] Your open to do list:" + b.String() +
+		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."
 }
 
 // Clean is s as one board row: control characters dropped, space runs collapsed, trimmed.
