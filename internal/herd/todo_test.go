@@ -232,7 +232,7 @@ func TestRefreshTodo(t *testing.T) {
 		case "display-message":
 			if strings.Contains(args[len(args)-1], "@dev_herd") {
 				looked++
-				return tmux.FormatRow("/tmp/s", "$1", "1700000000", "herd", herd), nil
+				return tmux.FormatRow("/tmp/s", "herd", herd, "$1", "1700000000"), nil
 			}
 			return "200\n", nil // fit's width
 		}

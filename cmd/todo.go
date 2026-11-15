@@ -29,10 +29,14 @@ func newTodoCmd() *cobra.Command {
 --json is what a desktop board reads. Without a subcommand, print it. The list belongs to the boss session it
 runs in: a dev boss session in tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a
 boss started it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the
-coordinator's /clear; a ticked item shows ticked for a few seconds, then leaves.`,
+coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
+session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
+worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
+and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := todoStore(boss)
+			// Not the board's --json read, which runs for every desktop session, boss or not
+			s, err := todoStore(boss, !asJSON, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -61,7 +65,7 @@ func newTodoSetCmd(boss *string) *cobra.Command {
 		Use:   "set [item...]",
 		Short: "Replace the list (items from the arguments, else stdin, one per line), numbered from 1",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := todoStore(*boss)
+			s, err := todoStore(*boss, false, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -97,7 +101,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 		Short: "Add an item (or put it in place of an open one, --replaces); prints its number",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := todoStore(*boss)
+			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -149,7 +153,7 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			}
 			slices.Sort(ids)
 			ids = slices.Compact(ids)
-			s, err := todoStore(*boss)
+			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -168,7 +172,7 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 		Short: "Empty the list: its board shows no to do block",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := todoStore(*boss)
+			s, err := todoStore(*boss, false, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -181,11 +185,12 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 	}
 }
 
-// todoStore is the list of --boss's session, else of the dev boss session or desktop app session it runs in.
-func todoStore(boss string) (todo.Store, error) {
+// todoStore is the list of --boss's session, else of the boss session it runs in; adopt lets a desktop one take
+// over an earlier list (desktopTodo). Never for --boss: that session takes over on its own first dev todo.
+func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 	switch {
 	case strings.HasPrefix(boss, "local_"):
-		return desktopTodo(boss)
+		return desktopTodo(boss, false, stderr)
 	case boss != "":
 		c := tmux.New()
 		pane, err := control.BossPane(c, boss)
@@ -198,27 +203,36 @@ func todoStore(boss string) (todo.Store, error) {
 		return todo.ForPane(tmux.New(), pane)
 	}
 	if id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID"); id != "" {
-		return desktopTodo(id)
+		return desktopTodo(id, adopt, stderr)
 	}
 	return todo.Store{}, errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
 }
 
 var errDesktopWorker = errors.New("a worker another session started: the to do list is its boss's")
 
-// desktopTodo is the list of desktop app session id, which must have an app record and not be a worker.
-func desktopTodo(id string) (todo.Store, error) {
+// desktopTodo is the list of desktop app session id, not a worker's; with adopt it takes over an earlier one
+// (desktop.Earlier), reporting a failure on stderr and keeping its own.
+func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return todo.Store{}, err
 	}
-	worker, err := desktop.Spawned(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")).Records, id)
+	paths := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
+	worker, err := desktop.Spawned(paths.Records, id)
 	if err != nil {
 		return todo.Store{}, err
 	}
 	if worker {
 		return todo.Store{}, fmt.Errorf("%s is %w", id, errDesktopWorker)
 	}
-	return todo.Desktop(id)
+	s, err := todo.Desktop(id)
+	if err != nil || !adopt {
+		return s, err
+	}
+	if _, err := s.AdoptDesktop(func() (func(string) bool, error) { return desktop.Earlier(paths, id) }); err != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: no earlier list taken over: "+err.Error())
+	}
+	return s, nil
 }
 
 // printCount prints prefix, then how many items are open: "to do 3, 1 on others", "to do empty".

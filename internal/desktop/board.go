@@ -144,6 +144,7 @@ type record struct {
 	Title          string `json:"title"`
 	Branch         string `json:"branch"`
 	WorktreePath   string `json:"worktreePath"`
+	OriginCwd      string `json:"originCwd"`
 	IsArchived     bool   `json:"isArchived"`
 	CreatedAt      int64  `json:"createdAt"`
 	LastActivityAt int64  `json:"lastActivityAt"`
@@ -335,6 +336,35 @@ func Spawned(dir, id string) (bool, error) {
 	}
 	r, err := own(dir, paths, id)
 	return r.SpawnedFrom != nil && !r.SpawnedFrom.UserFork, err
+}
+
+// Earlier tests which app sessions' boss lists running session id may take over: stopped ones in its project
+// (originCwd). Fails closed: no record for id, unreadable live files or id not running is an error.
+func Earlier(p Paths, id string) (func(other string) bool, error) {
+	paths, err := filepath.Glob(filepath.Join(p.Records, "*", "*", "local_*.json"))
+	if err != nil {
+		return nil, err
+	}
+	r, err := own(p.Records, paths, id)
+	if err != nil {
+		return nil, err
+	}
+	// A live file it can't read would make a running boss look stopped, and its list taken
+	lives, warnings := liveSessions(p.Live)
+	if len(warnings) > 0 {
+		return nil, errors.Join(warnings...)
+	}
+	if _, ok := findLive(lives, r); !ok {
+		return nil, fmt.Errorf("%s isn't among the running sessions in %s", id, p.Live)
+	}
+	return func(other string) bool {
+		o, err := own(p.Records, paths, other)
+		if err != nil || other == id || r.OriginCwd == "" || o.OriginCwd != r.OriginCwd {
+			return false
+		}
+		_, running := findLive(lives, o)
+		return !running
+	}, nil
 }
 
 // liveSessions reads the live session files whose Claude still runs (a crash leaves its file behind).

@@ -21,10 +21,13 @@ func bossTmux(t *testing.T, todoHerd string) *tmux.Client {
 		case "list-panes":
 			return tmux.FormatRow("boss", "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", ""), nil
 		case "display-message":
+			if args[len(args)-1] == "#{@dev_boss_pane}" {
+				return map[string]string{"%1": "coordinator\n", "%2": "previews\n"}[args[3]], nil
+			}
 			if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
 				return tmux.FormatRow("$1", "1700000000", "boss", "1", "", "/tmp/tmux-1/default"), nil
 			}
-			return tmux.FormatRow("/tmp/tmux-1/default", "$1", "1700000000", "boss", todoHerd), nil
+			return tmux.FormatRow("/tmp/tmux-1/default", "boss", todoHerd, "$1", "1700000000"), nil
 		}
 		return "", nil
 	})
@@ -112,7 +115,82 @@ func TestBossHookListError(t *testing.T) {
 	}
 }
 
+// A coordinator starting, resumed or /clear'ed gets its open list, kept from an earlier session on a start;
+// nothing after a compaction, with no open item, or for another pane in the boss session.
+func TestBossHookStart(t *testing.T) {
+	check := "\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."
+	for _, tt := range []struct {
+		name, source, pane string
+		list               []string
+		want               string
+	}{
+		{"startup", "startup", "%1", []string{"Mon: reply to Vince"}, "[dev todo] Your open to do list (kept from your last boss session, updated just now):\n1. Mon: reply to Vince" + check},
+		{"clear", "clear", "%1", []string{"a", "b"}, "[dev todo] Your open to do list (updated just now):\n1. a\n2. b" + check},
+		{"resume", "resume", "%1", []string{"a"}, "[dev todo] Your open to do list (updated just now):\n1. a" + check},
+		{"compact", "compact", "%1", []string{"a"}, ""},
+		{"empty list", "startup", "%1", nil, ""},
+		{"previews pane", "startup", "%2", []string{"a"}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := bossTmux(t, "1")
+			if tt.list != nil {
+				s, err := todo.ForPane(c, "%1")
+				if err == nil {
+					err = s.Set(tt.list, time.Now())
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, busy, err := BossHook(c, tt.pane, []byte(`{"hook_event_name":"SessionStart","source":"`+tt.source+`"}`))
+			if err != nil || busy {
+				t.Fatalf("BossHook: busy %v, %v", busy, err)
+			}
+			var got struct {
+				Out struct {
+					Event   string `json:"hookEventName"`
+					Context string `json:"additionalContext"`
+				} `json:"hookSpecificOutput"`
+			}
+			if out != "" {
+				if err := json.Unmarshal([]byte(out), &got); err != nil || got.Out.Event != "SessionStart" {
+					t.Fatalf("out %q: %v", out, err)
+				}
+			}
+			if got.Out.Context != tt.want {
+				t.Errorf("context = %q, want %q", got.Out.Context, tt.want)
+			}
+		})
+	}
+}
+
+// The age is how long ago the list last changed.
+func TestStartContextAge(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s, err := todo.Desktop("local_boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	then := time.Unix(1700000000, 0)
+	if err := s.Set([]string{"a"}, then); err != nil {
+		t.Fatal(err)
+	}
+	out, err := StartContext(s, "startup", then.Add(49*time.Hour))
+	if err != nil || !strings.Contains(out, "updated 49h ago):") {
+		t.Errorf("StartContext = %q, %v; want updated 49h ago", out, err)
+	}
+}
+
 func quote(s string) string {
 	data, _ := json.Marshal(s)
 	return string(data)
+}
+
+// A restored boss is marked one only after its coordinator starts: its SessionStart then gets nothing, quietly.
+func TestBossHookStartBeforeMarked(t *testing.T) {
+	c := bossTmux(t, "")
+	out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"resume"}`))
+	if out != "" || err != nil {
+		t.Errorf("BossHook = %q, %v; want nothing", out, err)
+	}
 }

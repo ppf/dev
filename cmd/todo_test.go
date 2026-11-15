@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +176,91 @@ func TestStateSideSessionsTodo(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_typo")
 	if got, stderr, err := execute(t, event, "state", "working"); got != "" || !strings.HasPrefix(stderr, "❌ dev state: todo: no app session record") || err != nil {
 		t.Errorf("no record: %q, %q, %v; want only a stderr report", got, stderr, err)
+	}
+}
+
+// A desktop boss without a list takes over a stopped session's list on its first dev todo, not at start or on
+// --json; a running session's list stays. Resume and /clear bring its list; startup and compaction nothing.
+func TestTodoDesktopTakeOver(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	home := os.Getenv("HOME")
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	org := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code-sessions", "acct", "org")
+	live := filepath.Join(home, ".claude", "sessions")
+	for i, id := range []string{"local_boss", "local_old", "local_running", "local_gone"} {
+		pid := os.Getpid()
+		if id == "local_old" || id == "local_gone" {
+			pid = 1 << 30 // no running process
+		}
+		for path, v := range map[string]any{
+			filepath.Join(org, id+".json"):               map[string]any{"sessionId": id, "originCwd": "/p", "createdAt": 1},
+			filepath.Join(live, strconv.Itoa(i)+".json"): map[string]any{"pid": pid, "sessionId": "cli-" + id, "hostSessionId": id, "status": "idle"},
+		} {
+			data, _ := json.Marshal(v)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	run(t, "", "todo", "--boss", "local_running", "set", "running's own")
+	run(t, "", "todo", "--boss", "local_old", "set", "old open item")
+	// A session whose own Claude isn't among the running ones takes over nothing, and says so
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_gone")
+	if got, stderr, err := execute(t, "", "todo"); got != "" || err != nil || !strings.Contains(stderr, "no earlier list taken over") {
+		t.Errorf("stopped session: %q, %q, %v; want nothing and a stderr note", got, stderr, err)
+	}
+	// set and clear replace the list: they take over nothing
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
+	run(t, "", "todo", "set", "plan")
+	run(t, "", "todo", "clear")
+	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
+		t.Errorf("local_old's list after set and clear elsewhere: %q, want it kept", got)
+	}
+	if err := os.Remove(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "todo", "desktop-local_boss.json")); err != nil {
+		t.Fatal(err)
+	}
+	start := func(source string) string {
+		return run(t, `{"hook_event_name":"SessionStart","source":"`+source+`","session_id":"s1"}`, "state", "idle")
+	}
+	if got := start("startup"); got != "" {
+		t.Errorf("start without a list: %q, want nothing", got)
+	}
+	if got := run(t, "", "todo", "--json"); !strings.Contains(got, `"items": []`) {
+		t.Errorf("--json read: %q, want an empty list (no take-over)", got)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\told open item\n" {
+		t.Errorf("first dev todo: %q, want local_old's list", got)
+	}
+	if got := run(t, "", "todo", "--boss", "local_old"); got != "" {
+		t.Errorf("local_old after the take-over: %q, want empty", got)
+	}
+	if got := run(t, "", "todo", "--boss", "local_running"); got != "1\t☐\trunning's own\n" {
+		t.Errorf("running session's list: %q, want it kept", got)
+	}
+	for source, want := range map[string]string{"startup": "", "resume": "(updated just now):\n1. old open item", "clear": "(updated just now):\n1. old open item", "compact": ""} {
+		got := start(source)
+		var out struct {
+			Hook struct {
+				Event   string `json:"hookEventName"`
+				Context string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		if want == "" {
+			if got != "" {
+				t.Errorf("%s: %q, want nothing", source, got)
+			}
+			continue
+		}
+		if err := json.Unmarshal([]byte(got), &out); err != nil || out.Hook.Event != "SessionStart" || !strings.Contains(out.Hook.Context, want) {
+			t.Errorf("%s: %q (%v), want context with %q", source, got, err, want)
+		}
+	}
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_w")
+	if got, stderr, err := execute(t, `{"hook_event_name":"SessionStart","source":"startup"}`, "state", "idle"); got != "" || stderr != "" || err != nil {
+		t.Errorf("worker start: %q, %q, %v; want nothing", got, stderr, err)
 	}
 }

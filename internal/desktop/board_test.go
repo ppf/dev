@@ -889,3 +889,42 @@ func TestReadTail(t *testing.T) {
 		t.Errorf("err = %v, want not exist", err)
 	}
 }
+
+// Only stopped sessions in the boss's project are accepted (running found by host or CLI session); unreadable
+// live files or the boss not running fail closed.
+func TestEarlier(t *testing.T) {
+	p := DefaultPaths(t.TempDir(), "")
+	org := filepath.Join(p.Records, "acct", "org")
+	for id, cwd := range map[string]string{"local_new": "/p", "local_old": "/p", "local_running": "/p", "local_cli": "/p", "local_elsewhere": "/q", "local_nocwd": "", "local_nocwd2": ""} {
+		writeJSON(t, filepath.Join(org, id+".json"), map[string]any{"sessionId": id, "originCwd": cwd, "cliSessionId": "cli-" + id})
+	}
+	live := func(name, host, cli string, pid int) {
+		writeJSON(t, filepath.Join(p.Live, name), map[string]any{"pid": pid, "sessionId": cli, "hostSessionId": host, "status": "idle"})
+	}
+	live("1.json", "local_running", "cli-r", os.Getpid())
+	live("2.json", "local_old", "cli-o", deadPID)
+	live("3.json", "local_new", "cli-n", os.Getpid())
+	live("4.json", "", "cli-local_cli", os.Getpid())
+	live("5.json", "local_nocwd", "cli-x", os.Getpid())
+	earlier, err := Earlier(p, "local_new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]bool{"local_old": true, "local_running": false, "local_cli": false, "local_elsewhere": false, "local_nocwd": false, "local_gone": false, "local_new": false} {
+		if got := earlier(id); got != want {
+			t.Errorf("earlier(%s) = %v, want %v", id, got, want)
+		}
+	}
+	if nocwd, err := Earlier(p, "local_nocwd"); err != nil || nocwd("local_nocwd2") {
+		t.Errorf("no project: %v; want none accepted", err)
+	}
+	for _, id := range []string{"local_unknown", "local_old"} {
+		if _, err := Earlier(p, id); err == nil {
+			t.Errorf("Earlier(%s): no error; want one (no record, or not running)", id)
+		}
+	}
+	write(t, filepath.Join(p.Live, "6.json"), "{not json")
+	if _, err := Earlier(p, "local_new"); err == nil {
+		t.Error("an unreadable live file: no error; want one, as a running boss could look stopped")
+	}
+}

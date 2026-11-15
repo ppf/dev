@@ -18,6 +18,7 @@ import (
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 var states = []string{agent.Working, agent.Waiting, agent.Idle, agent.Clear, agent.ToolFailed}
@@ -51,7 +52,7 @@ func newStateCmd() *cobra.Command {
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 				}
-				out, err := sideSessionsTodo(input)
+				out, err := desktopBossTodo(input, cmd.ErrOrStderr())
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: todo: "+err.Error())
 				}
@@ -164,19 +165,34 @@ func newStateCmd() *cobra.Command {
 	return cmd
 }
 
-// sideSessionsTodo is the UserPromptSubmit output adding a desktop app boss's open to do list to a turn that
-// brings its workers' notes (<side-sessions-event>), so it ticks what they closed; "" for any other prompt, a
-// worker, or no open item.
-func sideSessionsTodo(input []byte) (string, error) {
+// desktopBossTodo is a desktop app boss's open to do list as hook output, on worker notes (so it ticks what they
+// closed) and on resume or /clear; "" otherwise.
+func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 	var e struct {
 		Name   string `json:"hook_event_name"`
 		Prompt string `json:"prompt"`
+		Source string `json:"source"`
 	}
 	id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID")
-	if json.Unmarshal(input, &e) != nil || e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") || id == "" {
+	if json.Unmarshal(input, &e) != nil || id == "" {
 		return "", nil
 	}
-	s, err := desktopTodo(id)
+	if e.Name == "SessionStart" {
+		// A new app session has no list yet, and a claude -p the boss runs inherits its host session id
+		if e.Source == "startup" {
+			return "", nil
+		}
+		// Its own list, read without its app record: a start takes over nothing, and a worker has no list
+		s, err := todo.Desktop(id)
+		if err != nil {
+			return "", err
+		}
+		return inbox.StartContext(s, e.Source, time.Now())
+	}
+	if e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") {
+		return "", nil
+	}
+	s, err := desktopTodo(id, true, stderr)
 	if errors.Is(err, errDesktopWorker) {
 		return "", nil
 	}
