@@ -18,6 +18,7 @@ type bossEvent struct {
 	Name       string `json:"hook_event_name"`
 	StopActive bool   `json:"stop_hook_active"`
 	Prompt     string `json:"prompt"`
+	Source     string `json:"source"`
 }
 
 // BossHook hands pending notes to a coordinator through its own Claude hooks: on Stop it blocks the stop
@@ -27,10 +28,18 @@ type bossEvent struct {
 // a boss never loops on its own hook. A UserPromptSubmit showing the batch sent over the socket clears it (Arrived).
 // Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
 // list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
-// notes still out. Any pane but a coordinator's is left alone.
+// notes still out. On SessionStart it gives the coordinator its open list (startList). Any pane but a
+// coordinator's is left alone.
 func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool, err error) {
 	var e bossEvent
-	if json.Unmarshal(input, &e) != nil || e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
+	if json.Unmarshal(input, &e) != nil {
+		return "", false, nil
+	}
+	if e.Name == "SessionStart" {
+		out, err = startList(c, pane, e.Source)
+		return out, false, err
+	}
+	if e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
 		return "", false, nil
 	}
 	b, ok, err := Self(c, pane)
@@ -84,10 +93,54 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	return l.Reminder(), err
 }
 
-// promptContext is a UserPromptSubmit hook's output adding text to the prompt.
-func promptContext(text string) any {
-	return map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "UserPromptSubmit", "additionalContext": text}}
+// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list; "" otherwise.
+// Matched by pane role: its first SessionStart comes before dev registers it as an agent.
+func startList(c *tmux.Client, pane, source string) (string, error) {
+	// herd.OptPane and herd.RoleCoordinator: herd imports this package
+	role, err := c.Run("display-message", "-p", "-t", pane, "#{@dev_boss_pane}")
+	if err != nil || strings.TrimSpace(role) != "coordinator" {
+		return "", err
+	}
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		// A restored boss is marked one only after its coordinator starts
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return StartContext(s, source, time.Now())
 }
+
+// StartContext is the SessionStart hook output adding list s's open items (todo.List.StartReminder) to a boss
+// starting, resumed or /clear'ed (source); "" after a compaction, whose summary carries them, or with none open.
+func StartContext(s todo.Store, source string, now time.Time) (string, error) {
+	if source == "compact" {
+		return "", nil
+	}
+	l, err := s.Read(now)
+	if err != nil {
+		return "", err
+	}
+	age := "just now"
+	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
+		age = Span(d) + " ago"
+	}
+	text := l.StartReminder(source == "startup", age)
+	if text == "" {
+		return "", nil
+	}
+	data, err := json.Marshal(hookContext("SessionStart", text))
+	return string(data), err
+}
+
+// hookContext is a hook event's output adding text to Claude's context.
+func hookContext(event, text string) any {
+	return map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": event, "additionalContext": text}}
+}
+
+// promptContext is a UserPromptSubmit hook's output adding text to the prompt.
+func promptContext(text string) any { return hookContext("UserPromptSubmit", text) }
 
 // PromptContext is promptContext as the hook's stdout JSON.
 func PromptContext(text string) (string, error) {

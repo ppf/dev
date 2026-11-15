@@ -1,10 +1,12 @@
 // Package todo is a boss's to-do list: what waits on the user, kept by the boss with dev todo and shown at
-// the top of its board. One locked file per boss, keyed by its tmux session or its desktop app session, so
-// it outlives the coordinator's /clear.
+// the top of its board. One locked file per boss, keyed by its tmux session's name or its desktop app session,
+// so it outlives the coordinator's /clear, and a tmux boss reopened under its name gets its list back.
 package todo
 
 import (
 	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,21 +103,95 @@ func open(key string) (Store, error) {
 	return Store{path: filepath.Join(dir, "todo", name+".json")}, nil
 }
 
+const desktopPrefix = "desktop-"
+
 // Desktop is the list of the desktop app boss session id (local_…).
-func Desktop(id string) (Store, error) { return open("desktop-" + id) }
+func Desktop(id string) (Store, error) { return open(desktopPrefix + id) }
+
+// AdoptDesktop moves into s, when it has no file yet, the newest list with open items earlier accepts; adopted
+// reports it. Unreadable lists are skipped and returned in err.
+func (s Store) AdoptDesktop(earlier func() (func(id string) bool, error)) (adopted bool, err error) {
+	if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), desktopPrefix+"*.json"))
+	if err != nil || len(paths) == 0 {
+		return false, err
+	}
+	isEarlier, err := earlier()
+	if err != nil {
+		return false, err
+	}
+	var from Store
+	var updated int64
+	var unread []error
+	for _, path := range paths {
+		id := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), desktopPrefix), ".json")
+		if path == s.path || !isEarlier(id) {
+			continue
+		}
+		l, err := Store{path}.Read(time.Now())
+		if err != nil {
+			unread = append(unread, err)
+			continue
+		}
+		// An emptied list stays a file: a newer empty one mustn't win over open items
+		if n, _ := l.Open(); n > 0 && (from.path == "" || l.Updated > updated) {
+			from, updated = Store{path}, l.Updated
+		}
+	}
+	if from.path != "" {
+		adopted, err = s.take(from)
+	}
+	return adopted, errors.Join(append(unread, err)...)
+}
+
+// take moves from's file to s, when s has none and from still has one; taken reports it.
+func (s Store) take(from Store) (taken bool, err error) {
+	err = s.locked(func() error {
+		return from.locked(func() error {
+			// Under both locks: another boss may have taken it, or s got a list meanwhile
+			if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			if _, err := os.Stat(from.path); errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			taken = true
+			return os.Rename(from.path, s.path)
+		})
+	})
+	return taken, err
+}
+
+// sessionKey is name for a list's key, hashed when unsafe in a file name so boss-app+api and boss-app_api differ.
+func sessionKey(name string) string {
+	if !unsafe.MatchString(name) {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return unsafe.ReplaceAllString(name, "_") + "-" + hex.EncodeToString(sum[:4])
+}
+
+// ignoreMissing is err, nil for a file that doesn't exist.
+func ignoreMissing(err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
 
 // session is what keying a tmux boss's list reads of its session.
 type session struct {
 	Socket  string `tmux:"socket_path"`
-	ID      string `tmux:"session_id"`
-	Created string `tmux:"session_created"`
 	Name    string `tmux:"session_name"`
 	Herd    string `tmux:"@dev_herd"`
+	ID      string `tmux:"session_id"`
+	Created string `tmux:"session_created"`
 }
 
-// ForPane is the list of the dev boss session pane is in (its coordinator's or its previews pane), keyed as
-// its inbox is: socket, session id and creation time, as a restarted server reuses ids. Any other session's
-// pane is an error.
+// ForPane is the list of the dev boss session pane is in, keyed by socket and session name so a boss reopened
+// under its name gets it back; a list under its earlier key (session id and creation time) moves to it.
 func ForPane(c *tmux.Client, pane string) (Store, error) {
 	out, err := c.Run("display-message", "-p", "-t", pane, tmux.Format[session]())
 	if err != nil {
@@ -132,7 +208,23 @@ func ForPane(c *tmux.Client, pane string) (Store, error) {
 	if s.Herd == "" {
 		return Store{}, fmt.Errorf("%s is %w", s.Name, ErrNotBoss)
 	}
-	return open(s.Socket + "-" + s.ID + "-" + s.Created)
+	st, err := open(s.Socket + "-" + sessionKey(s.Name))
+	if err != nil {
+		return st, err
+	}
+	old, err := open(s.Socket + "-" + s.ID + "-" + s.Created)
+	if err != nil {
+		return st, err
+	}
+	// Stat first: most calls find the name's list, or nothing to move, without taking locks
+	if _, err := os.Stat(st.path); !errors.Is(err, fs.ErrNotExist) {
+		return st, err
+	}
+	if _, err := os.Stat(old.path); err != nil {
+		return st, ignoreMissing(err)
+	}
+	_, err = st.take(old)
+	return st, err
 }
 
 // Read is the list as its boards show it at now; a missing file is an empty list.
@@ -244,8 +336,8 @@ func (s Store) read() (file, error) {
 	return f, nil
 }
 
-// update runs fn on the file under an exclusive lock, stamps it now and writes it back.
-func (s Store) update(now time.Time, fn func(*file) error) error {
+// locked runs fn under the file's exclusive lock.
+func (s Store) locked(fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
@@ -257,24 +349,31 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	f, err := s.read()
-	if err != nil {
-		return err
-	}
-	f.prune(now)
-	if err := fn(&f); err != nil {
-		return err
-	}
-	f.Updated = now.Unix()
-	data, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return fn()
+}
+
+// update runs fn on the file under an exclusive lock, stamps it now and writes it back.
+func (s Store) update(now time.Time, fn func(*file) error) error {
+	return s.locked(func() error {
+		f, err := s.read()
+		if err != nil {
+			return err
+		}
+		f.prune(now)
+		if err := fn(&f); err != nil {
+			return err
+		}
+		f.Updated = now.Unix()
+		data, err := json.Marshal(f)
+		if err != nil {
+			return err
+		}
+		tmp := s.path + ".tmp"
+		if err := os.WriteFile(tmp, data, 0o600); err != nil {
+			return err
+		}
+		return os.Rename(tmp, s.path)
+	})
 }
 
 // ParseUntil reads an --until time in now's location: "15:30" today, "2026-11-16" the end of that day,
@@ -296,12 +395,19 @@ func ParseUntil(s string, now time.Time) (time.Time, error) {
 	return t, nil
 }
 
-// Reminder is the open items for a boss reading worker notes, numbered, with a line asking it to tick what the
-// notes closed; "" when none is open.
-func (l List) Reminder() string {
+// startShown is how many open items the list a boss gets at its start names before "+N more".
+const startShown = 20
+
+// lines is the open items, numbered, one per line after a newline; past limit (0: none) a "+N more" line.
+func (l List) lines(limit int) string {
 	var b strings.Builder
+	n := 0
 	for _, it := range l.Items {
 		if it.Done {
+			continue
+		}
+		n++
+		if limit > 0 && n > limit {
 			continue
 		}
 		fmt.Fprintf(&b, "\n%d. %s", it.ID, it.Text)
@@ -312,11 +418,36 @@ func (l List) Reminder() string {
 			b.WriteString(" (until " + time.Unix(it.Until, 0).Format(UntilLayout) + ")")
 		}
 	}
-	if b.Len() == 0 {
+	if limit > 0 && n > limit {
+		fmt.Fprintf(&b, "\n+%d more: dev todo", n-limit)
+	}
+	return b.String()
+}
+
+// Reminder is the open items for a boss reading worker notes, numbered, with a line asking it to tick what the
+// notes closed; "" when none is open.
+func (l List) Reminder() string {
+	items := l.lines(0)
+	if items == "" {
 		return ""
 	}
-	return "[dev todo] Your open to do list:" + b.String() +
+	return "[dev todo] Your open to do list:" + items +
 		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."
+}
+
+// StartReminder is the open items for a boss starting or /clear'ed, at most startShown, with how long ago the
+// list changed (age, e.g. "2h ago") and, when kept, that an earlier boss session left it; "" when none is open.
+func (l List) StartReminder(kept bool, age string) string {
+	items := l.lines(startShown)
+	if items == "" {
+		return ""
+	}
+	from := "updated " + age
+	if kept {
+		from = "kept from your last boss session, " + from
+	}
+	return "[dev todo] Your open to do list (" + from + "):" + items +
+		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."
 }
 
 // Clean is s as one board row: control characters dropped, space runs collapsed, trimmed.
