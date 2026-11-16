@@ -40,9 +40,13 @@ func newDevServer(t *testing.T, extraConf string) *devServer {
 	// No PRs: the sidebar must never reach the user's real gh
 	writeStubs(t, stubs, "exit 1", "gh")
 	path := stubs + ":" + os.Getenv("PATH")
+	// dev boss starts its coordinator as `<default-shell> -l -i -c ...`; a login shell would reorder PATH, so
+	// this "sh" drops -l -i and keeps the stubs first
+	shell := writeStubs(t, filepath.Join(tmp, "shell"), `[ "$1" = -l ] && [ "$2" = -i ] && shift 2
+exec /bin/sh "$@"`, "sh")
 	s := newServer(t, `set -g base-index 1
 setw -g pane-base-index 1
-set -g default-shell /bin/sh
+set -g default-shell '`+filepath.Join(shell, "sh")+`'
 set -g default-command /bin/sh
 set -g @resurrect-dir '`+tmp+`/resurrect'
 `+extraConf, "PATH="+path, "XDG_STATE_HOME="+filepath.Join(tmp, "state"), "DEV_STUB_LOG="+stubLog)
