@@ -37,7 +37,7 @@ func TestResurrectBoss(t *testing.T) {
 
 	openBoss("new", "--model", "opus", "--effort", "medium")
 	coordinator := display("=boss-app:1.2", "#{pane_id}")
-	if start := display(coordinator, "#{pane_start_command}"); !strings.Contains(start, "pty-wrap -- claude --model opus --effort medium --append-system-prompt") {
+	if start := display(coordinator, "#{pane_start_command}"); !strings.Contains(start, `'pty-wrap' '--' 'claude' '--model' 'opus' '--effort' 'medium' '--append-system-prompt'`) {
 		t.Errorf("coordinator not started with the model and effort: %q", start)
 	}
 	flagged := exec.Command(devBin, "boss", "app", "--effort", "low")

@@ -716,6 +716,45 @@ func TestCoordinatorArgv(t *testing.T) {
 	}
 }
 
+// The coordinator runs through an interactive login shell, so claude resolves on the user's PATH like a worker's.
+func TestViaLoginShell(t *testing.T) {
+	got := viaLoginShell("/bin/zsh", []string{"/x/dev", "pty-wrap", "--", "claude", "--append-system-prompt", "it's"})
+	want := []string{"/bin/zsh", "-l", "-i", "-c", `exec '/x/dev' 'pty-wrap' '--' 'claude' '--append-system-prompt' 'it'"'"'s'`}
+	if !slices.Equal(got, want) {
+		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+// A default-shell that isn't POSIX fails clearly: the coordinator command is quoted for sh.
+func TestCoordinatorCmdRefusesNonPosixShell(t *testing.T) {
+	for shell, ok := range map[string]bool{"/bin/zsh": true, "/usr/bin/bash": true, "/opt/homebrew/bin/fish": false, "": false} {
+		c := tmux.NewFake(func([]string) (string, error) { return shell + "\n", nil })
+		cmd, err := coordinatorCmd(c, "boss-p")
+		if ok && (err != nil || cmd[0] != shell) || !ok && (err == nil || !strings.Contains(err.Error(), "not a POSIX shell")) {
+			t.Errorf("shell %q: %q, %v", shell, cmd, err)
+		}
+	}
+}
+
+// Adopt respawns the coordinator through the login shell, and refuses before touching the session when the shell isn't POSIX.
+func TestAdoptCoordinatorShell(t *testing.T) {
+	for shell, ok := range map[string]bool{"/bin/zsh": true, "/opt/homebrew/bin/fish": false} {
+		var ran []string
+		c := tmux.NewFake(func(args []string) (string, error) {
+			ran = append(ran, strings.Join(args, " "))
+			if slices.Contains(args, "show-option") {
+				return shell + "\n", nil
+			}
+			return "", nil
+		})
+		err := Adopt(c, "boss-p", "%1", "%2", nil)
+		respawned := slices.ContainsFunc(ran, func(r string) bool { return strings.HasPrefix(r, "respawn-pane -k -t %1 "+shell+" -l -i -c exec ") })
+		if ok != (err == nil) || ok != respawned || !ok && len(ran) != 1 {
+			t.Errorf("shell %q: err %v, ran %q", shell, err, ran)
+		}
+	}
+}
+
 // An existing boss keeps the coordinator it has: another model or effort for it is refused, not dropped.
 func TestOpenExistingBossRefusesStart(t *testing.T) {
 	var ran []string

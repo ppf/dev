@@ -5,6 +5,8 @@ package herd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -137,7 +139,7 @@ func create(c *tmux.Client, session, project, dir string, start agent.Start) (st
 	if err != nil {
 		return "", err
 	}
-	coordinator, err := ptywrap.Argv(coordinatorArgv(session, start.Args(false)...)...)
+	coordinator, err := coordinatorCmd(c, session, start.Args(false)...)
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +183,7 @@ func Adopt(c *tmux.Client, session, claude, previews string, args []string) erro
 	if err != nil {
 		return err
 	}
-	coordinator, err := ptywrap.Argv(coordinatorArgv(session, args...)...)
+	coordinator, err := coordinatorCmd(c, session, args...)
 	if err != nil {
 		return err
 	}
@@ -199,6 +201,34 @@ func Adopt(c *tmux.Client, session, claude, previews string, args []string) erro
 	// Marked last: a half-restored boss stays a session dev boss refuses
 	_, err = c.Run("set-option", "-t", target, OptHerd, "1")
 	return err
+}
+
+// coordinatorCmd is the coordinator's pane command: run by tmux's default-shell as an interactive login
+// shell, as a worker's is typed into one, so claude resolves on the user's PATH, not the tmux server's.
+func coordinatorCmd(c *tmux.Client, session string, args ...string) ([]string, error) {
+	// start-server: with no server yet (first boss after a reboot) the query alone fails
+	shell, err := c.Run("start-server", ";", "show-option", "-gv", "default-shell")
+	if err != nil {
+		return nil, fmt.Errorf("reading tmux default-shell: %w", err)
+	}
+	shell = strings.TrimSpace(shell)
+	if !posixShell(shell) {
+		return nil, fmt.Errorf("tmux default-shell %q is not a POSIX shell (sh, bash, zsh, dash, ksh): dev boss can't start the coordinator through it: set default-shell to zsh or bash in tmux.conf", shell)
+	}
+	argv, err := ptywrap.Argv(coordinatorArgv(session, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	return viaLoginShell(shell, argv), nil
+}
+
+// posixShell reports whether shell takes `-l -i -c` with sh quoting.
+func posixShell(shell string) bool {
+	return slices.Contains([]string{"sh", "bash", "zsh", "dash", "ksh"}, filepath.Base(shell))
+}
+
+func viaLoginShell(shell string, argv []string) []string {
+	return []string{shell, "-l", "-i", "-c", "exec " + tmux.ShellJoin(argv...)}
 }
 
 // coordinatorArgv is the coordinator Claude's argv with args.

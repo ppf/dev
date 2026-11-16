@@ -170,7 +170,7 @@ func TestPickerBoss(t *testing.T) {
 	check(t, "boss option", d.T("show-option", "-qv", "-t", "=boss-app:", "@dev_herd"), "1")
 	// Panes left to right: sidebar, coordinator, previews
 	coordinator := d.T("display", "-t", "=boss-app:1.2", "-p", "#{pane_current_path} #{pane_start_command}")
-	if !strings.HasPrefix(coordinator, plain+" ") || !strings.HasSuffix(coordinator, "--remote-control=boss-app") {
+	if !strings.HasPrefix(coordinator, plain+" ") || !strings.HasSuffix(coordinator, `'--remote-control=boss-app'"`) {
 		t.Errorf("❌ coordinator pane: %q", coordinator)
 	}
 
