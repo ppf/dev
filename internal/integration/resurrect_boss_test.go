@@ -112,3 +112,59 @@ func TestResurrectBoss(t *testing.T) {
 		return err != nil
 	})
 }
+
+// A saved manager comes back as the manager: its coordinator with the manager's prompt, model and effort.
+func TestResurrectManager(t *testing.T) {
+	home := tmuxHome(t)
+	save := filepath.Join(home, "plugins/tmux-resurrect/scripts/save.sh")
+	requireFiles(t, filepath.Join(home, "plugins/tmux-resurrect/scripts/restore.sh"), save, filepath.Join(home, "plugins/tmux-resurrect/scripts/helpers.sh"))
+	resurrectDir := tempDir(t)
+	d := newDevServer(t, resurrectConf(resurrectDir))
+	stubs := filepath.SplitList(d.path)[0]
+	if err := os.Remove(filepath.Join(stubs, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	agentStub(t, stubs, "claude")
+	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
+	bare := exec.Command(devBin, "boss", "--timeout", "30s")
+	bare.Env = env
+	if out, err := bare.CombinedOutput(); err != nil {
+		t.Fatalf("dev boss: %v: %s", err, out)
+	}
+	d.T("run-shell", save+" quiet")
+	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
+	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
+	for _, line := range []string{":started_with\tmanager\tsonnet\tmedium\n", ":boss\tmanager\t1.1\t1.2\n"} {
+		if !strings.Contains(string(state), line) {
+			t.Errorf("saved state lacks %q:\n%s", line, state)
+		}
+	}
+
+	d.kill()
+	d.T("new-session", "-d", "-s", "boot")
+	d.T("set-option", "-gu", "@dev_restored")
+	d.outer.T("send-keys", "-t", "out", "TMUX= tmux -L "+d.socket+" attach -t boot", "Enter")
+	waitFor(t, "client attached again", func() bool {
+		c, _ := d.Try("list-clients", "-F", "#{client_session}")
+		return c == "boot"
+	})
+	// The server's first dev boss <project> restores; bare dev boss without a terminal doesn't, as --background
+	first := exec.Command(devBin, "boss", "app")
+	first.Env = env
+	if out, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("dev boss app: %v: %s", err, out)
+	}
+	waitFor(t, "manager restored as a boss", func() bool {
+		herd, _ := d.Try("show-option", "-qv", "-t", "=manager:", "@dev_herd")
+		return herd == "1"
+	})
+	again := exec.Command(devBin, "boss")
+	again.Env = env
+	out, err := again.Output()
+	check(t, "restored manager only printed", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
+	start, _ := d.Try("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}")
+	if !strings.Contains(start, `'claude' '--model' 'sonnet' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
+		!strings.Contains(start, `'--remote-control=manager'`) {
+		t.Errorf("restored manager's coordinator: %q", start)
+	}
+}

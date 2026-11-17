@@ -39,6 +39,15 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "dev", "projects.toml"), nil
 }
 
+// ManagerDir is the manager's folder, manager next to projects.toml (~/.config/dev/manager).
+func ManagerDir() (string, error) {
+	path, err := DefaultPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "manager"), nil
+}
+
 // StateDir is $XDG_STATE_HOME/dev, else ~/.local/state/dev.
 func StateDir() (string, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
@@ -84,7 +93,7 @@ func checkName(name string, seen map[string]bool, reserved []string) error {
 	case seen[name]:
 		return fmt.Errorf("duplicate project %q", name)
 	case slices.Contains(reserved, name):
-		return fmt.Errorf("project %q clashes with a subcommand", name)
+		return fmt.Errorf("project %q clashes with a subcommand or the manager session", name)
 	}
 	seen[name] = true
 	return nil

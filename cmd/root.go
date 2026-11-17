@@ -197,9 +197,10 @@ func loadProjects(cmd *cobra.Command) ([]config.Project, string, error) {
 	return projects, path, err
 }
 
-// reservedNames are the names `dev <name>` can't reach: every subcommand and alias, and help.
+// reservedNames are the names `dev <name>` can't reach, every subcommand and alias and help, and the manager's
+// session name.
 func reservedNames(cmd *cobra.Command) []string {
-	reserved := []string{"help"}
+	reserved := []string{"help", herd.Manager}
 	for _, c := range cmd.Root().Commands() {
 		reserved = append(reserved, c.Name())
 		reserved = append(reserved, c.Aliases...)

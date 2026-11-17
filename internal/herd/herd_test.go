@@ -716,6 +716,24 @@ func TestCoordinatorArgv(t *testing.T) {
 	}
 }
 
+// The manager's coordinator gets managerPrompt, so a resurrect's Adopt restores it as the manager; a new one runs on
+// sonnet · medium where its start leaves them unset.
+func TestManagerArgvAndStart(t *testing.T) {
+	want := []string{"claude", "--append-system-prompt", managerPrompt, "--remote-control=manager"}
+	if got := coordinatorArgv(Manager); !slices.Equal(got, want) {
+		t.Errorf("manager argv %q, want %q", got, want)
+	}
+	for _, tt := range []struct{ start, want agent.Start }{
+		{agent.Start{}, agent.Start{Model: "sonnet", Effort: "medium"}},
+		{agent.Start{Model: "opus"}, agent.Start{Model: "opus", Effort: "medium"}},
+		{agent.Start{Effort: "high"}, agent.Start{Model: "sonnet", Effort: "high"}},
+	} {
+		if got := managerStart(tt.start); got != tt.want {
+			t.Errorf("managerStart(%+v) = %+v, want %+v", tt.start, got, tt.want)
+		}
+	}
+}
+
 // The coordinator runs through an interactive login shell, so claude resolves on the user's PATH like a worker's.
 func TestViaLoginShell(t *testing.T) {
 	got := viaLoginShell("/bin/zsh", []string{"/x/dev", "pty-wrap", "--", "claude", "--append-system-prompt", "it's"})
