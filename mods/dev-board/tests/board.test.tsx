@@ -2215,6 +2215,67 @@ test('a list with an item this mod does not read shows no block', async ($, on) 
   await ui.unmount()
 })
 
+test('a linked worker is found by its id, a renamed one too; one off the board shows session gone; own items, then needs you, then gone, then the rest', async ($, on) => {
+  const workers = [
+    worker({ id: 'local_c', name: 'renamed', state: 'busy', status: 'working' }),
+    worker({ id: 'local_n', name: 'login', status: 'needs you' }),
+  ]
+  const items: TodoItem[] = [
+    { id: 1, text: 'Rework companion', on: 'companion-1000', session: { id: 'local_c', name: 'companion-1000' }, done: false },
+    { id: 2, text: 'Staging access', on: 'Marek', done: false },
+    { id: 3, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false },
+    { id: 4, text: 'Fix login', on: 'login', session: { id: 'local_n', name: 'login' }, done: false },
+    { id: 5, text: 'Approve the deploy', done: false },
+    { id: 6, text: 'Same name, other id', on: 'login', session: { id: 'local_old', name: 'login' }, done: false },
+  ]
+  await start($, on, ok(workers), { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual([
+    'TO DO 6 · 5 on others updated 12m',
+    '☐ Approve the deploy',
+    '◌ Fix login ● login · needs you',
+    '◌ Old spike ✕ spike · session gone',
+    '◌ Same name, other id ✕ login · session gone',
+    '◌ Rework companion ● renamed · working',
+    '▶ 1 more',
+  ])
+  const gone = (await ui.findAll({ type: 'Text', text: '✕ spike · session gone' })) as { props: Record<string, unknown> }[]
+  expect(gone.map(el => el.props.color)).toEqual(['error'])
+  await ui.unmount()
+})
+
+test('while the board cannot be read a linked item shows who it is on, not session gone', async ($, on) => {
+  const items: TodoItem[] = [{ id: 1, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false }]
+  await start($, on, { exitCode: 1, stdout: '', stderr: 'boom' }, { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Old spike on spike'])
+  await ui.unmount()
+})
+
+test('a linked worker whose record dev could not read shows who it is on, not session gone', async ($, on) => {
+  const items: TodoItem[] = [{ id: 1, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false }]
+  await start($, on, ok([], '⚠ org/local_gone.json: unexpected end of JSON input'), { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Old spike on spike'])
+  await ui.unmount()
+})
+
+test('an unlinked item whose name two workers share shows who it is on, not either worker', async ($, on) => {
+  const workers = [worker({ id: 'local_1', name: '', title: 'Fix login', status: 'idle' }), worker({ id: 'local_2', name: '', title: 'fix login ', status: 'working', state: 'busy' })]
+  await start($, on, ok(workers), { todo: todoRan([{ id: 1, text: 'Login', on: 'Fix login', done: false }]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Login on Fix login'])
+  await ui.unmount()
+})
+
+test('a list whose item has a session this mod does not read shows no block', async ($, on) => {
+  const items = [{ id: 1, text: 'a', on: 'w', session: { id: 1 }, done: false }] as unknown as TodoItem[]
+  await start($, on, ok(WORKERS), { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'todo' })).toBeFalsy()
+  await ui.unmount()
+})
+
 test("a to do item on a worker on the board shows the worker's dot and state, its name opening the worker's row", async ($, on) => {
   const workers = [
     worker({ id: 'local_c', name: 'companion-1000', state: 'busy', status: 'working' }),
@@ -2231,10 +2292,10 @@ test("a to do item on a worker on the board shows the worker's dot and state, it
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await todoRows(ui)).toEqual([
     'TO DO 4 · 3 on others updated 12m',
+    '☐ Approve the deploy',
     '◌ Rework companion 10:00 ● companion-1000 · working',
     '◌ Read the docs PR ● docs · idle',
     '◌ Staging access for lw on Marek (Ops)',
-    '☐ Approve the deploy',
   ])
   const dots = ((await ui.findAll({ type: 'Text', text: '●' })) as { props: Record<string, unknown> }[]).map(el => el.props.color)
   expect(dots.slice(0, 2)).toEqual(['success', 'subtle'])

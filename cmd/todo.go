@@ -48,13 +48,16 @@ and a dev boss also when it starts. A ticked item shows ticked for a few seconds
 			if asJSON {
 				return printJSON(out, l)
 			}
+			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(boss, cmd.ErrOrStderr()) }); err != nil {
+				return err
+			}
 			for _, it := range l.Items {
 				fmt.Fprintln(out, todoLine(it))
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, link, done, until), updated (unix seconds), stale`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until), updated (unix seconds), stale`)
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
 	return cmd
@@ -105,9 +108,22 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			it.On = todo.Clean(it.On)
 			if it.Text = todo.Clean(args[0]); it.Text == "" {
 				return errors.New("empty item")
+			}
+			if it.On = todo.Clean(it.On); strings.EqualFold(it.On, todo.Me) {
+				it.On = todo.Me
+			} else if it.On != "" {
+				// A worker of this boss's is linked, so its board shows the worker's state, or that it's gone
+				ws, err := todoWorkers(*boss, cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				if w, ok := todo.Match(it.On, ws); ok {
+					it.On, it.Session = w.Name, &w
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: no single worker of this boss by that name or id, so a person\n", it.On)
+				}
 			}
 			now := time.Now()
 			if until != "" {
@@ -130,7 +146,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringVar(&it.On, "on", "", "who it waits on, when not the user (shown last)")
+	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a worker session (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the --on, --link, --until not given")
@@ -188,24 +204,58 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 // todoStore is the list of --boss's session, else of the boss session it runs in; adopt lets a desktop one take
 // over an earlier list (desktopTodo). Never for --boss: that session takes over on its own first dev todo.
 func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
+	pane, id, err := todoBoss(boss)
 	switch {
-	case strings.HasPrefix(boss, "local_"):
-		return desktopTodo(boss, false, stderr)
-	case boss != "":
-		c := tmux.New()
-		pane, err := control.BossPane(c, boss)
-		if err != nil {
-			return todo.Store{}, err
-		}
-		return todo.ForPane(c, pane)
-	}
-	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+	case err != nil:
+		return todo.Store{}, err
+	case pane != "":
 		return todo.ForPane(tmux.New(), pane)
 	}
-	if id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID"); id != "" {
-		return desktopTodo(id, adopt, stderr)
+	return desktopTodo(id, adopt && boss == "", stderr)
+}
+
+// todoBoss is the boss session whose list it is: --boss's, else the one it runs in; a pane in a tmux one, else
+// a desktop app session's id.
+func todoBoss(boss string) (pane, id string, err error) {
+	switch {
+	case strings.HasPrefix(boss, "local_"):
+		return "", boss, nil
+	case boss != "":
+		pane, err := control.BossPane(tmux.New(), boss)
+		return pane, "", err
 	}
-	return todo.Store{}, errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		return pane, "", nil
+	}
+	if id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID"); id != "" {
+		return "", id, nil
+	}
+	return "", "", errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
+}
+
+// todoWorkers is the workers of the boss whose list it is: tmux sessions it started, or desktop app sessions it
+// spawned, not archived; records that can't be read are reported on stderr.
+func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
+	pane, id, err := todoBoss(boss)
+	switch {
+	case err != nil:
+		return nil, err
+	case pane != "":
+		return todo.Workers(tmux.New(), pane)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	named, warnings, err := desktop.Workers(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")).Records, id)
+	for _, w := range warnings {
+		fmt.Fprintln(stderr, "⚠ dev todo: "+w.Error())
+	}
+	ws := make([]todo.Session, len(named))
+	for i, n := range named {
+		ws[i] = todo.Session{ID: n.ID, Name: n.Name}
+	}
+	return ws, err
 }
 
 var errDesktopWorker = errors.New("a worker another session started: the to do list is its boss's")
@@ -262,7 +312,10 @@ func todoLine(it todo.Shown) string {
 		box = "◌"
 	}
 	parts := []string{strconv.Itoa(it.ID), box, it.Text}
-	if it.On != "" {
+	switch {
+	case it.Gone:
+		parts = append(parts, "on "+it.On+", session gone")
+	case it.On != "":
 		parts = append(parts, "on "+it.On)
 	}
 	if it.Until != 0 {

@@ -1,6 +1,8 @@
 package herd
 
 import (
+	"cmp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,13 +39,14 @@ func (m Model) todoRows(gh int) []string {
 	if m.todoFolded || room == 0 {
 		return rows
 	}
-	items := l.Items[:min(todoShown, len(l.Items))]
-	if len(items) < len(l.Items) || len(items) > room {
+	all := m.todoOrder(l.Items)
+	items := all[:min(todoShown, len(all))]
+	if len(items) < len(all) || len(items) > room {
 		// Room for the "+N more" row
 		items = items[:min(len(items), room-1)]
 	}
 	for _, it := range items {
-		rows = append(rows, todoItem(it, w))
+		rows = append(rows, todoItem(it.Shown, it.owner, w))
 	}
 	if more := len(l.Items) - len(items); more > 0 {
 		rows = append(rows, sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w))
@@ -76,10 +79,72 @@ func (m Model) todoHeader(l todo.List, w int) string {
 	return left + rule + strings.Repeat("─", fill) + reset + right
 }
 
+// owner is the worker a to do item is on, as this refresh saw it: its name and section, or gone.
+type owner struct {
+	name string
+	sec  section
+	gone bool
+}
+
+// todoOwner is the worker it is on: its linked session, else a worker named as its on is; nil for a person or
+// none. A linked session with no agent shows idle, one no longer listed gone.
+func (m Model) todoOwner(it todo.Shown) *owner {
+	if it.Done || it.On == "" {
+		return nil
+	}
+	tiles := make([]todo.Session, len(m.snap.tiles))
+	for i, t := range m.snap.tiles {
+		tiles[i] = todo.Session{ID: t.sess.Name, Name: t.sess.Name}
+	}
+	on := it.On
+	if it.Session != nil {
+		on = it.Session.ID
+	}
+	if w, ok := todo.Match(on, tiles); ok && (it.Session == nil || w.ID == on) {
+		return &owner{name: w.Name, sec: m.snap.tiles[slices.IndexFunc(tiles, func(s todo.Session) bool { return s == w })].section()}
+	}
+	switch {
+	case it.Session == nil:
+		return nil
+	case m.snap.started[on]:
+		return &owner{name: on, sec: restingSection}
+	}
+	return &owner{name: it.Session.Name, gone: true}
+}
+
+// ownedItem is an item with the worker it is on, nil for none.
+type ownedItem struct {
+	todo.Shown
+	owner *owner
+}
+
+// todoOrder is the items as the block lists them: the user's own first, then those on a worker that needs the
+// user, then on a worker that's gone, then the rest, each group in the list's order.
+func (m Model) todoOrder(items []todo.Shown) []ownedItem {
+	rank := func(it ownedItem) int {
+		switch o := it.owner; {
+		case it.On == "":
+			return 0
+		case o != nil && o.gone:
+			return 2
+		case o != nil && o.sec == needsYouSection:
+			return 1
+		}
+		return 3
+	}
+	out := make([]ownedItem, len(items))
+	for i, it := range items {
+		out[i] = ownedItem{it, m.todoOwner(it)}
+	}
+	slices.SortStableFunc(out, func(a, b ownedItem) int { return cmp.Compare(rank(a), rank(b)) })
+	return out
+}
+
 // todoItem is one item's row: its number, ☐ (◌ waiting on someone else, ☑ ticked, struck through), its text
-// cut with …, and at the right who it waits on, else its PR's number (↗ for another link), cut to a third
-// of the row.
-func todoItem(it todo.Shown, w int) string {
+// cut with …, and at the right who does it: a worker's dot in its section's colour, name and section, or ✕ and
+// session gone, in two fifths of the row (more for the state in a narrow pane), cutting the name first; else the
+// person, else its PR's number (↗ for another link), cut to a third of the row.
+func todoItem(it todo.Shown, o *owner, w int) string {
 	box, text := "☐", ""
 	switch {
 	case it.Done:
@@ -89,6 +154,16 @@ func todoItem(it todo.Shown, w int) string {
 	}
 	right := ""
 	switch {
+	case o != nil:
+		mark, state := sectionColours[o.sec]+"●"+reset+" ", sidebar.Muted+" · "+reset+sectionColours[o.sec]+strings.ToLower(sectionNames[o.sec])+reset
+		name := sidebar.Muted + o.name + reset
+		if o.gone {
+			mark, name, state = sidebar.Red+"✕ ", sidebar.Red+o.name, sidebar.Red+" · session gone"+reset
+		}
+		// Room for the state and a cut name, past two fifths if need be; a pane too narrow for that cuts the state too
+		cell := min(max(w*2/5, ansi.StringWidth(mark+state)+3), max(1, w-6))
+		room := max(1, cell-ansi.StringWidth(mark+state)-2)
+		right = " " + ansi.Truncate(mark+ansi.Truncate(name, room, "…")+reset+state, max(1, cell-2), "…") + reset + " "
 	case it.On != "":
 		right = sidebar.Gold + "on " + it.On + reset
 	case it.PR() != 0:
@@ -96,7 +171,7 @@ func todoItem(it todo.Shown, w int) string {
 	case it.Link != "":
 		right = sidebar.Muted + "↗" + reset
 	}
-	if right != "" {
+	if right != "" && o == nil {
 		right = " " + ansi.Truncate(right, max(1, w/3), "…") + reset + " "
 	}
 	left := " " + rule + strconv.Itoa(it.ID) + reset + " " + box + " " + text + it.Text + reset

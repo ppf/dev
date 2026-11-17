@@ -80,12 +80,13 @@ type tile struct {
 // snapshot is what one refresh saw.
 type snapshot struct {
 	tiles   []tile
-	self    string // own session's id
-	name    string // own session's name
-	visible bool   // a client shows own window
-	focused bool   // own pane is its window's active pane
-	zoomed  bool   // own window is zoomed
-	client  string // tty of the client viewing own session; "" lets tmux pick
+	started map[string]bool // sessions this boss started, an agent in them or not, by name
+	self    string          // own session's id
+	name    string          // own session's name
+	visible bool            // a client shows own window
+	focused bool            // own pane is its window's active pane
+	zoomed  bool            // own window is zoomed
+	client  string          // tty of the client viewing own session; "" lets tmux pick
 	todo    todo.List
 	todoErr error // why the to do list could not be read
 }
@@ -449,6 +450,10 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		if rs[0].Herd != "" || !sidebar.Names(rs[0].StartedBy, s.self, s.name, true) {
 			continue
 		}
+		if s.started == nil {
+			s.started = map[string]bool{}
+		}
+		s.started[name] = true
 		ps := make([]agent.Pane, len(rs))
 		for i, r := range rs {
 			ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,

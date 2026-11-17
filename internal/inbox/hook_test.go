@@ -33,6 +33,9 @@ func bossTmux(t *testing.T, todoHerd string) *tmux.Client {
 	})
 }
 
+// who is the line the reminders end with, asking who does each item.
+const who = "\nAn item a worker session or someone else does, not the user: dev todo add --replaces <n> --on <worker name|person>."
+
 // The boss's open to do list comes with the worker notes it hands over: blocking a Stop, as a prompt's context,
 // and alone with a prompt that is a batch Deliver pasted; never without notes, nor with an empty list.
 func TestBossHookTodo(t *testing.T) {
@@ -46,12 +49,12 @@ func TestBossHookTodo(t *testing.T) {
 		busy        bool
 	}{
 		{"stop with notes", `{"hook_event_name":"Stop"}`, true, []string{"Merge PR #9", "Answer Vince"}, pasted + "\n\n[dev todo] Your open to do list:\n1. Merge PR #9\n2. Answer Vince\n" +
-			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".`, true},
+			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + who, true},
 		{"prompt with notes", `{"hook_event_name":"UserPromptSubmit","prompt":"hi"}`, true, []string{"Merge PR #9"}, pasted + "\n\n[dev todo] Your open to do list:\n1. Merge PR #9\n" +
-			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".`, false},
+			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + who, false},
 		{"notes, empty list", `{"hook_event_name":"Stop"}`, true, nil, pasted, true},
 		{"pasted batch", `{"hook_event_name":"UserPromptSubmit","prompt":` + quote(pasted) + `}`, false, []string{"Merge PR #9"}, "[dev todo] Your open to do list:\n1. Merge PR #9\n" +
-			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".`, false},
+			`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + who, false},
 		{"pasted batch, empty list", `{"hook_event_name":"UserPromptSubmit","prompt":` + quote(pasted) + `}`, false, nil, "", false},
 		{"plain prompt", `{"hook_event_name":"UserPromptSubmit","prompt":"hi"}`, false, []string{"Merge PR #9"}, "", false},
 		{"stop without notes", `{"hook_event_name":"Stop"}`, false, []string{"Merge PR #9"}, "", false},
@@ -118,7 +121,7 @@ func TestBossHookListError(t *testing.T) {
 // A coordinator starting, resumed or /clear'ed gets its open list, kept from an earlier session on a start;
 // nothing after a compaction, with no open item, or for another pane in the boss session.
 func TestBossHookStart(t *testing.T) {
-	check := "\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."
+	check := "\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")." + who
 	for _, tt := range []struct {
 		name, source, pane string
 		list               []string
@@ -175,7 +178,7 @@ func TestStartContextAge(t *testing.T) {
 	if err := s.Set([]string{"a"}, then); err != nil {
 		t.Fatal(err)
 	}
-	out, err := StartContext(s, "startup", then.Add(49*time.Hour))
+	out, err := StartContext(s, func() ([]todo.Session, error) { return nil, nil }, "startup", then.Add(49*time.Hour))
 	if err != nil || !strings.Contains(out, "updated 49h ago):") {
 		t.Errorf("StartContext = %q, %v; want updated 49h ago", out, err)
 	}

@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -295,6 +296,98 @@ func TestReplace(t *testing.T) {
 	}
 }
 
+// A worker's item keeps its session through a replace that doesn't name who does it; --on another takes its own
+// (none for a person); --on me gives it back to the user, as does an add with it.
+func TestReplaceSession(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	w := &Session{ID: "local_w", Name: "fix-login"}
+	if _, err := s.Add(Item{Text: "a", On: "fix-login", Session: w}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(1, Item{Text: "a2"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it := read(t, s, now).Items[0]; it.On != "fix-login" || it.Session == nil || *it.Session != *w {
+		t.Errorf("replace without --on: %+v, want the worker kept", it)
+	}
+	if err := s.Replace(1, Item{Text: "a3", On: "Marek"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it := read(t, s, now).Items[0]; it.On != "Marek" || it.Session != nil {
+		t.Errorf("replace --on a person: %+v, want no session", it)
+	}
+	if err := s.Replace(1, Item{Text: "a4", On: Me}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it := read(t, s, now).Items[0]; it.On != "" || it.Session != nil {
+		t.Errorf("replace --on me: %+v, want the user's", it)
+	}
+	if _, err := s.Add(Item{Text: "b", On: Me}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it := read(t, s, now).Items[0]; it.Text != "a4" || read(t, s, now).Items[1].On != "" {
+		t.Errorf("add --on me: %+v, want the user's", read(t, s, now).Items)
+	}
+}
+
+// The session goes out in --json as {id, name}, and only for a worker's item.
+func TestSessionJSON(t *testing.T) {
+	got, err := json.Marshal([]Shown{{ID: 1, Text: "a", On: "w", Session: &Session{ID: "local_1", Name: "w"}}, {ID: 2, Text: "b", On: "Ola"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"id":1,"text":"a","on":"w","session":{"id":"local_1","name":"w"},"done":false},{"id":2,"text":"b","on":"Ola","done":false}]`; string(got) != want {
+		t.Errorf("JSON = %s, want %s", got, want)
+	}
+}
+
+// Match finds a worker by id, then by its unique name; a shared name or anything else is a person.
+func TestMatch(t *testing.T) {
+	ws := []Session{{ID: "local_1", Name: "Fix login"}, {ID: "local_2", Name: "local_1"}, {ID: "local_3", Name: "twin"}, {ID: "local_5", Name: "Twin"}, {ID: "local_4", Name: " Spaced "}}
+	for _, tt := range []struct {
+		on, want string // want: the id, "" for none
+	}{
+		{"local_1", "local_1"},
+		{" fix LOGIN ", "local_1"},
+		{"Fix login", "local_1"},
+		{"local_2", "local_2"},
+		{"Marek", ""},
+		{"fix", ""},
+		{"Twin", ""},
+		{"spaced", "local_4"},
+	} {
+		w, ok := Match(tt.on, ws)
+		if ok != (tt.want != "") || w.ID != tt.want {
+			t.Errorf("Match(%q) = %+v, %t; want %q", tt.on, w, ok, tt.want)
+		}
+	}
+}
+
+// Workers lists the sessions the pane's boss started, by name, leaving out other bosses and other sessions'
+// workers; a boss names them by its name, an older dev by its session id.
+func TestWorkers(t *testing.T) {
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "display-message" {
+			return tmux.FormatRow("/tmp/tmux-1/default", "boss-p", "1", "$1", "1700000000"), nil
+		}
+		return strings.Join([]string{
+			tmux.FormatRow("boss-p", "", "1"),
+			tmux.FormatRow("fix-login", "boss-p", ""),
+			tmux.FormatRow("old-worker", "$1", ""),
+			tmux.FormatRow("sub-boss", "boss-p", "1"),
+			tmux.FormatRow("theirs", "boss-q", ""),
+		}, ""), nil
+	})
+	got, err := Workers(c, "%1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Session{{"fix-login", "fix-login"}, {"old-worker", "old-worker"}}; !slices.Equal(got, want) {
+		t.Errorf("Workers = %+v, want %+v", got, want)
+	}
+}
+
 func TestParseUntil(t *testing.T) {
 	warsaw, err := time.LoadLocation("Europe/Warsaw")
 	if err != nil {
@@ -329,7 +422,7 @@ func TestParseUntil(t *testing.T) {
 func TestReminder(t *testing.T) {
 	l := List{Items: []Shown{{ID: 1, Text: "a"}, {ID: 2, Text: "b", Done: true}, {ID: 3, Text: "c", On: "Marek", Until: time.Date(2026, 11, 16, 10, 0, 0, 0, time.Local).Unix()}}}
 	want := "[dev todo] Your open to do list:\n1. a\n3. c (on Marek) (until 2026-11-16 10:00)\n" +
-		`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".`
+		`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + whoLine
 	if got := l.Reminder(); got != want {
 		t.Errorf("Reminder = %q, want %q", got, want)
 	}
@@ -420,5 +513,28 @@ func TestAdoptDesktopUnreadable(t *testing.T) {
 	adopted, err := s.AdoptDesktop(func() (func(string) bool, error) { return func(string) bool { return true }, nil })
 	if !adopted || err == nil || !strings.Contains(err.Error(), "desktop-local_bad.json") {
 		t.Errorf("AdoptDesktop = %v, %v; want local_good's list and local_bad's error", adopted, err)
+	}
+}
+
+// MarkGone reads the workers only when an open item has one, and the reminders show gone items.
+func TestMarkGone(t *testing.T) {
+	read := 0
+	workers := func() ([]Session, error) { read++; return []Session{{ID: "live", Name: "live"}}, nil }
+	l := List{Items: []Shown{{ID: 1, Text: "a", On: "Ola"}}}
+	if err := l.MarkGone(workers); err != nil || read != 0 {
+		t.Errorf("no linked item: %v, %d reads; want none", err, read)
+	}
+	l.Items = append(l.Items,
+		Shown{ID: 2, Text: "b", On: "live", Session: &Session{ID: "live", Name: "live"}},
+		Shown{ID: 3, Text: "c", On: "old", Session: &Session{ID: "old", Name: "old"}},
+		Shown{ID: 4, Text: "d", On: "old", Session: &Session{ID: "old", Name: "old"}, Done: true})
+	if err := l.MarkGone(workers); err != nil || read != 1 {
+		t.Fatalf("MarkGone: %v, %d reads", err, read)
+	}
+	if got := []bool{l.Items[0].Gone, l.Items[1].Gone, l.Items[2].Gone, l.Items[3].Gone}; !slices.Equal(got, []bool{false, false, true, false}) {
+		t.Errorf("gone = %v, want only the open item on old", got)
+	}
+	if got := l.Reminder(); !strings.Contains(got, "\n2. b (on live)\n3. c (on old, session gone)\n") {
+		t.Errorf("Reminder = %q", got)
 	}
 }

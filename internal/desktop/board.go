@@ -328,6 +328,19 @@ func own(dir string, paths []string, id string) (record, error) {
 	return record{}, fmt.Errorf("no app session record for %s in %s", id, dir)
 }
 
+// Named is a worker's app session id and the name its board shows: its spawn name, else its title, else its id.
+type Named struct{ ID, Name string }
+
+// Workers lists boss's unarchived workers by id and name; warnings name records it could not read.
+func Workers(dir, boss string) ([]Named, []error, error) {
+	recs, warnings, err := records(dir, boss)
+	named := make([]Named, len(recs))
+	for i, r := range recs {
+		named[i] = Named{ID: r.SessionID, Name: cmp.Or(r.SpawnedFrom.Name, r.Title, r.SessionID)}
+	}
+	return named, warnings, err
+}
+
 // Spawned reports whether app session id is a worker another session started, not a user fork; no record in dir is an error.
 func Spawned(dir, id string) (bool, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*", "*", "local_*.json"))

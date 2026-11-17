@@ -99,7 +99,8 @@ func TestTodoMore(t *testing.T) {
 		m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: i, Text: "item " + strconv.Itoa(i)})
 	}
 	rows := plain(m.todoRows(39))
-	if len(rows) != 7 || rows[5] != " 6 ☐ item 6"+strings.Repeat(" ", 39) || strings.TrimSpace(rows[6]) != "+4 more" {
+	// The user's own items come first, so the one on Marek goes under "+4 more"
+	if len(rows) != 7 || rows[4] != " 6 ☐ item 6"+strings.Repeat(" ", 39) || strings.TrimSpace(rows[6]) != "+4 more" {
 		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
 	}
 	rows = plain(m.todoRows(8))
@@ -287,6 +288,106 @@ func TestFitTodo(t *testing.T) {
 		next, _ := m.Update(refreshMsg{snap: st.snap})
 		if m = next.(Model); m.size != st.want {
 			t.Errorf("%s: size %v, want %v (ran %q)", st.name, m.size, st.want, ran)
+		}
+	}
+}
+
+// withWorkers is board4's list on its workers: one linked to each section's worker, one named on fix-login
+// without a link, one on a session with no agent, one on a session that's gone, one on a person.
+func withWorkers() Model {
+	m := board4()
+	m.snap.started = map[string]bool{"fix-login": true, "docs-api": true, "ci-fix": true, "old-spike": true, "shell-only": true}
+	on := func(id int, text, name string) todo.Shown {
+		return todo.Shown{ID: id, Text: text, On: name, Session: &todo.Session{ID: name, Name: name}}
+	}
+	m.snap.todo = todo.List{Updated: m.clk.Now().Unix(), Items: []todo.Shown{
+		{ID: 1, Text: "Answer Vince"},
+		on(2, "Document the API", "docs-api"),
+		on(3, "Rework companion importer", "companion-1000-feed"),
+		{ID: 4, Text: "Fix login", On: "Fix-Login"},
+		on(5, "Get CI green", "ci-fix"),
+		on(6, "Spike notes", "old-spike"),
+		on(7, "Shell job", "shell-only"),
+		{ID: 8, Text: "Staging access", On: "Marek"},
+		{ID: 9, Text: "Approve Kasia's PR"},
+	}}
+	return m
+}
+
+// A ticked item on a worker that's gone shows ticked, with no state and no session gone.
+func TestTodoDoneWorker(t *testing.T) {
+	m := withWorkers()
+	it := todo.Shown{ID: 3, Text: "Rework companion importer", On: "companion-1000-feed", Session: &todo.Session{ID: "companion-1000-feed", Name: "companion-1000-feed"}, Done: true}
+	if o := m.todoOwner(it); o != nil {
+		t.Errorf("owner = %+v, want none for a ticked item", o)
+	}
+	if row := ansi.Strip(todoItem(it, nil, 70)); strings.Contains(row, "gone") || !strings.Contains(row, "on companion-1000-feed") {
+		t.Errorf("row = %q", row)
+	}
+}
+
+// A worker's item shows its dot, name and section in that section's colour; a linked session no longer listed
+// shows ✕ session gone, one without an agent idle; an unlinked name matches a worker too; a person stays gold.
+func TestTodoWorkers(t *testing.T) {
+	m := withWorkers()
+	var rows []string
+	for _, it := range m.snap.todo.Items {
+		rows = append(rows, todoItem(it, m.todoOwner(it), 70))
+	}
+	checkRows(t, rows, []string{
+		" 1 ☐ Answer Vince                                                     ",
+		" 2 ◌ Document the API                            ● docs-api · working ",
+		" 3 ◌ Rework companion importer             ✕ companio… · session gone ",
+		" 4 ◌ Fix login                                ● fix-login · needs you ",
+		" 5 ◌ Get CI green                                  ● ci-fix · waiting ",
+		" 6 ◌ Spike notes                                   ● old-spike · idle ",
+		" 7 ◌ Shell job                                    ● shell-only · idle ",
+		" 8 ◌ Staging access                                          on Marek ",
+		" 9 ☐ Approve Kasia's PR                                               ",
+	}, 70)
+	if !strings.Contains(rows[1], sidebar.Gold+"●") || !strings.Contains(rows[1], sidebar.Gold+"working") {
+		t.Errorf("working: gold dot and state: %q", rows[1])
+	}
+	if !strings.Contains(rows[2], sidebar.Red+"✕ ") || !strings.Contains(rows[2], sidebar.Red+" · session gone") {
+		t.Errorf("gone: red: %q", rows[2])
+	}
+	if !strings.Contains(rows[3], sidebar.Red+"needs you") {
+		t.Errorf("needs you: red state: %q", rows[3])
+	}
+	if !strings.Contains(rows[7], sidebar.Gold+"on Marek") {
+		t.Errorf("a person stays gold: %q", rows[7])
+	}
+}
+
+// The block lists the user's own items first, then those on a worker that needs the user, then on a session
+// that's gone, then the rest in the list's order; five of them, then +N more.
+func TestTodoWorkerOrder(t *testing.T) {
+	m := withWorkers()
+	var got []int
+	for _, it := range m.todoOrder(m.snap.todo.Items) {
+		got = append(got, it.ID)
+	}
+	if want := []int{1, 9, 4, 3, 2, 5, 6, 7, 8}; !slices.Equal(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+	rows := plain(m.todoRows(39))
+	if len(rows) != 7 || !strings.HasPrefix(rows[3], " 4 ◌ Fix login") || !strings.HasPrefix(rows[4], " 3 ◌ Rework") || strings.TrimSpace(rows[6]) != "+4 more" {
+		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+// A narrow pane keeps a worker's state whole, cutting its name; one too narrow even for that cuts the state rather
+// than overflow the row.
+func TestTodoWorkerNarrow(t *testing.T) {
+	m := withWorkers()
+	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40)); !strings.HasSuffix(row, " · needs you ") {
+		t.Errorf("40 columns: %q, want the state whole", row)
+	}
+	for _, w := range []int{12, 20, 30, 40} {
+		for _, it := range m.snap.todo.Items {
+			if got := ansi.StringWidth(todoItem(it, m.todoOwner(it), w)); got != w {
+				t.Errorf("item %d at %d columns is %d wide", it.ID, w, got)
+			}
 		}
 	}
 }
