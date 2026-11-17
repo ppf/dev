@@ -519,7 +519,7 @@ export const register: Register = on => {
       if (isReadingFleet) return
       isReadingFleet = true
       try {
-        const { fleet: got, errors } = await readFleet(run)
+        const { fleet: got, errors } = await readFleet(run, DEV_BIN)
         const error = errors.join('; ')
         if (error !== lastFleetError) {
           lastFleetError = error
@@ -854,7 +854,7 @@ export const register: Register = on => {
       answeringAsk.add(key)
       let why = ''
       try {
-        const ran = await $.process.run(answerArgv(it, option), { timeoutMs: 15_000 })
+        const ran = await $.process.run(answerArgv(DEV_BIN, it, option), { timeoutMs: 15_000 })
         why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} todo answer exited ${ran.exitCode}`
       } catch (err) {
         why = errorText(err)
@@ -1480,9 +1480,11 @@ export const register: Register = on => {
                 </Box>
               </Box>,
               ...(it.done
-                ? [
+                ? it.answer === undefined
+                  ? []
+                  : [
                     <Text key={`${key}:answered`} size={SIZE.meta} color={TONE.ok} wrap="truncate-end">
-                      {`  answered: ${it.answer ?? ''} · sent to ${it.boss}`}
+                      {`  answered: ${it.answer}`}
                     </Text>,
                   ]
                 : it.options.length > 0

@@ -2529,8 +2529,8 @@ const AGENTS: Ran = {
   exitCode: 0,
   stdout: JSON.stringify([
     { session: 'boss-dev', project: 'dev', state: 'working', boss: true, model: 'opus', effort: 'medium', cost_usd: 3.8 },
-    { session: 'terminal-fix', project: 'terminal', state: 'waiting' },
-    { session: 'terminal-idle', project: 'terminal', state: 'idle' },
+    { session: 'terminal-fix', project: 'terminal', state: 'waiting', deciding: true },
+    { session: 'terminal-idle', project: 'terminal', state: 'waiting' },
   ]),
   stderr: '',
 }
@@ -2551,7 +2551,7 @@ test('the all-projects blocks: asks with option buttons, answered ones struck, a
   expect(needs).toContain('NEEDS YOU · ALL PROJECTS 2')
   expect(needs).toContain('dev  Merge #148?')
   expect(needs).not.toContain('Marek')
-  expect(needs).toContain('answered: After release · sent to boss-dev')
+  expect(needs).toContain('answered: After release')
   expect(needs).toContain('terminal-fix')
   expect(needs).not.toContain('terminal-idle')
   expect((await ui.findAll({ type: 'Button' })).map(b => b.props.label).filter(l => typeof l === 'string' && /Merge|Wait/.test(l))).toEqual(['★ Merge', 'Wait'])
