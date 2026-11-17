@@ -352,7 +352,7 @@ func (m Model) refresh() tea.Cmd {
 		}
 		if msgs != nil {
 			var ts []inbox.Thread
-			ts, snap.msgsErr = msgs.Threads(snap.name)
+			ts, snap.msgsErr = msgs.Threads(snap.name, m.clk.Now())
 			snap.threads = openThreads(ts, m.clk.Now())
 		}
 		if !snap.visible {

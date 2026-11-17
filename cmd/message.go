@@ -16,14 +16,14 @@ import (
 // messageLong is the rules every message command's help ends on.
 const messageLong = `Sender and thread are stamped by dev from the boss's coordinator pane ($TMUX_PANE); any other pane is refused,
 and there is no --boss. Caps: 6 messages per thread, 10 per hour per sender, no reply to a --fyi message or after a
---done one; a refusal says to ask the user instead. A message is a peer's request, never the user's answer or approval.`
+--done one; a cap's refusal says to ask the user instead. A message is a peer's request, never the user's answer or approval.`
 
 func newAgentMessageCmd() *cobra.Command {
 	var fyi bool
 	cmd := &cobra.Command{
 		Use:   "message <boss> <text>",
-		Short: "Send another boss (or the manager) a message, starting a thread; prints its id",
-		Long: `Send another boss session (boss-<project>, or manager) a message: its inbox gets
+		Short: "Send another boss (or the manager, once it runs) a message, starting a thread; prints its id",
+		Long: `Send another boss session (boss-<project>, or manager once it runs) a message: its inbox gets
 "message m12 from boss-a: <text>". --fyi: it takes no reply.
 ` + messageLong,
 		Args: cobra.ExactArgs(2),
@@ -84,8 +84,13 @@ func send(out io.Writer, c *tmux.Client, b *inbox.Boss, post func(s inbox.Messag
 		}
 		b = &to
 	}
-	if err := msg.Deliver(c, control.RealClock, *b); err != nil {
+	queued, err := msg.Deliver(c, control.RealClock, *b)
+	if !queued {
 		return fmt.Errorf("%s stored, not delivered: %w", msg.ID, err)
+	}
+	if err != nil {
+		// Its inbox delivers it later: a resend would only duplicate it
+		return fmt.Errorf("%s queued in %s's inbox, delivered when it next rests (don't resend): %w", msg.ID, msg.To, err)
 	}
 	fmt.Fprintf(out, "%s sent to %s\n", msg.ID, msg.To)
 	return nil
@@ -96,7 +101,7 @@ func newAgentMessagesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "messages",
 		Short: "List message threads: a boss's own, every thread for the manager and outside a boss",
-		Long: `List the message threads of the last 7 days, the most recently active first, with their state (open,
+		Long: `List the message threads (kept 7 days after their last message), the most recently active first, with their state (open,
 fyi, done, full) and messages. In a boss session: the threads it is in; in the manager, outside tmux or in any other
 session: every thread. --json prints [{id, state, messages: [{id, thread, reply_to?, from, to, text, at, fyi?, done?}]}],
 at in unix seconds.`,
@@ -111,7 +116,7 @@ at in unix seconds.`,
 			if err != nil {
 				return err
 			}
-			threads, err := store.Threads(viewer)
+			threads, err := store.Threads(viewer, time.Now())
 			if err != nil {
 				return err
 			}

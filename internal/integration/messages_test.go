@@ -63,6 +63,8 @@ func TestBossMessages(t *testing.T) {
 			strings.Contains(s.T("capture-pane", "-p", "-t", pane[inbox.Manager]), "Try")
 	})
 
+	split := s.T("split-window", "-d", "-t", "=boss-a:", "-P", "-F", "#{pane_id}", "sleep 600")
+	refused(split, "is not boss-a's coordinator", "agent", "message", inbox.Manager, "hi")
 	refused(pane["plain"], "plain is not a boss session", "agent", "message", "boss-a", "hi")
 	refused("", "run it in a boss's coordinator pane", "agent", "message", "boss-a", "hi")
 	refused(pane["boss-a"], "plain is not a boss session", "agent", "message", "plain", "hi")

@@ -86,7 +86,7 @@ type Thread struct {
 // Last is the thread's latest message.
 func (t Thread) Last() Msg { return t.Messages[len(t.Messages)-1] }
 
-// msgFile is a tmux server's messages as stored; Next numbers the next one.
+// msgFile is a tmux server's messages as stored; Next is the last id issued.
 type msgFile struct {
 	Next     int   `json:"next"`
 	Messages []Msg `json:"messages"`
@@ -116,10 +116,11 @@ func (s Messages) update(now time.Time, f func(*msgFile) error) error {
 	if err != nil {
 		return err
 	}
+	// Before f: a reply doesn't bring back a thread gone
+	m.prune(now)
 	if err := f(&m); err != nil {
 		return err
 	}
-	m.prune(now)
 	return writeJSON(s.path, m)
 }
 
@@ -188,11 +189,12 @@ func threadState(msgs []Msg) string {
 }
 
 // Threads are the threads viewer is in, the most recently active first; every thread for the Manager or viewer "".
-func (s Messages) Threads(viewer string) ([]Thread, error) {
+func (s Messages) Threads(viewer string, now time.Time) ([]Thread, error) {
 	m, err := s.read()
 	if err != nil {
 		return nil, err
 	}
+	m.prune(now)
 	ts := []Thread{}
 	for _, t := range m.threads() {
 		if first := t.Messages[0]; viewer == "" || viewer == Manager || first.From == viewer || first.To == viewer {
@@ -250,8 +252,8 @@ func (s Messages) Post(from, to, text string, fyi bool, now time.Time) (Msg, err
 }
 
 // Reply stores from's reply to message id, to the thread's other boss; done closes the thread. Refused unless from
-// is in the thread, to a --fyi message, after a --done one, past ThreadCap messages in the thread, and for the Manager
-// past one message in a thread it didn't start.
+// is in the thread, to a --fyi message, after a --done one, once the thread holds ThreadCap messages, and for the Manager
+// after its one message in a thread sent to it.
 func (s Messages) Reply(from, id, text string, done bool, now time.Time) (Msg, error) {
 	if err := checkText(text); err != nil {
 		return Msg{}, err
@@ -281,7 +283,7 @@ func (s Messages) Reply(from, id, text string, done bool, now time.Time) (Msg, e
 		case to.FYI:
 			return fmt.Errorf("%s was sent --fyi: it takes no reply", id)
 		case st == ThreadDone:
-			return fmt.Errorf("thread %s was ended with --done: ask the user to reopen it", to.Thread)
+			return fmt.Errorf("thread %s was ended with --done: start a new thread only if it is needed, else ask the user", to.Thread)
 		case st == ThreadFull:
 			return fmt.Errorf("thread %s holds %d messages, the cap: ask the user instead", to.Thread, ThreadCap)
 		case from == Manager && first.From != Manager && slices.ContainsFunc(thread, func(x Msg) bool { return x.From == Manager }):
@@ -340,13 +342,14 @@ func Recipient(c *tmux.Client, name string) (Boss, error) {
 	return b, err
 }
 
-// Deliver queues msg in b's inbox and delivers it.
-func (msg Msg) Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
+// Deliver queues msg in b's inbox and delivers it; queued reports it waits there even when delivering failed, as
+// b's hooks and Watch deliver it later.
+func (msg Msg) Deliver(c *tmux.Client, clk control.Clock, b Boss) (queued bool, err error) {
 	n := Note{Worker: msg.From, Kind: Message, Text: msg.Line(), Key: msg.ID}
 	if _, err := b.Box.Add(n, clk.Now()); err != nil {
-		return err
+		return false, err
 	}
-	return Deliver(c, clk, b)
+	return true, Deliver(c, clk, b)
 }
 
 // Socket is the socket path of the tmux server c reaches.

@@ -48,7 +48,7 @@ func TestMessageThread(t *testing.T) {
 	if _, err := s.Reply("boss-b", "m3", "one more", false, now); err == nil || !strings.Contains(err.Error(), "ended with --done") {
 		t.Errorf("reply after --done = %v, want refused", err)
 	}
-	ts, err := s.Threads("boss-a")
+	ts, err := s.Threads("boss-a", now)
 	if err != nil || len(ts) != 1 || ts[0].State != ThreadDone || len(ts[0].Messages) != 3 {
 		t.Errorf("threads = %+v, %v", ts, err)
 	}
@@ -79,7 +79,7 @@ func TestMessageRefusals(t *testing.T) {
 			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
 		}
 	}
-	ts, _ := s.Threads("")
+	ts, _ := s.Threads("", now)
 	if len(ts) != 2 || ts[0].ID != "m2" || ts[0].State != ThreadOpen || ts[1].State != ThreadFYI {
 		t.Errorf("refusals stored something: %+v", ts)
 	}
@@ -123,7 +123,7 @@ func TestMessageManager(t *testing.T) {
 	sent(t)(s.Reply(Manager, "m4", "thanks", false, now))
 	sent(t)(s.Post("boss-b", "boss-c", "other", false, now.Add(time.Minute)))
 	for viewer, want := range map[string][]string{Manager: {"m6", "m3", "m1"}, "": {"m6", "m3", "m1"}, "boss-b": {"m6", "m3"}, "boss-a": {"m1"}, "boss-d": {}} {
-		ts, err := s.Threads(viewer)
+		ts, err := s.Threads(viewer, now)
 		var got []string
 		for _, th := range ts {
 			got = append(got, th.ID)
@@ -141,8 +141,16 @@ func TestMessagePrune(t *testing.T) {
 	sent(t)(s.Post("boss-a", "boss-b", "old", false, now))
 	sent(t)(s.Post("boss-a", "boss-b", "kept", false, now))
 	sent(t)(s.Reply("boss-b", "m2", "recent", false, now.Add(2*24*time.Hour)))
-	msg := sent(t)(s.Post("boss-a", "boss-b", "new", false, now.Add(keepThreads+time.Hour)))
-	ts, _ := s.Threads("")
+	later := now.Add(keepThreads + time.Hour)
+	// Gone from a read too, before any write prunes the file; a reply doesn't bring it back
+	if ts, _ := s.Threads("", later); len(ts) != 1 || ts[0].ID != "m2" {
+		t.Errorf("read after a week: %+v", ts)
+	}
+	if _, err := s.Reply("boss-b", "m1", "late", false, later); err == nil || !strings.Contains(err.Error(), "no message m1") {
+		t.Errorf("reply to a thread gone = %v", err)
+	}
+	msg := sent(t)(s.Post("boss-a", "boss-b", "new", false, later))
+	ts, _ := s.Threads("", later)
 	if msg.ID != "m4" || len(ts) != 2 || ts[0].ID != "m4" || ts[1].ID != "m2" {
 		t.Errorf("after prune: %s, %+v", msg.ID, ts)
 	}

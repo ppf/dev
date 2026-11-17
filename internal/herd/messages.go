@@ -34,7 +34,7 @@ func openThreads(ts []inbox.Thread, now time.Time) []inbox.Thread {
 
 // msgRows is the block of open message threads under the board, in at most a third of the rem rows left by the to do
 // block: header (messages · n open ──), then per thread, the most recently active first, its latest messages (time,
-// sender → recipient, text) and its count (open · 2 of 6); "+ more" when cut. An alert row if unreadable; none
+// sender → recipient, · reply on a reply, text) and its count (open · 2 of 6); "+ more" when cut. An alert row if unreadable; none
 // without open threads.
 func (m Model) msgRows(rem int) []string {
 	w, room := m.width, rem/3
@@ -64,9 +64,10 @@ func (m Model) msgRows(rem int) []string {
 		rows = append(rows, padRow(" "+sidebar.Muted+"open · "+strconv.Itoa(len(t.Messages))+" of "+strconv.Itoa(inbox.ThreadCap)+reset, w))
 	}
 	if len(rows) > room {
+		// The header, then as many rows as fit with the hint
 		rows = append(rows[:max(1, room-1)], sidebar.HintRow("  + more: dev agent messages", w))
 	}
-	return rows[:min(len(rows), room)]
+	return rows[:min(len(rows), max(room, 1))]
 }
 
 // wrapText is text on one line, wrapped under msgIndent to at most textRows rows, … ending a cut one.

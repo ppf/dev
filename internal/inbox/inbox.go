@@ -233,7 +233,7 @@ func (bt Batch) String() string {
 		b.WriteString("\n- " + n.String())
 	}
 	if bt.Dropped > 0 {
-		fmt.Fprintf(&b, "\n(%d older update(s) dropped: run dev agent list --mine)", bt.Dropped)
+		fmt.Fprintf(&b, "\n(%d older update(s) dropped: run dev agent list --mine and dev agent messages)", bt.Dropped)
 	}
 	if slices.ContainsFunc(bt.Notes, func(n Note) bool { return n.Kind == Message }) {
 		b.WriteString("\n" + messageHint)

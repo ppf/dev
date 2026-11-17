@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // withThread is board4 at 44 columns, in UTC, with one open thread of two messages, the reply long.
@@ -79,5 +81,59 @@ func TestOpenThreads(t *testing.T) {
 	}, now)
 	if len(got) != 1 || got[0].ID != "m1" {
 		t.Errorf("openThreads = %+v, want m1 only", got)
+	}
+}
+
+// Per thread its latest threadShown messages and its count, the most recently active thread first.
+func TestMessageBlockThreads(t *testing.T) {
+	m := withThread()
+	at := m.clk.Now().Add(-time.Minute).Unix()
+	long := inbox.Thread{ID: "m20", State: inbox.ThreadOpen}
+	for i, from := range []string{"boss-a", "boss-b", "boss-a", "boss-b"} {
+		long.Messages = append(long.Messages, inbox.Msg{ID: "m2" + string(rune('0'+i)), From: from, To: "x", Text: "msg " + string(rune('1'+i)), At: at})
+	}
+	m.snap.threads = append([]inbox.Thread{long}, m.snap.threads...)
+	rows := plain(m.msgRows(60))
+	got := strings.Join(rows, "\n")
+	for _, want := range []string{" messages · 2 open ", "msg 3", "msg 4", " open · 4 of 6", " open · 2 of 6"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("block lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "msg 1") || strings.Contains(got, "msg 2") || strings.Index(got, "4 of 6") > strings.Index(got, "2 of 6") {
+		t.Errorf("want the long thread's last two messages, first:\n%s", got)
+	}
+}
+
+// A click on the block hits no card; one on the board above it does.
+func TestMessageBlockClick(t *testing.T) {
+	m := withThread()
+	lines := m.render()
+	if _, ok := m.hitAt(3, len(lines)-5); ok {
+		t.Error("click on the block hit a card")
+	}
+	top, _ := m.boardSpan(m.height - len(m.bottom()))
+	if _, ok := m.hitAt(3, top+1); !ok {
+		t.Error("click on the board missed its card")
+	}
+}
+
+// Threads with no workers grow a collapsed pane to its share; once gone the pane collapses again.
+func TestFitThreads(t *testing.T) {
+	c := tmux.NewFake(func([]string) (string, error) { return "200\n", nil })
+	m := Model{c: c, pane: "%2", size: collapsed}
+	for _, st := range []struct {
+		name string
+		snap snapshot
+		want paneSize
+	}{
+		{"a thread", snapshot{threads: withThread().snap.threads}, shared},
+		{"unreadable", snapshot{msgsErr: errors.New("bad")}, shared},
+		{"gone", snapshot{}, collapsed},
+	} {
+		next, _ := m.Update(refreshMsg{snap: st.snap})
+		if m = next.(Model); m.size != st.want {
+			t.Errorf("%s: size %v, want %v", st.name, m.size, st.want)
+		}
 	}
 }
