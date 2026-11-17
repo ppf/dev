@@ -139,3 +139,38 @@ func TestScheduleResume(t *testing.T) {
 		})
 	}
 }
+
+// A resume holds the boss's inbox only while it is still to come, resumeGrace past its time, for the conversation
+// and prompts it was scheduled for, and a boss is there to resume it.
+func TestResumeAhead(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(10_000, 0)
+	for _, tt := range []struct {
+		name, at, prompts, session, startedBy, off string
+		want                                       bool
+	}{
+		{"ahead", "10060", "4", "s1", "boss-hq", "", true},
+		{"in its grace", "9941", "4", "s1", "boss-hq", "", true},
+		{"due", "9940", "4", "s1", "boss-hq", "", false},
+		{"none", "", "4", "s1", "boss-hq", "", false},
+		{"prompted since", "10060", "5", "s1", "boss-hq", "", false},
+		{"another conversation", "10060", "4", "s2", "boss-hq", "", false},
+		{"no boss above", "10060", "4", "s1", "", "", false},
+		{"its boss's inbox off", "10060", "4", "s1", "boss-hq", "off", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tmux.NewFake(func(args []string) (string, error) {
+				switch f := args[len(args)-1]; {
+				case strings.Contains(f, "@dev_resume_at"):
+					return tmux.FormatRow(tt.at, tt.prompts, "4", tt.session, "s1"), nil
+				case strings.Contains(f, "@dev_started_by"):
+					return tmux.FormatRow(tt.startedBy, "boss-app", "", "", "", "1"), nil
+				}
+				return tmux.FormatRow("$1", "1700000000", "boss-hq", "1", tt.off, "/tmp/tmux-1/default"), nil
+			})
+			if got, err := resumeAhead(c, "%1", now); got != tt.want || err != nil {
+				t.Errorf("resumeAhead = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}

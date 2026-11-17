@@ -296,7 +296,7 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			if resumed {
 				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt,
 					Outside: r.Outside != ""}
-				if r.Herd == "" {
+				if r.Herd == "" || up(n.Kind) {
 					if _, err := b.Box.Add(n, now); err != nil {
 						return err
 					}

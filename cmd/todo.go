@@ -153,15 +153,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				if err := s.Replace(replaces, it, now); err != nil {
 					return err
 				}
-				if it.On == todo.Me {
-					// Given back to the user: its text and options may be the replaced item's
-					l, err := s.Read(now)
-					if err != nil {
-						return err
-					}
-					if i := slices.IndexFunc(l.Items, func(x todo.Shown) bool { return x.ID == replaces }); i >= 0 {
-						waitsOnYou(*boss, cmd.ErrOrStderr(), replaces, l.Items[i].Text, l.Items[i].Options)
-					}
+				if it.On == todo.Me || it.Text != "" {
+					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
 				return printCount(cmd.OutOrStdout(), s, "replaced "+strconv.Itoa(replaces)+" · ", now)
 			}
@@ -408,6 +401,23 @@ func waitsOnYou(boss string, stderr io.Writer, id int, text string, options []st
 		fmt.Fprintln(stderr, "⚠ dev todo: queued for the boss above, delivered when it next rests: "+err.Error())
 	case err != nil:
 		fmt.Fprintln(stderr, "⚠ dev todo: the boss above wasn't told: "+err.Error())
+	}
+}
+
+// replacedWaits tells the boss above of item id, just replaced, when it is the user's: given back, or with new text.
+func replacedWaits(s todo.Store, boss string, stderr io.Writer, id int, now time.Time) {
+	l, err := s.Read(now)
+	if err != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: the boss above wasn't told: "+err.Error())
+		return
+	}
+	i := slices.IndexFunc(l.Items, func(x todo.Shown) bool { return x.ID == id })
+	if i < 0 {
+		fmt.Fprintf(stderr, "⚠ dev todo: the boss above wasn't told: #%d left the list\n", id)
+		return
+	}
+	if l.Items[i].On == "" {
+		waitsOnYou(boss, stderr, id, l.Items[i].Text, l.Items[i].Options)
 	}
 }
 

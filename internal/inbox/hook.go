@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -274,5 +275,7 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
 	text = clean(fmt.Sprintf("#%d %s", id, text))
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: WaitsOnYou + "\x00" + text, Outside: w.Outside != ""})
+	// Each its own: an item given back with the same text is news again
+	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
+	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
 }
