@@ -175,6 +175,7 @@ func bossEmpty(c *tmux.Client, a Agent) error {
 	if err != nil {
 		return err
 	}
+	id = strings.TrimSpace(id)
 	type session struct {
 		Name      string `tmux:"session_name"`
 		StartedBy string `tmux:"@dev_started_by"`
@@ -185,7 +186,7 @@ func bossEmpty(c *tmux.Client, a Agent) error {
 	}
 	var left []string
 	for _, s := range sessions {
-		if sidebar.Names(s.StartedBy, strings.TrimSpace(id), a.Session, true) {
+		if sidebar.Names(s.StartedBy, id, a.Session, true) {
 			left = append(left, s.Name)
 		}
 	}
