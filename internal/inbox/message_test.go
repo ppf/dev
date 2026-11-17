@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,16 +37,16 @@ func TestMessageThread(t *testing.T) {
 	if want := "m1 from boss-a: Is it released?"; first.Line() != want || first.To != "boss-b" || first.Thread != "m1" {
 		t.Errorf("first = %+v, line %q, want %q", first, first.Line(), want)
 	}
-	reply := sent(t)(s.Reply("boss-b", "m1", "Not yet", false, now))
+	reply := sent(t)(s.Reply("boss-b", "m1", "Not yet", false, now, nil))
 	if want := "m2 from boss-b (thread m1, reply to m1): Not yet"; reply.Line() != want || reply.To != "boss-a" {
 		t.Errorf("reply = %+v, line %q, want %q to boss-a", reply, reply.Line(), want)
 	}
 	// The first sender follows up on its own message: to the other boss still
-	again := sent(t)(s.Reply("boss-a", "m1", "Thanks", true, now))
+	again := sent(t)(s.Reply("boss-a", "m1", "Thanks", true, now, nil))
 	if want := "m3 from boss-a (thread m1, reply to m1, done: the thread is closed): Thanks"; again.Line() != want || again.To != "boss-b" {
 		t.Errorf("follow-up = %+v, line %q", again, again.Line())
 	}
-	if _, err := s.Reply("boss-b", "m3", "one more", false, now); err == nil || !strings.Contains(err.Error(), "ended with --done") {
+	if _, err := s.Reply("boss-b", "m3", "one more", false, now, nil); err == nil || !strings.Contains(err.Error(), "ended with --done") {
 		t.Errorf("reply after --done = %v, want refused", err)
 	}
 	ts, err := s.Threads("boss-a", now)
@@ -64,10 +65,10 @@ func TestMessageRefusals(t *testing.T) {
 		err  func() error
 		want string
 	}{
-		{"to --fyi", func() error { _, err := s.Reply("boss-b", "m1", "ok", false, now); return err }, "m1 was sent --fyi: it takes no reply"},
-		{"not in the thread", func() error { _, err := s.Reply("boss-c", "m2", "me too", false, now); return err }, "boss-c isn't in thread m2"},
-		{"the manager outside its thread", func() error { _, err := s.Reply(Manager, "m2", "hi", false, now); return err }, "manager isn't in thread m2"},
-		{"unknown id", func() error { _, err := s.Reply("boss-b", "m99", "?", false, now); return err }, "no message m99"},
+		{"to --fyi", func() error { _, err := s.Reply("boss-b", "m1", "ok", false, now, nil); return err }, "m1 was sent --fyi: it takes no reply"},
+		{"not in the thread", func() error { _, err := s.Reply("boss-c", "m2", "me too", false, now, nil); return err }, "boss-c isn't in thread m2"},
+		{"the manager outside its thread", func() error { _, err := s.Reply(Manager, "m2", "hi", false, now, nil); return err }, "manager isn't in thread m2"},
+		{"unknown id", func() error { _, err := s.Reply("boss-b", "m99", "?", false, now, nil); return err }, "no message m99"},
 		{"to itself", func() error { _, err := s.Post("boss-a", "boss-a", "hi", false, now); return err }, "can't message itself"},
 		{"control characters", func() error { _, err := s.Post("boss-a", "boss-b", "hi\x1b[2J", false, now); return err }, "message has control characters"},
 		{"empty", func() error { _, err := s.Post("boss-a", "boss-b", " \n", false, now); return err }, "empty message"},
@@ -87,15 +88,29 @@ func TestMessageRefusals(t *testing.T) {
 }
 
 // 6 messages per thread, the first included; 10 per hour per sender, over a rolling hour.
+// A reply the recipient check refuses stores nothing: no cap used, the thread not ended.
+func TestMessageReplyUnreachable(t *testing.T) {
+	s := messages(t)
+	now := time.Unix(1_700_000_000, 0)
+	sent(t)(s.Post("boss-a", "boss-b", "q", false, now))
+	gone := func(to string) error { return errors.New("no session " + to) }
+	if _, err := s.Reply("boss-b", "m1", "bye", true, now, gone); err == nil || err.Error() != "no session boss-a" {
+		t.Errorf("reply to a gone boss = %v", err)
+	}
+	if msg := sent(t)(s.Reply("boss-b", "m1", "bye", true, now, nil)); msg.ID != "m2" {
+		t.Errorf("retry got %s, want m2: the refused reply took an id", msg.ID)
+	}
+}
+
 func TestMessageCaps(t *testing.T) {
 	s := messages(t)
 	now := time.Unix(1_700_000_000, 0)
 	sent(t)(s.Post("boss-a", "boss-b", "1", false, now))
 	for i := 2; i <= ThreadCap; i++ {
 		from := map[bool]string{true: "boss-b", false: "boss-a"}[i%2 == 0]
-		sent(t)(s.Reply(from, "m"+strconv.Itoa(i-1), strconv.Itoa(i), false, now))
+		sent(t)(s.Reply(from, "m"+strconv.Itoa(i-1), strconv.Itoa(i), false, now, nil))
 	}
-	if _, err := s.Reply("boss-a", "m6", "7", false, now); err == nil || err.Error() != "thread m1 holds 6 messages, the cap: ask the user instead" {
+	if _, err := s.Reply("boss-a", "m6", "7", false, now, nil); err == nil || err.Error() != "thread m1 holds 6 messages, the cap: ask the user instead" {
 		t.Errorf("7th in a thread = %v", err)
 	}
 	// boss-a sent 3 of them: 7 more within the hour, then refused
@@ -115,13 +130,13 @@ func TestMessageManager(t *testing.T) {
 	s := messages(t)
 	now := time.Unix(1_700_000_000, 0)
 	sent(t)(s.Post("boss-a", Manager, "can you ask boss-b?", false, now))
-	sent(t)(s.Reply(Manager, "m1", "asking", false, now))
-	if _, err := s.Reply(Manager, "m1", "again", false, now); err == nil || !strings.Contains(err.Error(), "the manager already wrote in thread m1") {
+	sent(t)(s.Reply(Manager, "m1", "asking", false, now, nil))
+	if _, err := s.Reply(Manager, "m1", "again", false, now, nil); err == nil || !strings.Contains(err.Error(), "the manager already wrote in thread m1") {
 		t.Errorf("manager's second message = %v", err)
 	}
 	sent(t)(s.Post(Manager, "boss-b", "boss-a asks", false, now))
-	sent(t)(s.Reply("boss-b", "m3", "yes", false, now))
-	sent(t)(s.Reply(Manager, "m4", "thanks", false, now))
+	sent(t)(s.Reply("boss-b", "m3", "yes", false, now, nil))
+	sent(t)(s.Reply(Manager, "m4", "thanks", false, now, nil))
 	sent(t)(s.Post("boss-b", "boss-c", "other", false, now.Add(time.Minute)))
 	for viewer, want := range map[string][]string{Manager: {"m6", "m3", "m1"}, "": {"m6", "m3", "m1"}, "boss-b": {"m6", "m3"}, "boss-a": {"m1"}, "boss-d": {}} {
 		ts, err := s.Threads(viewer, now)
@@ -141,13 +156,13 @@ func TestMessagePrune(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	sent(t)(s.Post("boss-a", "boss-b", "old", false, now))
 	sent(t)(s.Post("boss-a", "boss-b", "kept", false, now))
-	sent(t)(s.Reply("boss-b", "m2", "recent", false, now.Add(2*24*time.Hour)))
+	sent(t)(s.Reply("boss-b", "m2", "recent", false, now.Add(2*24*time.Hour), nil))
 	later := now.Add(keepThreads + time.Hour)
 	// Gone from a read too, before any write prunes the file; a reply doesn't bring it back
 	if ts, _ := s.Threads("", later); len(ts) != 1 || ts[0].ID != "m2" {
 		t.Errorf("read after a week: %+v", ts)
 	}
-	if _, err := s.Reply("boss-b", "m1", "late", false, later); err == nil || !strings.Contains(err.Error(), "no message m1") {
+	if _, err := s.Reply("boss-b", "m1", "late", false, later, nil); err == nil || !strings.Contains(err.Error(), "no message m1") {
 		t.Errorf("reply to a thread gone = %v", err)
 	}
 	msg := sent(t)(s.Post("boss-a", "boss-b", "new", false, later))

@@ -28,8 +28,14 @@ func newAgentMessageCmd() *cobra.Command {
 ` + messageLong,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return send(cmd.OutOrStdout(), tmux.New(), args[0], func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
-				return s.Post(from, args[0], args[1], fyi, now)
+			c := tmux.New()
+			return send(cmd.OutOrStdout(), c, func(s inbox.Messages, from string, now time.Time) (msg inbox.Msg, b inbox.Boss, err error) {
+				// Before storing: a refusal doesn't count against the caps
+				if b, err = inbox.Recipient(c, args[0]); err != nil {
+					return msg, b, err
+				}
+				msg, err = s.Post(from, args[0], args[1], fyi, now)
+				return msg, b, err
 			})
 		},
 	}
@@ -47,8 +53,13 @@ thread reply in it. --done ends the thread: no reply after it.
 ` + messageLong,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return send(cmd.OutOrStdout(), tmux.New(), "", func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
-				return s.Reply(from, args[0], args[1], done, now)
+			c := tmux.New()
+			return send(cmd.OutOrStdout(), c, func(s inbox.Messages, from string, now time.Time) (msg inbox.Msg, b inbox.Boss, err error) {
+				msg, err = s.Reply(from, args[0], args[1], done, now, func(to string) (err error) {
+					b, err = inbox.Recipient(c, to)
+					return err
+				})
+				return msg, b, err
 			})
 		},
 	}
@@ -56,38 +67,22 @@ thread reply in it. --done ends the thread: no reply after it.
 	return cmd
 }
 
-// send stores the message post makes from the boss this pane coordinates, then delivers it to boss to ("": the
-// message's recipient, known once stored) and prints its id.
-func send(out io.Writer, c *tmux.Client, to string, post func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error)) error {
+// send stores the message post makes from the boss this pane coordinates, then delivers it to the boss post checked
+// it can reach, and prints its id.
+func send(out io.Writer, c *tmux.Client, post func(s inbox.Messages, from string, now time.Time) (inbox.Msg, inbox.Boss, error)) error {
 	from, socket, err := inbox.Peer(c, os.Getenv("TMUX_PANE"))
 	if err != nil {
 		return err
-	}
-	var b *inbox.Boss
-	if to != "" {
-		// Before storing: a refusal doesn't count against the caps
-		r, err := inbox.Recipient(c, to)
-		if err != nil {
-			return err
-		}
-		b = &r
 	}
 	store, err := inbox.OpenMessages(socket)
 	if err != nil {
 		return err
 	}
-	msg, err := post(store, from, time.Now())
+	msg, b, err := post(store, from, time.Now())
 	if err != nil {
 		return err
 	}
-	if b == nil {
-		to, err := inbox.Recipient(c, msg.To)
-		if err != nil {
-			return fmt.Errorf("%s stored, not delivered: %w", msg.ID, err)
-		}
-		b = &to
-	}
-	queued, err := msg.Deliver(c, control.RealClock, *b)
+	queued, err := msg.Deliver(c, control.RealClock, b)
 	if !queued {
 		return fmt.Errorf("%s stored, not delivered: %w", msg.ID, err)
 	}

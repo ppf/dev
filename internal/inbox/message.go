@@ -257,8 +257,9 @@ func (s Messages) Post(from, to, text string, fyi bool, now time.Time) (Msg, err
 
 // Reply stores from's reply to message id, to the thread's other boss; done closes the thread. Refused unless from
 // is in the thread, to a --fyi message, after a --done one, once the thread holds ThreadCap messages, and for the Manager
-// after its one message in a thread sent to it.
-func (s Messages) Reply(from, id, text string, done bool, now time.Time) (Msg, error) {
+// after its one message in a thread sent to it. reach (nil: none) checks the recipient before anything is stored, so a
+// reply it refuses neither counts against the caps nor ends the thread.
+func (s Messages) Reply(from, id, text string, done bool, now time.Time, reach func(to string) error) (Msg, error) {
 	if err := checkText(text); err != nil {
 		return Msg{}, err
 	}
@@ -292,6 +293,11 @@ func (s Messages) Reply(from, id, text string, done bool, now time.Time) (Msg, e
 			return fmt.Errorf("thread %s holds %d messages, the cap: ask the user instead", to.Thread, ThreadCap)
 		case from == Manager && first.From != Manager && slices.ContainsFunc(thread, func(x Msg) bool { return x.From == Manager }):
 			return fmt.Errorf("the manager already wrote in thread %s, which it didn't start: ask the user instead", to.Thread)
+		}
+		if reach != nil {
+			if err := reach(other); err != nil {
+				return err
+			}
 		}
 		var err error
 		msg, err = m.add(Msg{Thread: to.Thread, ReplyTo: id, From: from, To: other, Text: text, Done: done}, now)
