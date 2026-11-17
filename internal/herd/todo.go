@@ -11,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
+	"github.com/ppf/dev/internal/wait"
 )
 
 const (
@@ -89,9 +90,10 @@ func (m Model) todoHeader(l todo.List, w int) string {
 
 // owner is the worker a to do item is on, as this refresh saw it: its name and section, or gone.
 type owner struct {
-	name string
-	sec  section
-	gone bool
+	name  string
+	sec   section
+	gone  bool
+	until string // when its planned wait ends, as boards show it; "" for none
 }
 
 // todoOwner is the worker it is on: its linked session, else a worker named as its on is; nil for a person or
@@ -109,7 +111,12 @@ func (m Model) todoOwner(it todo.Shown) *owner {
 		on = it.Session.ID
 	}
 	if w, ok := todo.Match(on, tiles); ok && (it.Session == nil || w.ID == on) {
-		return &owner{name: w.Name, sec: m.snap.tiles[slices.IndexFunc(tiles, func(s todo.Session) bool { return s == w })].section()}
+		t := m.snap.tiles[slices.IndexFunc(tiles, func(s todo.Session) bool { return s == w })]
+		o := &owner{name: w.Name, sec: t.section()}
+		if o.sec == waitingSection && t.sess.Wait.Held() {
+			o.until = wait.Clock(t.sess.Wait.Until, m.clk.Now())
+		}
+		return o
 	}
 	switch {
 	case it.Session == nil:
@@ -163,7 +170,11 @@ func todoItem(it todo.Shown, o *owner, w int) string {
 	right := ""
 	switch {
 	case o != nil:
-		mark, state := sectionColours[o.sec]+"●"+reset+" ", sidebar.Muted+" · "+reset+sectionColours[o.sec]+strings.ToLower(sectionNames[o.sec])+reset
+		what := strings.ToLower(sectionNames[o.sec])
+		if o.until != "" {
+			what += " until " + o.until
+		}
+		mark, state := sectionColours[o.sec]+"●"+reset+" ", sidebar.Muted+" · "+reset+sectionColours[o.sec]+what+reset
 		name := sidebar.Muted + o.name + reset
 		if o.gone {
 			mark, name, state = sidebar.Red+"✕ ", sidebar.Red+o.name, sidebar.Red+" · session gone"+reset

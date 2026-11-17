@@ -8,6 +8,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 func TestModelAgentPane(t *testing.T) {
@@ -32,7 +33,7 @@ func modelRows() []paneRow {
 		{Session: "app-2", Window: 1, ID: "%5", Path: "/app2", Command: "nvim"},
 		{Session: "web", Window: 1, ID: "%6", Path: "/web", Title: "repo | task", Command: "codex", State: "idle", StateCmd: "claude", Cost: "4", Project: "zz"},
 		{Session: "stale", Window: 1, ID: "%7", Path: "/stale", Title: "✳ Old", Command: "zsh", State: "waiting", StateCmd: "claude", Cost: "3"},
-		{Session: "gen", Window: 1, ID: "%8", Path: "/gen", Title: "✳ gen", Command: "claude", State: "idle", StateCmd: "claude"},
+		{Session: "gen", Window: 1, ID: "%8", Path: "/gen", Title: "✳ gen", Command: "claude", State: "idle", StateCmd: "claude", WaitUntil: "1700000000", WaitReason: "CI reruns"},
 		{Session: "side", Window: 1, ID: "%9", Path: "/side", Command: "claude", StateCmd: "claude", Sidebar: "%9"},
 		{Session: "w2", Window: 2, ID: "%10", Path: "/w2", Command: "claude", StateCmd: "claude"},
 	}
@@ -58,7 +59,7 @@ func TestModelBuildSnapshot(t *testing.T) {
 	want := []Session{
 		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50", CostUSD: 1.5, HasCost: true},
 		{Name: "app-2", Group: "app"},
-		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle"},
+		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle", Wait: wait.Wait{Until: time.Unix(1700000000, 0), Reason: "CI reruns"}},
 		{Name: "side", Group: "side"},
 		{Name: "stale", Group: "stale"},
 		{Name: "w2", Group: "w2"},
@@ -189,7 +190,7 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "")
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "", "", "")
 }
 
 func modelTestModel(c *tmux.Client) Model {
@@ -208,7 +209,7 @@ func TestModelRefresh(t *testing.T) {
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
 			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{@agent_waiting_for}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
-			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f#{@dev_pr}\x1f#{@dev_pr_gen}\x1f"},
+			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f#{@dev_pr}\x1f#{@dev_pr_gen}\x1f#{@dev_wait_until}\x1f#{@dev_wait_reason}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
 	}

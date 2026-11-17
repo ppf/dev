@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -122,6 +123,11 @@ func (m Model) render() frame {
 		if s.Agent != "" {
 			body, colour = s.Agent, muted
 			switch {
+			// A dialog says waiting, not the planned wait
+			case s.Wait.Held() && !s.Deciding && s.Agent == "Claude":
+				body = s.Wait.Text(time.Now())
+			case s.Wait.Held() && !s.Deciding:
+				body += " · " + s.Wait.Text(time.Now())
 			case s.State == "":
 			case s.Agent == "Claude":
 				// Claude is the default agent: its name is left out of the line

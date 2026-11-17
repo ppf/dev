@@ -15,6 +15,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Hook is what a desktop app session's own Claude hooks (dev state, dev question) recorded of it, kept in
@@ -32,6 +33,8 @@ type Hook struct {
 	// RateLimited marks a turn a rate limit stopped; ResetAt is its reset, unix seconds, 0 when unread.
 	RateLimited bool  `json:"rateLimited,omitempty"`
 	ResetAt     int64 `json:"resetAt,omitempty"`
+	// Wait is its planned wait (dev agent wait-until), until a prompt.
+	Wait wait.Wait `json:"wait,omitzero"`
 }
 
 // staleHooks is how long a hook file goes unwritten before a session's start removes it: its session
@@ -49,7 +52,8 @@ func HookDir() (string, error) {
 
 // RecordState updates the hook file of the session a `dev state <state>` hook (input: its stdin) runs for,
 // as agent.Record does a pane's options: a subagent's event only moves Active, a Stop waiting on background
-// tasks stays working, a rate limit's StopFailure records its reset, and the session's end removes the file.
+// tasks stays working, a rate limit's StopFailure records its reset, a prompt ends a planned wait, and the
+// session's end removes the file.
 // A session's start also removes the files of sessions gone for staleHooks.
 func RecordState(dir, state string, input []byte, now time.Time) error {
 	resolved, ok, err := agent.Resolve(state, input)
@@ -87,6 +91,10 @@ func RecordState(dir, state string, input []byte, now time.Time) error {
 		if slices.Contains(agent.TurnBounds, e.Event) {
 			h.Question = ""
 		}
+		// A turn ending past its time ran without the boss's wake (its own background task woke it)
+		if e.Event == "UserPromptSubmit" || e.Event == "Stop" && h.Wait.Due(now) {
+			h.Wait = wait.Wait{}
+		}
 		switch e.Event {
 		case "StopFailure":
 			h.RateLimited, h.ResetAt = rateLimit(input, now)
@@ -95,6 +103,26 @@ func RecordState(dir, state string, input []byte, now time.Time) error {
 		}
 		return false
 	}))
+}
+
+// SetWait records the planned wait of the session id (dev agent wait-until in a desktop app session), replacing
+// one it holds; the zero Wait drops it. A session without a hook file (its dev state hooks don't run) or a drop
+// without a wait is an error.
+func SetWait(dir, id string, w wait.Wait) error {
+	path := filepath.Join(dir, id+".json")
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("session %s has no hook file (are its dev state hooks installed?): %w", id, err)
+	}
+	none := false
+	err := update(path, func(h *Hook) bool {
+		none = !w.Held() && !h.Wait.Held()
+		h.Wait = w
+		return false
+	})
+	if err == nil && none {
+		return errors.New("this session has no planned wait")
+	}
+	return err
 }
 
 // RecordQuestion records what the dialog a `dev question` hook reports asks in its session's hook file. A

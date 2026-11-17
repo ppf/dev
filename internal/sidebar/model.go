@@ -12,6 +12,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // pollInterval is bash's POLL_INTERVAL: focus, size and sessions follow tmux within one tick.
@@ -49,6 +50,8 @@ type paneRow struct {
 	CostOpt     string `tmux:"@dev_cost"`
 	PR          string `tmux:"@dev_pr"`
 	PRGen       string `tmux:"@dev_pr_gen"`
+	WaitUntil   string `tmux:"@dev_wait_until"`
+	WaitReason  string `tmux:"@dev_wait_reason"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -276,6 +279,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			}
 			i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
 			sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
+			sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
 			sess.Branch = branch(a.Pane.Path)
 			// Before Order moves a worker into its starter's group
 			sess.Named = sess.Branch != "" && name == SessionName(sess.Group, sess.Branch)

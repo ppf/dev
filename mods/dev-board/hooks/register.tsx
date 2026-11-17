@@ -229,6 +229,12 @@ const label = (w: Worker) => w.name || w.title
 /** A worker's section; a status a newer dev adds counts as Working rather than nowhere. */
 const groupOf = (w: Worker) => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working')
 
+/** A worker's section as a to do item on it names it, e.g. `waiting until 16:30` in a planned wait (its status text's start, as dev words the time). */
+const ownerState = (w: Worker) => {
+  const group = groupOf(w).toLowerCase()
+  return w.wait && w.status === 'waiting' ? `${group} ${w.statusText.split(' · ')[0]}` : group
+}
+
 /** The worker an open to do item is on: its linked session's, else the one worker its `on` names by board label, name or title, case and outer spaces aside. */
 function ownerOf(it: TodoItem, workers: Worker[]): Worker | undefined {
   if (it.done || !it.on) return undefined
@@ -1094,7 +1100,7 @@ export const register: Register = on => {
               {dot(owner, groupOf(owner))}
               <Button key={`todo:item${it.id}:owner`} plain dimColor={!isDesktop} onPress={() => void fold(owner.id, true)}>
                 <Text size={SIZE.meta} wrap="truncate-end">
-                  {`${label(owner)} · ${groupOf(owner).toLowerCase()}`}
+                  {`${label(owner)} · ${ownerState(owner)}`}
                 </Text>
               </Button>
             </Box>

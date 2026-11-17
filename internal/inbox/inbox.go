@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // OptOff is the tmux option that turns the inbox off ("off"), globally or per boss session.
@@ -35,6 +36,7 @@ const (
 	Stuck    = "stuck"
 	Context  = "high context"
 	Resumed  = "resumed"
+	Waits    = "waiting"      // its turn ended on a planned wait (dev agent wait-until)
 	Message  = "message"      // from another boss: dev agent message
 	Answered = "you answered" // the user answered an item on the boss's list: dev todo answer
 	// WaitsOnYou is from a boss under this one: it put an item for the user on its list (dev todo add, ask)
@@ -198,14 +200,7 @@ func QuestionAt(lines []string) int {
 
 // Span is d in whole minutes: "17m", "1h", "1h 5m".
 func Span(d time.Duration) string {
-	m := int(d.Minutes())
-	switch {
-	case m < 60:
-		return fmt.Sprintf("%dm", m)
-	case m%60 == 0:
-		return fmt.Sprintf("%dh", m/60)
-	}
-	return fmt.Sprintf("%dh %dm", m/60, m%60)
+	return wait.Span(d)
 }
 
 // clean collapses whitespace and truncates.
@@ -306,6 +301,7 @@ type health struct {
 	Reminded  int    `json:"reminded,omitempty"`   // reminders of Question queued
 	PRChecked string `json:"pr_checked,omitempty"` // the idle stretch (@agent_since) its PR was checked in
 	Full      bool   `json:"full,omitempty"`       // a high context note went out, until its use drops back
+	WaitEnd   int64  `json:"wait_end,omitempty"`   // when a planned wait it still worked through ended: its stuck clock starts there
 }
 
 // Box is one boss's inbox file.

@@ -16,6 +16,7 @@ import (
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 var (
@@ -60,6 +61,8 @@ type Agent struct {
 	Questions []Question `json:"questions,omitempty"`
 	// Deciding marks a state waiting on the user's decision (a permission prompt or question), not Claude's idle reminder.
 	Deciding bool `json:"deciding,omitempty"`
+	// Wait is its planned wait (dev agent wait-until); omitted when none.
+	Wait *wait.Wait `json:"wait,omitempty"`
 	// HideCost is @dev_cost off: text output leaves the cost out, --json keeps cost_usd.
 	HideCost bool `json:"-"`
 }
@@ -121,6 +124,8 @@ type row struct {
 	// Pane options of each pane: only the agent pane's count
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Question   string `tmux:"@agent_question"`
+	WaitUntil  string `tmux:"@dev_wait_until"`
+	WaitReason string `tmux:"@dev_wait_reason"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -192,6 +197,9 @@ func list(c *tmux.Client) ([]Agent, error) {
 		}
 		if a.CostOK {
 			ag.CostUSD = &a.Cost
+		}
+		if w := wait.FromOptions(byID[a.Pane.ID].WaitUntil, byID[a.Pane.ID].WaitReason); w.Held() {
+			ag.Wait = &w
 		}
 		agents = append(agents, ag)
 	}

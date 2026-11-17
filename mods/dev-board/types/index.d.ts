@@ -53,6 +53,8 @@ export type Worker = {
   ask?: Ask | null
   /** Its last turn's newest wrap_up recap, "" for none; absent from a dev older than this mod. */
   recap?: string
+  /** Its planned wait (dev agent wait-until): until when (RFC 3339) and why; absent for none or from a dev older than this mod. */
+  wait?: { until: string; reason: string }
 }
 
 /** The last poll: its workers, or why it failed or did not run; warnings are its stderr. */

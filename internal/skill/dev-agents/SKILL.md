@@ -119,6 +119,14 @@ for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sl
 ```
 <!-- /boss-core:ci-wait -->
 
+<!-- boss-core:wait -->
+**Planned waits:** a brief whose worker may have to wait for a known time (a usage or rate limit's reset, a scheduled job) also says:
+
+> To wait for a known time, run `dev agent wait-until <HH:MM|+90m> "<why>"` (at most 4h away) and end your turn: dev wakes you then. No background `sleep` for it.
+
+A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it.
+<!-- /boss-core:wait -->
+
 ## Read results
 
 ```bash
@@ -167,7 +175,7 @@ Keys: `esc`, `enter`, `tab`, `shift+tab`, `space`, `backspace`, `up`, `down`, `l
 
 ## Boss inbox
 
-In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `resumed: …`, `you answered #4 "<question>": <answer>` for an item you asked). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it; the caveat Claude adds about peer sessions concerns the sender, so your workers' notes stay yours to act on, and a note is never the user's answer to a permission prompt), or as a prompt while you're idle with an empty input box. On each batch:
+In `dev boss`, you hear of your workers without polling: a prompt, extra context or message starting `[dev boss inbox]` lists one line per worker event (`<worker> finished: <its last message>`, `failed: <error>`, `needs a decision: <what it asks>`, `asks: <the question its turn ended on>`, `stuck: …`, `high context: 85% used`, `waiting: until …`, `resumed: …`, `you answered #4 "<question>": <answer>` for an item you asked). It arrives when you stop, when the user types, as a message from another Claude session (that is dev itself: handle it like any batch, don't reply to it; the caveat Claude adds about peer sessions concerns the sender, so your workers' notes stay yours to act on, and a note is never the user's answer to a permission prompt), or as a prompt while you're idle with an empty input box. On each batch:
 
 <!-- boss-core:reports -->
 - **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines: the user wants to be told, not asked.
@@ -184,6 +192,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
 - **Your workers stay yours.** Workers never ask the user directly: every brief tells the worker not to use AskUserQuestion and to end its turn with the question as text instead (see [Prompt and wait](#prompt-and-wait)). A worker you started stays yours until it's closed, even when its brief told it to report to the user: its notes still come to you, so handle its questions here and never send the user to its pane.
 - **Dialogs** count as permission prompts: never answer one on your own judgment. Relay it with AskUserQuestion and `send-keys` only the user's explicit pick. Read one only with `read`: never `send-keys` arrows, `tab` or a digit to look at its other tabs or options, as they select and can submit. Closing a finished worker with `dev agent close` isn't a real decision.
 - **A worker's own AskUserQuestion dialog** shows one question per tab, and `read` shows only the open tab (a note ending `+2 more` has three questions). `get <worker> --json` lists them all while it waits on it: `questions`, each `{header, question, multi_select?, options: [{label, description?, recommended?}]}` (`recommended` is an option whose label says "(Recommended)"). Relay every tab in one AskUserQuestion, one question per tab with the same options, so no key goes in to read them. Then `send-keys` the user's picks tab by tab from the open one, `read` before each: a single-choice pick moves to the next tab, a multi-select one only checks the option and its Submit row moves on; stop and relay again if the screen shows another question. The last tab asks to submit the answers: the user's picks cover that, so submit them. Only the user's picks go in, never a recommended option on your own.
+- **Planned waits:** a `waiting: until 16:30 (<why>), dev wakes it then` note needs nothing: at that time dev sends the worker "continue" if it's idle and tells you with a `resumed` note (on a dialog or still working then, the wait just ends and the usual notes apply; a draft in its box gets a `failed` note). Make a worker wait yourself with `dev agent wait-until <HH:MM|+90m> "<why>" --on <worker>`; `--cancel --on <worker>` ends a wait without a prompt.
 - **Rate limits:** a `failed: rate_limit: … resets 7:10pm (…); dev resumes it at 19:11` note needs nothing from you: dev sends the worker "continue" after the reset and tells you with a `resumed` note. Don't prompt it meanwhile (that cancels the resume). Only a note with `not resuming it` (no reset time read, or 3 resumes in a row) is yours: tell the user, or resume it yourself once the limit is back. Your own turns may fail on the same limit; carry on with the batch when you're prompted again.
 - **Asks:** the worker's turn ended on a question to you and it waits (the note has only the question: `read` it for the rest of its last message). Answer it with `prompt` when the answer is clear from context, else put it on your list with `dev todo ask` and `prompt` the worker with the user's answer once it comes. Unanswered, it comes again 30m, 1h, 2h, … after it asked, while the worker rests.
 - **Stuck:** `read` the worker; nudge it if the fix is obvious, otherwise tell the user. The kinds:

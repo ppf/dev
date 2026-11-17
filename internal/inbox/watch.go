@@ -16,6 +16,7 @@ import (
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 const (
@@ -57,6 +58,10 @@ type paneRow struct {
 	ResumeSession string `tmux:"@dev_resume_session"`
 	AgentSession  string `tmux:"@agent_session"`
 	Resumes       string `tmux:"@dev_resumes"`
+	// Its planned wait (dev agent wait-until)
+	WaitUntil   string `tmux:"@dev_wait_until"`
+	WaitReason  string `tmux:"@dev_wait_reason"`
+	WaitPrompts string `tmux:"@dev_wait_prompts"`
 }
 
 // teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
@@ -96,6 +101,8 @@ type sight struct {
 	trusted string // agent.Trusted
 	screen  string // a hash of its screen.Snapshot, while it works
 	parked  bool   // working with Claude's input box back: its turn waits on background tasks
+	waiting bool   // its planned wait holds: no stuck note while it rests or waits on background tasks, no asks repeat
+	waitEnd int64  // its planned wait ended this round while it worked: its stuck clock starts there
 }
 
 // prCheck is a PR's merge and CI state as Watch checks it.
@@ -172,6 +179,9 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			}
 		}
 		h := s.health(w.Session)
+		if w.waitEnd != 0 {
+			h.WaitEnd = w.waitEnd
+		}
 		stuck := func(text, key string) {
 			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key, Outside: w.Outside != ""}
 			holding = append(holding, n)
@@ -185,8 +195,8 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			if w.screen != h.Screen {
 				h.Screen, h.ScreenAt = w.screen, now.Unix()
 			}
-			progress := time.Unix(max(unix(w.Active), unix(w.Since), h.ScreenAt), 0)
-			if quiet := now.Sub(progress); quiet >= StuckWorking {
+			progress := time.Unix(max(unix(w.Active), unix(w.Since), h.ScreenAt, h.WaitEnd), 0)
+			if quiet := now.Sub(progress); quiet >= StuckWorking && !(w.waiting && w.parked) {
 				text := "no progress for " + Span(quiet)
 				if w.parked {
 					text += ", waiting on its background tasks"
@@ -199,7 +209,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			if held := now.Sub(since); held >= StuckDecision {
 				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since)
 			}
-		case resting(w.trusted, w.WaitingFor):
+		case resting(w.trusted, w.WaitingFor) && !w.waiting:
 			if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
 				// Past several (rounds missed while it worked or the previews were closed): one repeat
 				for asked >= AskAgain<<h.Reminded {
@@ -254,7 +264,7 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 }
 
 // Watch runs from the boss session pane is in (its previews): it resumes the boss's workers whose rate
-// limit reset (resume; a worker that is a boss without a resumed note), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
+// limit reset (resume; a worker that is a boss without a resumed note), wakes those whose planned wait ended (wake), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
 // StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find.
@@ -291,7 +301,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if mates[r.Pane] || w.trusted == "" {
 			continue
 		}
-		if r.ResumeAt != "" {
+		// A planned wait set since a rate limit holds its resume back until the wait's time
+		if pw := wait.FromOptions(r.WaitUntil, r.WaitReason); r.ResumeAt != "" && !(pw.Held() && !pw.Due(now)) {
 			resumed, err := resume(c, clk, r)
 			if resumed {
 				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt,
@@ -313,6 +324,35 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			}
 			if resumed || err != nil {
 				continue
+			}
+		}
+		if r.WaitUntil != "" {
+			wt := wait.FromOptions(r.WaitUntil, r.WaitReason)
+			woke, held, err := wake(c, clk, r)
+			if woke {
+				n := Note{Worker: r.Session, Kind: Resumed, Text: "its wait " + wt.Phrase(now) + " ended, dev sent it: continue",
+					Key: Resumed + "\x00wait" + r.WaitUntil, Outside: r.Outside != ""}
+				if r.Herd == "" || up(n.Kind) {
+					if _, err := b.Box.Add(n, now); err != nil {
+						return err
+					}
+				}
+				errs = append(errs, setNote(c, r.Pane, n.Summary()))
+				continue
+			}
+			if err != nil && strings.Contains(err.Error(), "can't find pane") {
+				continue
+			}
+			if err != nil {
+				n := Note{Worker: r.Session, Kind: Failed, Text: clean("waking it after its planned wait: " + err.Error()), Key: Failed + "\x00wait" + r.WaitUntil,
+					Outside: r.Outside != ""}
+				if _, err := b.Box.Add(n, now); err != nil {
+					return err
+				}
+			}
+			w.waiting = held
+			if !held && w.trusted == agent.Working && wt.Due(now) {
+				w.waitEnd = wt.Until.Unix()
 			}
 		}
 		held := now.Sub(time.Unix(unix(r.Since), 0))
@@ -354,7 +394,7 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			if !agent.Deciding(st.Trusted(), st.WaitingFor) {
 				continue
 			}
-		case resting(w.trusted, r.WaitingFor) && held >= StuckIdlePR && (known[r.Session] == nil || known[r.Session].PRChecked != r.Since):
+		case resting(w.trusted, r.WaitingFor) && !w.waiting && held >= StuckIdlePR && (known[r.Session] == nil || known[r.Session].PRChecked != r.Since):
 			if sidebar.StoredPR(r.PR, r.Path).State == "open" {
 				due = append(due, r)
 			}

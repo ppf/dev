@@ -6,12 +6,14 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Note kinds besides inbox's stuck, needs a decision and high context.
 const (
 	RateLimited = "rate-limited"
 	ResumeDue   = "resume due"
+	WakeDue     = "wake due"
 )
 
 // Note is a worker's health note, as dev boss's inbox has them for tmux workers. Key is the same while the
@@ -25,7 +27,8 @@ type Note struct {
 // notes are w's health notes at now from its hook file h (the zero Hook when there is none) and seen, its
 // last progress the app shows in unix seconds (its transcript's last write, its live status's change): stuck
 // (busy with no progress for inbox.StuckWorking), a decision unanswered for inbox.StuckDecision, a context at
-// inbox.ContextFull or above, a rate limit and its resume once it reset.
+// inbox.ContextFull or above, a rate limit and its resume once it reset, a planned wait's end (wake due); no
+// stuck note while a planned wait holds.
 // A stopped worker has none: its hook file may be a crash's leftover.
 func notes(w Worker, cli string, h Hook, seen int64, now time.Time) []Note {
 	ns := []Note{}
@@ -46,20 +49,27 @@ func notes(w Worker, cli string, h Hook, seen int64, now time.Time) []Note {
 			}
 			add(inbox.Decision, text, unix(h.Since))
 		}
+	case w.State == StateBusy && w.Background > 0 && h.Wait.Held() && !h.Wait.Due(now):
+		// Its planned wait holds: background tasks of its own don't make it stuck
 	case w.State == StateBusy:
 		progress := max(h.Active, h.Since, seen)
+		if h.Wait.Due(now) {
+			progress = max(progress, h.Wait.Until.Unix())
+		}
 		if quiet := now.Sub(time.Unix(progress, 0)); progress > 0 && quiet >= inbox.StuckWorking {
 			add(inbox.Stuck, "no progress for "+inbox.Span(quiet), unix(progress))
 		}
+	case h.Wait.Due(now):
+		add(WakeDue, "its wait "+h.Wait.Phrase(now)+" ended: continue it", unix(h.Wait.Until.Unix()))
 	case h.RateLimited:
 		reset := time.Unix(h.ResetAt, 0)
 		switch {
 		case h.ResetAt == 0:
 			add(RateLimited, "no reset time read", unix(h.Since))
 		case now.Before(reset.Add(inbox.ResumeMargin)):
-			add(RateLimited, "resets "+inbox.Clock(reset, now), unix(h.ResetAt))
+			add(RateLimited, "resets "+wait.Clock(reset, now), unix(h.ResetAt))
 		default:
-			add(ResumeDue, "rate limit reset "+inbox.Clock(reset, now)+": resume it", unix(h.ResetAt))
+			add(ResumeDue, "rate limit reset "+wait.Clock(reset, now)+": resume it", unix(h.ResetAt))
 		}
 	}
 	if w.Context != nil && *w.Context >= inbox.ContextFull && cli != "" {

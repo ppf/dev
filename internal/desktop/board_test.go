@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/wait"
 )
 
 const boss = "local_boss"
@@ -871,6 +872,23 @@ func TestBoardStatusWiring(t *testing.T) {
 	idle := workers[2]
 	if idle.ID != "local_idle" || idle.Status != StatusNeedsYou || idle.StatusText != interruptedNote {
 		t.Errorf("running idle worker the app quit on = %s %s %q, want needs you", idle.ID, idle.Status, idle.StatusText)
+	}
+	// A planned wait: in its JSON; busy in the foreground (no background task), still stuck
+	p.Hooks = t.TempDir()
+	if err := SetWait(p.Hooks, "cli-busy", wait.Wait{Until: now.Add(time.Hour), Reason: "Codex limit resets"}); err == nil {
+		t.Error("SetWait without a hook file: no error")
+	}
+	writeJSON(t, filepath.Join(p.Hooks, "cli-busy.json"), Hook{State: "working", Since: old.Unix(), Active: old.Unix()})
+	if err := SetWait(p.Hooks, "cli-busy", wait.Wait{Until: now.Add(time.Hour), Reason: "Codex limit resets"}); err != nil {
+		t.Fatal(err)
+	}
+	if workers, _, err = Board(p, boss, now); err != nil {
+		t.Fatal(err)
+	}
+	b = workers[0]
+	data, _ := json.Marshal(b)
+	if b.Status != StatusStuck || !strings.Contains(string(data), `"wait":{"until":"`) {
+		t.Errorf("busy in the foreground in a planned wait = %s %q, JSON %s; want stuck, the wait in its JSON", b.Status, b.StatusText, data)
 	}
 }
 

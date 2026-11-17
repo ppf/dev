@@ -553,3 +553,47 @@ func TestUp(t *testing.T) {
 		}
 	}
 }
+
+// A planned wait mutes the stuck note of a worker parked on background tasks and the repeat of its question, not
+// the stuck note of one still working nor a decision; once the wait ends while it works, its stuck clock starts there.
+func TestObserveWaiting(t *testing.T) {
+	o := newObserver(t)
+	parked := worker("working", "", o.ago(5*time.Hour))
+	parked.screen, parked.parked, parked.waiting = "s1", true, true
+	o.round(0, parked)
+	if got, _ := o.round(StuckWorking, parked); got != "" {
+		t.Errorf("parked in a planned wait: %q", got)
+	}
+	busy := parked
+	busy.parked = false
+	if got, _ := o.round(time.Minute, busy); got != "[dev boss inbox] 1 worker update(s):\n- w stuck: no progress for 16m" {
+		t.Errorf("working through a planned wait = %q, want stuck", got)
+	}
+
+	o = newObserver(t)
+	parked.Since = o.ago(5 * time.Hour)
+	o.round(0, parked)
+	ended := parked
+	ended.waiting, ended.waitEnd = false, o.now.Unix()
+	if got, _ := o.round(time.Minute, ended); got != "" {
+		t.Errorf("right after its wait ended: %q", got)
+	}
+	after := ended
+	after.waitEnd = 0
+	if got, _ := o.round(StuckWorking-time.Minute, after); got != "[dev boss inbox] 1 worker update(s):\n- w stuck: no progress for 15m, waiting on its background tasks" {
+		t.Errorf("15m after its wait ended = %q", got)
+	}
+
+	o = newObserver(t)
+	o.s.health("w").Question, o.s.health("w").AskedAt = "Merge it?", o.now.Unix()
+	idle := worker("idle", "", o.ago(0))
+	idle.waiting = true
+	if got, _ := o.round(AskAgain, idle); got != "" {
+		t.Errorf("asks again in a planned wait: %q", got)
+	}
+	deciding := worker("waiting", "permission_prompt", o.ago(StuckDecision))
+	deciding.waiting = true
+	if got, _ := o.round(0, deciding); !strings.Contains(got, "w stuck: waiting on a decision for 3m, unanswered") {
+		t.Errorf("a decision in a planned wait = %q, want it reported", got)
+	}
+}

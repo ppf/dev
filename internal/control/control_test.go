@@ -24,7 +24,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "", "", "")
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "", "", "", "", "")
 }
 
 func TestList(t *testing.T) {
@@ -97,7 +97,7 @@ func TestListQuestions(t *testing.T) {
 		`{"question":"Add e2e?","header":"Tests","options":[{"label":"yes","description":""},{"label":"no (Recommended)","description":""}],"multiSelect":true}]}`
 	line := func(session, pane, cmd, state, waitingFor, question string) string {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", cmd, state, cmd, "", "", "%0", "$"+session, "", "", "", "", "", "",
-			waitingFor, question)
+			waitingFor, question, "", "")
 	}
 	out := line("asks", "%0", "dev", "", "", "") + line("asks", "%1", "claude", "waiting", "permission_prompt", ask) +
 		line("answered", "%2", "claude", "working", "", ask) + line("idle", "%3", "claude", "waiting", "idle_prompt", ask) +
@@ -605,7 +605,7 @@ func TestListStartedByAndHerd(t *testing.T) {
 	model, effort := map[string]string{"fix-login": "sonnet", "herd": "opus"}, map[string]string{"fix-login": "medium", "mine-too": "low"}
 	line := func(session, id, pane, startedBy, herd string) string {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "", outside[session],
-			model[session], effort[session], "", "")
+			model[session], effort[session], "", "", "", "")
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
 		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
@@ -681,7 +681,7 @@ func TestBossPane(t *testing.T) {
 }
 
 func TestListCostOff(t *testing.T) {
-	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "", "", "")
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "", "", "", "", "")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
 	if err != nil {
 		t.Fatal(err)
@@ -703,5 +703,21 @@ func TestSendText(t *testing.T) {
 		if err := SendText(c, "%1", text); err != nil || got != want {
 			t.Errorf("SendText(%q) ran %q, %v; want %q", text, got, err, want)
 		}
+	}
+}
+
+// An agent pane's planned wait shows in list and get --json; none leaves "wait" out.
+func TestListWait(t *testing.T) {
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "", "", "", "$app", "", "", "", "", "", "", "", "", "1700000000", "Codex limit resets") +
+		tmux.FormatRow("web", "1", "%2", "/nonexistent/web", "t", "claude", "idle", "claude", "", "", "", "$web", "", "", "", "", "", "", "", "", "", "")
+	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
+	if err != nil || len(got) != 2 {
+		t.Fatalf("List = %+v, %v", got, err)
+	}
+	app, _ := json.Marshal(got[0])
+	web, _ := json.Marshal(got[1])
+	want := `"wait":{"until":"` + time.Unix(1700000000, 0).Format(time.RFC3339) + `","reason":"Codex limit resets"}`
+	if !strings.Contains(string(app), want) || strings.Contains(string(web), `"wait"`) {
+		t.Errorf("JSON\n%s\n%s\nwant %s on app only", app, web, want)
 	}
 }

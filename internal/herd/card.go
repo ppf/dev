@@ -24,14 +24,16 @@ const (
 	restingSection
 )
 
-// section is where t's card goes, the first that holds: needs you while a dialog waits on the user; working
-// while its agent works; needs you when its turn ended on a question (an asks note; a needs a decision note
-// outlives its dialog, so the dialog itself decides); waiting when the newest marker in its last reply is
-// WAITING; else resting.
+// section is where t's card goes, the first that holds: needs you while a dialog waits on the user; waiting
+// while its planned wait (dev agent wait-until) holds; working while its agent works; needs you when its turn
+// ended on a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself
+// decides); waiting when the newest marker in its last reply is WAITING; else resting.
 func (t tile) section() section {
 	switch {
 	case t.deciding:
 		return needsYouSection
+	case t.sess.Wait.Held():
+		return waitingSection
 	case t.sess.State == agent.Working:
 		return workingSection
 	case noteKind(t.note) == inbox.Asks:

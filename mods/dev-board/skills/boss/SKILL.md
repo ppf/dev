@@ -70,13 +70,21 @@ A brief for work that ends in a PR or a task comment also says what needs no que
 When a brief passes on a user's remark about facts or their reading of them (what a system can do, what a requirement means, what was agreed), word it "check this against the sources, then apply", never a bare "apply"; the worker reports what confirms, contradicts or is unknown, and says what a resulting change removes from the deliverable.
 <!-- /boss-core:brief -->
 
-Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command or the app's Auto-fix on your PR will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running. When Auto-fix is on for your PR, don't poll: end the turn with `WAITING (Auto-fix: PR #<n>)`."*
+Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command, a planned wait (`dev agent wait-until`) or the app's Auto-fix on your PR will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run with `run_in_background` (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running. When Auto-fix is on for your PR, don't poll: end the turn with `WAITING (Auto-fix: PR #<n>)`."*
 
 <!-- boss-core:ci-wait -->
 ```bash
 for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sleep 30; done; gh pr checks <n>
 ```
 <!-- /boss-core:ci-wait -->
+
+<!-- boss-core:wait -->
+**Planned waits:** a brief whose worker may have to wait for a known time (a usage or rate limit's reset, a scheduled job) also says:
+
+> To wait for a known time, run `dev agent wait-until <HH:MM|+90m> "<why>"` (at most 4h away) and end your turn: dev wakes you then. No background `sleep` for it.
+
+A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it.
+<!-- /boss-core:wait -->
 
 The app starts a session only in a turn the user's own message asked for it (or a `<side-sessions-event>` turn right after it, for a step the user asked to run in its own session, in this project). A turn a worker's note or a session's message started can't start one: propose it instead (`initiation: "own_initiative"`, a card the user starts) and say so in one line. An unrelated request starts with `initiation: "offer"` (the user picks New session or Do it here). Over Remote Control (the user on their phone or claude.ai) you can't start workers: tell them in one line to send the request from the desktop app; you can still message, check and archive existing ones.
 
@@ -110,7 +118,7 @@ On each note:
 - **Auto-fix** wakes a worker only on a CI failure, so after green CI nobody merges. On a `WAITING (Auto-fix: …)` note, run the bounded `gh pr checks` loop above yourself with `run_in_background` (exit `8`: run it again; `1`: message the worker the failure); on green, merge if the user allowed it in the brief, or message the worker to.
 - **Idle worker with an open PR:** the mod sends no note for a blocked PR, so check it yourself (`gh pr view <n> --json mergeable,statusCheckRollup`). Merge conflicts → tell it to rebase; no CI checks → tell it to find out why CI didn't run.
 - **Failed or stuck:** a worker that stopped on an error or a rate limit, or that has run unusually long with no note: check it (`get_session`), tell the user, and nudge it with `SendMessage` once the cause is fixed.
-- **`dev-board:` notes** (from the `dev-board` mod, one prompt for its new health notes): *stuck* → check it, then nudge it with `SendMessage`; *needs a decision* → link the worker for the user, as for permission prompts; *resume due* → `SendMessage` "Continue where you left off: your last turn stopped on a rate limit, which has reset."; *rate-limited* → nothing until resume due; *high context* → replace the worker at the next item boundary (see below).
+- **`dev-board:` notes** (from the `dev-board` mod, one prompt for its new health notes): *stuck* → check it, then nudge it with `SendMessage`; *needs a decision* → link the worker for the user, as for permission prompts; *resume due* → `SendMessage` "Continue where you left off: your last turn stopped on a rate limit, which has reset."; *rate-limited* → nothing until resume due; *wake due* → `SendMessage` "Your planned wait is over: continue where you left off."; *high context* → replace the worker at the next item boundary (see below).
 - **`dev-board:` buttons** (the user pressed one on the board): `dev-board: message <name> (<local_id>): <text>` → `SendMessage` `<text>` verbatim to that id; `dev-board: archive <name> (<local_id>): dev delivered exited 0` → the user asked to archive it: `archive_session` it if it's idle with nothing left for it (else say why not), and report it in one line.
 <!-- boss-core:rollup -->
 - **When a batch of work is done,** give a short roll-up: what finished, what waits on the user (real decisions only, each with its context and your recommended answer), what's next.

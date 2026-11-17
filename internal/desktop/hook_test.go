@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/wait"
 )
 
 func TestRecordState(t *testing.T) {
@@ -201,5 +203,47 @@ func TestRecordStatePrunes(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
 			t.Errorf("%s: %v, want present=%v", name, err, want)
 		}
+	}
+}
+
+// dev agent wait-until records a desktop session's planned wait in its hook file; its next prompt ends it.
+func TestSetWait(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC)
+	if err := RecordState(dir, "working", []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	w := wait.Wait{Until: now.Add(time.Hour), Reason: "Codex limit resets"}
+	if err := SetWait(dir, "s1", w); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordState(dir, "idle", []byte(`{"hook_event_name":"Stop","session_id":"s1"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	h, err := ReadHook(filepath.Join(dir, "s1.json"))
+	if err != nil || !h.Wait.Until.Equal(w.Until) || h.Wait.Reason != w.Reason || h.State != "idle" {
+		t.Errorf("hook = %+v, %v; want the wait kept through its turn's end", h, err)
+	}
+	if err := RecordState(dir, "working", []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := ReadHook(filepath.Join(dir, "s1.json")); err != nil || h.Wait.Held() {
+		t.Errorf("hook = %+v, %v; want a prompt to end the wait", h, err)
+	}
+	if err := SetWait(dir, "s1", wait.Wait{}); err == nil {
+		t.Error("dropping no wait: no error")
+	}
+	if err := SetWait(dir, "s2", w); err == nil {
+		t.Error("a session without a hook file: no error")
+	}
+	// A turn ending past its time (its own background task woke it) ends the wait; one before it keeps it
+	if err := SetWait(dir, "s1", w); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordState(dir, "idle", []byte(`{"hook_event_name":"Stop","session_id":"s1"}`), now.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := ReadHook(filepath.Join(dir, "s1.json")); err != nil || h.Wait.Held() {
+		t.Errorf("hook = %+v, %v; want a turn ending past its time to end the wait", h, err)
 	}
 }

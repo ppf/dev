@@ -9,6 +9,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Worker statuses, finer than its state: the first that holds names the tile.
@@ -22,7 +23,8 @@ const (
 	StatusStuck = "stuck"
 	// StatusWorking: busy.
 	StatusWorking = "working"
-	// StatusWaiting: its last turn ended on `WAITING (…)` (a line of its last few): CI or a background job will wake it.
+	// StatusWaiting: a planned wait (dev agent wait-until) holds (the boss wakes it on its wake due note), or its last
+	// turn ended on `WAITING (…)` (a line of its last few): CI or a background job will wake it.
 	StatusWaiting = "waiting"
 	// StatusBlocked: the app's verdict on its last turn is blocked (it waits on the person).
 	StatusBlocked = "blocked"
@@ -58,11 +60,14 @@ func status(w Worker, h Hook, interrupted bool, now time.Time) (string, string) 
 	// A busy worker runs a turn: whatever the app recorded at its quit is over
 	case !busy && interrupted:
 		return StatusNeedsYou, interruptedNote
+	// Its planned wait, until the boss wakes it; busy, only while its own background tasks run before its time
+	case h.Wait.Held() && (!busy || w.Background > 0 && !h.Wait.Due(now)):
+		return StatusWaiting, h.Wait.Text(now)
 	case !busy && h.RateLimited:
 		if h.ResetAt == 0 {
 			return StatusRateLimited, "no reset time read"
 		}
-		return StatusRateLimited, "resumes " + inbox.Clock(time.Unix(h.ResetAt, 0), now)
+		return StatusRateLimited, "resumes " + wait.Clock(time.Unix(h.ResetAt, 0), now)
 	case busy:
 		for _, n := range w.Notes {
 			if n.Kind == inbox.Stuck {
