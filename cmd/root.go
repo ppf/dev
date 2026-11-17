@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 
@@ -28,7 +29,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return runPicker(cmd)
+			return runPicker(cmd, agent.Start{})
 		}
 		wt, err := worktreeArg(args)
 		if err != nil {
@@ -69,7 +70,8 @@ func Execute() {
 	os.Exit(exitCode(err))
 }
 
-func runPicker(cmd *cobra.Command) error {
+// runPicker opens the chosen project's boss, or with ctrl-o its plain session, either one's Claude with start.
+func runPicker(cmd *cobra.Command, start agent.Start) error {
 	if os.Getenv("TMUX") != "" && os.Getenv(picker.PopupGuard) == "" {
 		code, err := tmux.New().ReexecInPopup(picker.PopupGuard, "80%", "60%")
 		if err != nil {
@@ -94,12 +96,12 @@ func runPicker(cmd *cobra.Command) error {
 	}
 	c := tmux.New()
 	if res.Session {
-		return open.Run(c, open.Options{Path: dir, Name: res.Project.Name}, cmd.OutOrStdout())
+		return open.Run(c, open.Options{Path: dir, Name: res.Project.Name, Start: start}, cmd.OutOrStdout())
 	}
 	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 		return err
 	}
-	return herd.Open(c, res.Project.Name, dir, agent.Start{})
+	return herd.Open(c, res.Project.Name, dir, start)
 }
 
 // openProject opens project name, or its worktree wt (created when missing) when wt is set; detach
@@ -117,10 +119,8 @@ func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agent
 	p, ok := config.Find(projects, name)
 	if !ok {
 		stderr := cmd.ErrOrStderr()
-		fmt.Fprintf(stderr, "❌ Project '%s' not found in %s\nAvailable:\n", name, path)
-		for _, p := range projects {
-			fmt.Fprintln(stderr, "  "+p.Name)
-		}
+		fmt.Fprintf(stderr, "❌ Project '%s' not found in %s\n", name, path)
+		printAvailable(stderr, projects)
 		return fmt.Errorf("%w: project %q not found", open.ErrShown, name)
 	}
 	dir, err := p.Dir()
@@ -136,6 +136,14 @@ func openProject(cmd *cobra.Command, name, wt string, detach, worker bool, agent
 		defer func() { os.Stdout = stdout }()
 	}
 	return open.Run(tmux.New(), open.Options{Path: dir, Name: p.Name, Worktree: wt, Detach: detach, Agent: agentCmd, Worker: worker, Boss: boss, Start: start}, out)
+}
+
+// printAvailable lists the project names.
+func printAvailable(w io.Writer, projects []config.Project) {
+	fmt.Fprintln(w, "Available:")
+	for _, p := range projects {
+		fmt.Fprintln(w, "  "+p.Name)
+	}
 }
 
 // completeArgs completes project names (with descriptions), then that project's worktree names.
