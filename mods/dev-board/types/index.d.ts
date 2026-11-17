@@ -74,7 +74,19 @@ export type Delivered = { at: number; isDelivered: boolean; why: string }
 export type View = { composing: string; details: Record<string, boolean>; unsent: Record<string, string>; idleOpen: boolean }
 
 /** One item of `dev todo --json`: `on` who does it when not the person, `session` the worker `on` named when added (its `local_…` id or tmux session name, and name), `link` e.g. its PR; `done` true for a ticked item still listed. */
-export type TodoItem = { id: number; text: string; on?: string; session?: { id: string; name: string }; link?: string; done: boolean }
+export type TodoItem = { id: number; text: string; on?: string; session?: { id: string; name: string }; link?: string; done: boolean; options?: string[]; answer?: string }
+
+/** An item waiting on the person on a tmux boss's list (`dev todo --all --json`): `options` set for an ask, `answer` once answered (`done`). */
+export type FleetItem = { boss: string; id: number; text: string; done: boolean; options: string[]; answer?: string }
+
+/** A tmux boss (`isBoss`), or a worker waiting on a prompt, from `dev agent list --json`. */
+export type FleetAgent = { session: string; project: string; isBoss: boolean; state: string; model: string; effort: string; cost?: number }
+
+/** An open message thread between bosses (`dev agent messages --json`), oldest message first; `at` unix seconds. */
+export type FleetThread = { id: string; messages: { id: string; from: string; to: string; text: string; at: number }[] }
+
+/** The all-projects reads: what waits on the person, the bosses, the open threads. */
+export type Fleet = { asks: FleetItem[]; agents: FleetAgent[]; threads: FleetThread[] }
 
 /** The boss's to do list as last read: its items in dev's order (the person's first, then those on others), how long ago it changed (`12m`), whether it is stale (unchanged an hour). */
 export type Todo = { items: TodoItem[]; age: string; stale: boolean }
@@ -96,6 +108,7 @@ declare module 'claude-code' {
       todo: Shaped<Todo | null>
       linkStates: Shaped<Record<string, LinkState>>
       bossLine: Shaped<BossLine | null>
+      fleet: Shaped<Fleet | null>
     }
   }
 }

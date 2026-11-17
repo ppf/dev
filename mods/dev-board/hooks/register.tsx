@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionMessage } from 'claude-code'
 
-import type { Ask, Board, BossLine, Checks, Delivered, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
+import type { Ask, Board, BossLine, Checks, Delivered, Fleet, FleetAgent, FleetItem, FleetThread, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
 import { registerAsk } from './ask'
+import { answerArgv, cost, projectOf, readFleet } from './fleet'
 import { listenForReplies, registerReply, writeReply } from './reply'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
@@ -106,6 +107,8 @@ const DESKTOP_ICONS = iconsIn({ open: TONE_HEX.ok, merged: TONE_HEX.muted, close
 const ICON_PX = 12
 // The to do list's items shown before its `▶ N more` toggle, as on the tmux board; a link's PR number, as dev reads it
 const TODO_SHOWN = 5
+// The last messages of an open thread the board draws
+const THREAD_SHOWN = 3
 // Only GitHub's pull links can be read with gh
 const GH_PR_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#]|$)/
 const PR_LINK = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/
@@ -136,6 +139,9 @@ const todo = atom({ plugin: 'dev-board', key: 'todo' } as const, null, { shape: 
 const linkStates = atom({ plugin: 'dev-board', key: 'linkStates' } as const, {}, { shape: 'link-states-1' })
 // The boss session's own line, null when it has neither a chapter nor a current step
 const bossLine = atom({ plugin: 'dev-board', key: 'bossLine' } as const, null, { shape: 'boss-line-1' })
+
+// The all-projects reads (asks on every tmux boss's list, bosses, open message threads), null until read
+const fleet = atom({ plugin: 'dev-board', key: 'fleet' } as const, null, { shape: 'fleet-1' })
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -479,6 +485,10 @@ export const register: Register = on => {
   const answering = new Set<string>()
   // The title last given to the pane, or found on it; /board forgets it, as a poll may land between its read and its open
   let titled: string | undefined
+  // The asks being answered, by boss and item: a second press waits
+  const answeringAsk = new Set<string>()
+  // Re-reads the all-projects block now; set once the session started
+  let refreshFleet: () => Promise<void> = async () => {}
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: "Show this boss session's workers in a pane" })
     const boss = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
@@ -500,6 +510,29 @@ export const register: Register = on => {
       if (errorText(err) === lastTodoError) return
       lastTodoError = errorText(err)
       $.ui.log(`dev-board: no to do list: ${lastTodoError}`, { to: 'debug' })
+    }
+    let isReadingFleet = false
+    let lastFleet = ''
+    let lastFleetError = ''
+    /** Reads the all-projects asks, bosses and threads, off the board's path; a read that fails leaves its block out and says why once. */
+    refreshFleet = async () => {
+      if (isReadingFleet) return
+      isReadingFleet = true
+      try {
+        const { fleet: got, errors } = await readFleet(run)
+        const error = errors.join('; ')
+        if (error !== lastFleetError) {
+          lastFleetError = error
+          if (error !== '') $.ui.log(`dev-board: all-projects block not read: ${error}`, { to: 'debug' })
+        }
+        const json = JSON.stringify(got)
+        if (json !== lastFleet) {
+          await update($, fleet, () => got)
+          lastFleet = json
+        }
+      } finally {
+        isReadingFleet = false
+      }
     }
     const readingLinks = new Set<string>()
     /** Reads the state of each to do PR link not read for REFRESH_MS, off the render path; links gone from the list are dropped. */
@@ -596,6 +629,7 @@ export const register: Register = on => {
     }
     const tick = async () => {
       void refreshTodo().catch(logTodo)
+      void refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
       // A slow run must not stack another on top
       if (isPolling) return
       isPolling = true
@@ -721,6 +755,8 @@ export const register: Register = on => {
     const todoRead = await read($, todo)
     const linkStatesRead = await read($, linkStates)
     const bossLineRead = await read($, bossLine)
+    const fleetRead = await read($, fleet)
+    const nowMs = await $.clock.now()
 
     const fold = (id: string, isOpen: boolean) => update($, view, s => ({ ...s, details: { ...s.details, [id]: isOpen } }))
     const forgetDrafts = (id: string) => {
@@ -810,6 +846,23 @@ export const register: Register = on => {
       const why = await writeReply($, w.id, a.toolUseId, text)
       await $.ui.toast(why === '' ? `replied to ${label(w)}: ${text}` : `reply for ${label(w)} not sent: ${why}`)
       return why === ''
+    }
+    /** The person's click on an ask's option: `dev todo answer` with the item's question, so a reused number is refused; the list is re-read either way. */
+    const answerAsk = async (it: FleetItem, option: string) => {
+      const key = `${it.boss}:${it.id}`
+      if (answeringAsk.has(key)) return
+      answeringAsk.add(key)
+      let why = ''
+      try {
+        const ran = await $.process.run(answerArgv(it, option), { timeoutMs: 15_000 })
+        why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} todo answer exited ${ran.exitCode}`
+      } catch (err) {
+        why = errorText(err)
+      } finally {
+        answeringAsk.delete(key)
+      }
+      await $.ui.toast(why === '' ? `answered ${projectOf(it.boss)}: ${option}` : `${projectOf(it.boss)} not answered: ${why}`)
+      await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
     }
     const archive = async (w: Worker) => {
       if (!canArchive(w)) {
@@ -1124,7 +1177,17 @@ export const register: Register = on => {
               {`updated ${t.age}`}
             </Text>
           </Box>
-          {shownItems.map(todoRow)}
+          {shownItems.flatMap(it => [
+            todoRow(it),
+            // This boss is a desktop session: dev has no inbox for it, so the answer is typed in its chat
+            ...(!it.done && it.options !== undefined && it.options.length > 0
+              ? [
+                  <Text key={`todo:item${it.id}:options`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
+                    {`  ${it.options.map(o => o.replace(RECOMMENDED, '')).join(' · ')} — answer in the chat`}
+                  </Text>,
+                ]
+              : []),
+          ])}
           {foldable && (
             <Box key="todo:more" flexDirection="row" minWidth={0}>
               <Button key="todo:fold" plain dimColor onPress={toggleTodo}>
@@ -1368,6 +1431,155 @@ export const register: Register = on => {
       </Box>
     )
 
+    /** A block's header: its title (strong, in `color`), its count, then `right` muted. */
+    const fleetHead = (key: string, title: string, count: string, color?: string, right?: string) => (
+      <Box key={`${key}:head`} flexDirection="row" columnGap={SPACE.inline} minWidth={0}>
+        <Text size={SIZE.meta} weight={WEIGHT.strong} color={color}>
+          {title}
+        </Text>
+        <Text size={SIZE.meta} color={TONE.muted} tabular>
+          {count}
+        </Text>
+        <Box flexGrow={1} />
+        {right !== undefined && (
+          <Text size={SIZE.meta} color={TONE.muted}>
+            {right}
+          </Text>
+        )}
+      </Box>
+    )
+    const projectTag = (boss: string) => (
+      <Text color={TONE.muted} wrap="truncate-end">
+        {`${projectOf(boss)}  `}
+      </Text>
+    )
+
+    /** What waits on the person across the projects: each tmux boss's open item (an ask with its options as buttons; an answered one struck, saying what was answered) and each worker waiting on a prompt, answered or opened in its own session. */
+    const needsYouBlock = (f: Fleet) => {
+      const open = f.asks.filter(it => !it.done)
+      const prompts = f.agents.filter(a => !a.isBoss)
+      if (f.asks.length + prompts.length === 0) return null
+      return (
+        <Box key="fleet:needs" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
+          {fleetHead('needs', 'NEEDS YOU · ALL PROJECTS', String(open.length + prompts.length), TONE.danger)}
+          {f.asks.flatMap((it: FleetItem) => {
+            const key = `fleet:ask:${it.boss}:${it.id}`
+            const lead = Math.max(0, it.options.findIndex(o => RECOMMENDED.test(o)))
+            return [
+              <Box key={key} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+                <Box flexShrink={0}>
+                  <Text size={SIZE.meta} color={it.done ? 'success' : 'subtle'}>
+                    {it.done ? '☑' : '☐'}
+                  </Text>
+                </Box>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Text color={it.done ? (isDesktop ? TONE.muted : 'inactive') : undefined} strikethrough={it.done} wrap="truncate-end">
+                    {projectTag(it.boss)}
+                    {it.text}
+                  </Text>
+                </Box>
+              </Box>,
+              ...(it.done
+                ? [
+                    <Text key={`${key}:answered`} size={SIZE.meta} color={TONE.ok} wrap="truncate-end">
+                      {`  answered: ${it.answer ?? ''} · sent to ${it.boss}`}
+                    </Text>,
+                  ]
+                : it.options.length > 0
+                  ? [
+                      <Box key={`${key}:options`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.inline} rowGap={SPACE.line}>
+                        {it.options.map((o, oi) => (
+                          <Button key={`${key}:o${oi}`} label={`${oi === lead && RECOMMENDED.test(o) ? '★ ' : ''}${o.replace(RECOMMENDED, '')}`} onPress={() => void answerAsk(it, o)} />
+                        ))}
+                      </Box>,
+                    ]
+                  : []),
+            ]
+          })}
+          {prompts.map(a => (
+            <Box key={`fleet:prompt:${a.session}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+              <Text color={TONE.danger}>●</Text>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="truncate-end">
+                  {a.project !== '' ? `${a.project}  ` : ''}
+                  {a.session}
+                  <Text size={SIZE.meta} color={TONE.muted}>
+                    {'  waiting on a prompt: open its session'}
+                  </Text>
+                </Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+
+    /** The tmux bosses: dot by state (red waiting on a prompt, green working, grey idle), name, state and its open items on the person's list, its cost at the right, then model·effort. */
+    const bossesBlock = (f: Fleet) => {
+      const bosses = f.agents.filter(a => a.isBoss)
+      if (bosses.length === 0) return null
+      return (
+        <Box key="fleet:bosses" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
+          {fleetHead('bosses', 'BOSSES', String(bosses.length))}
+          {bosses.flatMap((a: FleetAgent) => {
+            const mine = f.asks.filter(it => it.boss === a.session && !it.done).length
+            const color = a.state === 'waiting' ? TONE.danger : a.state === 'working' ? TONE.ok : TONE.muted
+            const model = [a.model, a.effort].filter(s => s !== '').join('·')
+            return [
+              <Box key={`fleet:boss:${a.session}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
+                <Text color={color}>●</Text>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Text wrap="truncate-end">
+                    {a.session}
+                    <Text size={SIZE.meta} color={TONE.muted}>
+                      {`  ${a.state === '' ? 'unknown' : a.state}${mine > 0 ? ` · ${mine} on your list` : ''}`}
+                    </Text>
+                  </Text>
+                </Box>
+                {a.cost !== undefined && (
+                  <Text size={SIZE.meta} color={TONE.muted} tabular>
+                    {cost(a.cost)}
+                  </Text>
+                )}
+              </Box>,
+              ...(model !== ''
+                ? [
+                    <Text key={`fleet:boss:${a.session}:model`} size={SIZE.meta} color={TONE.muted}>
+                      {`  ${model}`}
+                    </Text>,
+                  ]
+                : []),
+            ]
+          })}
+        </Box>
+      )
+    }
+
+    /** The open message threads between bosses: each message's sender, recipient and age, then its text (read-only; the last THREAD_SHOWN of a thread). */
+    const messagesBlock = (f: Fleet) => {
+      if (f.threads.length === 0) return null
+      return (
+        <Box key="fleet:messages" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
+          {fleetHead('messages', 'MESSAGES', `${f.threads.length} open`)}
+          {f.threads.map((t: FleetThread) => (
+            <Box key={`fleet:thread:${t.id}`} flexDirection="column" rowGap={SPACE.line} minWidth={0}>
+              {t.messages.slice(-THREAD_SHOWN).flatMap(m => [
+                <Text key={`${m.id}:who`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
+                  {`${m.from} → ${m.to} · ${m.id} · ${span(nowMs - m.at * 1000)}`}
+                </Text>,
+                <Text key={`${m.id}:text`} wrap="wrap">
+                  {m.text}
+                </Text>,
+              ])}
+              <Text size={SIZE.meta} color={TONE.muted}>
+                {`open · ${Math.min(THREAD_SHOWN, t.messages.length)} of ${t.messages.length}`}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+
     const sections = GROUPS.map(group => ({ group, workers: b.workers.filter(w => groupOf(w) === group) }))
       .filter(s => s.workers.length > 0)
     /** Whether a worker gets a full row: any but Idle, or an idle one asking for the person, being messaged or opened. */
@@ -1393,7 +1605,10 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
+        {fleetRead !== null && needsYouBlock(fleetRead)}
         {todoRead !== null && todoBlock(todoRead)}
+        {fleetRead !== null && bossesBlock(fleetRead)}
+        {fleetRead !== null && messagesBlock(fleetRead)}
         {b.error === '' && b.workers.length === 0 && notice('empty', 'No workers yet', { mark: '○', color: 'subtle' }, 'start_session from this boss session adds one')}
         {sections.map(({ group, workers }) => {
           const quiet = workers.filter(w => !isFull(w, group))
