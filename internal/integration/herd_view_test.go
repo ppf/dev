@@ -19,13 +19,13 @@ func TestHerdCards(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentStub(t, stubs, "claude")
-	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
-	boss := exec.Command(devBin, "boss")
+	env := d.scriptEnv(writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}))
+	boss := exec.Command(devBin, "boss", "hq")
 	boss.Env = env
 	if out, err := boss.CombinedOutput(); err != nil {
 		t.Fatalf("dev boss: %v: %s", err, out)
 	}
-	panes := strings.Fields(d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id}"))
+	panes := strings.Fields(d.T("list-panes", "-t", "=boss-hq:1", "-F", "#{pane_id}"))
 	coordinator, previews := panes[1], panes[2]
 	collapsed := func(pane string) func() bool {
 		return func() bool { return d.T("display", "-p", "-t", pane, "#{pane_width}") == "1" }
@@ -57,7 +57,7 @@ func TestHerdCards(t *testing.T) {
 	check(t, "slow prompt", status+errOut, "0")
 	waitFor(t, "note cleared by the prompt", func() bool { return note() == "" })
 	waitFor(t, "slow turn's note", func() bool { return note() == "finished" })
-	d.T("set-option", "-t", "=boss:", "@dev_boss_inbox", "off")
+	d.T("set-option", "-t", "=boss-hq:", "@dev_boss_inbox", "off")
 	_, errOut, status = devAgent(env, "", "prompt", "app", "ask")
 	check(t, "ask prompt", status+errOut, "0")
 	waitFor(t, "decision note with the inbox off", func() bool { return note() == "needs a decision" })

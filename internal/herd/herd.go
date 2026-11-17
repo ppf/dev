@@ -82,11 +82,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`tests, recurring review findings, missing tooling, rough UX the user hit): one line each with why and a rough size. ` +
 	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined.`
 
-// SessionName is the boss session for project ("" for none).
+// SessionName is project's boss session.
 func SessionName(project string) string {
-	if project == "" {
-		return "boss"
-	}
 	return "boss-" + project
 }
 
@@ -159,9 +156,7 @@ func create(c *tmux.Client, session, project, dir string, start agent.Start) (st
 	if set := start.SetOptions(target); set != nil {
 		run(set...)
 	}
-	if project != "" {
-		run("set-option", "-t", target, "@project", project)
-	}
+	run("set-option", "-t", target, "@project", project)
 	previews := run("split-window", "-t", claude, "-h", "-l", strconv.Itoa(previewsPct)+"%", "-c", dir, "-PF", "#{pane_id}", exe, "boss", "--previews")
 	if err == nil {
 		err = bind(c, target, exe, claude, previews)

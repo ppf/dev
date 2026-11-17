@@ -24,15 +24,15 @@ func TestHerdExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentStub(t, stubs, "claude")
-	env := d.scriptEnv(writeProjects(t, [2]string{"app", tempDir(t)}))
+	env := d.scriptEnv(writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}))
 	boss := func() string {
-		cmd := exec.Command(devBin, "boss")
+		cmd := exec.Command(devBin, "boss", "hq")
 		cmd.Env = env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("dev boss: %v: %s", err, out)
 		}
-		check(t, "client on boss", d.T("list-clients", "-F", "#{client_session}"), "boss")
-		return d.T("list-panes", "-t", "=boss:1", "-F", "#{pane_id}", "-f", "#{m:*pty-wrap*,#{pane_start_command}}")
+		check(t, "client on boss", d.T("list-clients", "-F", "#{client_session}"), "boss-hq")
+		return d.T("list-panes", "-t", "=boss-hq:1", "-F", "#{pane_id}", "-f", "#{m:*pty-wrap*,#{pane_start_command}}")
 	}
 	// A coordinator killed by a signal (a shutdown) leaves the boss for the restore
 	coordinator := boss()
@@ -45,8 +45,8 @@ func TestHerdExit(t *testing.T) {
 	}
 	waitFor(t, "coordinator dead", func() bool { return d.T("display", "-t", coordinator, "-p", "#{pane_dead}") == "1" })
 	time.Sleep(time.Second)
-	check(t, "signal: boss stays", d.T("list-sessions", "-F", "#{session_name}"), "boot\nboss")
-	d.T("kill-session", "-t", "=boss:")
+	check(t, "signal: boss stays", d.T("list-sessions", "-F", "#{session_name}"), "boot\nboss-hq")
+	d.T("kill-session", "-t", "=boss-hq:")
 
 	// The client goes to the sidebar's first other session (boot), not the newest one (worker)
 	coordinator = boss()
@@ -54,12 +54,12 @@ func TestHerdExit(t *testing.T) {
 	// The stub exits on EOF, like Claude on /exit
 	d.T("send-keys", "-t", coordinator, "C-d")
 	waitFor(t, "boss gone", func() bool {
-		_, err := d.Try("has-session", "-t", "=boss:")
+		_, err := d.Try("has-session", "-t", "=boss-hq:")
 		return err != nil
 	})
 	check(t, "client back on boot", d.T("list-clients", "-F", "#{client_session}"), "boot")
 	actWait(d, "saved without boss", d.saved, "boot worker")
-	data, err := os.ReadFile(filepath.Join(d.tmp, "state/dev/archive/boss/session.json"))
+	data, err := os.ReadFile(filepath.Join(d.tmp, "state/dev/archive/boss-hq/session.json"))
 	if err != nil || !strings.Contains(string(data), `"conversation": "s0"`) {
 		t.Errorf("archive record: %v %s", err, data)
 	}
@@ -69,7 +69,7 @@ func TestHerdExit(t *testing.T) {
 	d.T("kill-session", "-t", "=boot:")
 	d.T("send-keys", "-t", coordinator, "C-d")
 	waitFor(t, "boss gone again", func() bool {
-		_, err := d.Try("has-session", "-t", "=boss:")
+		_, err := d.Try("has-session", "-t", "=boss-hq:")
 		return err != nil
 	})
 	check(t, "client on worker", d.T("list-clients", "-F", "#{client_session}"), "worker")
