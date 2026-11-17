@@ -79,7 +79,19 @@ func TestTodoAskAnswer(t *testing.T) {
 	})
 	out, _ = dev(boss, "todo")
 	check(t, "ticked with its answer", out, "1\t☑\tMerge #148?\tanswered: Merge\n")
-	if _, err := dev(user, "todo", "answer", "boss-a", "1", "Wait"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "no open item 1") {
-		t.Errorf("❌ second answer: %v, want no open item", err)
+	if _, err := dev(user, "todo", "answer", "boss-a", "1", "Wait"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "item 1 is answered already: Merge") {
+		t.Errorf("❌ second answer: %v, want answered already", err)
+	}
+
+	// A boss with its inbox off can't get an answer: the item stays open
+	if _, err := dev(boss, "todo", "ask", "Release?", "--option", "Now"); err != nil {
+		t.Fatal(err)
+	}
+	s.T("set-option", "-t", "=boss-a:", "@dev_boss_inbox", "off")
+	if _, err := dev(user, "todo", "answer", "boss-a", "2", "1"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "has its inbox off") {
+		t.Errorf("❌ answer with the inbox off: %v, want refused", err)
+	}
+	if out, _ = dev(boss, "todo"); !strings.Contains(out, "2\t☐\tRelease?\toptions: Now\n") {
+		t.Errorf("❌ with the inbox off the ask stays open: %q", out)
 	}
 }

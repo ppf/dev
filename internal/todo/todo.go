@@ -419,18 +419,23 @@ func Pick(options []string, arg string) (string, error) {
 	return arg, nil
 }
 
-// Answer ticks the user's own open item id with what arg answers it (Pick), and returns the item as answered. An item
-// on someone else, or not open (answered already, say), is an error.
+// Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
+// that isn't an ask, is on someone else or isn't open is an error.
 func (s Store) Answer(id int, arg string, now time.Time) (Item, error) {
 	var it Item
 	err := s.update(now, func(f *file) error {
-		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
+		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
 		if i < 0 {
 			return fmt.Errorf("no open item %d", id)
 		}
 		p := &f.Items[i]
-		if p.On != "" {
+		switch {
+		case p.Done != 0:
+			return fmt.Errorf("item %d is answered already: %s", id, p.Answer)
+		case p.On != "":
 			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
+		case len(p.Options) == 0:
+			return fmt.Errorf("item %d is no question (dev todo ask): tick it with dev todo done", id)
 		}
 		answer, err := Pick(p.Options, arg)
 		if err != nil {

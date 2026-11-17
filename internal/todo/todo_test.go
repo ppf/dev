@@ -599,8 +599,12 @@ func TestAnswer(t *testing.T) {
 	if l := read(t, s, now); !l.Items[0].Done || l.Items[0].Answer != "Wait" {
 		t.Errorf("after answer: %+v", l.Items[0])
 	}
-	if _, err := s.Answer(id, "1", now); err == nil || err.Error() != "no open item 1" {
-		t.Errorf("second answer: %v, want no open item", err)
+	if _, err := s.Answer(id, "1", now); err == nil || err.Error() != "item 1 is answered already: Wait" {
+		t.Errorf("second answer: %v, want answered already", err)
+	}
+	plain, _ := s.Add(Item{Text: "Answer Vince"}, now)
+	if _, err := s.Answer(plain, "ok", now); err == nil || !strings.Contains(err.Error(), "is no question") {
+		t.Errorf("answer a plain item: %v, want refused", err)
 	}
 }
 

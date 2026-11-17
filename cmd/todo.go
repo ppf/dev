@@ -221,7 +221,7 @@ func newTodoAnswerCmd(boss *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "answer <boss> <n> <option|text>",
 		Short: "Answer item n on a dev boss's list, as the user: ticks it and sends the boss what was answered",
-		Long: `Answer item n on the list of dev boss session <boss>, as the user: an option's number or label, or your own
+		Long: `Answer ask n (dev todo ask) on the list of dev boss session <boss>, as the user: an option's number or label, or your own
 words. It ticks the item and the boss's inbox gets "you answered #<n> \"<question>\": <answer>", which the boss
 takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), so no Claude answers for the user,
 and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
@@ -263,7 +263,8 @@ and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
 			case !queued:
 				return fmt.Errorf("#%d answered %q and ticked, not sent to %s (tell it yourself): %w", id, it.Answer, name, err)
 			case err != nil:
-				return fmt.Errorf("#%d answered, queued in %s's inbox, delivered when it next rests (don't answer again): %w", id, name, err)
+				// Answered all the same: a board shows a failed exit as an answer to give again
+				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, name, err)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "#%d answered, sent to %s\n", id, name)
 			return nil
@@ -345,7 +346,11 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 		target := tmux.SessionTarget(sess.Name)
 		s, err := todo.ForPane(c, target)
 		if err != nil {
-			return err
+			if _, gone := c.Run("has-session", "-t", target); gone != nil {
+				// Closed since list-sessions
+				continue
+			}
+			return fmt.Errorf("%s: %w", sess.Name, err)
 		}
 		l, err := s.Read(now)
 		if err != nil {
