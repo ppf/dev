@@ -544,3 +544,70 @@ func TestMarkGone(t *testing.T) {
 		t.Errorf("Reminder = %q", got)
 	}
 }
+
+// An answer picks an option by number or label, "(Recommended)" and case aside, else is the user's own words.
+func TestPick(t *testing.T) {
+	opts := []string{"Merge (Recommended)", "Wait for review"}
+	for _, tt := range []struct{ arg, want, err string }{
+		{"1", "Merge", ""},
+		{"2", "Wait for review", ""},
+		{" wait FOR review ", "Wait for review", ""},
+		{"merge (recommended)", "Merge", ""},
+		{"after the release", "after the release", ""},
+		{"3", "", "option 3: it has 2 (1-2)"},
+		{"0", "", "option 0: it has 2 (1-2)"},
+		{"  ", "", "empty answer"},
+	} {
+		got, err := Pick(opts, tt.arg)
+		if got != tt.want || (err == nil) != (tt.err == "") || err != nil && err.Error() != tt.err {
+			t.Errorf("Pick(%q) = %q, %v; want %q, %q", tt.arg, got, err, tt.want, tt.err)
+		}
+	}
+	if got, err := Pick(nil, "2"); got != "2" || err != nil {
+		t.Errorf("no options: Pick(2) = %q, %v; want the text", got, err)
+	}
+}
+
+// An ask keeps its options through a replace; answering ticks it with the answer, once; an item on someone else
+// isn't the user's to answer.
+func TestAnswer(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "Staging", On: "Marek"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(id, Item{Text: "Merge #148 now?"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(t, s, now); !slices.Equal(l.Items[0].Options, []string{"Merge (Recommended)", "Wait"}) {
+		t.Errorf("options after replace: %+v", l.Items[0])
+	}
+	if _, err := s.Answer(2, "ok", now); err == nil || err.Error() != "item 2 is on Marek, not the user's to answer" {
+		t.Errorf("answer an item on Marek: %v", err)
+	}
+	if _, err := s.Answer(id, "5", now); err == nil {
+		t.Error("option 5 of 2 answered")
+	}
+	it, err := s.Answer(id, "2", now)
+	if err != nil || it.Text != "Merge #148 now?" || it.Answer != "Wait" || it.Done != now.Unix() {
+		t.Errorf("Answer = %+v, %v", it, err)
+	}
+	if l := read(t, s, now); !l.Items[0].Done || l.Items[0].Answer != "Wait" {
+		t.Errorf("after answer: %+v", l.Items[0])
+	}
+	if _, err := s.Answer(id, "1", now); err == nil || err.Error() != "no open item 1" {
+		t.Errorf("second answer: %v, want no open item", err)
+	}
+}
+
+// The open list a boss gets names an ask's options, so a cleared boss knows it still waits on the user.
+func TestReminderAsk(t *testing.T) {
+	l := List{Items: []Shown{{ID: 2, Text: "Merge?", Options: []string{"Merge (Recommended)", "Wait"}}}}
+	if got := l.lines(0); got != "\n2. Merge? (asked, options: Merge (Recommended) · Wait)" {
+		t.Errorf("lines = %q", got)
+	}
+}

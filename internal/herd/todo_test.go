@@ -391,3 +391,40 @@ func TestTodoWorkerNarrow(t *testing.T) {
 		}
 	}
 }
+
+// An open ask shows its options under it, ★ on the recommended one; an answered item what was answered. The
+// options' row counts against the block's rows.
+func TestTodoAsk(t *testing.T) {
+	m := withTodo()
+	m.snap.todo.Items = []todo.Shown{
+		{ID: 2, Text: "Merge #148 boss picker?", Options: []string{"Merge (Recommended)", "Wait for review"}},
+		{ID: 3, Text: "Orders API: v3 when?", Done: true, Answer: "After release"},
+		{ID: 1, Text: "Answer Vince"},
+	}
+	checkRows(t, m.todoRows(39), []string{
+		" TO DO 2 ───────────────────────────── updated 2m ",
+		" 2 ☐ Merge #148 boss picker?                      ",
+		"     1 ★ Merge  2 Wait for review                 ",
+		" 3 ☑ Orders API: v3 when?                         ",
+		"     answered: After release                      ",
+		" 1 ☐ Answer Vince                                 ",
+	}, 50)
+	if rows := m.todoRows(39); !strings.Contains(rows[2], sidebar.Gold+"★") || !strings.Contains(rows[4], sidebar.Green+"answered") {
+		t.Errorf("★ gold, answered green:\n%q\n%q", rows[2], rows[4])
+	}
+	// 8 rows: 3 for the block, header aside, so the ask and its options, then "+2 more"
+	rows := m.todoRows(8)
+	checkRows(t, rows[:3], []string{
+		" TO DO 2 ───────────────────────────── updated 2m ",
+		" 2 ☐ Merge #148 boss picker?                      ",
+		"     1 ★ Merge  2 Wait for review                 ",
+	}, 50)
+	if len(rows) != 4 || strings.TrimSpace(ansi.Strip(rows[3])) != "+2 more" {
+		t.Errorf("8 rows: want the ask, its options, +2 more:\n%s", strings.Join(plain(rows), "\n"))
+	}
+	m.width = 20
+	checkRows(t, m.todoRows(39)[1:3], []string{
+		" 2 ☐ Merge #148 bo… ",
+		"     1 ★ Merge  2 … ",
+	}, 20)
+}
