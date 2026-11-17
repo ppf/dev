@@ -189,7 +189,7 @@ tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
 dev todo set "Answer Vince in Slack" "Approve PR #84"   # replace the list (no arguments: stdin, one item per line)
 dev todo add "Staging access" --on "Marek (Ops)"       # add one; --on: who does it (a person, or a worker below), --link: e.g. its PR
 dev todo add "Rework companion" --on companion-1000   # on a worker of this boss (name or local_… id): its board shows its state
-dev todo add "Rework companion" --replaces 4 --on me  # give item 4 back to you
+dev todo add --replaces 4 --on me                     # give item 4 back to you, keeping its text
 dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00"  # ticks itself then; --until 15:30 (today), 2026-11-16 (that day's end)
 dev todo add "Approve PR #85" --replaces 2            # in place of open item 2: keeps its number, --on, --link, --until
 dev todo done 2 3                                     # tick by number

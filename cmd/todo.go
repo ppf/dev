@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -101,15 +102,20 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	var replaces int
 	cmd := &cobra.Command{
 		Use:   "add <item>",
-		Short: "Add an item (or put it in place of an open one, --replaces); prints its number",
-		Args:  cobra.ExactArgs(1),
+		Short: "Add an item (or put it in place of an open one, --replaces, which may leave out its text); prints its number",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			if it.Text = todo.Clean(args[0]); it.Text == "" {
-				return errors.New("empty item")
+			switch {
+			case len(args) == 1:
+				if it.Text = todo.Clean(args[0]); it.Text == "" {
+					return errors.New("empty item")
+				}
+			case !cmd.Flags().Changed("replaces"):
+				return errors.New("no item: only --replaces keeps the item's text")
 			}
 			if it.On = todo.Clean(it.On); strings.EqualFold(it.On, todo.Me) {
 				it.On = todo.Me
@@ -149,7 +155,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a worker session (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the --on, --link, --until not given")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until not given")
 	return cmd
 }
 
@@ -248,15 +254,22 @@ func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
 		return nil, err
 	}
 	named, warnings, err := desktop.Workers(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")).Records, id)
-	for _, w := range warnings {
-		fmt.Fprintln(stderr, "⚠ dev todo: "+w.Error())
-	}
 	ws := make([]todo.Session, len(named))
 	for i, n := range named {
 		ws[i] = todo.Session{ID: n.ID, Name: n.Name}
 	}
+	for _, w := range warnings {
+		fmt.Fprintln(stderr, "⚠ dev todo: "+w.Error())
+		// A record it couldn't read may be a live worker's: listed by id, so its items aren't called gone
+		for _, unread := range recordID.FindAllString(w.Error(), -1) {
+			ws = append(ws, todo.Session{ID: strings.TrimSuffix(unread, ".json"), Name: strings.TrimSuffix(unread, ".json")})
+		}
+	}
 	return ws, err
 }
+
+// recordID is an app session record's file name in a warning.
+var recordID = regexp.MustCompile(`local_[A-Za-z0-9_-]+\.json`)
 
 var errDesktopWorker = errors.New("a worker another session started: the to do list is its boss's")
 

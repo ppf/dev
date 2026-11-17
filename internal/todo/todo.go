@@ -337,7 +337,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	return id, err
 }
 
-// Replace puts it in the place of open item id, keeping its number and the On (with its Session), Link and
+// Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link and
 // Until it doesn't set; On Me gives it back to the user. An id that isn't one is an error.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
@@ -353,7 +353,7 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		case "":
 			it.On, it.Session = old.On, old.Session
 		}
-		it.Link, it.Until = cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
+		it.Text, it.Link, it.Until = cmp.Or(it.Text, old.Text), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
 		f.Items[i] = it
 		return nil
 	})

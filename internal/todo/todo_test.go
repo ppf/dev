@@ -281,6 +281,12 @@ func TestReplace(t *testing.T) {
 	if _, err := s.Add(Item{Text: "d", On: "Marek", Link: "https://x/pull/1", Until: now.Unix() + 60}, now); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.Replace(3, Item{}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, s, now).Items[2].Text; got != "c" {
+		t.Errorf("replace without text: %q, want c kept", got)
+	}
 	if err := s.Replace(4, Item{Text: "d2", On: "Ola"}, now); err != nil {
 		t.Fatal(err)
 	}
