@@ -493,3 +493,32 @@ func TestTeammates(t *testing.T) {
 		}
 	}
 }
+
+// An answer's line has no worker; the same answer twice is queued twice, and the batch says it is the user's.
+func TestAddAnswer(t *testing.T) {
+	b := testBox(t)
+	n := Answer(4, "Merge #148?", "Merge")
+	for range 2 {
+		if added, err := b.Add(n, time.Time{}); !added || err != nil {
+			t.Fatalf("Add = %v, %v", added, err)
+		}
+	}
+	bt, _ := b.Take()
+	want := "[dev boss inbox] 2 worker update(s):\n- you answered #4 \"Merge #148?\": Merge\n- you answered #4 \"Merge #148?\": Merge\n" + answeredHint
+	if bt.String() != want {
+		t.Errorf("batch = %q, want %q", bt, want)
+	}
+}
+
+// A full inbox drops its oldest notes, never an answer: its item is ticked already.
+func TestAddCapsKeepsAnswers(t *testing.T) {
+	b := testBox(t)
+	_, _ = b.Add(Answer(1, "a?", "Yes"), time.Time{})
+	for i := range maxNotes + 3 {
+		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
+	}
+	bt, _ := b.Take()
+	if len(bt.Notes) != maxNotes || bt.Dropped != 4 || bt.Notes[0].Kind != Answered {
+		t.Errorf("got %d notes, %d dropped, first %+v; want the answer kept first", len(bt.Notes), bt.Dropped, bt.Notes[0])
+	}
+}

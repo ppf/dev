@@ -35,7 +35,8 @@ const (
 	Stuck    = "stuck"
 	Context  = "high context"
 	Resumed  = "resumed"
-	Message  = "message" // from another boss: dev agent message
+	Message  = "message"      // from another boss: dev agent message
+	Answered = "you answered" // the user answered an item on the boss's list: dev todo answer
 )
 
 // Note is one line about a worker; Key dedupes it against the worker's previous note.
@@ -51,9 +52,10 @@ type Note struct {
 // leaveIt ends an Outside note's line.
 const leaveIt = "started by a coordinator outside tmux: leave it to that coordinator"
 
-// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside; a Message's is "message <text>".
+// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside; a Message's is "message <text>",
+// an Answered's "you answered <text>".
 func (n Note) String() string {
-	if n.Kind == Message {
+	if n.Kind == Message || n.Kind == Answered {
 		return n.Kind + " " + n.Text
 	}
 	if n.Outside {
@@ -238,6 +240,9 @@ func (bt Batch) String() string {
 	if slices.ContainsFunc(bt.Notes, func(n Note) bool { return n.Kind == Message }) {
 		b.WriteString("\n" + messageHint)
 	}
+	if slices.ContainsFunc(bt.Notes, func(n Note) bool { return n.Kind == Answered }) {
+		b.WriteString("\n" + answeredHint)
+	}
 	return b.String()
 }
 
@@ -394,16 +399,21 @@ func (s *state) health(worker string) *health {
 }
 
 func (s *state) add(n Note) bool {
-	// A message's sender is no worker of this boss: its key would spoil that worker's dedupe
-	if n.Kind != Message {
+	// A message's sender and an answer's user are no worker of this boss: their key would spoil that worker's dedupe
+	if n.Kind != Message && n.Kind != Answered {
 		if s.Last[n.Worker] == n.Key {
 			return false
 		}
 		s.Last[n.Worker] = n.Key
 	}
 	s.Notes = append(s.Notes, n)
-	if over := len(s.Notes) - maxNotes; over > 0 {
-		s.Notes, s.Dropped = s.Notes[over:], s.Dropped+over
+	// The oldest go first, answers last: an answered item is ticked, so a dropped answer would be lost
+	for over := len(s.Notes) - maxNotes; over > 0; over-- {
+		i := slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind != Answered })
+		if i < 0 {
+			break
+		}
+		s.Notes, s.Dropped = slices.Delete(s.Notes, i, i+1), s.Dropped+1
 	}
 	return true
 }

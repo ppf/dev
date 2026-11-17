@@ -20,8 +20,8 @@ const (
 )
 
 // todoRows is the boss's list above the cards, in at most half the gh rows above the bottom rows (header in any):
-// header (TO DO n · k on others ── updated <age>), up to todoShown items, "+N more"; header only while folded (t);
-// an alert row if unreadable; none if empty or no rows.
+// header (TO DO n · k on others ── updated <age>), up to todoShown items, an ask's with its options' row, "+N more";
+// header only while folded (t); an alert row if unreadable; none if empty or no rows.
 func (m Model) todoRows(gh int) []string {
 	w := m.width
 	if gh < 1 {
@@ -40,15 +40,23 @@ func (m Model) todoRows(gh int) []string {
 		return rows
 	}
 	all := m.todoOrder(l.Items)
-	items := all[:min(todoShown, len(all))]
-	if len(items) < len(all) || len(items) > room {
-		// Room for the "+N more" row
-		items = items[:min(len(items), room-1)]
+	shown := 0
+	for i, it := range all[:min(todoShown, len(all))] {
+		item := []string{todoItem(it.Shown, it.owner, w)}
+		if r := todoOptions(it.Shown, w); r != "" {
+			item = append(item, r)
+		}
+		need := len(item)
+		if i < len(all)-1 {
+			// Room for the "+N more" row
+			need++
+		}
+		if len(rows)-1+need > room {
+			break
+		}
+		rows, shown = append(rows, item...), shown+1
 	}
-	for _, it := range items {
-		rows = append(rows, todoItem(it.Shown, it.owner, w))
-	}
-	if more := len(l.Items) - len(items); more > 0 {
+	if more := len(l.Items) - shown; more > 0 {
 		rows = append(rows, sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w))
 	}
 	return rows
@@ -177,4 +185,30 @@ func todoItem(it todo.Shown, o *owner, w int) string {
 	left := " " + rule + strconv.Itoa(it.ID) + reset + " " + box + " " + text + it.Text + reset
 	left = ansi.Truncate(left, max(1, w-max(1, ansi.StringWidth(right))), "…") + reset
 	return left + strings.Repeat(" ", max(0, w-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
+}
+
+// todoOptions is the row under an open ask: its options numbered, ★ on the recommended one; under an answered item
+// what was answered; "" for any other item.
+func todoOptions(it todo.Shown, w int) string {
+	var b strings.Builder
+	switch {
+	case it.Done && it.Answer != "":
+		b.WriteString(sidebar.Green + "answered: " + it.Answer + reset)
+	case !it.Done && len(it.Options) > 0:
+		for i, o := range it.Options {
+			label, rec := todo.Label(o)
+			if rec {
+				label = sidebar.Gold + "★ " + reset + label
+			}
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			b.WriteString(rule + strconv.Itoa(i+1) + reset + " " + label)
+		}
+	default:
+		return ""
+	}
+	// Under the item's text: past its number and box
+	row := ansi.Truncate(strings.Repeat(" ", len(strconv.Itoa(it.ID))+4)+b.String(), max(1, w-1), "…") + reset
+	return row + strings.Repeat(" ", max(0, w-ansi.StringWidth(row)))
 }

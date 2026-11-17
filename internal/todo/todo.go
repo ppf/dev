@@ -47,7 +47,8 @@ type Session struct {
 }
 
 // Item is one thing waiting on the user. Done is when it was ticked, unix seconds; 0 while open. Until, when
-// set, ticks it by itself at that time, unix seconds.
+// set, ticks it by itself at that time, unix seconds. An ask (dev todo ask) has the Options the user picks from;
+// Answer is what the user answered (dev todo answer), set as it ticks.
 type Item struct {
 	ID      int      `json:"id"`
 	Text    string   `json:"text"`
@@ -56,6 +57,8 @@ type Item struct {
 	Link    string   `json:"link,omitempty"`
 	Done    int64    `json:"done,omitempty"`
 	Until   int64    `json:"until,omitempty"`
+	Options []string `json:"options,omitempty"`
+	Answer  string   `json:"answer,omitempty"`
 }
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty.
@@ -84,6 +87,8 @@ type Shown struct {
 	Link    string   `json:"link,omitempty"`
 	Done    bool     `json:"done"`
 	Until   int64    `json:"until,omitempty"`
+	Options []string `json:"options,omitempty"`
+	Answer  string   `json:"answer,omitempty"`
 	Gone    bool     `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
 }
 
@@ -300,7 +305,7 @@ func (s Store) Read(now time.Time) (List, error) {
 	f.prune(now)
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until})
+		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Answer: it.Answer})
 	}
 	slices.SortStableFunc(l.Items, func(a, b Shown) int {
 		return cmp.Compare(min(len(a.On), 1), min(len(b.On), 1))
@@ -354,6 +359,9 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 			it.On, it.Session = old.On, old.Session
 		}
 		it.Text, it.Link, it.Until = cmp.Or(it.Text, old.Text), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
+		if it.Options == nil {
+			it.Options = old.Options
+		}
 		f.Items[i] = it
 		return nil
 	})
@@ -371,6 +379,73 @@ func (s Store) Done(ids []int, now time.Time) error {
 		}
 		return nil
 	})
+}
+
+// MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
+const MaxOptions = 9
+
+// recommended ends the label of an option the asker recommends, case aside.
+const recommended = "(recommended)"
+
+// Label is option o without its " (Recommended)"; rec reports it had one.
+func Label(o string) (label string, rec bool) {
+	if n := len(o) - len(recommended); n >= 0 && strings.EqualFold(o[n:], recommended) {
+		return strings.TrimSpace(o[:n]), true
+	}
+	return o, false
+}
+
+// Pick is the answer arg gives to an item with options: the option whose label (Label) it names, case aside, else
+// option n for a number 1 to len(options), else arg itself, the user's own words. Another number is an error, as is
+// an empty answer.
+func Pick(options []string, arg string) (string, error) {
+	arg = Clean(arg)
+	if arg == "" {
+		return "", errors.New("empty answer")
+	}
+	want, _ := Label(arg)
+	for _, o := range options {
+		if l, _ := Label(o); strings.EqualFold(l, want) {
+			return l, nil
+		}
+	}
+	if n, err := strconv.Atoi(arg); err == nil && len(options) > 0 {
+		if n < 1 || n > len(options) {
+			return "", fmt.Errorf("option %d: it has %d (1-%d)", n, len(options), len(options))
+		}
+		l, _ := Label(options[n-1])
+		return l, nil
+	}
+	return arg, nil
+}
+
+// Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
+// that isn't an ask, is on someone else or isn't open is an error.
+func (s Store) Answer(id int, arg string, now time.Time) (Item, error) {
+	var it Item
+	err := s.update(now, func(f *file) error {
+		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
+		if i < 0 {
+			return fmt.Errorf("no open item %d", id)
+		}
+		p := &f.Items[i]
+		switch {
+		case p.Done != 0:
+			return fmt.Errorf("item %d is answered already: %s", id, p.Answer)
+		case p.On != "":
+			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
+		case len(p.Options) == 0:
+			return fmt.Errorf("item %d is no question (dev todo ask): tick it with dev todo done", id)
+		}
+		answer, err := Pick(p.Options, arg)
+		if err != nil {
+			return err
+		}
+		p.Done, p.Answer = now.Unix(), answer
+		it = *p
+		return nil
+	})
+	return it, err
 }
 
 // Clear empties the list.
@@ -492,6 +567,9 @@ func (l List) lines(limit int) string {
 		}
 		if it.Until != 0 {
 			b.WriteString(" (until " + time.Unix(it.Until, 0).Format(UntilLayout) + ")")
+		}
+		if len(it.Options) > 0 {
+			b.WriteString(" (asked, options: " + strings.Join(it.Options, " · ") + ")")
 		}
 	}
 	if limit > 0 && n > limit {

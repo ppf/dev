@@ -325,3 +325,58 @@ func TestTodoReplacesWithoutText(t *testing.T) {
 		t.Errorf("dev todo = %q", got)
 	}
 }
+
+// ask puts a decision with its options on the list: the rows, the JSON and the open list name them.
+func TestTodoAsk(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "set", "a")
+	if got := run(t, "", "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", " Wait ", "--link", "https://github.com/o/r/pull/148"); got != "asked 2 · to do 2\n" {
+		t.Errorf("ask = %q", got)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\ta\n2\t☐\tMerge #148?\thttps://github.com/o/r/pull/148\toptions: Merge (Recommended) · Wait\n" {
+		t.Errorf("rows = %q", got)
+	}
+	var l struct {
+		Items []struct {
+			Options []string `json:"options"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 2 || l.Items[0].Options != nil || strings.Join(l.Items[1].Options, "|") != "Merge (Recommended)|Wait" {
+		t.Errorf("json = %+v, %v", l, err)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"todo", "ask", "Merge?"}, "no --option"},
+		{[]string{"todo", "ask", " ", "--option", "a"}, "empty question"},
+		{[]string{"todo", "ask", "Merge?", "--option", "a", "--option", " (Recommended)"}, "option 2 is empty"},
+		{[]string{"todo", "ask", "Merge?", "--option", "Merge", "--option", "merge (Recommended)"}, `option 2 repeats "merge"`},
+		{append([]string{"todo", "ask", "Pick?"}, strings.Split(strings.Repeat("--option|x|", 10), "|")[:20]...), "at most 9"},
+	} {
+		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
+		}
+	}
+}
+
+// answer refuses a Claude Code session, a desktop app boss and --boss before reaching tmux; --all refuses --boss.
+func TestTodoAnswerRefused(t *testing.T) {
+	todoEnv(t)
+	for _, tt := range []struct {
+		claude string
+		args   []string
+		want   string
+	}{
+		{"1", []string{"todo", "answer", "boss-dev", "1", "Merge"}, "refused in a Claude Code session"},
+		{"", []string{"todo", "answer", "local_boss", "1", "Merge"}, "has no dev inbox"},
+		{"", []string{"todo", "answer", "boss-dev", "1", "Merge", "--boss", "boss-x"}, "leave out --boss"},
+		{"", []string{"todo", "answer", "boss-dev", "x", "Merge"}, `item number "x"`},
+		{"", []string{"todo", "--all", "--boss", "boss-x"}, "leave out --boss"},
+	} {
+		t.Setenv("CLAUDECODE", tt.claude)
+		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
+		}
+	}
+}

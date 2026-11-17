@@ -16,12 +16,13 @@ import (
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
 
 func newTodoCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, all bool
 	var boss string
 	cmd := &cobra.Command{
 		Use:   "todo",
@@ -33,9 +34,17 @@ boss started it; --boss names one (a session name, or a desktop app session's lo
 coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
 session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
 worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
-and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.`,
+and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.
+A decision for the user goes on the list with dev todo ask and its options; the user answers it with dev todo answer,
+which ticks it and tells the boss. --all prints every dev boss's list on this tmux server.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if all {
+				if boss != "" {
+					return errors.New("--all lists every boss: leave out --boss")
+				}
+				return printAll(cmd.OutOrStdout(), tmux.New(), asJSON)
+			}
 			// Not the board's --json read, which runs for every desktop session, boss or not
 			s, err := todoStore(boss, !asJSON, cmd.ErrOrStderr())
 			if err != nil {
@@ -58,9 +67,10 @@ and a dev boss also when it starts. A ticked item shows ticked for a few seconds
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until), updated (unix seconds), stale`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask), updated (unix seconds), stale; with --all an array of them, each with its boss`)
+	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
 	return cmd
 }
 
@@ -159,6 +169,109 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	return cmd
 }
 
+func newTodoAskCmd(boss *string) *cobra.Command {
+	var it todo.Item
+	cmd := &cobra.Command{
+		Use:   "ask <question>",
+		Short: "Put a decision on the list for the user, with the options to pick from; prints its number",
+		Long: `Put a decision on the list for the user, with its options (the recommended one marked "(Recommended)"),
+and go on: the boss doesn't wait for it. The user answers with dev todo answer (a pick or their own words), which
+ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if it.Text = todo.Clean(args[0]); it.Text == "" {
+				return errors.New("empty question")
+			}
+			if len(it.Options) == 0 {
+				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
+			}
+			if len(it.Options) > todo.MaxOptions {
+				return fmt.Errorf("%d options, at most %d", len(it.Options), todo.MaxOptions)
+			}
+			var labels []string
+			for i, o := range it.Options {
+				o = todo.Clean(o)
+				l, _ := todo.Label(o)
+				if l == "" {
+					return fmt.Errorf("option %d is empty", i+1)
+				}
+				if slices.ContainsFunc(labels, func(x string) bool { return strings.EqualFold(x, l) }) {
+					return fmt.Errorf("option %d repeats %q", i+1, l)
+				}
+				labels, it.Options[i] = append(labels, l), o
+			}
+			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			id, err := s.Add(it, now)
+			if err != nil {
+				return err
+			}
+			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
+		},
+	}
+	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9; the recommended one ends with "(Recommended)"`)
+	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
+	return cmd
+}
+
+func newTodoAnswerCmd(boss *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "answer <boss> <n> <option|text>",
+		Short: "Answer item n on a dev boss's list, as the user: ticks it and sends the boss what was answered",
+		Long: `Answer ask n (dev todo ask) on the list of dev boss session <boss>, as the user: an option's number or label, or your own
+words. It ticks the item and the boss's inbox gets "you answered #<n> \"<question>\": <answer>", which the boss
+takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), so no Claude answers for the user,
+and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			switch {
+			case os.Getenv("CLAUDECODE") != "":
+				return errors.New("refused in a Claude Code session: only the user answers (in a shell, the sidebar or a board)")
+			case *boss != "":
+				return errors.New("the boss is answer's first argument: leave out --boss")
+			case strings.HasPrefix(name, "local_"):
+				return errors.New("a desktop app boss has no dev inbox: answer it in its chat")
+			}
+			id, err := strconv.Atoi(args[1])
+			if err != nil {
+				return fmt.Errorf("item number %q: %w", args[1], err)
+			}
+			c := tmux.New()
+			// Before ticking: an answer it can't send stays open
+			b, err := inbox.Recipient(c, name)
+			if err != nil {
+				return err
+			}
+			pane, err := control.BossPane(c, name)
+			if err != nil {
+				return err
+			}
+			s, err := todo.ForPane(c, pane)
+			if err != nil {
+				return err
+			}
+			it, err := s.Answer(id, args[2], time.Now())
+			if err != nil {
+				return err
+			}
+			queued, err := b.Send(c, control.RealClock, inbox.Answer(it.ID, it.Text, it.Answer))
+			switch {
+			case !queued:
+				return fmt.Errorf("#%d answered %q and ticked, not sent to %s (tell it yourself): %w", id, it.Answer, name, err)
+			case err != nil:
+				// Answered all the same: a board shows a failed exit as an answer to give again
+				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, name, err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "#%d answered, sent to %s\n", id, name)
+			return nil
+		},
+	}
+}
+
 func newTodoDoneCmd(boss *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "done <n>...",
@@ -205,6 +318,67 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "", now)
 		},
 	}
+}
+
+// bossList is one boss's list, for dev todo --all --json.
+type bossList struct {
+	Boss string `json:"boss"`
+	todo.List
+}
+
+// printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
+func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
+	type session struct {
+		Name string `tmux:"session_name"`
+		Herd string `tmux:"@dev_herd"`
+	}
+	sessions, err := tmux.Query[session](c, "list-sessions")
+	if err != nil && !tmux.IsNoServer(err) {
+		return err
+	}
+	slices.SortFunc(sessions, func(a, b session) int { return strings.Compare(a.Name, b.Name) })
+	lists := []bossList{}
+	now := time.Now()
+	for _, sess := range sessions {
+		if sess.Herd == "" {
+			continue
+		}
+		target := tmux.SessionTarget(sess.Name)
+		s, err := todo.ForPane(c, target)
+		if err != nil {
+			if _, gone := c.Run("has-session", "-t", target); gone != nil {
+				// Closed since list-sessions
+				continue
+			}
+			return fmt.Errorf("%s: %w", sess.Name, err)
+		}
+		l, err := s.Read(now)
+		if err != nil {
+			return fmt.Errorf("%s: %w", sess.Name, err)
+		}
+		if len(l.Items) == 0 {
+			continue
+		}
+		if !asJSON {
+			if err := l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, target) }); err != nil {
+				return err
+			}
+		}
+		lists = append(lists, bossList{Boss: sess.Name, List: l})
+	}
+	if asJSON {
+		return printJSON(out, lists)
+	}
+	if len(lists) == 0 {
+		_, err := fmt.Fprintln(out, "no boss has a to do list")
+		return err
+	}
+	for _, bl := range lists {
+		for _, it := range bl.Items {
+			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it))
+		}
+	}
+	return nil
 }
 
 // todoStore is the list of --boss's session, else of the boss session it runs in; adopt lets a desktop one take
@@ -336,6 +510,12 @@ func todoLine(it todo.Shown) string {
 	}
 	if it.Link != "" {
 		parts = append(parts, it.Link)
+	}
+	switch {
+	case it.Answer != "":
+		parts = append(parts, "answered: "+it.Answer)
+	case len(it.Options) > 0:
+		parts = append(parts, "options: "+strings.Join(it.Options, " · "))
 	}
 	return strings.Join(parts, "\t")
 }
