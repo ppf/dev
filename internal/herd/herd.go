@@ -95,14 +95,7 @@ func Open(c *tmux.Client, project, dir string, start agent.Start) error {
 	session := SessionName(project)
 	target := tmux.SessionTarget(session)
 	if _, err := c.Run("has-session", "-t", target); err == nil {
-		mark, err := c.Run("show-option", "-qv", "-t", target, OptHerd)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(mark) == "" {
-			return fmt.Errorf("session %q exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it", session)
-		}
-		if err := start.CheckExisting(c, session); err != nil {
+		if err := checkExisting(c, session, start); err != nil {
 			return err
 		}
 		return withSidebar(c, session, sidebar.Origin{})
@@ -123,14 +116,19 @@ func OpenBackground(c *tmux.Client, project, dir string, start agent.Start) (ses
 		_, err = create(c, session, project, dir, start)
 		return session, err == nil, err
 	}
-	mark, err := c.Run("show-option", "-qv", "-t", target, OptHerd)
+	return session, false, checkExisting(c, session, start)
+}
+
+// checkExisting refuses an existing session that isn't a boss, or one started with other --model/--effort than start.
+func checkExisting(c *tmux.Client, session string, start agent.Start) error {
+	mark, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(session), OptHerd)
 	if err != nil {
-		return session, false, err
+		return err
 	}
 	if strings.TrimSpace(mark) == "" {
-		return session, false, fmt.Errorf("session %q exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it", session)
+		return fmt.Errorf("session %q exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it", session)
 	}
-	return session, false, start.CheckExisting(c, session)
+	return start.CheckExisting(c, session)
 }
 
 // withSidebar ensures session's sidebar, focus going back to from's pane, and attaches; a sidebar that

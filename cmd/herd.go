@@ -70,7 +70,12 @@ boss is only printed.`,
 				return err
 			}
 			// After the first-run restore, so a saved boss is attached rather than replaced
-			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
+			// A background boss's stdout is its name only
+			restoreOut := cmd.OutOrStdout()
+			if background {
+				restoreOut = cmd.ErrOrStderr()
+			}
+			if err := open.RestoreOnce(c, os.Getenv("HOME"), restoreOut); err != nil {
 				return err
 			}
 			if background {
@@ -90,9 +95,6 @@ boss is only printed.`,
 // openBackground is dev boss <project> --background: the boss exists detached, started by the boss session this
 // runs in, and is printed once its Claude registered.
 func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, start agent.Start, timeout time.Duration) error {
-	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.ErrOrStderr()); err != nil {
-		return err
-	}
 	session, created, err := herd.OpenBackground(c, project, dir, start)
 	if err != nil {
 		return err
