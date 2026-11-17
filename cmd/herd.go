@@ -4,19 +4,22 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 func newHerdCmd() *cobra.Command {
-	var previews bool
+	var previews, background bool
+	var timeout time.Duration
 	var start agent.Start
 	cmd := &cobra.Command{
 		Use:     "boss [project]",
@@ -27,7 +30,10 @@ project's main checkout that drives the other sessions with the dev-agents skill
 the workers it started. Without a project it opens the project picker (as bare dev); with no terminal it
 fails, listing the projects. --model and --effort start a new boss's coordinator with them (with
 a boss that exists they are an error unless they equal what it was started with); it keeps them when dev
-restarts it.`,
+restarts it.
+--background creates the boss without attaching or switching a client, marks it started by the boss session
+dev runs in, prints its name and waits until its Claude registered (as dev agent start does); an existing
+boss is only printed.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -41,6 +47,9 @@ restarts it.`,
 					return errors.New("Must run inside tmux")
 				}
 				return herd.Run(c, pane)
+			}
+			if background && len(args) == 0 {
+				return errors.New("--background needs a project: dev boss <project> --background")
 			}
 			if len(args) == 0 {
 				if !hasTerminal() {
@@ -64,13 +73,42 @@ restarts it.`,
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 				return err
 			}
+			if background {
+				return openBackground(cmd, c, p.Name, dir, start, timeout)
+			}
 			return herd.Open(c, p.Name, dir, start)
 		},
 	}
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
+	cmd.Flags().BoolVar(&background, "background", false, "create the boss detached and wait until its Claude registered")
+	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background, give up when no Claude registered within this")
 	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd
+}
+
+// openBackground is dev boss <project> --background: the boss exists detached, started by the boss session this
+// runs in, and is printed once its Claude registered.
+func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, start agent.Start, timeout time.Duration) error {
+	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.ErrOrStderr()); err != nil {
+		return err
+	}
+	session, created, err := herd.OpenBackground(c, project, dir, start)
+	if err != nil {
+		return err
+	}
+	if created {
+		if pane := os.Getenv("TMUX_PANE"); pane != "" && herd.IsBossPane(c, pane) {
+			if err := herd.MarkStartedBy(c, session, pane, false); err != nil {
+				return err
+			}
+		}
+		if _, err := control.AwaitAgent(c, control.RealClock, session, timeout); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), session)
+	return nil
 }
 
 // hasTerminal reports whether the picker can run: stdin and stdout are a terminal.

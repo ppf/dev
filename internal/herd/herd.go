@@ -114,6 +114,25 @@ func Open(c *tmux.Client, project, dir string, start agent.Start) error {
 	return withSidebar(c, session, sidebar.Origin{Session: session, Pane: claude})
 }
 
+// OpenBackground makes project's boss session without attaching or switching any client, and returns its name.
+// An existing boss is only checked against start; created reports a new one.
+func OpenBackground(c *tmux.Client, project, dir string, start agent.Start) (session string, created bool, err error) {
+	session = SessionName(project)
+	target := tmux.SessionTarget(session)
+	if _, err := c.Run("has-session", "-t", target); err != nil {
+		_, err = create(c, session, project, dir, start)
+		return session, err == nil, err
+	}
+	mark, err := c.Run("show-option", "-qv", "-t", target, OptHerd)
+	if err != nil {
+		return session, false, err
+	}
+	if strings.TrimSpace(mark) == "" {
+		return session, false, fmt.Errorf("session %q exists and isn't a boss session (nor is a boss a restore brought back plain): kill or rename it", session)
+	}
+	return session, false, start.CheckExisting(c, session)
+}
+
 // withSidebar ensures session's sidebar, focus going back to from's pane, and attaches; a sidebar that
 // can't be made is reported after the attach rather than blocking it.
 func withSidebar(c *tmux.Client, session string, from sidebar.Origin) error {
@@ -293,4 +312,10 @@ func MarkStartedBy(c *tmux.Client, session, pane string, outside bool) error {
 	}
 	_, err = c.Run(set...)
 	return err
+}
+
+// IsBossPane reports whether pane is in a boss session.
+func IsBossPane(c *tmux.Client, pane string) bool {
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptHerd+"}")
+	return err == nil && strings.TrimSpace(out) != ""
 }

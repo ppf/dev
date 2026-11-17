@@ -141,6 +141,7 @@ Some changes run no Claude hook, so `dev agent` reads them off the screen:
 ```bash
 dev boss <project>      # open or attach the project's boss session, "boss-<project>"
 dev boss                # no project: the project picker (as bare dev), never a boss in $HOME
+dev boss <project> --background   # create it detached (no attach), started by the calling boss; prints boss-<project> once its Claude registered; an existing boss is only printed
 dev boss <project> --model opus --effort medium   # a new boss's coordinator starts with them
 ```
 
