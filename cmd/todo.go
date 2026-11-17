@@ -190,14 +190,15 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			}
 			var labels []string
 			for i, o := range it.Options {
-				l, _ := todo.Label(todo.Clean(o))
+				o = todo.Clean(o)
+				l, _ := todo.Label(o)
 				if l == "" {
 					return fmt.Errorf("option %d is empty", i+1)
 				}
 				if slices.ContainsFunc(labels, func(x string) bool { return strings.EqualFold(x, l) }) {
 					return fmt.Errorf("option %d repeats %q", i+1, l)
 				}
-				labels, it.Options[i] = append(labels, l), todo.Clean(o)
+				labels, it.Options[i] = append(labels, l), o
 			}
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
@@ -324,8 +325,7 @@ type bossList struct {
 	todo.List
 }
 
-// printAll prints the list of every dev boss session c's server runs that has items, by session name; none for
-// no server.
+// printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
 func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 	type session struct {
 		Name string `tmux:"session_name"`

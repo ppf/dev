@@ -428,15 +428,16 @@ func (s Store) Answer(id int, arg string, now time.Time) (Item, error) {
 		if i < 0 {
 			return fmt.Errorf("no open item %d", id)
 		}
-		if on := f.Items[i].On; on != "" {
-			return fmt.Errorf("item %d is on %s, not the user's to answer", id, on)
+		p := &f.Items[i]
+		if p.On != "" {
+			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
 		}
-		answer, err := Pick(f.Items[i].Options, arg)
+		answer, err := Pick(p.Options, arg)
 		if err != nil {
 			return err
 		}
-		f.Items[i].Done, f.Items[i].Answer = now.Unix(), answer
-		it = f.Items[i]
+		p.Done, p.Answer = now.Unix(), answer
+		it = *p
 		return nil
 	})
 	return it, err
