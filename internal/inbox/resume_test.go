@@ -11,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // resumeRig fakes a worker pane: its hook state, @dev_resumes and screen; it records the other commands
@@ -172,5 +173,76 @@ func TestResumeAhead(t *testing.T) {
 				t.Errorf("resumeAhead = %v, %v; want %v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestWake(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	empty := rule + "\n❯ \n" + rule + "\n"
+	now := time.Unix(10_000, 0)
+	clk := control.Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
+	due, later := strconv.FormatInt(now.Add(-time.Second).Unix(), 10), strconv.FormatInt(now.Add(time.Hour).Unix(), 10)
+	tests := []struct {
+		name                     string
+		rig                      resumeRig
+		until, prompts, setAt    string
+		woke, held, sent, unsets bool
+	}{
+		{"due, idle", resumeRig{state: "idle", screen: empty}, due, "4", "4", true, false, true, true},
+		{"due, sat idle (idle reminder)", resumeRig{state: "waiting", waitingFor: "idle_prompt", screen: empty}, due, "4", "4", true, false, true, true},
+		{"restored: prompts not compared", resumeRig{state: "idle", screen: empty}, due, "1", "", true, false, true, true},
+		{"not due", resumeRig{state: "idle", screen: empty}, later, "4", "4", false, true, false, false},
+		{"prompted since it was set", resumeRig{state: "idle", screen: empty}, later, "5", "4", false, false, false, true},
+		{"due, on a decision", resumeRig{state: "waiting", waitingFor: "permission_prompt", screen: empty}, due, "4", "4", false, false, false, true},
+		{"due, working (its own background wait)", resumeRig{state: "working", screen: empty}, due, "4", "4", false, false, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := tt.rig
+			r.prompts = tt.prompts
+			woke, held, err := wake(r.client(), clk, paneRow{Pane: "%1", Prompts: tt.prompts, WaitUntil: tt.until, WaitReason: "Codex limit resets", WaitPrompts: tt.setAt})
+			if err != nil || woke != tt.woke || held != tt.held {
+				t.Errorf("wake = %v, %v, %v; want %v, %v", woke, held, err, tt.woke, tt.held)
+			}
+			want := "Your planned wait until " + wait.Clock(now.Add(-time.Second), now) + " (Codex limit resets) is over: continue where you left off."
+			if sent := r.pasted == want; sent != tt.sent {
+				t.Errorf("sent = %v (pasted %q), want %v", sent, r.pasted, tt.sent)
+			}
+			unset := slices.ContainsFunc(r.cmds, func(c string) bool { return strings.HasPrefix(c, "set-option -pu -t %1 "+wait.OptUntil) })
+			if unset != tt.unsets {
+				t.Errorf("wait dropped = %v, want %v; cmds %q", unset, tt.unsets, r.cmds)
+			}
+		})
+	}
+}
+
+// A wake prompt that fails puts the wait back for the next round, no longer held (muting nothing).
+func TestWakePromptFails(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	now := time.Unix(10_000, 0)
+	clk := control.Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
+	r := &resumeRig{state: "idle", prompts: "4", screen: rule + "\n❯ \n" + rule + "\n", pasteErr: errors.New("no pane")}
+	woke, held, err := wake(r.client(), clk, paneRow{Pane: "%1", Prompts: "4", WaitUntil: "9000", WaitReason: "x", WaitPrompts: "4"})
+	restore := "set-option -p -t %1 " + wait.OptUntil + " 9000 ; set-option -p -t %1 " + wait.OptReason + " x ; set-option -p -t %1 " + wait.OptPrompts + " 4"
+	if woke || held || err == nil || !slices.Contains(r.cmds, restore) {
+		t.Errorf("wake = %v, %v, %v; want an error and the wait back; cmds %q", woke, held, err, r.cmds)
+	}
+}
+
+// Due, a draft in the input box keeps the wait for the next round with errDraft, no longer held; a prompt since the
+// round's list-panes (its turn over) drops it without a wake.
+func TestWakeDueEdges(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	now := time.Unix(10_000, 0)
+	clk := control.Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
+	draft := &resumeRig{state: "idle", prompts: "4", screen: rule + "\n❯ half a thought\n" + rule + "\n"}
+	woke, held, err := wake(draft.client(), clk, paneRow{Pane: "%1", Prompts: "4", WaitUntil: "9000", WaitReason: "x", WaitPrompts: "4"})
+	if woke || held || !errors.Is(err, errDraft) || draft.pasted != "" || len(draft.cmds) > 0 {
+		t.Errorf("draft: wake = %v, %v, %v; cmds %q, pasted %q; want errDraft, the wait kept", woke, held, err, draft.cmds, draft.pasted)
+	}
+	since := &resumeRig{state: "idle", prompts: "5", screen: rule + "\n❯ \n" + rule + "\n"}
+	woke, held, err = wake(since.client(), clk, paneRow{Pane: "%1", Prompts: "4", WaitUntil: "9000", WaitReason: "x", WaitPrompts: "4"})
+	if woke || held || err != nil || since.pasted != "" || !slices.ContainsFunc(since.cmds, func(c string) bool { return strings.HasPrefix(c, "set-option -pu -t %1 "+wait.OptUntil) }) {
+		t.Errorf("prompted since list-panes: wake = %v, %v, %v; cmds %q, pasted %q; want the wait dropped, no wake", woke, held, err, since.cmds, since.pasted)
 	}
 }

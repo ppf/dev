@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // bossEvent is the part of the coordinator's own hook input BossHook reads.
@@ -175,7 +177,8 @@ func PromptContext(text string) (string, error) {
 // started worker's agent pane gets the note too (OptNote), also with the inbox off or the boss gone. A
 // teammate pane beside it (an agent team's) sends only its decisions, named "<worker> (%N)".
 // A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
-// A rate limit schedules the worker's resume (scheduleResume), which its failed note tells. A worker that is itself
+// A rate limit schedules the worker's resume (scheduleResume), which its failed note tells. A turn ending in a
+// planned wait (dev agent wait-until) sends a waiting note in place of finished; a prompt ends the wait. A worker that is itself
 // a boss sends only the notes up reports: not its finished turns.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
 	var e bossEvent
@@ -214,7 +217,24 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		return errors.Join(askErr, deliverNote(c, clk, b, w, n, e.Name))
 	}
 	var resumeErr error
+	var wt wait.Wait
+	if own := slices.IndexFunc(rows, func(r paneRow) bool { return r.Pane == pane }); own >= 0 {
+		wt = wait.FromOptions(rows[own].WaitUntil, rows[own].WaitReason)
+	}
 	switch {
+	case e.Name == "UserPromptSubmit" && wt.Held():
+		// A prompt ends a planned wait
+		resumeErr = wait.Unset(c, pane)
+	case e.Name == "Stop" && wt.Held():
+		// A finished turn ends a run of rate limits; one past its wait's time (its own background task woke it) ends the wait
+		resumeErr = unsetResume(c, pane, true)
+		switch {
+		case wt.Due(clk.Now()):
+			resumeErr = errors.Join(resumeErr, wait.Unset(c, pane))
+		case n.Kind == Finished:
+			n.Kind, n.Text = Waits, wt.Phrase(clk.Now())+", dev wakes it then"
+			n.Key = n.Kind + "\x00" + n.Text
+		}
 	case e.Name == "StopFailure" && ok:
 		// Only a boss's Watch resumes it
 		var resume string

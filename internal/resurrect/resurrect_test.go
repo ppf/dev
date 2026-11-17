@@ -91,8 +91,13 @@ func TestSave(t *testing.T) {
 	// recorded session, %3 holds a crashed one's leftover, %4 a Claude without a session yet. boss-p's
 	// panes carry their roles (its window 1 also linked into linked as window 6, listed first), plain's
 	// previews-marked pane doesn't make it a boss, and boss-old (made before the roles) has none.
+	// boss-p's coordinator holds a planned wait
 	pane := func(session, id, window, index, command, agentCmd, agentID, role string) string {
-		return tmux.FormatRow(session, id, window, index, command, "/repo", agentCmd, agentID, "/t/"+agentID+".jsonl", role)
+		until, reason := "", ""
+		if id == "%7" {
+			until, reason = "1700000000", "Codex limit resets"
+		}
+		return tmux.FormatRow(session, id, window, index, command, "/repo", agentCmd, agentID, "/t/"+agentID+".jsonl", role, until, reason)
 	}
 	panes := pane("devt", "%1", "1", "1", "dev", "", "", "") + pane("devt", "%2", "1", "2", "2.1.3", "2.1.3", "s1", "") +
 		pane("devt", "%3", "1", "3", "zsh", "2.1.3", "s0", "") + pane("plain", "%4", "1", "1", "2.1.3", "2.1.3", "", "previews") +
@@ -113,7 +118,8 @@ func TestSave(t *testing.T) {
 			want: "devt\tdevt\t1.1\nhidden\tproj\t\nstale\tp\t\nboss-p\t\t\nw-name\tp\t\nboss-old\t\t\n" +
 				":started_by\tw-name\tboss-p\n:started_by\tw-old\tboss-p\n:started_by\tw-out\tboss-p\toutside\n" +
 				":started_with\tplain\t\tlow\n:started_with\tboss-p\topus\t\n:started_with\tw-name\tsonnet\tmedium\n:boss\tboss-p\t1.2\t1.3\n" +
-				":agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n:agent\tboss-p\t1.2\tclaude\tb1\t/t/b1.jsonl\t/repo\n",
+				":agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n:agent\tboss-p\t1.2\tclaude\tb1\t/t/b1.jsonl\t/repo\n" +
+				":wait\tboss-p\t1.2\t1700000000\tCodex limit resets\n",
 		},
 		{
 			name:     "list-sessions failure keeps the old file",
@@ -701,6 +707,14 @@ func TestRestoreAgents(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:  "a planned wait goes back on its agent's pane, a live session's left alone",
+			state: line("devt", "claude", "s1", transcript, "/repo") + ":wait\tdevt\t1.2\t1700000000\tCodex limit resets\n:wait\tlive\t1.2\t1\tx\n",
+			replies: with(map[string]any{
+				"set-option -p -t =devt:1.2 @dev_wait_until 1700000000 ; set-option -p -t =devt:1.2 @dev_wait_reason Codex limit resets": ""}),
+			want: []string{procs, slotQuery("devt"), send("%2", resumeT),
+				"set-option -p -t =devt:1.2 @dev_wait_until 1700000000 ; set-option -p -t =devt:1.2 @dev_wait_reason Codex limit resets"},
+		},
+		{
 			name:    "a pane back in another directory gets a fresh agent",
 			state:   line("devt", "claude", "s1", transcript, "/elsewhere"),
 			replies: slots,
@@ -1032,27 +1046,30 @@ func TestParseState(t *testing.T) {
 		wantBy     []startedByEntry
 		wantBosses []bossEntry
 		wantStarts map[string]agent.Start
+		wantWaits  []waitEntry
 	}{
-		{"empty", "", nil, nil, nil, nil, nil},
-		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil, nil, nil},
-		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil, nil, nil},
-		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil, nil, nil},
-		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil, nil, nil},
+		{"empty", "", nil, nil, nil, nil, nil, nil},
+		{"lines", "devt\tdevt\t1.1\nhidden\tproj\t\n", []entry{{"devt", "devt", "1.1"}, {"hidden", "proj", ""}}, nil, nil, nil, nil, nil},
+		{"blank lines skipped", "\ndevt\tp\t2.1\n\n", []entry{{"devt", "p", "2.1"}}, nil, nil, nil, nil, nil},
+		{"no trailing newline", "devt\tp\t1.1", []entry{{"devt", "p", "1.1"}}, nil, nil, nil, nil, nil},
+		{"missing fields", "devt\n", []entry{{"devt", "", ""}}, nil, nil, nil, nil, nil},
 		{"agent lines", "devt\tp\t1.1\n:agent\tdevt\t1.2\tclaude\ts1\t/t/s1.jsonl\t/repo\n", []entry{{"devt", "p", "1.1"}},
-			[]agentEntry{devtAgent}, nil, nil, nil},
-		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil, nil},
+			[]agentEntry{devtAgent}, nil, nil, nil, nil},
+		{"agent line with missing fields skipped", ":agent\tdevt\t1.2\tclaude\n", nil, nil, nil, nil, nil, nil},
 		{"started-by lines", ":started_by\tw\tboss-p\n:started_by\tbad\n:started_by\to\tboss-p\toutside\n", nil, nil,
-			[]startedByEntry{{"w", "boss-p", false}, {"o", "boss-p", true}}, nil, nil},
-		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}, nil},
+			[]startedByEntry{{"w", "boss-p", false}, {"o", "boss-p", true}}, nil, nil, nil},
+		{"boss lines", ":boss\tboss-p\t1.2\t1.3\n:boss\tbad\t1.2\n:boss\tbad\t\t1.3\n", nil, nil, nil, []bossEntry{{"boss-p", "1.2", "1.3"}}, nil, nil},
 		{"started-with lines, one of the two maybe empty",
 			":started_with\tw\tsonnet\tmedium\n:started_with\tm\topus\t\n:started_with\te\t\tlow\n:started_with\tbad\t\t\n:started_with\tbad\topus\n:started_with\t\topus\tlow\n",
-			nil, nil, nil, nil, map[string]agent.Start{"w": {Model: "sonnet", Effort: "medium"}, "m": {Model: "opus"}, "e": {Effort: "low"}}},
+			nil, nil, nil, nil, map[string]agent.Start{"w": {Model: "sonnet", Effort: "medium"}, "m": {Model: "opus"}, "e": {Effort: "low"}}, nil},
+		{"wait lines", ":wait\tw\t1.2\t1700000000\tCodex limit resets\n:wait\tw\t1.2\t1700000000\n:wait\t\t1.2\t1\tx\n:wait\tw\t1.2\t\tx\n", nil, nil, nil, nil, nil,
+			[]waitEntry{{"w", "1.2", "1700000000", "Codex limit resets"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, agents, by, bosses, starts := parseState(tt.data)
+			got, agents, by, bosses, starts, waits := parseState(tt.data)
 			if !reflect.DeepEqual(got, tt.want) || !reflect.DeepEqual(agents, tt.wantAgents) || !reflect.DeepEqual(by, tt.wantBy) ||
-				!reflect.DeepEqual(bosses, tt.wantBosses) || !maps.Equal(starts, tt.wantStarts) {
+				!reflect.DeepEqual(bosses, tt.wantBosses) || !maps.Equal(starts, tt.wantStarts) || !reflect.DeepEqual(waits, tt.wantWaits) {
 				t.Errorf("parseState(%q) = %v, %v, %v, %v, %v; want %v, %v, %v, %v, %v", tt.data, got, agents, by, bosses, starts,
 					tt.want, tt.wantAgents, tt.wantBy, tt.wantBosses, tt.wantStarts)
 			}

@@ -18,6 +18,7 @@ import (
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // board4 is a worker in each section, the selected one working, at 70×40.
@@ -839,5 +840,49 @@ func TestModelOnCard(t *testing.T) {
 	cx.sess.Agent = "Codex"
 	if got := ansi.Strip(metaRow(cx, 60)); strings.Contains(got, "opus") || strings.Contains(got, "default") {
 		t.Errorf("codex shows a model: %q", got)
+	}
+}
+
+// A worker in a planned wait goes to Waiting, saying until when and why, also while its turn still runs; a
+// dialog it shows still puts it in Needs you. A to do item on it says waiting until then.
+func TestBoardPlannedWait(t *testing.T) {
+	m := withWorkers()
+	now := m.clk.Now()
+	w := wait.Wait{Until: now.Add(30 * time.Minute), Reason: "Codex limit resets"}
+	at := wait.Clock(w.Until, now)
+	for i := range m.snap.tiles {
+		if m.snap.tiles[i].sess.Name == "docs-api" {
+			m.snap.tiles[i].sess.Wait = w
+		}
+	}
+	sortBySection(m.snap.tiles)
+	var lines []string
+	for _, l := range m.board().lines {
+		lines = append(lines, ansi.Strip(l))
+	}
+	board := strings.Join(lines, "\n")
+	for _, want := range []string{" WAITING 2 ─", "┃│ ▾ ● docs-api", "┃│    until " + at + " · Codex limit resets"} {
+		if !strings.Contains(board, want) {
+			t.Errorf("board has no %q:\n%s", want, board)
+		}
+	}
+	if strings.Contains(board, "WORKING") || strings.Contains(board, "Run the desktop tests") {
+		t.Errorf("a planned wait still shows working:\n%s", board)
+	}
+	row := todoItem(m.snap.todo.Items[1], m.todoOwner(m.snap.todo.Items[1]), 90)
+	if got := strings.TrimSpace(ansi.Strip(row)); !strings.HasSuffix(got, "● docs-api · waiting until "+at) || !strings.Contains(row, sidebar.Green+"waiting until "+at) {
+		t.Errorf("to do row = %q", row)
+	}
+	m.folds = map[string]bool{"docs-api": true}
+	for i := range m.snap.tiles {
+		if m.snap.tiles[i].sess.Name == "docs-api" {
+			if got := ansi.Strip(m.headRow(m.snap.tiles[i], waitingSection, true, 90)); !strings.Contains(got, "docs-api  until "+at+" · Codex limit resets") {
+				t.Errorf("folded = %q", got)
+			}
+			m.snap.tiles[i].deciding = true
+			if s := m.snap.tiles[i].section(); s != needsYouSection {
+				t.Errorf("a dialog in a planned wait: section %v, want needs you", s)
+			}
+		}
 	}
 }

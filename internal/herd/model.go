@@ -22,6 +22,7 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // pollInterval is how often the previews refresh while on screen.
@@ -57,6 +58,8 @@ type row struct {
 	Zoomed       bool   `tmux:"window_zoomed_flag"`
 	Model        string `tmux:"@dev_model"`
 	Effort       string `tmux:"@dev_effort"`
+	WaitUntil    string `tmux:"@dev_wait_until"`
+	WaitReason   string `tmux:"@dev_wait_reason"`
 }
 
 // tile is one worker session's preview.
@@ -492,6 +495,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
 		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
+		sess.Wait = wait.FromOptions(r.WaitUntil, r.WaitReason)
 		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort}
 		if sec, err := strconv.ParseInt(r.Since, 10, 64); err == nil {
 			t.since = time.Unix(sec, 0)

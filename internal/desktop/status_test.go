@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/wait"
 )
 
 func TestStatus(t *testing.T) {
@@ -17,6 +18,7 @@ func TestStatus(t *testing.T) {
 	reset := time.Date(2026, 11, 4, 18, 30, 0, 0, time.UTC).Unix()
 	asking := Hook{State: "waiting", WaitingFor: "permission_prompt", Question: "allow Bash: rm -rf bin"}
 	stuck := []Note{{Kind: "stuck", Text: "no progress for 17m"}}
+	planned := wait.Wait{Until: time.Unix(reset, 0), Reason: "Codex limit resets"}
 	ask := func(blocked bool) *Pending {
 		return &Pending{Questions: []agent.Ask{{Question: "Merge #68?"}}, Reply: true, Blocked: blocked}
 	}
@@ -37,6 +39,12 @@ func TestStatus(t *testing.T) {
 		{"blocked, the app quit on its dialog", Worker{State: StateBlocked, NeedsAction: "x"}, Hook{}, true, StatusNeedsYou, interruptedNote},
 		{"a busy worker's old rate limit is over", Worker{State: StateBusy, Tool: "Bash"}, Hook{RateLimited: true, ResetAt: reset}, false, StatusWorking, "Bash"},
 		{"rate-limited", Worker{State: StateIdle}, Hook{RateLimited: true, ResetAt: reset}, false, StatusRateLimited, "resumes 18:30"},
+		{"a planned wait", Worker{State: StateIdle}, Hook{Wait: planned}, false, StatusWaiting, "until 18:30 · Codex limit resets"},
+		{"a planned wait, its own background task running", Worker{State: StateBusy, Tool: "Bash", Background: 1}, Hook{Wait: planned}, false, StatusWaiting, "until 18:30 · Codex limit resets"},
+		{"a planned wait, working in the foreground", Worker{State: StateBusy, Tool: "Bash"}, Hook{Wait: planned}, false, StatusWorking, "Bash"},
+		{"a planned wait ended, not woken yet", Worker{State: StateIdle}, Hook{Wait: wait.Wait{Until: now.Add(-time.Minute), Reason: "x"}}, false, StatusWaiting, "until 17:59 · x"},
+		{"busy past its planned wait", Worker{State: StateBusy, Tool: "Bash"}, Hook{Wait: wait.Wait{Until: now.Add(-time.Minute), Reason: "x"}}, false, StatusWorking, "Bash"},
+		{"a dialog in a planned wait", Worker{State: StateBusy, Tool: "Bash"}, Hook{State: "waiting", WaitingFor: "permission_prompt", Question: "allow Bash: ls", Wait: planned}, false, StatusNeedsYou, "allow Bash: ls"},
 		{"rate-limited, no reset read", Worker{State: StateIdle}, Hook{RateLimited: true}, false, StatusRateLimited, "no reset time read"},
 		{"stuck", Worker{State: StateBusy, Tool: "Bash", Notes: stuck}, Hook{}, false, StatusStuck, "no progress for 17m"},
 		{"working", Worker{State: StateBusy, Tool: "Bash"}, Hook{}, false, StatusWorking, "Bash"},

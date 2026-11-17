@@ -242,7 +242,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		}
 		text(sidebar.Red+bold, status)
 	default:
-		text(sidebar.Muted, statusText(t, sec))
+		text(sidebar.Muted, m.statusText(t, sec))
 	}
 	if t.sess.Branch != "" || t.sess.Cost != "" || t.context != "" || modelText(t) != "" {
 		rows = append(rows, line(in+metaRow(t, iw-len(in))))
@@ -420,7 +420,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	}
 	left := rule + arrow + reset + " " + sidebar.StateColour(t.sess.Agent, t.sess.State) + "●" + reset + " " + bold + t.sess.Name + reset
 	if folded {
-		if s := statusText(t, sec); s != "" {
+		if s := m.statusText(t, sec); s != "" {
 			left += "  " + sidebar.Muted + s + reset
 		}
 		if pr := t.sess.PR; pr.Number != 0 {
@@ -455,6 +455,14 @@ func span(d time.Duration) string {
 		return "now"
 	}
 	return inbox.Span(d)
+}
+
+// statusText is statusText, or what a Waiting card's planned wait says: "until 16:30 · Codex limit resets".
+func (m Model) statusText(t tile, sec section) string {
+	if sec == waitingSection && t.sess.Wait.Held() {
+		return t.sess.Wait.Text(m.clk.Now())
+	}
+	return statusText(t, sec)
 }
 
 // statusText is what a card says about its worker, leaving out what its section says: the dialog it waits on

@@ -13,6 +13,7 @@ import (
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Pane options of a worker a rate limit stopped: when dev resumes it (unix seconds), its @agent_prompts
@@ -115,7 +116,7 @@ func scheduleResume(c *tmux.Client, now time.Time, pane string, input []byte) (n
 		"set-option", "-pF", "-t", pane, OptResumeSession, "#{@agent_session}"); err != nil {
 		return "", err
 	}
-	return "dev resumes it at " + Clock(at, now), nil
+	return "dev resumes it at " + wait.Clock(at, now), nil
 }
 
 // failureLines is the end of the conversation on a captured screen, where Claude shows the turn's error: the
@@ -132,15 +133,6 @@ func failureLines(capture string) string {
 // failureRows is how many lines above Claude's input box failureLines takes: the error, maybe wrapped, and
 // a status line.
 const failureRows = 4
-
-// Clock is t as a note shows it: the time, and the day unless it's now's.
-func Clock(t, now time.Time) string {
-	t = t.In(now.Location())
-	if t.YearDay() == now.YearDay() && t.Year() == now.Year() {
-		return t.Format("15:04")
-	}
-	return t.Format("Jan 2 15:04")
-}
 
 // unsetResume drops pane's scheduled resume, and its count of resumes in a row when all is set.
 func unsetResume(c *tmux.Client, pane string, all bool) error {
@@ -188,4 +180,54 @@ func resume(c *tmux.Client, clk control.Clock, r paneRow) (ok bool, err error) {
 		return false, errors.Join(err, rerr)
 	}
 	return true, nil
+}
+
+// WakePrompt is what dev sends a worker once its planned wait ended.
+func WakePrompt(w wait.Wait, now time.Time) string {
+	return "Your planned wait " + w.Phrase(now) + " is over: continue where you left off."
+}
+
+// errDraft is why a due wake waits: a draft in the worker's input box.
+var errDraft = errors.New("its input box holds a draft, not woken yet")
+
+// wake sends WakePrompt to r's worker once its planned wait (wait.OptUntil) is due, if it's idle with an empty
+// input box; woke reports it, held that the wait still holds before its time (no stuck note meanwhile). A worker
+// prompted since it was set has it dropped, as has one not idle when it's due: on a decision, or working (its
+// own background wait ended), the usual rules apply. Due, a draft in its input box (errDraft) or a prompt not sent
+// keeps it for the next round, though no longer held.
+func wake(c *tmux.Client, clk control.Clock, r paneRow) (woke, held bool, err error) {
+	w := wait.FromOptions(r.WaitUntil, r.WaitReason)
+	if !w.Held() || r.WaitPrompts != "" && r.Prompts != r.WaitPrompts {
+		return false, false, wait.Unset(c, r.Pane)
+	}
+	now := clk.Now()
+	if !w.Due(now) {
+		return false, true, nil
+	}
+	st, err := control.ReadChecked(c, r.Pane)
+	if err != nil {
+		return false, false, err
+	}
+	// Read again: a prompt since list-panes, its turn over, dropped the wait
+	if !resting(st.Trusted(), st.WaitingFor) || r.WaitPrompts != "" && st.Prompts != r.WaitPrompts {
+		return false, false, wait.Unset(c, r.Pane)
+	}
+	shot, err := c.Run("capture-pane", "-p", "-e", "-t", r.Pane)
+	if err != nil {
+		return false, false, err
+	}
+	if !InputEmpty(shot) {
+		return false, false, errDraft
+	}
+	// Before the prompt, whose UserPromptSubmit would drop it anyway
+	if err := wait.Unset(c, r.Pane); err != nil {
+		return false, false, err
+	}
+	if _, err := control.Prompt(c, clk, r.Pane, WakePrompt(w, now)); err != nil {
+		// Not sent: the next round tries again
+		_, rerr := c.Run("set-option", "-p", "-t", r.Pane, wait.OptUntil, r.WaitUntil, ";", "set-option", "-p", "-t", r.Pane, wait.OptReason, r.WaitReason,
+			";", "set-option", "-p", "-t", r.Pane, wait.OptPrompts, r.WaitPrompts)
+		return false, false, errors.Join(err, rerr)
+	}
+	return true, false, nil
 }

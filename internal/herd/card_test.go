@@ -12,6 +12,7 @@ import (
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 func TestSection(t *testing.T) {
@@ -32,6 +33,9 @@ func TestSection(t *testing.T) {
 		{"waiting on CI", tile{sess: sidebar.Session{State: agent.Idle}, note: "finished: pushed", tail: tail("Pushed.", "**WAITING (CI)**")}, waitingSection},
 		{"IDLE after WAITING", tile{sess: sidebar.Session{State: agent.Idle}, tail: tail("WAITING (CI)", "IDLE")}, restingSection},
 		{"idle", tile{sess: sidebar.Session{State: agent.Idle}, note: "finished"}, restingSection},
+		{"a planned wait", tile{sess: sidebar.Session{State: agent.Idle, Wait: wait.Wait{Until: time.Unix(1, 0), Reason: "x"}}}, waitingSection},
+		{"a planned wait, its turn still running", tile{sess: sidebar.Session{State: agent.Working, Wait: wait.Wait{Until: time.Unix(1, 0), Reason: "x"}}}, waitingSection},
+		{"a dialog in a planned wait", tile{sess: sidebar.Session{State: agent.Waiting, Wait: wait.Wait{Until: time.Unix(1, 0), Reason: "x"}}, deciding: true}, needsYouSection},
 		{"no state", tile{}, restingSection},
 	}
 	for _, tt := range tests {
@@ -46,7 +50,7 @@ func TestSection(t *testing.T) {
 func TestSnapshotCard(t *testing.T) {
 	rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1", WindowActive: true},
 		{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude",
-			StartedBy: "$1", Transcript: "/t/w.jsonl", Since: "1700000000", Context: "41"},
+			StartedBy: "$1", Transcript: "/t/w.jsonl", Since: "1700000000", Context: "41", WaitUntil: "1700003600", WaitReason: "CI reruns"},
 		{Session: "fresh", SessionID: "$3", ID: "%3", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1"},
 		{Session: "gone", SessionID: "$4", ID: "%4", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1", Transcript: "/t/gone.jsonl"}}
 	clients := []sidebar.Client{{TTY: "/dev/ttys1", Session: "boss"}}
@@ -56,8 +60,9 @@ func TestSnapshotCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := index(s.tiles, "w")
-	if w := s.tiles[i]; !slices.Equal(w.tail.Lines, []string{"Done."}) || w.tailErr != nil || !w.since.Equal(time.Unix(1700000000, 0)) || w.context != "41" {
-		t.Errorf("w = %+v, want its transcript's lines, since and context", w)
+	if w := s.tiles[i]; !slices.Equal(w.tail.Lines, []string{"Done."}) || w.tailErr != nil || !w.since.Equal(time.Unix(1700000000, 0)) || w.context != "41" ||
+		w.sess.Wait != (wait.Wait{Until: time.Unix(1700003600, 0), Reason: "CI reruns"}) {
+		t.Errorf("w = %+v, want its transcript's lines, since, context and planned wait", w)
 	}
 	if g := s.tiles[index(s.tiles, "gone")]; g.tailErr == nil || len(s.tiles) != 3 {
 		t.Errorf("gone = %+v among %d tiles, want its read error and every tile kept", g, len(s.tiles))

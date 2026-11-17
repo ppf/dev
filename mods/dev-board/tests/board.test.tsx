@@ -2261,6 +2261,21 @@ test('a linked worker whose record dev could not read shows who it is on, not se
   await ui.unmount()
 })
 
+test('a to do item on a worker in a planned wait says until when', async ($, on) => {
+  const workers = [
+    worker({ id: 'local_w', name: 'fix-review', status: 'waiting', statusText: 'until 16:30 · Codex limit resets', wait: { until: '2026-11-17T16:30:00+01:00', reason: 'Codex limit resets' } }),
+    worker({ id: 'local_c', name: 'ci', status: 'waiting', statusText: 'CI' }),
+  ]
+  const items: TodoItem[] = [
+    { id: 1, text: 'Re-run the Codex review', on: 'fix-review', session: { id: 'local_w', name: 'fix-review' }, done: false },
+    { id: 2, text: 'Get CI green', on: 'ci', session: { id: 'local_c', name: 'ci' }, done: false },
+  ]
+  await start($, on, ok(workers), { todo: todoRan(items) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 2 · 2 on others updated 12m', '◌ Re-run the Codex review ● fix-review · waiting until 16:30', '◌ Get CI green ● ci · waiting'])
+  await ui.unmount()
+})
+
 test('an unlinked item whose name two workers share shows who it is on, not either worker', async ($, on) => {
   const workers = [worker({ id: 'local_1', name: '', title: 'Fix login', status: 'idle' }), worker({ id: 'local_2', name: '', title: 'fix login ', status: 'working', state: 'busy' })]
   await start($, on, ok(workers), { todo: todoRan([{ id: 1, text: 'Login', on: 'Fix login', done: false }]) })

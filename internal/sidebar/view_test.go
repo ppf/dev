@@ -5,9 +5,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/ppf/dev/internal/wait"
 )
 
 // The goldens are sidebar.sh's render output, captured by sourcing it into bash with tmux and tput
@@ -669,5 +672,25 @@ func TestViewBossRollupListLines(t *testing.T) {
 	rows := f.rows
 	if got, drawn := listLines(ss), rows[len(rows)-1].line-f.header+2; got != drawn || got != 14 {
 		t.Errorf("listLines = %d, render drew %d, want 14", got, drawn)
+	}
+}
+
+// A planned wait takes the state's place on line 2: until when and why.
+func TestViewPlannedWait(t *testing.T) {
+	w := wait.Wait{Until: time.Now().Add(30 * time.Minute), Reason: "Codex limit resets"}
+	m := Model{snap: snapshot{width: 60, height: 10, current: "x", sessions: []Session{
+		{Name: "a", Group: "g", Agent: "Claude", State: "idle", Title: "t", Wait: w},
+		{Name: "b", Group: "g", Agent: "Codex", State: "working", Wait: w},
+	}}}
+	f := m.render()
+	at := wait.Clock(w.Until, time.Now())
+	deciding := Model{snap: snapshot{width: 60, height: 14, current: "x", sessions: []Session{{Name: "c", Group: "g", Agent: "Claude", State: "waiting", Deciding: true, Wait: w}}}}
+	if got := strings.Join(deciding.render().lines, "\n"); strings.Contains(ansi.Strip(got), "until "+at) {
+		t.Errorf("a dialog in a planned wait shows the wait:\n%s", ansi.Strip(got))
+	}
+	for i, want := range map[int]string{4: "    until " + at + " · Codex limit resets · t", 6: "    Codex · until " + at + " · Codex limit resets"} {
+		if got := strings.TrimRight(ansi.Strip(f.lines[i]), " "); got != want {
+			t.Errorf("line %d = %q, want %q", i, got, want)
+		}
 	}
 }

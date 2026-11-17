@@ -27,12 +27,14 @@ import (
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Save writes <snapshot>.dev: a "session<TAB>project<TAB>window.pane" line per session with a @project or
 // a boss, the position empty while its sidebar is hidden, then a startedByPrefix line per worker a boss
 // started, a startedWithPrefix line per session whose Claude started with a model or effort, a bossPrefix
-// line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session.
+// line per boss with role-marked panes and an agentPrefix line per live agent pane with a recorded session, then
+// a waitPrefix line when that pane holds a planned wait.
 // A snapshot identical to the last one is deleted by save.sh, so its state goes to the last one's .dev instead. A failure keeps the previous file. It runs in every save, so it also keeps a save from
 // leaving last dangling or on an older snapshot (see settle).
 func Save(c *tmux.Client, snapshot string) error {
@@ -79,6 +81,8 @@ func Save(c *tmux.Client, snapshot string) error {
 		AgentID    string `tmux:"@agent_session"`
 		Transcript string `tmux:"@agent_transcript"`
 		BossPane   string `tmux:"@dev_boss_pane"`
+		WaitUntil  string `tmux:"@dev_wait_until"`
+		WaitReason string `tmux:"@dev_wait_reason"`
 	}](c, "list-panes", "-a")
 	// With no session left (the sidebar closed the last one) list-panes -a fails, and there's nothing to save
 	if err != nil && len(sessions) > 0 {
@@ -155,6 +159,9 @@ func Save(c *tmux.Client, snapshot string) error {
 		saved[p.ID] = true
 		fmt.Fprintf(&b, "%s\t%s\t%s.%s\t%s\t%s\t%s\t%s\n", agentPrefix, p.Session, p.Window, p.Index,
 			agent.Claude, p.AgentID, p.Transcript, p.Path)
+		if p.WaitUntil != "" {
+			fmt.Fprintf(&b, "%s\t%s\t%s.%s\t%s\t%s\n", waitPrefix, p.Session, p.Window, p.Index, p.WaitUntil, p.WaitReason)
+		}
 	}
 	dev := devPath(snapshot)
 	err = os.WriteFile(dev+".tmp", []byte(b.String()), 0o644)
@@ -325,7 +332,7 @@ func Restore(c *tmux.Client) error {
 	shell = filepath.Base(strings.TrimSpace(shell))
 
 	liveSessions := strings.Split(string(liveData), "\n")
-	entries, agents, startedBy, bosses, starts := parseState(string(data))
+	entries, agents, startedBy, bosses, starts, waits := parseState(string(data))
 	var errs []error
 	// First: rebuilding a sidebar renumbers its window's panes, and agents and bosses are saved by position.
 	// A coordinator restarts with its boss, or as a plain agent when its boss can't be restored.
@@ -345,6 +352,18 @@ func Restore(c *tmux.Client) error {
 	agents = slices.DeleteFunc(agents, func(a agentEntry) bool { return adopted[slot{a.Session, a.Pos}] })
 	if err := resumeAgents(c, agents, startedBy, starts, liveSessions, shell); err != nil {
 		errs = append(errs, err)
+	}
+	// By position too, before a sidebar's rebuild renumbers the panes; without @agent_prompts to compare, as the
+	// resumed agent counts its own
+	for _, w := range waits {
+		if slices.Contains(liveSessions, w.Session) {
+			continue
+		}
+		target := tmux.SessionTarget(w.Session) + w.Pos
+		if _, err := c.Run("set-option", "-p", "-t", target, wait.OptUntil, w.Until, ";", "set-option", "-p", "-t", target, wait.OptReason, w.Reason); err != nil {
+			warn(c, w.Session+":"+w.Pos+": planned wait not restored")
+			errs = append(errs, err)
+		}
 	}
 	for _, e := range entries {
 		// Sessions that were live before the restore are untouched by it — leave them alone
@@ -656,6 +675,13 @@ const outsideMark = "outside"
 // session's Claude, one of the two maybe empty.
 const startedWithPrefix = ":started_with"
 
+// waitPrefix starts a "<prefix><TAB>session<TAB>window.pane<TAB>until<TAB>reason" line of a .dev file: the planned
+// wait (wait.OptUntil, wait.OptReason) of the agent pane there.
+const waitPrefix = ":wait"
+
+// waitEntry is one wait line of a .dev file.
+type waitEntry struct{ Session, Pos, Until, Reason string }
+
 // bossPrefix starts a "<prefix><TAB>session<TAB>window.pane<TAB>window.pane" line of a .dev file: a boss,
 // its coordinator's and previews' positions.
 const bossPrefix = ":boss"
@@ -674,15 +700,22 @@ type agentEntry struct {
 	Session, Pos, Kind, ID, Transcript, Path string
 }
 
-// parseState reads a .dev file's session, agent, started-by, boss and started-with (by session) lines.
-func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEntry, map[string]agent.Start) {
+// parseState reads a .dev file's session, agent, started-by, boss, started-with (by session) and wait lines.
+func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEntry, map[string]agent.Start, []waitEntry) {
 	var entries []entry
 	var agents []agentEntry
 	var startedBy []startedByEntry
 	var bosses []bossEntry
 	starts := map[string]agent.Start{}
+	var waits []waitEntry
 	for _, line := range strings.Split(data, "\n") {
 		session, rest, _ := strings.Cut(line, "\t")
+		if session == waitPrefix {
+			if f := strings.Split(rest, "\t"); len(f) == 4 && f[0] != "" && f[1] != "" && f[2] != "" {
+				waits = append(waits, waitEntry{f[0], f[1], f[2], f[3]})
+			}
+			continue
+		}
 		if session == bossPrefix {
 			if f := strings.Split(rest, "\t"); len(f) == 3 && f[0] != "" && f[1] != "" && f[2] != "" {
 				bosses = append(bosses, bossEntry{f[0], f[1], f[2]})
@@ -714,7 +747,7 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 		project, pos, _ := strings.Cut(rest, "\t")
 		entries = append(entries, entry{Session: session, Project: project, Pos: pos})
 	}
-	return entries, agents, startedBy, bosses, starts
+	return entries, agents, startedBy, bosses, starts, waits
 }
 
 const snapshotTimeout = time.Minute

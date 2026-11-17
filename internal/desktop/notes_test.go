@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/wait"
 )
 
 func TestNotes(t *testing.T) {
@@ -12,6 +14,7 @@ func TestNotes(t *testing.T) {
 	ago := func(m int) int64 { return now.Add(-time.Duration(m) * time.Minute).Unix() }
 	pct := func(n int) *int { return &n }
 	reset := time.Date(2026, 11, 4, 17, 55, 0, 0, time.UTC).Unix()
+	codex := func(until time.Time) wait.Wait { return wait.Wait{Until: until, Reason: "Codex limit resets"} }
 	tests := []struct {
 		name string
 		w    Worker
@@ -45,6 +48,16 @@ func TestNotes(t *testing.T) {
 		{"resume due", Worker{State: StateIdle}, Hook{State: "idle", RateLimited: true, ResetAt: reset}, 0,
 			[]Note{{Key: "local_w/resume due/" + itoa(reset), Kind: "resume due", Text: "rate limit reset 17:55: resume it"}}},
 		{"resumed by someone: busy again", Worker{State: StateBusy}, Hook{State: "idle", RateLimited: true, ResetAt: reset}, ago(1), []Note{}},
+		{"a planned wait, its own background task running: no stuck note", Worker{State: StateBusy, Background: 1}, Hook{State: "working", Since: ago(30), Active: ago(17), Wait: codex(now.Add(30 * time.Minute))}, ago(20), []Note{}},
+		{"a planned wait, working in the foreground: stuck", Worker{State: StateBusy}, Hook{State: "working", Since: ago(30), Active: ago(17), Wait: codex(now.Add(30 * time.Minute))}, ago(20),
+			[]Note{{Key: "local_w/stuck/" + itoa(ago(17)), Kind: "stuck", Text: "no progress for 17m"}}},
+		{"busy past its planned wait: stuck from its end", Worker{State: StateBusy}, Hook{State: "working", Since: ago(60), Active: ago(60), Wait: codex(now.Add(-16 * time.Minute))}, ago(60),
+			[]Note{{Key: "local_w/stuck/" + itoa(ago(16)), Kind: "stuck", Text: "no progress for 16m"}}},
+		{"a planned wait, not due", Worker{State: StateIdle}, Hook{State: "idle", Wait: codex(now.Add(time.Minute))}, 0, []Note{}},
+		{"a planned wait ended: wake due", Worker{State: StateIdle}, Hook{State: "idle", Wait: codex(now.Add(-time.Minute))}, 0,
+			[]Note{{Key: "local_w/wake due/" + itoa(ago(1)), Kind: "wake due", Text: "its wait until 17:59 (Codex limit resets) ended: continue it"}}},
+		{"a decision in a planned wait", Worker{State: StateBusy}, Hook{State: "waiting", Since: ago(4), WaitingFor: "permission_prompt", Wait: codex(now.Add(time.Hour))}, ago(40),
+			[]Note{{Key: "local_w/needs a decision/" + itoa(ago(4)), Kind: "needs a decision", Text: "waiting on a decision for 4m, unanswered"}}},
 		{"stopped: none", Worker{State: StateStopped, Context: pct(95)}, Hook{State: "working", Active: ago(60), RateLimited: true}, ago(60), []Note{}},
 	}
 	for _, tt := range tests {

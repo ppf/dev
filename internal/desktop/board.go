@@ -20,6 +20,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Paths are the directories the board reads.
@@ -116,7 +117,7 @@ type Worker struct {
 	// effort level, e.g. medium; "" when unknown.
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
-	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due).
+	// Notes are its health notes (stuck, unanswered decision, high context, rate-limited, resume due, wake due).
 	Notes []Note `json:"notes"`
 	// Background counts its background tasks still running (Bash commands, async agents) its Claude started; 0 when not running.
 	Background int `json:"background"`
@@ -136,6 +137,8 @@ type Worker struct {
 	Ask *Pending `json:"ask"`
 	// Recap is its last turn's newest wrap_up recap; "" for none or a call the app rejected.
 	Recap string `json:"recap"`
+	// Wait is its planned wait (dev agent wait-until); omitted when none.
+	Wait *wait.Wait `json:"wait,omitempty"`
 }
 
 type record struct {
@@ -552,6 +555,9 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 		seen = max(seen, l.StatusUpdatedAt/1000)
 	}
 	w.Notes = notes(w, cli, h, seen, now)
+	if h.Wait.Held() {
+		w.Wait = &h.Wait
+	}
 	// Asked before its idle stretch began: that turn is over (a question asked since that read is the next poll's)
 	endedSince := w.State != StateBusy && asked.AskedAt < l.StatusUpdatedAt
 	switch {
