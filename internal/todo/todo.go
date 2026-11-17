@@ -395,13 +395,19 @@ func Label(o string) (label string, rec bool) {
 	return o, false
 }
 
-// Pick is the answer arg gives to an item with options: option n for a number 1 to len(options), else the option
-// whose label (Label) it names, case aside, else arg itself, the user's own words. A number past the options is an
-// error, as is an empty answer.
+// Pick is the answer arg gives to an item with options: the option whose label (Label) it names, case aside, else
+// option n for a number 1 to len(options), else arg itself, the user's own words. Another number is an error, as is
+// an empty answer.
 func Pick(options []string, arg string) (string, error) {
 	arg = Clean(arg)
 	if arg == "" {
 		return "", errors.New("empty answer")
+	}
+	want, _ := Label(arg)
+	for _, o := range options {
+		if l, _ := Label(o); strings.EqualFold(l, want) {
+			return l, nil
+		}
 	}
 	if n, err := strconv.Atoi(arg); err == nil && len(options) > 0 {
 		if n < 1 || n > len(options) {
@@ -409,12 +415,6 @@ func Pick(options []string, arg string) (string, error) {
 		}
 		l, _ := Label(options[n-1])
 		return l, nil
-	}
-	want, _ := Label(arg)
-	for _, o := range options {
-		if l, _ := Label(o); strings.EqualFold(l, want) {
-			return l, nil
-		}
 	}
 	return arg, nil
 }

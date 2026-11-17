@@ -563,6 +563,9 @@ func TestPick(t *testing.T) {
 			t.Errorf("Pick(%q) = %q, %v; want %q, %q", tt.arg, got, err, tt.want, tt.err)
 		}
 	}
+	if got, err := Pick([]string{"30", "60 (Recommended)"}, "60"); got != "60" || err != nil {
+		t.Errorf("a number that is a label: Pick(60) = %q, %v; want 60", got, err)
+	}
 	if got, err := Pick(nil, "2"); got != "2" || err != nil {
 		t.Errorf("no options: Pick(2) = %q, %v; want the text", got, err)
 	}
