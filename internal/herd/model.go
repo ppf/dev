@@ -87,7 +87,9 @@ type snapshot struct {
 	zoomed  bool   // own window is zoomed
 	client  string // tty of the client viewing own session; "" lets tmux pick
 	todo    todo.List
-	todoErr error // why the to do list could not be read
+	todoErr error          // why the to do list could not be read
+	threads []inbox.Thread // own open message threads (openThreads)
+	msgsErr error          // why the messages could not be read
 }
 
 // Model is the Bubble Tea previews pane.
@@ -115,6 +117,8 @@ type Model struct {
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
 	todoFolded    bool            // the to do block shows as its header only (t)
+	msgs          *inbox.Messages // the tmux server's messages; nil reads none, unless findMsgs
+	findMsgs      bool            // refresh looks up msgs until it's found
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -145,8 +149,9 @@ const watchInterval = 15 * time.Second
 
 type refreshMsg struct {
 	snap   snapshot
-	todo   *todo.Store // the list found this refresh
-	inputs int         // m.inputs when the refresh started
+	todo   *todo.Store     // the list found this refresh
+	msgs   *inbox.Messages // the messages found this refresh
+	inputs int             // m.inputs when the refresh started
 	err    error
 }
 
@@ -162,7 +167,7 @@ func Run(c *tmux.Client, pane string) error {
 func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
-	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true}
+	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).
@@ -176,7 +181,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -230,6 +235,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.snap, m.err = msg.snap, nil
+			if msg.msgs != nil {
+				m.msgs = msg.msgs
+			}
 			if msg.todo != nil {
 				m.todo = msg.todo
 			}
@@ -332,8 +340,23 @@ func (m Model) refresh() tea.Cmd {
 		if store != nil {
 			snap.todo, snap.todoErr = store.Read(m.clk.Now())
 		}
+		msgs := m.msgs
+		if msgs == nil && m.findMsgs {
+			if _, socket, err := inbox.Viewer(m.c, m.pane); err != nil {
+				snap.msgsErr = err
+			} else if s, err := inbox.OpenMessages(socket); err != nil {
+				snap.msgsErr = err
+			} else {
+				msgs = &s
+			}
+		}
+		if msgs != nil {
+			var ts []inbox.Thread
+			ts, snap.msgsErr = msgs.Threads(snap.name)
+			snap.threads = openThreads(ts, m.clk.Now())
+		}
 		if !snap.visible {
-			return refreshMsg{snap: snap, todo: store, inputs: inputs}
+			return refreshMsg{snap: snap, todo: store, msgs: msgs, inputs: inputs}
 		}
 		for _, i := range captures(snap.tiles, selected, folds) {
 			out, err := m.c.Run("capture-pane", "-p", "-e", "-t", snap.tiles[i].pane)
@@ -377,7 +400,7 @@ func (m Model) refresh() tea.Cmd {
 		}
 		// A dialog found gone moves its card out of Needs you
 		sortBySection(snap.tiles)
-		return refreshMsg{snap: snap, todo: store, inputs: inputs}
+		return refreshMsg{snap: snap, todo: store, msgs: msgs, inputs: inputs}
 	}
 }
 

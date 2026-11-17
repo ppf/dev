@@ -48,7 +48,8 @@ pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout, 3
 Run "dev agent skill [dev-agents|desktop-boss]" for a coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(),
-		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd())
+		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd(), newAgentMessageCmd(), newAgentReplyCmd(),
+		newAgentMessagesCmd())
 	return cmd
 }
 

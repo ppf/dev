@@ -29,8 +29,8 @@ func (m Model) View() string {
 	return strings.Join(m.render(), "\n")
 }
 
-// render lays out exactly m.height lines: the to do block, the board under it scrolled to the selected card,
-// then the bottom rows.
+// render lays out exactly m.height lines: the to do block, the board under it scrolled to the selected card, the
+// message threads under it, then the bottom rows.
 func (m Model) render() []string {
 	w, h := m.width, m.height
 	lines := make([]string, h)
@@ -39,26 +39,32 @@ func (m Model) render() []string {
 	copy(lines[gh:], bottom)
 	top := m.todoRows(gh)
 	copy(lines, top)
-	board, gh := lines[len(top):], gh-len(top)
+	msgs := m.msgRows(gh - len(top))
+	copy(lines[gh-len(msgs):], msgs)
+	board, bh := lines[len(top):gh-len(msgs)], gh-len(top)-len(msgs)
 	if len(m.snap.tiles) == 0 {
-		if gh > 0 {
+		if bh > 0 {
 			board[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 		}
 		return lines
 	}
 	b := m.board()
-	off := b.offset(index(m.snap.tiles, m.selected), gh)
-	copy(board[:gh], b.lines[off:])
+	off := b.offset(index(m.snap.tiles, m.selected), bh)
+	copy(board[:bh], b.lines[off:])
 	return lines
 }
 
-// boardTop is the row the board starts at, under the to do block, when gh rows are above the bottom rows.
-func (m Model) boardTop(gh int) int { return len(m.todoRows(gh)) }
+// boardSpan is the row the board starts at, under the to do block, and the rows it gets above the message
+// threads, when gh rows are above the bottom rows.
+func (m Model) boardSpan(gh int) (top, height int) {
+	top = len(m.todoRows(gh))
+	return top, gh - top - len(m.msgRows(gh-top))
+}
 
-// boardHeight is the rows the board gets between the to do block and the bottom rows.
+// boardHeight is the rows the board gets between the to do block and the message threads.
 func (m Model) boardHeight() int {
-	gh := m.height - len(m.bottom())
-	return gh - m.boardTop(gh)
+	_, bh := m.boardSpan(m.height - len(m.bottom()))
+	return bh
 }
 
 // bottom is the rows under the cards: the reply box while open, else one row of hints or a message.
@@ -86,7 +92,7 @@ func (m Model) bottom() []string {
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
-	if gh := m.height - 1; len(tiles) > 0 && len(m.board().lines) > gh-m.boardTop(gh) {
+	if _, bh := m.boardSpan(m.height - 1); len(tiles) > 0 && len(m.board().lines) > bh {
 		// Where the selection is on a board taller than the pane; first, so a narrow row cuts the hint
 		pages = fmt.Sprintf("%d/%d  ", sel+1, len(tiles))
 	}
