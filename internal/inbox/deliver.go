@@ -92,9 +92,21 @@ func BossOf(c *tmux.Client, pane string) (b Boss, w workerView, ok bool, err err
 
 // Self is the boss whose own pane (the coordinator) pane is, ok=false for any other pane.
 func Self(c *tmux.Client, pane string) (Boss, bool, error) {
+	return self(c, pane, false)
+}
+
+// Coordinator is Self with the boss's inbox on or off, for the user's prompts (Arrived) kept either way.
+func Coordinator(c *tmux.Client, pane string) (Boss, bool, error) {
+	return self(c, pane, true)
+}
+
+func self(c *tmux.Client, pane string, inboxOff bool) (Boss, bool, error) {
 	v, err := view(c, pane)
 	if err != nil {
 		return Boss{}, false, err
+	}
+	if inboxOff {
+		v.Off = ""
 	}
 	b, ok, err := v.boss()
 	if !ok || err != nil {

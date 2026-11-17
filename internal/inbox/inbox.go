@@ -529,7 +529,7 @@ func (b Box) Arrived(prompt string, now time.Time) error {
 		if s.InFlight != nil && strings.Contains(prompt, s.InFlight.batch().Message()) {
 			s.InFlight = nil
 		}
-		if !strings.Contains(prompt, Header) && strings.TrimSpace(prompt) != ResumePrompt && strings.TrimSpace(prompt) != "" {
+		if p := strings.TrimSpace(prompt); !strings.HasPrefix(p, Header) && p != ResumePrompt && p != "" {
 			s.Prompt = &Prompt{Text: clip(prompt), At: now.Unix()}
 		}
 		return nil

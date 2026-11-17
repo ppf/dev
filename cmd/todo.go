@@ -312,7 +312,7 @@ func managerPrompt(c *tmux.Client) (*inbox.Prompt, error) {
 	if pane == "" {
 		return nil, notHere
 	}
-	self, ok, err := inbox.Self(c, pane)
+	self, ok, err := inbox.Coordinator(c, pane)
 	switch {
 	case err != nil:
 		return nil, err

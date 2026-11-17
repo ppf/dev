@@ -165,6 +165,14 @@ func TestArrivedUserPrompt(t *testing.T) {
 	if p, err := b.UserPrompt(); err != nil || p == nil || *p != (Prompt{Text: "merge 148", At: at.Unix()}) {
 		t.Errorf("UserPrompt = %+v, %v; want merge 148 at %d", p, err, at.Unix())
 	}
+	// The user quoting a batch is still their prompt
+	quote := "for " + Header + " #1 Merge?: merge"
+	if err := b.Arrived(quote, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.UserPrompt(); err != nil || p == nil || p.Text != quote {
+		t.Errorf("UserPrompt = %+v, %v; want %q", p, err, quote)
+	}
 }
 
 // A relayed answer quotes the user's words, cleaned, and stays a "you answered" note for its item.

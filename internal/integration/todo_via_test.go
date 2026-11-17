@@ -88,10 +88,13 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		return strings.Contains(string(data), `- you answered #1 "Merge #148?" via manager ("merge 148, wait on the API one"): Merge`)
 	})
 
-	// After /clear the manager's new conversation never saw the user's words
+	// After /clear the manager's new conversation never saw the user's words, its inbox off then or not
+	s.T("set-option", "-t", "=manager:", "@dev_boss_inbox", "off")
+	prompt("merge it")
 	if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, `{"hook_event_name":"SessionStart","source":"clear"}`, "state", "idle"); err != nil {
 		t.Fatal(err, stderr)
 	}
+	s.T("set-option", "-u", "-t", "=manager:", "@dev_boss_inbox")
 	refused("after /clear", claude(pane["manager"]), "hasn't prompted the manager yet")
 
 	// boss-b's list file broken: --all still lists boss-a's, boss-b marked
