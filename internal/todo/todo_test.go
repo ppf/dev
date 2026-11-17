@@ -589,24 +589,24 @@ func TestAnswer(t *testing.T) {
 	if l := read(t, s, now); !slices.Equal(l.Items[0].Options, []string{"Merge (Recommended)", "Wait"}) {
 		t.Errorf("options after replace: %+v", l.Items[0])
 	}
-	if _, err := s.Answer(2, "ok", now); err == nil || err.Error() != "item 2 is on Marek, not the user's to answer" {
+	if _, err := s.Answer(2, "", "ok", now); err == nil || err.Error() != "item 2 is on Marek, not the user's to answer" {
 		t.Errorf("answer an item on Marek: %v", err)
 	}
-	if _, err := s.Answer(id, "5", now); err == nil {
+	if _, err := s.Answer(id, "", "5", now); err == nil {
 		t.Error("option 5 of 2 answered")
 	}
-	it, err := s.Answer(id, "2", now)
+	it, err := s.Answer(id, "", "2", now)
 	if err != nil || it.Text != "Merge #148 now?" || it.Answer != "Wait" || it.Done != now.Unix() {
 		t.Errorf("Answer = %+v, %v", it, err)
 	}
 	if l := read(t, s, now); !l.Items[0].Done || l.Items[0].Answer != "Wait" {
 		t.Errorf("after answer: %+v", l.Items[0])
 	}
-	if _, err := s.Answer(id, "1", now); err == nil || err.Error() != "item 1 is answered already: Wait" {
+	if _, err := s.Answer(id, "", "1", now); err == nil || err.Error() != "item 1 is answered already: Wait" {
 		t.Errorf("second answer: %v, want answered already", err)
 	}
 	plain, _ := s.Add(Item{Text: "Answer Vince"}, now)
-	if _, err := s.Answer(plain, "ok", now); err == nil || !strings.Contains(err.Error(), "is no question") {
+	if _, err := s.Answer(plain, "", "ok", now); err == nil || !strings.Contains(err.Error(), "is no question") {
 		t.Errorf("answer a plain item: %v, want refused", err)
 	}
 }
@@ -616,5 +616,30 @@ func TestReminderAsk(t *testing.T) {
 	l := List{Items: []Shown{{ID: 2, Text: "Merge?", Options: []string{"Merge (Recommended)", "Wait"}}}}
 	if got := l.lines(0); got != "\n2. Merge? (asked, options: Merge (Recommended) · Wait)" {
 		t.Errorf("lines = %q", got)
+	}
+}
+
+// A board's answer carries the question it showed: numbers restart once a list empties, so a stale board's #1 may be a newer ask.
+func TestAnswerQuestionGuard(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "Merge #148?", Options: []string{"Merge", "Wait"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(now); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Add(Item{Text: "Release now?", Options: []string{"Merge", "Wait"}}, now)
+	if err != nil || id != 1 {
+		t.Fatalf("new ask: %d, %v, want #1 again", id, err)
+	}
+	if _, err := s.Answer(1, "Merge #148?", "Merge", now); err == nil || !strings.Contains(err.Error(), "the list changed") {
+		t.Errorf("answer by the old question: %v, want refused", err)
+	}
+	if l := read(t, s, now); l.Items[0].Done {
+		t.Error("refused answer ticked the item")
+	}
+	if it, err := s.Answer(1, "  Release   now? ", "Wait", now); err != nil || it.Answer != "Wait" {
+		t.Errorf("answer by its own question: %+v, %v", it, err)
 	}
 }

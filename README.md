@@ -257,6 +257,10 @@ go test ./...                                              # unit tests, never s
 go test -tags integration -count=1 ./internal/integration/ # isolated tmux servers; needs tmux 3.8, tmux plugins + a ppf/terminal clone (CI skips its parity tests)
 ```
 
+## Sidebar NEEDS YOU
+
+While any dev boss has an open to do item that is the user's (no `--on`), or a session waits on a permission prompt or question, every sidebar gets a `NEEDS YOU n` section above SESSIONS: one row per item (`dev ☐ Merge #148?`, the project first) or waiting session (`dev ● dev-fix-login`), read every 2 seconds from `dev todo --all --json`. On a focused sidebar `n` puts the cursor in it (a click on a row does the same as `⏎` on it): `j`/`k` move, `⏎` on an ask shows its question whole and its options, one per line (`1 ★ Merge`, `2 Wait`) and `1`–`9` answer it as `dev todo answer` does (the boss gets `you answered …`; the answer carries the question shown, so a list that emptied and reused the number refuses it), `⏎` on a plain item or a waiting session goes to that session, `esc` closes the options, then leaves. The section takes at most half the pane (an open ask always fits) and none under 10 rows; free-text answers stay with `dev todo answer`.
+
 ## Sidebar width
 
 Every sidebar shows the same width, kept in the global tmux option `@sidebar_width` (default 40). Drag any sidebar's border (or `resize-pane` it) and every other sidebar follows; new sidebars open at that width. When tmux rescales panes because a window resizes (another client size, a terminal resize), each sidebar takes the stored width back instead of drifting. Compact mode's zoom leaves it alone.

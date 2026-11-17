@@ -584,8 +584,10 @@ func rollupSessions() []Session {
 func TestViewBossRollup(t *testing.T) {
 	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}
 	f := m.render()
+	// w1 waits on a dialog, so NEEDS YOU draws above the header
+	off := f.header
 	var got []string
-	for _, l := range f.lines[3:14] {
+	for _, l := range f.lines[off+3 : off+14] {
 		got = append(got, strings.TrimRight(ansi.Strip(l), " "))
 	}
 	want := []string{
@@ -604,15 +606,15 @@ func TestViewBossRollup(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("rows =\n%q\nwant\n%q", got, want)
 	}
-	if !strings.Contains(f.lines[5], red+"1 need you") {
-		t.Errorf("need-you colour: %q", f.lines[5])
+	if !strings.Contains(f.lines[off+5], red+"1 need you") {
+		t.Errorf("need-you colour: %q", f.lines[off+5])
 	}
-	wantRows := []rowStart{{3, "boss"}, {6, "w1"}, {8, "w2"}, {10, "w3"}, {12, "solo"}}
+	wantRows := []rowStart{{off + 3, "boss"}, {off + 6, "w1"}, {off + 8, "w2"}, {off + 10, "w3"}, {off + 12, "solo"}}
 	if !slices.Equal(f.rows, wantRows) {
 		t.Errorf("rows = %v, want %v", f.rows, wantRows)
 	}
 	// A click on the roll-up line selects its boss, not exact so × doesn't close it
-	if s, exact, _ := rowAt(f.rows, 5); s != "boss" || exact {
+	if s, exact, _ := rowAt(f.rows, off+5); s != "boss" || exact {
 		t.Errorf("click on roll-up = %q exact %v", s, exact)
 	}
 }
@@ -620,7 +622,8 @@ func TestViewBossRollup(t *testing.T) {
 func TestViewBossRollupVariants(t *testing.T) {
 	line := func(width int, ss []Session) string {
 		m := Model{snap: snapshot{width: width, height: 20, current: "x", sessions: ss}}
-		return strings.TrimRight(ansi.Strip(m.render().lines[5]), " ")
+		f := m.render()
+		return strings.TrimRight(ansi.Strip(f.lines[f.header+5]), " ")
 	}
 	idle := []Session{
 		{Name: "boss", Group: "g", Boss: true, ID: "$1", Agent: "Claude", State: "idle"},
@@ -631,7 +634,7 @@ func TestViewBossRollupVariants(t *testing.T) {
 	if got, want := line(40, idle), "    2 idle"; got != want { // an idle reminder (waiting, not deciding) is idle
 		t.Errorf("all idle = %q, want %q", got, want)
 	}
-	if !strings.Contains(newRollupFrame(idle).lines[5], muted+"2 idle") {
+	if f := newRollupFrame(idle); !strings.Contains(f.lines[f.header+5], muted+"2 idle") {
 		t.Error("idle count not muted")
 	}
 	if got, want := line(27, rollupSessions()), "    1 need you · 2 working"; got != want {
@@ -650,8 +653,8 @@ func TestViewBossRollupVariants(t *testing.T) {
 	}
 	// Selected: full-width selection background on the roll-up line
 	m := Model{selected: "boss", snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}
-	if l := m.render().lines[5]; !strings.HasPrefix(l, selectedBG) || ansi.StringWidth(l) != 40 {
-		t.Errorf("selected roll-up line: %q", l)
+	if f := m.render(); !strings.HasPrefix(f.lines[f.header+5], selectedBG) || ansi.StringWidth(f.lines[f.header+5]) != 40 {
+		t.Errorf("selected roll-up line: %q", f.lines[f.header+5])
 	}
 }
 
@@ -662,8 +665,9 @@ func newRollupFrame(ss []Session) frame {
 func TestViewBossRollupListLines(t *testing.T) {
 	ss := rollupSessions()
 	m := Model{snap: snapshot{width: 40, height: 40, current: "x", sessions: ss}}
-	rows := m.render().rows
-	if got, drawn := listLines(ss), rows[len(rows)-1].line+2; got != drawn || got != 14 {
+	f := m.render()
+	rows := f.rows
+	if got, drawn := listLines(ss), rows[len(rows)-1].line-f.header+2; got != drawn || got != 14 {
 		t.Errorf("listLines = %d, render drew %d, want 14", got, drawn)
 	}
 }

@@ -420,8 +420,9 @@ func Pick(options []string, arg string) (string, error) {
 }
 
 // Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
-// that isn't an ask, is on someone else or isn't open is an error.
-func (s Store) Answer(id int, arg string, now time.Time) (Item, error) {
+// that isn't an ask, is on someone else or isn't open is an error, and so is one whose text isn't question, when
+// that isn't "": numbers restart once a list empties, so a stale board's answer could hit a newer ask.
+func (s Store) Answer(id int, question, arg string, now time.Time) (Item, error) {
 	var it Item
 	err := s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
@@ -430,6 +431,8 @@ func (s Store) Answer(id int, arg string, now time.Time) (Item, error) {
 		}
 		p := &f.Items[i]
 		switch {
+		case question != "" && p.Text != Clean(question):
+			return fmt.Errorf("item %d is %q now, not %q: the list changed, look again", id, p.Text, Clean(question))
 		case p.Done != 0:
 			return fmt.Errorf("item %d is answered already: %s", id, p.Answer)
 		case p.On != "":

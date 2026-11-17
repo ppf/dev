@@ -218,13 +218,15 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 }
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
-	return &cobra.Command{
+	var question string
+	cmd := &cobra.Command{
 		Use:   "answer <boss> <n> <option|text>",
 		Short: "Answer item n on a dev boss's list, as the user: ticks it and sends the boss what was answered",
 		Long: `Answer ask n (dev todo ask) on the list of dev boss session <boss>, as the user: an option's number or label, or your own
 words. It ticks the item and the boss's inbox gets "you answered #<n> \"<question>\": <answer>", which the boss
 takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), so no Claude answers for the user,
-and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
+and for a desktop app boss, which has no dev inbox: answer it in its chat. --question <text> answers only while item n
+still reads that (a board's guard: numbers restart once a list empties).`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -254,7 +256,7 @@ and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
 			if err != nil {
 				return err
 			}
-			it, err := s.Answer(id, args[2], time.Now())
+			it, err := s.Answer(id, question, args[2], time.Now())
 			if err != nil {
 				return err
 			}
@@ -270,6 +272,8 @@ and for a desktop app boss, which has no dev inbox: answer it in its chat.`,
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&question, "question", "", "answer only if item n still has this text (a board's guard: numbers restart once a list empties)")
+	return cmd
 }
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
