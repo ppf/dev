@@ -159,6 +159,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if it.On == "" || it.On == todo.Me {
+				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it)
+			}
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
@@ -209,6 +212,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			if err != nil {
 				return err
 			}
+			waitsOnYou(*boss, cmd.ErrOrStderr(), id, it)
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
@@ -379,6 +383,18 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 		}
 	}
 	return nil
+}
+
+// waitsOnYou tells the boss above the list's boss (a boss under a boss) that item id waits on the user; a failure
+// is only reported, as the item is on the list.
+func waitsOnYou(boss string, stderr io.Writer, id int, it todo.Item) {
+	pane, _, err := todoBoss(boss)
+	if err == nil && pane != "" {
+		err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, it.Text, it.Options)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: the boss above wasn't told: "+err.Error())
+	}
 }
 
 // todoStore is the list of --boss's session, else of the boss session it runs in; adopt lets a desktop one take

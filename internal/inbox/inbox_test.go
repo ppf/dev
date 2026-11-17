@@ -3,6 +3,7 @@ package inbox
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -520,5 +521,35 @@ func TestAddCapsKeepsAnswers(t *testing.T) {
 	bt, _ := b.Take()
 	if len(bt.Notes) != maxNotes || bt.Dropped != 4 || bt.Notes[0].Kind != Answered {
 		t.Errorf("got %d notes, %d dropped, first %+v; want the answer kept first", len(bt.Notes), bt.Dropped, bt.Notes[0])
+	}
+}
+
+// A worker that is itself a boss sends its boss its unanswered question's repeat and stuck notes, not high context;
+// its card's note still shows it.
+func TestObserveBoss(t *testing.T) {
+	o := newObserver(t)
+	o.s.health("w").Question, o.s.health("w").AskedAt = "Merge it?", o.now.Unix()
+	w := worker("idle", "", o.ago(0))
+	w.Context, w.Herd = "85", "1"
+	got, holding := o.round(AskAgain, w)
+	if got != "[dev boss inbox] 1 worker update(s):\n- w asks: Merge it? (unanswered for 30m)" {
+		t.Errorf("queued = %q", got)
+	}
+	if !slices.Contains(holding, "w high context: 85% used") {
+		t.Errorf("holding = %q, want the high context note", holding)
+	}
+	w = worker("working", "", o.ago(StuckWorking))
+	w.Herd = "1"
+	if got, _ := o.round(0, w); got != "[dev boss inbox] 1 worker update(s):\n- w stuck: no progress for 15m" {
+		t.Errorf("stuck = %q", got)
+	}
+}
+
+func TestUp(t *testing.T) {
+	for kind, want := range map[string]bool{WaitsOnYou: true, Asks: true, Decision: true, Failed: true, Stuck: true,
+		Finished: false, Context: false, Resumed: false} {
+		if up(kind) != want {
+			t.Errorf("up(%q) = %v", kind, !want)
+		}
 	}
 }

@@ -60,6 +60,7 @@ type workerView struct {
 	Since     string `tmux:"@agent_since"`
 	Question  string `tmux:"@agent_question"`
 	Outside   string `tmux:"@dev_started_outside"`
+	Herd      string `tmux:"@dev_herd"` // set when the worker is itself a boss
 }
 
 // BossOf is the boss that started pane's session (@dev_started_by), and the worker pane itself.
@@ -207,10 +208,14 @@ func undimmed(line string) string {
 // Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when send
 // takes them, else pasted into its pane, only while the coordinator is idle with an empty input box, at most once
 // per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
-// flightTimeout into a rest goes back too (Expire), for the paste, and is reported.
+// flightTimeout into a rest goes back too (Expire), for the paste, and is reported. A coordinator a rate limit
+// stopped (a boss under a boss, OptResumeAt) gets none until it is resumed: its resume prompt's hook hands them over.
 func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
+		return err
+	}
+	if at, err := c.Run("display-message", "-p", "-t", a.Pane, "#{"+OptResumeAt+"}"); err != nil || strings.TrimSpace(at) != "" {
 		return err
 	}
 	ready := func() (bool, error) {

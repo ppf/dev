@@ -40,6 +40,7 @@ type paneRow struct {
 	Sidebar    string `tmux:"@sidebar_pane"`
 	StartedBy  string `tmux:"@dev_started_by"`
 	Outside    string `tmux:"@dev_started_outside"`
+	Herd       string `tmux:"@dev_herd"` // set when the worker is itself a boss
 	Command    string `tmux:"pane_current_command"`
 	State      string `tmux:"@agent_state"`
 	StateCmd   string `tmux:"@agent_cmd"`
@@ -153,7 +154,8 @@ func hasWorkflows(dir string) bool {
 // observe updates the workers' health with one round's sights and queues their notes: stuck (no progress
 // while working, an unanswered decision), a repeat of an unanswered question, high context. live is the
 // sessions of the boss's workers; others' health goes. It returns the notes holding this round, for the
-// panes (OptNote): a stuck note each round it holds, so its minutes stay current, though queued once.
+// panes (OptNote): a stuck note each round it holds, so its minutes stay current, though queued once. A worker
+// that is itself a boss queues only the notes up reports.
 func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []Note {
 	for name := range s.Workers {
 		if !live[name] {
@@ -161,12 +163,14 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 		}
 	}
 	var holding []Note
-	queue := func(n Note) {
-		n.Key = n.Kind + "\x00" + n.Key
-		holding = append(holding, n)
-		s.add(n)
-	}
 	for _, w := range sights {
+		queue := func(n Note) {
+			n.Key = n.Kind + "\x00" + n.Key
+			holding = append(holding, n)
+			if w.Herd == "" || up(n.Kind) {
+				s.add(n)
+			}
+		}
 		h := s.health(w.Session)
 		stuck := func(text, key string) {
 			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key, Outside: w.Outside != ""}
@@ -250,7 +254,7 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 }
 
 // Watch runs from the boss session pane is in (its previews): it resumes the boss's workers whose rate
-// limit reset (resume), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
+// limit reset (resume; a worker that is a boss without a resumed note), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
 // StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find.
@@ -292,8 +296,10 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			if resumed {
 				n := Note{Worker: r.Session, Kind: Resumed, Text: "its rate limit reset, dev sent it: continue", Key: Resumed + "\x00" + r.ResumeAt,
 					Outside: r.Outside != ""}
-				if _, err := b.Box.Add(n, now); err != nil {
-					return err
+				if r.Herd == "" {
+					if _, err := b.Box.Add(n, now); err != nil {
+						return err
+					}
 				}
 				errs = append(errs, setNote(c, r.Pane, n.Summary()))
 			}
