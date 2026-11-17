@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
@@ -211,6 +212,9 @@ func checkText(text string) error {
 		return errors.New("empty message")
 	case n > maxMessage:
 		return fmt.Errorf("message too long (%d characters, at most %d): write it to a file and send its path", n, maxMessage)
+	case strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }):
+		// An escape would reach the previews pane and the recipient's input as keys
+		return errors.New("message has control characters: send plain text")
 	}
 	return nil
 }

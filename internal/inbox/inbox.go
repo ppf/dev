@@ -244,7 +244,7 @@ func (bt Batch) String() string {
 // Message is the batch as sent over Claude's messaging socket, which Claude shows as another session's message
 // and would try to answer.
 func (bt Batch) Message() string {
-	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
+	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; don't reply to this session, dev reads no reply here)"
 }
 
 // state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, the last paste,

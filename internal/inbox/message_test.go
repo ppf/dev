@@ -69,6 +69,7 @@ func TestMessageRefusals(t *testing.T) {
 		{"the manager outside its thread", func() error { _, err := s.Reply(Manager, "m2", "hi", false, now); return err }, "manager isn't in thread m2"},
 		{"unknown id", func() error { _, err := s.Reply("boss-b", "m99", "?", false, now); return err }, "no message m99"},
 		{"to itself", func() error { _, err := s.Post("boss-a", "boss-a", "hi", false, now); return err }, "can't message itself"},
+		{"control characters", func() error { _, err := s.Post("boss-a", "boss-b", "hi\x1b[2J", false, now); return err }, "message has control characters"},
 		{"empty", func() error { _, err := s.Post("boss-a", "boss-b", " \n", false, now); return err }, "empty message"},
 		{"too long", func() error {
 			_, err := s.Post("boss-a", "boss-b", strings.Repeat("x", maxMessage+1), false, now)

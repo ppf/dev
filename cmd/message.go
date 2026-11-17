@@ -28,14 +28,8 @@ func newAgentMessageCmd() *cobra.Command {
 ` + messageLong,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := tmux.New()
-			// The recipient first: a refusal doesn't count against the caps
-			b, err := inbox.Recipient(c, args[0])
-			if err != nil {
-				return err
-			}
-			return send(cmd.OutOrStdout(), c, &b, func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
-				return s.Post(from, b.Name, args[1], fyi, now)
+			return send(cmd.OutOrStdout(), tmux.New(), args[0], func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
+				return s.Post(from, args[0], args[1], fyi, now)
 			})
 		},
 	}
@@ -53,7 +47,7 @@ thread reply in it. --done ends the thread: no reply after it.
 ` + messageLong,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return send(cmd.OutOrStdout(), tmux.New(), nil, func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
+			return send(cmd.OutOrStdout(), tmux.New(), "", func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error) {
 				return s.Reply(from, args[0], args[1], done, now)
 			})
 		},
@@ -62,12 +56,21 @@ thread reply in it. --done ends the thread: no reply after it.
 	return cmd
 }
 
-// send stores the message post makes from the boss this pane coordinates, then delivers it to b (nil: the
-// message's recipient) and prints its id.
-func send(out io.Writer, c *tmux.Client, b *inbox.Boss, post func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error)) error {
+// send stores the message post makes from the boss this pane coordinates, then delivers it to boss to ("": the
+// message's recipient, known once stored) and prints its id.
+func send(out io.Writer, c *tmux.Client, to string, post func(s inbox.Messages, from string, now time.Time) (inbox.Msg, error)) error {
 	from, socket, err := inbox.Peer(c, os.Getenv("TMUX_PANE"))
 	if err != nil {
 		return err
+	}
+	var b *inbox.Boss
+	if to != "" {
+		// Before storing: a refusal doesn't count against the caps
+		r, err := inbox.Recipient(c, to)
+		if err != nil {
+			return err
+		}
+		b = &r
 	}
 	store, err := inbox.OpenMessages(socket)
 	if err != nil {
