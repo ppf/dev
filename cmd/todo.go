@@ -153,6 +153,16 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				if err := s.Replace(replaces, it, now); err != nil {
 					return err
 				}
+				if it.On == todo.Me {
+					// Given back to the user: its text and options may be the replaced item's
+					l, err := s.Read(now)
+					if err != nil {
+						return err
+					}
+					if i := slices.IndexFunc(l.Items, func(x todo.Shown) bool { return x.ID == replaces }); i >= 0 {
+						waitsOnYou(*boss, cmd.ErrOrStderr(), replaces, l.Items[i].Text, l.Items[i].Options)
+					}
+				}
 				return printCount(cmd.OutOrStdout(), s, "replaced "+strconv.Itoa(replaces)+" · ", now)
 			}
 			id, err := s.Add(it, now)
@@ -160,7 +170,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			if it.On == "" || it.On == todo.Me {
-				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it)
+				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
@@ -212,7 +222,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			if err != nil {
 				return err
 			}
-			waitsOnYou(*boss, cmd.ErrOrStderr(), id, it)
+			waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
@@ -387,12 +397,16 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 
 // waitsOnYou tells the boss above the list's boss (a boss under a boss) that item id waits on the user; a failure
 // is only reported, as the item is on the list.
-func waitsOnYou(boss string, stderr io.Writer, id int, it todo.Item) {
+func waitsOnYou(boss string, stderr io.Writer, id int, text string, options []string) {
 	pane, _, err := todoBoss(boss)
+	queued := false
 	if err == nil && pane != "" {
-		err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, it.Text, it.Options)
+		queued, err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, text, options)
 	}
-	if err != nil {
+	switch {
+	case err != nil && queued:
+		fmt.Fprintln(stderr, "⚠ dev todo: queued for the boss above, delivered when it next rests: "+err.Error())
+	case err != nil:
 		fmt.Fprintln(stderr, "⚠ dev todo: the boss above wasn't told: "+err.Error())
 	}
 }

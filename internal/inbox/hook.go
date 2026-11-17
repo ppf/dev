@@ -263,16 +263,16 @@ func setNote(c *tmux.Client, pane, summary string) error {
 
 // WaitsOn tells the boss that started the boss session pane is in (a boss under a boss) that item id of its list
 // waits on the user: a WaitsOnYou note with the item's text and options, delivered. Nothing for a boss no boss
-// started, or whose boss is gone or has its inbox off.
-func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string, options []string) error {
+// started, or whose boss is gone or has its inbox off. queued reports the note in that boss's inbox, err then
+// being its delivery's.
+func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string, options []string) (queued bool, err error) {
 	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil || w.Herd == "" {
-		return err
+		return false, err
 	}
 	if len(options) > 0 {
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
 	text = clean(fmt.Sprintf("#%d %s", id, text))
-	_, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: WaitsOnYou + "\x00" + text, Outside: w.Outside != ""})
-	return err
+	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: WaitsOnYou + "\x00" + text, Outside: w.Outside != ""})
 }

@@ -209,13 +209,14 @@ func undimmed(line string) string {
 // takes them, else pasted into its pane, only while the coordinator is idle with an empty input box, at most once
 // per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
 // flightTimeout into a rest goes back too (Expire), for the paste, and is reported. A coordinator a rate limit
-// stopped (a boss under a boss, OptResumeAt) gets none until it is resumed: its resume prompt's hook hands them over.
+// stopped (a boss under a boss, OptResumeAt) gets none before its resume is due: its resume prompt's hook hands them
+// over. Past it, as when its boss is gone and won't resume it, they go as usual.
 func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
 		return err
 	}
-	if at, err := c.Run("display-message", "-p", "-t", a.Pane, "#{"+OptResumeAt+"}"); err != nil || strings.TrimSpace(at) != "" {
+	if at, err := c.Run("display-message", "-p", "-t", a.Pane, "#{"+OptResumeAt+"}"); err != nil || unix(strings.TrimSpace(at)) > clk.Now().Unix() {
 		return err
 	}
 	ready := func() (bool, error) {
