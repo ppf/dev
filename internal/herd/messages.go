@@ -75,7 +75,7 @@ func wrapText(text string, w int) []string {
 	lines := strings.Split(ansi.Wordwrap(strings.Join(strings.Fields(text), " "), width, ""), "\n")
 	if len(lines) > textRows {
 		lines = lines[:textRows]
-		lines[textRows-1] = ansi.Truncate(lines[textRows-1]+" …", width, "…")
+		lines[textRows-1] += " …"
 	}
 	rows := make([]string, len(lines))
 	for i, l := range lines {
