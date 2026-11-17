@@ -44,7 +44,7 @@ func TestSidebarNeedsYouAnswer(t *testing.T) {
 	// A stale board's answer names the question it showed: another one is refused and the item stays open
 	stale := exec.Command(devBin, "todo", "answer", "--question", "Release now?", "boss-a", "1", "Merge")
 	stale.Env = d.scriptEnv("TMUX_PANE=", "CLAUDECODE=")
-	if out, err := stale.CombinedOutput(); err == nil || !strings.Contains(string(out), "the list changed") {
+	if out, err := stale.CombinedOutput(); err == nil || !strings.Contains(string(out), "look at the list again") {
 		t.Fatalf("❌ answer for another question: %v %s, want refused", err, out)
 	}
 

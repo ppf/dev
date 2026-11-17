@@ -595,7 +595,10 @@ func TestAnswer(t *testing.T) {
 	if _, err := s.Answer(id, "", "5", now); err == nil {
 		t.Error("option 5 of 2 answered")
 	}
-	it, err := s.Answer(id, "", "2", now)
+	if _, err := s.Answer(id, "Another question?", "2", now); err == nil || !strings.Contains(err.Error(), `is "Merge #148 now?" now, not "Another question?"`) {
+		t.Errorf("answer with another question: %v", err)
+	}
+	it, err := s.Answer(id, "Merge #148 now?", "2", now)
 	if err != nil || it.Text != "Merge #148 now?" || it.Answer != "Wait" || it.Done != now.Unix() {
 		t.Errorf("Answer = %+v, %v", it, err)
 	}
@@ -633,13 +636,13 @@ func TestAnswerQuestionGuard(t *testing.T) {
 	if err != nil || id != 1 {
 		t.Fatalf("new ask: %d, %v, want #1 again", id, err)
 	}
-	if _, err := s.Answer(1, "Merge #148?", "Merge", now); err == nil || !strings.Contains(err.Error(), "the list changed") {
+	if _, err := s.Answer(1, "Merge #148?", "Merge", now); err == nil || !strings.Contains(err.Error(), "look at the list again") {
 		t.Errorf("answer by the old question: %v, want refused", err)
 	}
 	if l := read(t, s, now); l.Items[0].Done {
 		t.Error("refused answer ticked the item")
 	}
-	if it, err := s.Answer(1, "  Release   now? ", "Wait", now); err != nil || it.Answer != "Wait" {
+	if it, err := s.Answer(1, "Release now?", "Wait", now); err != nil || it.Answer != "Wait" {
 		t.Errorf("answer by its own question: %+v, %v", it, err)
 	}
 }

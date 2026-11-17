@@ -58,6 +58,8 @@ type Agent struct {
 	Effort string `json:"effort,omitempty"`
 	// Questions are every question (tab) of the AskUserQuestion dialog it waits on, open or not; omitted when none.
 	Questions []Question `json:"questions,omitempty"`
+	// Deciding marks a state waiting on the user's decision (a permission prompt or question), not Claude's idle reminder.
+	Deciding bool `json:"deciding,omitempty"`
 	// HideCost is @dev_cost off: text output leaves the cost out, --json keeps cost_usd.
 	HideCost bool `json:"-"`
 }
@@ -184,6 +186,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
 			Outside: r.Outside != "", Model: r.Model, Effort: r.Effort, HideCost: sidebar.CostHidden(r.CostOpt),
 		}
+		ag.Deciding = agent.Deciding(a.State, byID[a.Pane.ID].WaitingFor)
 		if p := byID[a.Pane.ID]; p.Question != "" {
 			ag.Questions = dialogQuestions(a.State, p.WaitingFor, p.Question)
 		}

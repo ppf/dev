@@ -73,7 +73,7 @@ const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
 /** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, dev todo, open, mv (by argv[0]/argv[1]/argv[2]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'todo' | 'open' | 'mv', Ran | string | (() => Ran | string)>>
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'todo' | 'open' | 'mv' | 'asks' | 'agents' | 'threads', Ran | string | (() => Ran | string)>>
 
 // What a dev older than `dev todo` says to it
 const NO_TODO: Ran = { exitCode: 1, stdout: '', stderr: '❌ unknown flag: --json' }
@@ -96,12 +96,13 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('ui.panes', () => ({ value: panes() }))
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
-    const isTodo = e.argv[1] === 'todo'
-    const other = others[e.argv[1] === 'delivered' || isTodo ? e.argv[1] as 'delivered' | 'todo' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv')]
+    const fleetKey = e.argv[1] === 'todo' && e.argv[2] === '--all' ? 'asks' : e.argv[1] === 'agent' ? (e.argv[2] === 'list' ? 'agents' : 'threads') : undefined
+    const isTodo = e.argv[1] === 'todo' && fleetKey === undefined && e.argv[2] !== 'answer'
+    const other = others[fleetKey ?? (e.argv[1] === 'delivered' || isTodo ? e.argv[1] as 'delivered' | 'todo' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv'))]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
-        (e.argv[0] === 'gh' ? { exitCode: 1, stdout: '', stderr: 'no checks reported' } : e.argv[1] === 'delivered' ? { exitCode: 1, stdout: '', stderr: 'not delivered' } : isTodo ? NO_TODO : { exitCode: 0, stdout: '', stderr: '' }))
+        (e.argv[0] === 'gh' ? { exitCode: 1, stdout: '', stderr: 'no checks reported' } : e.argv[1] === 'delivered' ? { exitCode: 1, stdout: '', stderr: 'not delivered' } : isTodo ? NO_TODO : fleetKey !== undefined ? { exitCode: 0, stdout: '[]', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' }))
     if (isBoard) {
       runs.push(e.argv)
     } else if (isTodo) {
@@ -2508,4 +2509,90 @@ test('the terminal and the phones keep their own looks: theme greys, a caption, 
   for (const hex of ['#2DA44E', '#8957E5', '#E5484D']) expect(svgs).toContain(hex)
   expect(svgs).not.toContain('#278D43')
   await mobile.unmount()
+})
+
+const ASKS: Ran = {
+  exitCode: 0,
+  stdout: JSON.stringify([
+    {
+      boss: 'boss-dev',
+      items: [
+        { id: 3, text: 'Merge #148?', done: false, options: ['Merge (Recommended)', 'Wait'] },
+        { id: 4, text: 'Reply to Marek', done: false, on: 'Marek' },
+        { id: 5, text: 'Orders API: v3 now?', done: true, options: ['Now', 'After release'], answer: 'After release' },
+      ],
+    },
+  ]),
+  stderr: '',
+}
+const AGENTS: Ran = {
+  exitCode: 0,
+  stdout: JSON.stringify([
+    { session: 'boss-dev', project: 'dev', state: 'working', boss: true, model: 'opus', effort: 'medium', cost_usd: 3.8 },
+    { session: 'terminal-fix', project: 'terminal', state: 'waiting', deciding: true },
+    { session: 'terminal-idle', project: 'terminal', state: 'waiting' },
+  ]),
+  stderr: '',
+}
+const THREADS: Ran = {
+  exitCode: 0,
+  stdout: JSON.stringify([
+    { id: 'm1', state: 'open', messages: [{ id: 'm1', thread: 'm1', from: 'boss-a', to: 'boss-dev', text: 'Is it in 0.56.0?', at: 0 }] },
+    { id: 'm9', state: 'done', messages: [{ id: 'm9', thread: 'm9', from: 'boss-a', to: 'boss-dev', text: 'old', at: 0 }] },
+  ]),
+  stderr: '',
+}
+
+test('the all-projects blocks: asks with option buttons, answered ones struck, a waiting worker, bosses, open threads; the person’s own items only', async ($, on) => {
+  const { clock } = await start($, on, ok(WORKERS), { asks: ASKS, agents: AGENTS, threads: THREADS })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
+  expect(needs).toContain('NEEDS YOU · ALL PROJECTS 2')
+  expect(needs).toContain('dev  Merge #148?')
+  expect(needs).not.toContain('Marek')
+  expect(needs).toContain('answered: After release')
+  expect(needs).toContain('terminal-fix')
+  expect(needs).not.toContain('terminal-idle')
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.props.label).filter(l => typeof l === 'string' && /Merge|Wait/.test(l))).toEqual(['★ Merge', 'Wait'])
+  const bosses = readEl((await ui.find({ key: 'fleet:bosses' })) as El).join(' ')
+  expect(bosses).toContain('BOSSES 1')
+  expect(bosses).toContain('boss-dev')
+  expect(bosses).toContain('1 on your list')
+  expect(bosses).toContain('$3.80')
+  expect(bosses).toContain('opus·medium')
+  const messages = readEl((await ui.find({ key: 'fleet:messages' })) as El).join(' ')
+  expect(messages).toContain('MESSAGES 1 open')
+  expect(messages).toContain('boss-a → boss-dev · m1')
+  expect(messages).not.toContain('old')
+  await ui.unmount()
+})
+
+test('a click on an ask option runs dev todo answer from the board with the item question', async ($, on) => {
+  const { otherRuns, clock } = await start($, on, ok(WORKERS), { asks: ASKS, agents: AGENTS, threads: THREADS })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'fleet:ask:boss-dev:3:o1' })
+  const runs = otherRuns.filter(r => r.argv[1] === 'todo' && r.argv[2] === 'answer')
+  expect(runs.map(r => r.argv)).toEqual([['dev', 'todo', 'answer', '--from-board', '--question', 'Merge #148?', '--', 'boss-dev', '3', 'Wait']])
+  await ui.unmount()
+})
+
+test('a refused answer says why in a toast', async ($, on) => {
+  const toasts = collectToasts(on)
+  const { clock } = await start($, on, ok(WORKERS), { asks: ASKS, answer: { exitCode: 1, stdout: '', stderr: 'item 3 is "Other?" now, not "Merge #148?"' } })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'fleet:ask:boss-dev:3:o0' })
+  expect(toasts).toEqual(['dev not answered: item 3 is "Other?" now, not "Merge #148?"'])
+  await ui.unmount()
+})
+
+test('a read that fails leaves its block out, the others stay', async ($, on) => {
+  const { clock } = await start($, on, ok(WORKERS), { asks: { exitCode: 1, stdout: '', stderr: 'no tmux' }, agents: AGENTS })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'fleet:messages' })).toBeUndefined()
+  expect(readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')).toContain('terminal-fix')
+  await ui.unmount()
 })
