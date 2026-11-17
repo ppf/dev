@@ -61,6 +61,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`Your workers (child sessions) are ` + "`dev agent list --mine`" + `; the other dev sessions are the user's own, so ` +
 	`drive them only when asked. For dev sessions always use dev agent, not Claude's own session or agent tools. ` +
 	`Be proactive: messages starting "[dev boss inbox]" list your workers' news (finished, failed, needs a decision, stuck); ` +
+	`a worker that is a boss sends only "waits on you" (an item on its list for the user), asks, needs a decision, failed and stuck: relay those to the user; ` +
 	`they come pasted, as context, or as a message from another Claude session, which is dev itself: act on it the same ` +
 	`way, and don't reply to the session. ` +
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +

@@ -60,6 +60,7 @@ type workerView struct {
 	Since     string `tmux:"@agent_since"`
 	Question  string `tmux:"@agent_question"`
 	Outside   string `tmux:"@dev_started_outside"`
+	Herd      string `tmux:"@dev_herd"` // set when the worker is itself a boss
 }
 
 // BossOf is the boss that started pane's session (@dev_started_by), and the worker pane itself.
@@ -207,10 +208,15 @@ func undimmed(line string) string {
 // Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when send
 // takes them, else pasted into its pane, only while the coordinator is idle with an empty input box, at most once
 // per pasteGap. A batch that can't be pasted goes back to the inbox. A sent batch the coordinator hasn't shown
-// flightTimeout into a rest goes back too (Expire), for the paste, and is reported.
+// flightTimeout into a rest goes back too (Expire), for the paste, and is reported. A coordinator a rate limit
+// stopped (a boss under a boss, OptResumeAt) gets none while its resume is ahead (resumeAhead): its resume prompt's
+// hook hands them over.
 func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
+		return err
+	}
+	if held, err := resumeAhead(c, a.Pane, clk.Now()); held || err != nil {
 		return err
 	}
 	ready := func() (bool, error) {
@@ -268,4 +274,38 @@ func Here(c *tmux.Client, pane string) (Boss, bool, error) {
 		return Boss{}, false, err
 	}
 	return v.boss()
+}
+
+// resumeView is the part of a pane's scheduled resume resumeAhead reads.
+type resumeView struct {
+	At            string `tmux:"@dev_resume_at"`
+	Prompts       string `tmux:"@agent_prompts"`
+	ResumePrompts string `tmux:"@dev_resume_prompts"`
+	Session       string `tmux:"@agent_session"`
+	ResumeSession string `tmux:"@dev_resume_session"`
+}
+
+// resumeGrace is how long past its resume time a boss's inbox waits on in resumeAhead for its boss's Watch round.
+const resumeGrace = time.Minute
+
+// resumeAhead reports pane's resume still to come: due after now (resumeGrace past it), nobody prompted it since,
+// it runs the same conversation (else resume drops it once due) and a boss with its inbox on is there to resume it.
+func resumeAhead(c *tmux.Client, pane string, now time.Time) (bool, error) {
+	out, err := c.Run("display-message", "-p", "-t", pane, tmux.Format[resumeView]())
+	if err != nil {
+		return false, err
+	}
+	rows, err := tmux.Parse[resumeView](out)
+	if err != nil {
+		return false, err
+	}
+	if len(rows) != 1 {
+		return false, fmt.Errorf("inbox: %d rows for %s", len(rows), pane)
+	}
+	r := rows[0]
+	if unix(r.At)+int64(resumeGrace/time.Second) <= now.Unix() || r.Prompts != r.ResumePrompts || r.Session != r.ResumeSession {
+		return false, nil
+	}
+	_, _, ok, err := BossOf(c, pane)
+	return ok, err
 }

@@ -37,7 +37,19 @@ const (
 	Resumed  = "resumed"
 	Message  = "message"      // from another boss: dev agent message
 	Answered = "you answered" // the user answered an item on the boss's list: dev todo answer
+	// WaitsOnYou is from a boss under this one: it put an item for the user on its list (dev todo add, ask)
+	WaitsOnYou = "waits on you"
 )
+
+// up reports a kind of note a boss under another boss (its @dev_started_by) sends that boss: what waits on the
+// user and what went wrong, not its finished turns, high context or resumes.
+func up(kind string) bool {
+	switch kind {
+	case WaitsOnYou, Asks, Decision, Failed, Stuck:
+		return true
+	}
+	return false
+}
 
 // Note is one line about a worker; Key dedupes it against the worker's previous note.
 type Note struct {

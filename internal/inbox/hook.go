@@ -3,6 +3,8 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,7 +163,8 @@ func PromptContext(text string) (string, error) {
 // started worker's agent pane gets the note too (OptNote), also with the inbox off or the boss gone. A
 // teammate pane beside it (an agent team's) sends only its decisions, named "<worker> (%N)".
 // A worker's new prompt resets its dedupe, so two turns ending alike both reach the boss, and clears its note.
-// A rate limit schedules the worker's resume (scheduleResume), which its failed note tells.
+// A rate limit schedules the worker's resume (scheduleResume), which its failed note tells. A worker that is itself
+// a boss sends only the notes up reports: not its finished turns.
 func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) error {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil {
@@ -210,7 +213,7 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		// A finished turn ends a run of rate limits
 		resumeErr = unsetResume(c, pane, true)
 	}
-	if ok {
+	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
@@ -257,4 +260,22 @@ func setNote(c *tmux.Client, pane, summary string) error {
 	}
 	_, err := c.Run("set-option", "-p", "-t", pane, OptNote, summary)
 	return err
+}
+
+// WaitsOn tells the boss that started the boss session pane is in (a boss under a boss) that item id of its list
+// waits on the user: a WaitsOnYou note with the item's text and options, delivered. Nothing for a boss no boss
+// started, or whose boss is gone or has its inbox off. queued reports the note in that boss's inbox, err then
+// being its delivery's.
+func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string, options []string) (queued bool, err error) {
+	b, w, ok, err := BossOf(c, pane)
+	if !ok || err != nil || w.Herd == "" {
+		return false, err
+	}
+	if len(options) > 0 {
+		text += " (options: " + strings.Join(options, " / ") + ")"
+	}
+	text = clean(fmt.Sprintf("#%d %s", id, text))
+	// Each its own: an item given back with the same text is news again
+	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
+	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
 }
