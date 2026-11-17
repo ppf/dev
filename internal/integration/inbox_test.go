@@ -844,15 +844,15 @@ func TestBossInboxSocket(t *testing.T) {
 
 	// Working, with a draft: sent anyway
 	finish("two")
-	msg := batch("two") + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
+	msg := batch("two") + "\n(from dev's boss inbox: act on these like any inbox batch; don't reply to this session, dev reads no reply here)"
 	check(t, "sent to a working coordinator", received(), msg)
 	finish("three")
 	check(t, "one batch in flight at a time", received(), "")
 	out = run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(msg)+`,"permission_mode":"default"}`, sock)
 	check(t, "its arrival takes the next note as context", out, `{"hookSpecificOutput":{"additionalContext":"`+strings.ReplaceAll(batch("three"), "\n", `\n`)+`","hookEventName":"UserPromptSubmit"}}`+"\n")
 	finish("four")
-	check(t, "sent again once shown", received(), batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)")
-	run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)")+`,"permission_mode":"default"}`, sock)
+	check(t, "sent again once shown", received(), batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; don't reply to this session, dev reads no reply here)")
+	run(boss, "working", `{"hook_event_name":"UserPromptSubmit","prompt":`+strconv.Quote(batch("four")+"\n(from dev's boss inbox: act on these like any inbox batch; don't reply to this session, dev reads no reply here)")+`,"permission_mode":"default"}`, sock)
 
 	// Bypass mode would hold the message behind a dialog
 	run(boss, "idle", `{"hook_event_name":"Stop","permission_mode":"bypassPermissions"}`, sock)
