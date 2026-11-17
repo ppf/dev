@@ -240,14 +240,18 @@ func TestSnapshotDeciding(t *testing.T) {
 	}
 }
 
-// Only sessions this boss started show, by session id or by its name.
+// Only sessions this boss started show, by session id or by its name, bosses too (the manager's).
 func TestSnapshotMine(t *testing.T) {
 	rows := []row{{Session: "boss", SessionID: "$1", ID: "%1", Herd: "1"}}
 	for _, w := range []struct{ name, startedBy string }{
-		{"by-id", "$1"}, {"by-name", "boss"}, {"other-boss", "boss-x"}, {"other-id", "$9"}, {"user", ""},
+		{"by-id", "$1"}, {"by-name", "boss"}, {"other-boss", "boss-x"}, {"other-id", "$9"}, {"user", ""}, {"boss-a", "boss"}, {"boss-b", ""},
 	} {
+		herd := ""
+		if strings.HasPrefix(w.name, "boss-") {
+			herd = "1"
+		}
 		rows = append(rows, row{Session: w.name, SessionID: "$" + w.name, ID: "%" + w.name, Window: 1, Command: "claude",
-			State: agent.Idle, StateCmd: "claude", StartedBy: w.startedBy})
+			State: agent.Idle, StateCmd: "claude", StartedBy: w.startedBy, Herd: herd})
 	}
 	s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
 	if err != nil {
@@ -258,7 +262,7 @@ func TestSnapshotMine(t *testing.T) {
 		got = append(got, tl.sess.Name)
 	}
 	slices.Sort(got)
-	if want := []string{"by-id", "by-name"}; !slices.Equal(got, want) {
+	if want := []string{"boss-a", "by-id", "by-name"}; !slices.Equal(got, want) {
 		t.Errorf("tiles %q, want %q", got, want)
 	}
 }

@@ -200,6 +200,10 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
   - **Run `dev todo` as its own command,** not chained with others: auto mode judges a chain as a whole, and the user may allow `Bash(dev todo:*)`, which covers only a command that is `dev todo` alone.
 <!-- /boss-core:rollup -->
 
+## Manager
+
+In the `manager` session (bare `dev boss`) your workers are bosses, not workers: start one with `dev boss <project> --background` only when the user asks, never with `--model`/`--effort` (the model table and the fresh-worker rule are for workers). A boss that was already open is only printed and stays the user's: its news doesn't reach you. Relay what they send up; you may forward a question between bosses and answer a boss's `asks:` from what the user said to you. Never answer an item on a boss's list, a permission prompt or a dialog: tell the user to answer it from the sidebar's NEEDS YOU, the desktop board or `dev todo answer`.
+
 ## Messages between bosses
 
 ```bash

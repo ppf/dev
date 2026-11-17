@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // dev herd opens the coordinator and previews panes; a worker the coordinator starts is marked as its
@@ -20,14 +22,81 @@ func TestHerd(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentStub(t, stubs, "claude")
-	env := d.scriptEnv(writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}, [2]string{"web", tempDir(t)}))
 
-	// Inside tmux without a terminal, no project: no popup and no boss, the projects listed instead
-	bare := exec.Command(devBin, "boss")
-	bare.Env = env
-	out, err := bare.CombinedOutput()
-	check(t, "bare boss without a terminal", errStatus(err)+" "+string(out), "1 ❌ No terminal for the project picker: run dev boss <project>\nAvailable:\n  hq\n  app\n  web\n")
-	check(t, "no boss made", d.T("list-sessions", "-F", "#{session_name}"), "boot")
+	// Inside tmux without a terminal, no project: the manager started detached in its own folder, on sonnet ·
+	// medium, and how to reach it printed; again, only printed
+	xdg := writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}, [2]string{"web", tempDir(t)})
+	env := d.scriptEnv(xdg)
+	clients := d.T("list-clients", "-F", "#{client_session}")
+	for _, call := range []string{"first", "second"} {
+		bare := exec.Command(devBin, "boss")
+		bare.Env = env
+		out, err := bare.Output()
+		check(t, call+" bare boss without a terminal", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
+	}
+	check(t, "client stays", d.T("list-clients", "-F", "#{client_session}"), clients)
+	check(t, "manager made", d.T("list-sessions", "-F", "#{session_name}"), "boot\nmanager")
+	// Its defaults apply to a new manager only: flags given are checked against what it was started with
+	for _, tt := range [][2]string{
+		{"--effort high", "1 ❌ session manager was started with --effort medium, not high: --model and --effort only apply to a new session\n"},
+		{"--model sonnet --effort medium", "0 manager running: dev goto manager\n"},
+	} {
+		flagged := exec.Command(devBin, append([]string{"boss"}, strings.Fields(tt[0])...)...)
+		flagged.Env = env
+		out, err := flagged.CombinedOutput()
+		check(t, "bare boss "+tt[0], errStatus(err)+" "+string(out), tt[1])
+	}
+	check(t, "manager is a boss", d.T("show-option", "-qv", "-t", "=manager:", "@dev_herd")+"|"+
+		d.T("show-option", "-qv", "-t", "=manager:", "@project")+"|"+d.T("show-option", "-qv", "-t", "=manager:", "@dev_started_by"), "1|manager|")
+	managerDir, err := filepath.EvalSymlinks(filepath.Join(strings.TrimPrefix(xdg, "XDG_CONFIG_HOME="), "dev", "manager"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	managerPanes := strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{pane_current_path} #{pane_start_command}"), "\n")
+	if len(managerPanes) != 2 || !strings.HasPrefix(managerPanes[0], managerDir+" ") ||
+		!strings.Contains(managerPanes[0], `'claude' '--model' 'sonnet' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
+		!strings.HasSuffix(managerPanes[0], `'--remote-control=manager'"`) || !strings.Contains(managerPanes[1], "boss --previews") {
+		t.Fatalf("manager panes: %q", managerPanes)
+	}
+	// Typed in the user's pane, as the printed line says
+	gotoManager := exec.Command(devBin, "goto", "manager")
+	gotoManager.Env = append(env, "TMUX_PANE="+d.T("display", "-t", "=boot:", "-p", "#{pane_id}"))
+	if out, err := gotoManager.CombinedOutput(); err != nil {
+		t.Fatalf("dev goto manager: %v: %s", err, out)
+	}
+	check(t, "client on the manager", d.T("list-clients", "-F", "#{client_session}"), "manager")
+	waitFor(t, "manager's sidebar", func() bool { return d.T("show-option", "-qv", "-t", "=manager:", "@sidebar_pane") != "" })
+	d.T("switch-client", "-t", "=boot:")
+	missing := exec.Command(devBin, "goto", "nope")
+	missing.Env = env
+	out, err := missing.CombinedOutput()
+	if !strings.HasPrefix(errStatus(err)+" "+string(out), "1 ❌ no session nope: ") {
+		t.Errorf("goto nope: %s %s", errStatus(err), out)
+	}
+	// With a terminal inside tmux (typed in boot's pane): the existing manager attached, no defaults checked
+	d.T("send-keys", "-t", "=boot:", "env "+tmux.ShellJoin(xdg, devBin, "boss"), "Enter")
+	waitFor(t, "client on the manager from a terminal", func() bool {
+		c, _ := d.Try("list-clients", "-F", "#{client_session}")
+		return c == "manager"
+	})
+	// A boss the manager starts is its card
+	roles := map[string]string{}
+	for _, l := range strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{@dev_boss_pane} #{pane_id}"), "\n") {
+		if role, id, ok := strings.Cut(l, " "); ok {
+			roles[role] = id
+		}
+	}
+	web := exec.Command(devBin, "boss", "web", "--background", "--timeout", "30s")
+	web.Env = append(env, "TMUX_PANE="+roles["coordinator"])
+	out, err = web.CombinedOutput()
+	check(t, "boss from the manager", errStatus(err)+" "+string(out), "0 boss-web\n")
+	check(t, "started by the manager", d.T("show-option", "-qv", "-t", "=boss-web:", "@dev_started_by"), "manager")
+	waitFor(t, "boss-web card in the manager's previews", func() bool {
+		return strings.Contains(d.T("capture-pane", "-p", "-t", roles["previews"]), "boss-web")
+	})
+	d.T("switch-client", "-t", "=boot:")
+	d.T("kill-session", "-t", "=boss-web:")
+	d.T("kill-session", "-t", "=manager:")
 
 	herd := exec.Command(devBin, "boss", "hq")
 	herd.Env = env

@@ -27,10 +27,12 @@ func newHerdCmd() *cobra.Command {
 		Short:   "Open the coordinator view: a coordinator Claude next to live previews of its workers",
 		Long: `Open or attach the project's boss session ("boss-<project>"): a coordinator Claude started in the
 project's main checkout that drives the other sessions with the dev-agents skill, next to live previews of
-the workers it started. Without a project it opens the project picker (as bare dev); with no terminal it
-fails, listing the projects. --model and --effort start a new boss's coordinator with them (with
-a boss that exists they are an error unless they equal what it was started with); it keeps them when dev
-restarts it.
+the workers it started. Without a project it opens or attaches the manager (session "manager", in
+~/.config/dev/manager), a boss whose workers are bosses, on sonnet and medium effort unless --model or
+--effort say otherwise; with no terminal (stdin or stdout not one) it starts the manager detached when
+missing, waits until its Claude registered, and prints how to reach it. --model and --effort start a new
+boss's coordinator with them (with a boss that exists they are an error unless they equal what it was started
+with); it keeps them when dev restarts it.
 --background creates the boss without attaching or switching a client, marks it started by the boss session
 dev runs in, prints its name and waits until its Claude registered (as dev agent start does); an existing
 boss is only printed.`,
@@ -52,10 +54,7 @@ boss is only printed.`,
 				return errors.New("--background needs a project: dev boss <project> --background")
 			}
 			if len(args) == 0 {
-				if !hasTerminal() {
-					return noTerminal(cmd)
-				}
-				return runPicker(cmd, start)
+				return openManager(cmd, c, start, timeout)
 			}
 			projects, _, err := loadProjects(cmd)
 			if err != nil {
@@ -83,7 +82,7 @@ boss is only printed.`,
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
 	cmd.Flags().BoolVar(&background, "background", false, "create the boss detached and wait until its Claude registered")
-	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background, give up when no Claude registered within this")
+	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background or no terminal, give up when no Claude registered within this")
 	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd
 }
@@ -109,19 +108,34 @@ func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, sta
 	return nil
 }
 
-// hasTerminal reports whether the picker can run: stdin and stdout are a terminal.
-var hasTerminal = func() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-}
-
-// noTerminal is bare dev boss's error without a terminal: never a boss nobody picked.
-func noTerminal(cmd *cobra.Command) error {
-	projects, _, err := loadProjects(cmd)
+// openManager is bare dev boss: the manager attached, or without a terminal started detached when missing and
+// printed, never switching a client.
+func openManager(cmd *cobra.Command, c *tmux.Client, start agent.Start, timeout time.Duration) error {
+	dir, err := config.ManagerDir()
 	if err != nil {
 		return err
 	}
-	stderr := cmd.ErrOrStderr()
-	fmt.Fprintln(stderr, "❌ No terminal for the project picker: run dev boss <project>")
-	printAvailable(stderr, projects)
-	return fmt.Errorf("%w: dev boss without a project needs a terminal", open.ErrShown)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if hasTerminal() {
+		if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
+			return err
+		}
+		return herd.OpenManager(c, dir, start)
+	}
+	if _, err := herd.OpenManagerBackground(c, dir, start); err != nil {
+		return err
+	}
+	// An existing one too: "running" only once its Claude is
+	if _, err := control.AwaitAgent(c, control.RealClock, herd.Manager, timeout); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "manager running: dev goto "+herd.Manager)
+	return nil
+}
+
+// hasTerminal reports whether bare dev boss can attach: stdin and stdout are a terminal.
+var hasTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }

@@ -2,27 +2,27 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/tmux"
 )
 
-func TestBossWithoutTerminalListsProjects(t *testing.T) {
-	withConfig(t, projectsTOML)
+// Without a terminal, bare dev boss starts the manager detached in its own folder: never the picker.
+func TestBossWithoutTerminalStartsManager(t *testing.T) {
+	path := withConfig(t, projectsTOML)
 	orig := hasTerminal
 	t.Cleanup(func() { hasTerminal = orig })
 	hasTerminal = func() bool { return false }
 	for _, name := range []string{"boss", "herd"} {
-		// Failing before tmux proves no boss was opened.
-		out, errOut, err := execute(t, "", name, "--model", "opus")
-		if !errors.Is(err, open.ErrShown) {
-			t.Errorf("%s: err = %v, want ErrShown (already printed)", name, err)
+		// No tmux server here: reaching tmux proves it went for the manager
+		if _, _, err := execute(t, "", name, "--model", "opus"); !errors.Is(err, tmux.ErrNoSocket) {
+			t.Errorf("%s: err = %v, want ErrNoSocket", name, err)
 		}
-		want := "❌ No terminal for the project picker: run dev boss <project>\nAvailable:\n  app\n  notes\n"
-		if out != "" || errOut != want {
-			t.Errorf("%s: stdout %q, stderr %q; want stderr %q", name, out, errOut, want)
-		}
+	}
+	if info, err := os.Stat(filepath.Join(filepath.Dir(path), "manager")); err != nil || !info.IsDir() {
+		t.Errorf("manager folder not made: %v", err)
 	}
 }
 

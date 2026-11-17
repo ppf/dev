@@ -444,7 +444,7 @@ func sortBySection(tiles []tile) {
 }
 
 // buildSnapshot turns the rows into tiles by section, in sidebar order within one, keeping only agent sessions
-// this boss started. PRs, their checks and transcripts are only read while visible.
+// this boss started, bosses too. PRs, their checks and transcripts are only read while visible.
 func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look lookups) (snapshot, error) {
 	var s snapshot
 	own := false
@@ -470,7 +470,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	meta := map[string]tile{}
 	for _, name := range names {
 		rs := panes[name]
-		if rs[0].Herd != "" || !sidebar.Names(rs[0].StartedBy, s.self, s.name, true) {
+		if !sidebar.Names(rs[0].StartedBy, s.self, s.name, true) {
 			continue
 		}
 		if s.started == nil {

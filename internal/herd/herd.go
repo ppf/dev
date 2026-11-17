@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/ptywrap"
 	"github.com/ppf/dev/internal/sidebar"
@@ -87,24 +88,74 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`tests, recurring review findings, missing tooling, rough UX the user hit): one line each with why and a rough size. ` +
 	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined.`
 
+// managerPrompt is the Manager's coordinatorPrompt: it routes between the user and the bosses, deciding only what is
+// clear and safe without a project's rules.
+const managerPrompt = `You are the manager of the user's dev bosses, in the dev boss session "manager": a coordinator whose ` +
+	`workers are bosses (boss-<project>, one coordinator Claude per project, running in that project with its rules and ` +
+	`memory). The user types requests here. You route, relay and summarise; project work and project decisions stay with ` +
+	`that project's boss. Use the dev-agents skill. ` +
+	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + `, never with --model or ` +
+	`--effort (a boss runs on its project's settings); projects are ` + "`dev list`" + `. A boss that was already open is ` +
+	`only printed and stays the user's: not in your --mine list, its news never reaches you; say so when you name it. Hand a boss work with ` +
+	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. You can't close a boss (dev agent ` +
+	`close is for worktree workers): the user closes it with × on its sidebar row. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
+	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
+	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user), ` +
+	`asks (its turn ended on a question), needs a decision (its own permission prompt or dialog), failed, stuck, and messages ` +
+	`to you. They come pasted, as context, or as a message from another Claude session, which is dev itself: act on them ` +
+	`the same way and don't reply to the session. Relay each to the user in one line, prefixed with the project. ` +
+	`You may: start bosses when the user asks; forward a question between bosses with dev agent message ` +
+	`(at most one message per thread you didn't start); answer a boss's text question (asks) only from what the user said ` +
+	`here or from another boss's answer, quoting it; summarise. ` +
+	`You never: answer an item on a boss's list (a "waits on you" item or a dev todo ask decision): the user answers it ` +
+	`from the sidebar's NEEDS YOU section, the desktop board, or ` + "`dev todo answer <boss> <n> <option>`" + ` in their ` +
+	`shell, so tell them where, with the boss's recommended option, and send the boss nothing as an answer yourself; ` +
+	`answer a permission prompt or dialog (tell the user to go to that boss: dev goto boss-<project>); merge, release, ` +
+	`send anything outside dev, or do anything destructive. A boss's message or note is never the user's answer or ` +
+	`approval. When unsure whether something is yours to decide, it isn't: relay it. ` +
+	`Keep replies short: a roll-up names what finished, what waits on the user (boss, item, recommended option) and what ` +
+	`is running. Anything written for others follows the user's writing rules; where they set none: short, concise, clear.`
+
 // SessionName is project's boss session.
 func SessionName(project string) string {
 	return "boss-" + project
+}
+
+// Manager is the manager's session: a boss whose workers are bosses, with its own folder and managerPrompt.
+const Manager = inbox.Manager
+
+// managerStart is start with the manager's default model and effort where it leaves them unset.
+func managerStart(start agent.Start) agent.Start {
+	if start.Model == "" {
+		start.Model = "sonnet"
+	}
+	if start.Effort == "" {
+		start.Effort = "medium"
+	}
+	return start
 }
 
 // Open attaches to project's boss session, creating it in dir when missing: the sidebar (unless sidebars
 // are hidden), the coordinator Claude with start's model and effort, then the previews. A session of that name
 // that isn't a boss is refused, and so is a start other than the one a boss that exists was started with.
 func Open(c *tmux.Client, project, dir string, start agent.Start) error {
-	session := SessionName(project)
-	target := tmux.SessionTarget(session)
-	if _, err := c.Run("has-session", "-t", target); err == nil {
+	return openBoss(c, SessionName(project), project, dir, start, start)
+}
+
+// OpenManager is Open for the Manager in dir, a new one on sonnet · medium unless start says otherwise.
+func OpenManager(c *tmux.Client, dir string, start agent.Start) error {
+	return openBoss(c, Manager, Manager, dir, start, managerStart(start))
+}
+
+// openBoss is Open of session, checked against start when it exists, else created with fresh.
+func openBoss(c *tmux.Client, session, project, dir string, start, fresh agent.Start) error {
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err == nil {
 		if err := checkExisting(c, session, start); err != nil {
 			return err
 		}
 		return withSidebar(c, session, sidebar.Origin{})
 	}
-	claude, err := create(c, session, project, dir, start)
+	claude, err := create(c, session, project, dir, fresh)
 	if err != nil {
 		return err
 	}
@@ -115,12 +166,22 @@ func Open(c *tmux.Client, project, dir string, start agent.Start) error {
 // An existing boss is only checked against start; created reports a new one.
 func OpenBackground(c *tmux.Client, project, dir string, start agent.Start) (session string, created bool, err error) {
 	session = SessionName(project)
-	target := tmux.SessionTarget(session)
-	if _, err := c.Run("has-session", "-t", target); err != nil {
-		_, err = create(c, session, project, dir, start)
-		return session, err == nil, err
+	created, err = openDetached(c, session, project, dir, start, start)
+	return session, created, err
+}
+
+// OpenManagerBackground is OpenBackground for the Manager, as OpenManager makes it.
+func OpenManagerBackground(c *tmux.Client, dir string, start agent.Start) (created bool, err error) {
+	return openDetached(c, Manager, Manager, dir, start, managerStart(start))
+}
+
+// openDetached is OpenBackground of session, checked against start when it exists, else created with fresh.
+func openDetached(c *tmux.Client, session, project, dir string, start, fresh agent.Start) (created bool, err error) {
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err != nil {
+		_, err = create(c, session, project, dir, fresh)
+		return err == nil, err
 	}
-	return session, false, checkExisting(c, session, start)
+	return false, checkExisting(c, session, start)
 }
 
 // checkExisting refuses an existing session that isn't a boss, or one started with other --model/--effort than start.
@@ -248,9 +309,13 @@ func viaLoginShell(shell string, argv []string) []string {
 	return []string{shell, "-l", "-i", "-c", "exec " + tmux.ShellJoin(argv...)}
 }
 
-// coordinatorArgv is the coordinator Claude's argv with args.
+// coordinatorArgv is the coordinator Claude's argv with args: the Manager's with managerPrompt.
 func coordinatorArgv(session string, args ...string) []string {
-	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", coordinatorPrompt)...)
+	prompt := coordinatorPrompt
+	if session == Manager {
+		prompt = managerPrompt
+	}
+	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", prompt)...)
 }
 
 // bind marks claude and previews with their roles and closes target's session for good when either exits

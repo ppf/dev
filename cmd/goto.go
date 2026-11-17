@@ -12,13 +12,13 @@ import (
 func newGotoCmd() *cobra.Command {
 	var client string
 	cmd := &cobra.Command{
-		Use:   "goto <n>",
-		Short: "Switch to the n-th session in sidebar order (prefix+1..9)",
+		Use:   "goto <n|session>",
+		Short: "Switch to the n-th session in sidebar order (prefix+1..9), or to the named session (outside tmux: attach it)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			n, err := strconv.Atoi(args[0])
 			if err != nil {
-				return err
+				return sidebar.GotoSession(tmux.New(), args[0], client)
 			}
 			return sidebar.Goto(tmux.New(), n, client)
 		},
