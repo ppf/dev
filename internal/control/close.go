@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 	"github.com/ppf/dev/internal/worktree"
 )
 
@@ -112,6 +115,23 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 // closable refuses a working, deciding or hookless worker, or a shared or dirty worktree, or one whose HEAD
 // moved from head, the one delivered checked.
 func closable(c *tmux.Client, a Agent, wt, head string) error {
+	if err := settled(c, a); err != nil {
+		return err
+	}
+	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
+		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
+	}
+	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
+		return cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt))
+	}
+	if now, err := worktree.Head(wt); err != nil || now != head {
+		return cmp.Or(err, fmt.Errorf("%s got new commits while closing", wt))
+	}
+	return nil
+}
+
+// settled refuses a working, deciding or hookless agent.
+func settled(c *tmux.Client, a Agent) error {
 	st, err := ReadChecked(c, a.Pane)
 	if err != nil {
 		return err
@@ -124,14 +144,70 @@ func closable(c *tmux.Client, a Agent, wt, head string) error {
 	case agent.Deciding(state, st.WaitingFor):
 		return fmt.Errorf("%s is waiting for a decision (%s): answer it first", a.Session, cmp.Or(st.WaitingFor, "unknown"))
 	}
-	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
-		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
+	return nil
+}
+
+// CloseBoss closes boss a for the coordinator in pane as the sidebar's × does, asking nothing: refused unless
+// pane's session started (or adopted) a, a is idle, no session a started is left and a's list has no open ask.
+// Its list stays, for a boss reopened under its name.
+func CloseBoss(c *tmux.Client, pane string, a Agent) error {
+	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+	if err != nil {
+		return err
 	}
-	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
-		return cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt))
+	own = strings.TrimSpace(own)
+	if a.StartedBy != own {
+		return fmt.Errorf("%s wasn't started or adopted by this session (%s), but by %q: close only your own bosses", a.Session, own, a.StartedBy)
 	}
-	if now, err := worktree.Head(wt); err != nil || now != head {
-		return cmp.Or(err, fmt.Errorf("%s got new commits while closing", wt))
+	if err := settled(c, a); err != nil {
+		return err
+	}
+	if err := bossEmpty(c, a); err != nil {
+		return err
+	}
+	_, err = kill(c, a.Session, own, sidebar.Ended{})
+	return err
+}
+
+// bossEmpty refuses boss a while a session it started is left or its list has an open ask.
+func bossEmpty(c *tmux.Client, a Agent) error {
+	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
+	if err != nil {
+		return err
+	}
+	type session struct {
+		Name      string `tmux:"session_name"`
+		StartedBy string `tmux:"@dev_started_by"`
+	}
+	sessions, err := tmux.Query[session](c, "list-sessions")
+	if err != nil {
+		return err
+	}
+	var left []string
+	for _, s := range sessions {
+		if sidebar.Names(s.StartedBy, strings.TrimSpace(id), a.Session, true) {
+			left = append(left, s.Name)
+		}
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%s still has workers (%s): it closes them first", a.Session, strings.Join(left, ", "))
+	}
+	s, err := todo.ForPane(c, a.Pane)
+	if err != nil {
+		return err
+	}
+	l, err := s.Read(time.Now())
+	if err != nil {
+		return err
+	}
+	var asks []string
+	for _, it := range l.Items {
+		if !it.Done && len(it.Options) > 0 {
+			asks = append(asks, "#"+strconv.Itoa(it.ID))
+		}
+	}
+	if len(asks) > 0 {
+		return fmt.Errorf("%s has open asks on its list (%s): the user answers them first", a.Session, strings.Join(asks, ", "))
 	}
 	return nil
 }
