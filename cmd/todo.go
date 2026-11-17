@@ -67,7 +67,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask), updated (unix seconds), stale; with --all an array of them, each with its boss`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask), updated (unix seconds), stale; with --all an array of them, each with its boss, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
@@ -225,7 +225,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 }
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
-	var question string
+	var question, via string
 	var fromBoard bool
 	cmd := &cobra.Command{
 		Use:   "answer <boss> <n> <option|text>",
@@ -234,12 +234,16 @@ func newTodoAnswerCmd(boss *string) *cobra.Command {
 words. It ticks the item and the boss's inbox gets "you answered #<n> \"<question>\": <answer>", which the boss
 takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), so no Claude answers for the user,
 and for a desktop app boss, which has no dev inbox: answer it in its chat. --question refuses the answer unless item n
-still reads that text (item numbers restart once a list empties).`,
+still reads that text (item numbers restart once a list empties). --via manager is the manager relaying what the user
+told it: only in the manager's coordinator pane, only for an item older than the user's latest prompt there, and the
+note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<prompt>\"): <answer>".`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			switch {
-			case os.Getenv("CLAUDECODE") != "" && !fromBoard:
+			case via != "" && via != inbox.Manager:
+				return fmt.Errorf("--via %s: only --via %s", via, inbox.Manager)
+			case os.Getenv("CLAUDECODE") != "" && !fromBoard && via == "":
 				return errors.New("refused in a Claude Code session: only the user answers (in a shell, the sidebar or a board)")
 			case fromBoard && question == "":
 				return errors.New("--from-board needs --question")
@@ -253,6 +257,14 @@ still reads that text (item numbers restart once a list empties).`,
 				return fmt.Errorf("item number %q: %w", args[1], err)
 			}
 			c := tmux.New()
+			var said *inbox.Prompt
+			var before int64
+			if via != "" {
+				if said, err = managerPrompt(c); err != nil {
+					return err
+				}
+				before = said.At
+			}
 			// Before ticking: an answer it can't send stays open
 			b, err := inbox.Recipient(c, name)
 			if err != nil {
@@ -266,11 +278,15 @@ still reads that text (item numbers restart once a list empties).`,
 			if err != nil {
 				return err
 			}
-			it, err := s.Answer(id, question, args[2], time.Now())
+			it, err := s.Answer(id, question, args[2], before, time.Now())
 			if err != nil {
 				return err
 			}
-			queued, err := b.Send(c, control.RealClock, inbox.Answer(it.ID, it.Text, it.Answer))
+			note := inbox.Answer(it.ID, it.Text, it.Answer)
+			if said != nil {
+				note = inbox.AnswerVia(it.ID, it.Text, it.Answer, said.Text)
+			}
+			queued, err := b.Send(c, control.RealClock, note)
 			switch {
 			case !queued:
 				return fmt.Errorf("#%d answered %q and ticked, not sent to %s (tell it yourself): %w", id, it.Answer, name, err)
@@ -285,7 +301,32 @@ still reads that text (item numbers restart once a list empties).`,
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button (needs --question): allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
+	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's answer from their latest prompt to it (only in its coordinator pane)")
 	return cmd
+}
+
+// managerPrompt is the user's latest prompt to the manager, for an answer relayed from its coordinator pane.
+func managerPrompt(c *tmux.Client) (*inbox.Prompt, error) {
+	notHere := errors.New("--via manager runs only in the manager's coordinator pane")
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return nil, notHere
+	}
+	self, ok, err := inbox.Self(c, pane)
+	switch {
+	case err != nil:
+		return nil, err
+	case !ok || self.Name != inbox.Manager:
+		return nil, notHere
+	}
+	p, err := self.Box.UserPrompt()
+	switch {
+	case err != nil:
+		return nil, err
+	case p == nil:
+		return nil, errors.New("--via manager: the user hasn't prompted the manager yet")
+	}
+	return p, nil
 }
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
@@ -336,13 +377,15 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 	}
 }
 
-// bossList is one boss's list, for dev todo --all --json.
+// bossList is one boss's list, for dev todo --all; Error is what couldn't be read (a list not read: stale, no items).
 type bossList struct {
-	Boss string `json:"boss"`
+	Boss  string `json:"boss"`
+	Error string `json:"error,omitempty"`
 	todo.List
 }
 
 // printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
+// A list it can't read is a row with its error, the others still printed.
 func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 	type session struct {
 		Name string `tmux:"session_name"`
@@ -361,26 +404,29 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 		}
 		target := tmux.SessionTarget(sess.Name)
 		s, err := todo.ForPane(c, target)
+		var l todo.List
+		if err == nil {
+			l, err = s.Read(now)
+		}
 		if err != nil {
 			if _, gone := c.Run("has-session", "-t", target); gone != nil {
 				// Closed since list-sessions
 				continue
 			}
-			return fmt.Errorf("%s: %w", sess.Name, err)
-		}
-		l, err := s.Read(now)
-		if err != nil {
-			return fmt.Errorf("%s: %w", sess.Name, err)
+			lists = append(lists, bossList{Boss: sess.Name, Error: "list not read: " + err.Error(), List: todo.List{Items: []todo.Shown{}, Stale: true}})
+			continue
 		}
 		if len(l.Items) == 0 {
 			continue
 		}
+		bl := bossList{Boss: sess.Name, List: l}
 		if !asJSON {
+			// The items still print: what each says holds without the workers
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, target) }); err != nil {
-				return err
+				bl.Error = "workers not read: " + err.Error()
 			}
 		}
-		lists = append(lists, bossList{Boss: sess.Name, List: l})
+		lists = append(lists, bl)
 	}
 	if asJSON {
 		return printJSON(out, lists)
@@ -390,6 +436,9 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 		return err
 	}
 	for _, bl := range lists {
+		if bl.Error != "" {
+			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
+		}
 		for _, it := range bl.Items {
 			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it))
 		}

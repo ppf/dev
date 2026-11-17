@@ -38,6 +38,14 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		return "", false, nil
 	}
 	if e.Name == "SessionStart" {
+		if e.Source == "clear" || e.Source == "startup" {
+			// A new conversation never saw the user's earlier words
+			if b, ok, err := Self(c, pane); ok && err == nil {
+				if err := b.Box.ForgetPrompt(); err != nil {
+					return "", false, err
+				}
+			}
+		}
 		out, err = startList(c, pane, e.Source)
 		return out, false, err
 	}
@@ -49,7 +57,7 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		return "", false, err
 	}
 	if e.Name == "UserPromptSubmit" {
-		if err := b.Box.Arrived(e.Prompt); err != nil {
+		if err := b.Box.Arrived(e.Prompt, time.Now()); err != nil {
 			return "", false, err
 		}
 	}

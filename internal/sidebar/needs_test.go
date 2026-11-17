@@ -68,8 +68,14 @@ func TestNeedsRows(t *testing.T) {
 	}) {
 		t.Errorf("rows = %+v\nwant %+v", got, want)
 	}
-	// A boss no session carries is shown by its own name
+	// A list not read is a row saying why, ⏎ going to its boss
 	m := needsModel(&calls)
+	m.needs = append(m.needs, needList{Boss: "boss-web", Error: "list not read: bad JSON"})
+	if r := m.needRows(); len(r) != 4 || !r[2].broken || r[2].text != "list not read: bad JSON" || r[2].session != "boss-web" || !strings.Contains(m.needLine(r[2], 40, false), "⚠") {
+		t.Errorf("rows with a list not read = %+v", r)
+	}
+	// A boss no session carries is shown by its own name
+	m = needsModel(&calls)
 	m.snap.sessions = nil
 	if r := m.needRows(); r[0].project != "boss-dev" {
 		t.Errorf("project without a session = %q", r[0].project)

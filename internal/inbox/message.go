@@ -376,6 +376,13 @@ func Answer(id int, text, answer string) Note {
 	return Note{Kind: Answered, Text: fmt.Sprintf(`#%d "%s": %s`, id, text, answer), Key: "answer " + strconv.Itoa(id)}
 }
 
+// AnswerVia is Answer relayed by the Manager from the user's words, which it quotes.
+func AnswerVia(id int, text, answer, words string) Note {
+	n := Answer(id, text, answer)
+	n.Text = fmt.Sprintf(`#%d "%s" via %s ("%s"): %s`, id, text, Manager, clip(words), answer)
+	return n
+}
+
 // Socket is the socket path of the tmux server c reaches.
 func Socket(c *tmux.Client) (string, error) {
 	out, err := c.Run("display-message", "-p", "#{socket_path}")

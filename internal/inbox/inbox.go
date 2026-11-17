@@ -275,6 +275,14 @@ type state struct {
 	InFlight  *flight            `json:"in_flight,omitempty"`
 	// PasteNext: a sent batch went unseen; Claude drops a repeated message, so the next batch is pasted
 	PasteNext bool `json:"paste_next,omitempty"`
+	// Prompt is the user's latest prompt to the coordinator, not one dev sent (a batch, ResumePrompt)
+	Prompt *Prompt `json:"prompt,omitempty"`
+}
+
+// Prompt is a prompt the coordinator got at At (unix seconds).
+type Prompt struct {
+	Text string `json:"text"`
+	At   int64  `json:"at"`
 }
 
 // flight is a batch sent over Claude's messaging socket at At (unix seconds).
@@ -514,14 +522,46 @@ func (b Box) Unsend() error {
 	})
 }
 
-// Arrived clears the batch in flight when prompt, from the coordinator's UserPromptSubmit, contains its message.
-func (b Box) Arrived(prompt string) error {
+// Arrived clears the batch in flight when prompt, from the coordinator's UserPromptSubmit, contains its message;
+// a prompt dev didn't send (no batch, not ResumePrompt) is kept as the user's latest, from now.
+func (b Box) Arrived(prompt string, now time.Time) error {
 	return b.update(func(s *state) error {
 		if s.InFlight != nil && strings.Contains(prompt, s.InFlight.batch().Message()) {
 			s.InFlight = nil
 		}
+		if !strings.Contains(prompt, Header) && strings.TrimSpace(prompt) != ResumePrompt && strings.TrimSpace(prompt) != "" {
+			s.Prompt = &Prompt{Text: clip(prompt), At: now.Unix()}
+		}
 		return nil
 	})
+}
+
+// ForgetPrompt drops the user's latest prompt (Arrived), for a new conversation.
+func (b Box) ForgetPrompt() error {
+	return b.update(func(s *state) error {
+		s.Prompt = nil
+		return nil
+	})
+}
+
+// clip is s with whitespace collapsed, cut to maxText in the middle, as a prompt's answer may be at either end.
+func clip(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > maxText {
+		s = string(r[:maxText/2-1]) + " … " + string(r[len(r)-maxText/2+2:])
+	}
+	return s
+}
+
+// UserPrompt is the user's latest prompt to the coordinator (Arrived), nil before any.
+func (b Box) UserPrompt() (*Prompt, error) {
+	lock, err := b.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Close() }()
+	s, err := b.read()
+	return s.Prompt, err
 }
 
 // Expire puts the batch in flight back, for the paste, once it went unshown flightTimeout into the coordinator's

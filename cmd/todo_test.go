@@ -360,9 +360,11 @@ func TestTodoAsk(t *testing.T) {
 	}
 }
 
-// answer refuses a Claude Code session, a desktop app boss and --boss before reaching tmux; --all refuses --boss.
+// answer refuses a Claude Code session, a desktop app boss and --boss before reaching tmux, and --via but from the
+// manager's pane; --all refuses --boss.
 func TestTodoAnswerRefused(t *testing.T) {
 	todoEnv(t)
+	t.Setenv("TMUX_PANE", "")
 	for _, tt := range []struct {
 		claude string
 		args   []string
@@ -375,6 +377,8 @@ func TestTodoAnswerRefused(t *testing.T) {
 		{"1", []string{"todo", "answer", "boss-dev", "1", "Merge", "--from-board"}, "--from-board needs --question"},
 		{"1", []string{"todo", "answer", "local_boss", "1", "Merge", "--from-board", "--question", "Merge?"}, "has no dev inbox"},
 		{"", []string{"todo", "--all", "--boss", "boss-x"}, "leave out --boss"},
+		{"1", []string{"todo", "answer", "boss-dev", "1", "Merge", "--via", "boss-x"}, "only --via manager"},
+		{"1", []string{"todo", "answer", "boss-dev", "1", "Merge", "--via", "manager"}, "only in the manager's coordinator pane"},
 	} {
 		t.Setenv("CLAUDECODE", tt.claude)
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
