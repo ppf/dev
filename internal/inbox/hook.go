@@ -90,6 +90,11 @@ func openList(c *tmux.Client, pane string) (string, error) {
 		return "", err
 	}
 	l, err := s.Read(time.Now())
+	if err != nil {
+		return "", err
+	}
+	// The list still goes out: what it says of each item holds without the workers
+	err = l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, pane) })
 	return l.Reminder(), err
 }
 
@@ -109,17 +114,20 @@ func startList(c *tmux.Client, pane, source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return StartContext(s, source, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, source, time.Now())
 }
 
-// StartContext is the SessionStart hook output adding list s's open items (todo.List.StartReminder) to a boss
-// starting, resumed or /clear'ed (source); "" after a compaction, whose summary carries them, or with none open.
-func StartContext(s todo.Store, source string, now time.Time) (string, error) {
+// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked; "" after
+// a compaction, whose summary carries them.
+func StartContext(s todo.Store, workers func() ([]todo.Session, error), source string, now time.Time) (string, error) {
 	if source == "compact" {
 		return "", nil
 	}
 	l, err := s.Read(now)
 	if err != nil {
+		return "", err
+	}
+	if err := l.MarkGone(workers); err != nil {
 		return "", err
 	}
 	age := "just now"

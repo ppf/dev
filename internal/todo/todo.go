@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -35,15 +36,26 @@ const (
 // UntilLayout is how an item's Until time is written: local date and minute.
 const UntilLayout = "2006-01-02 15:04"
 
+// Me is the --on that gives an item back to the user.
+const Me = "me"
+
+// Session is the boss's worker an item is on: its tmux session name or desktop app session id (local_…), and
+// the name its board shows.
+type Session struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // Item is one thing waiting on the user. Done is when it was ticked, unix seconds; 0 while open. Until, when
 // set, ticks it by itself at that time, unix seconds.
 type Item struct {
-	ID    int    `json:"id"`
-	Text  string `json:"text"`
-	On    string `json:"on,omitempty"` // who it waits on, when not the user
-	Link  string `json:"link,omitempty"`
-	Done  int64  `json:"done,omitempty"`
-	Until int64  `json:"until,omitempty"`
+	ID      int      `json:"id"`
+	Text    string   `json:"text"`
+	On      string   `json:"on,omitempty"`      // who does it, when not the user: a worker's name or a person
+	Session *Session `json:"session,omitempty"` // the worker On names, when it named one at add
+	Link    string   `json:"link,omitempty"`
+	Done    int64    `json:"done,omitempty"`
+	Until   int64    `json:"until,omitempty"`
 }
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty.
@@ -62,14 +74,32 @@ type List struct {
 	Stale   bool    `json:"stale"`
 }
 
-// Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never).
+// Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never). A Session the board
+// doesn't list any more is gone.
 type Shown struct {
-	ID    int    `json:"id"`
-	Text  string `json:"text"`
-	On    string `json:"on,omitempty"`
-	Link  string `json:"link,omitempty"`
-	Done  bool   `json:"done"`
-	Until int64  `json:"until,omitempty"`
+	ID      int      `json:"id"`
+	Text    string   `json:"text"`
+	On      string   `json:"on,omitempty"`
+	Session *Session `json:"session,omitempty"`
+	Link    string   `json:"link,omitempty"`
+	Done    bool     `json:"done"`
+	Until   int64    `json:"until,omitempty"`
+	Gone    bool     `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+}
+
+// MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
+func (l List) MarkGone(workers func() ([]Session, error)) error {
+	if !slices.ContainsFunc(l.Items, func(it Shown) bool { return !it.Done && it.Session != nil }) {
+		return nil
+	}
+	ws, err := workers()
+	if err != nil {
+		return err
+	}
+	for i, it := range l.Items {
+		l.Items[i].Gone = !it.Done && it.Session != nil && !slices.ContainsFunc(ws, func(w Session) bool { return w.ID == it.Session.ID })
+	}
+	return nil
 }
 
 // Open counts the items not ticked, and of them those waiting on someone else.
@@ -190,21 +220,29 @@ type session struct {
 	Created string `tmux:"session_created"`
 }
 
-// ForPane is the list of the dev boss session pane is in, keyed by socket and session name so a boss reopened
-// under its name gets it back; a list under its earlier key (session id and creation time) moves to it.
-func ForPane(c *tmux.Client, pane string) (Store, error) {
+// paneSession is the session pane is in.
+func paneSession(c *tmux.Client, pane string) (session, error) {
 	out, err := c.Run("display-message", "-p", "-t", pane, tmux.Format[session]())
 	if err != nil {
-		return Store{}, err
+		return session{}, err
 	}
 	rows, err := tmux.Parse[session](out)
 	if err != nil {
-		return Store{}, err
+		return session{}, err
 	}
 	if len(rows) != 1 {
-		return Store{}, fmt.Errorf("todo: %d rows for %s", len(rows), pane)
+		return session{}, fmt.Errorf("todo: %d rows for %s", len(rows), pane)
 	}
-	s := rows[0]
+	return rows[0], nil
+}
+
+// ForPane is the list of the dev boss session pane is in, keyed by socket and session name so a boss reopened
+// under its name gets it back; a list under its earlier key (session id and creation time) moves to it.
+func ForPane(c *tmux.Client, pane string) (Store, error) {
+	s, err := paneSession(c, pane)
+	if err != nil {
+		return Store{}, err
+	}
 	if s.Herd == "" {
 		return Store{}, fmt.Errorf("%s is %w", s.Name, ErrNotBoss)
 	}
@@ -227,6 +265,32 @@ func ForPane(c *tmux.Client, pane string) (Store, error) {
 	return st, err
 }
 
+// worker is what Workers reads of a tmux session.
+type worker struct {
+	Name      string `tmux:"session_name"`
+	StartedBy string `tmux:"@dev_started_by"`
+	Herd      string `tmux:"@dev_herd"`
+}
+
+// Workers lists the sessions the boss session pane is in started, bosses aside, by name.
+func Workers(c *tmux.Client, pane string) ([]Session, error) {
+	boss, err := paneSession(c, pane)
+	if err != nil {
+		return nil, err
+	}
+	all, err := tmux.Query[worker](c, "list-sessions")
+	if err != nil {
+		return nil, err
+	}
+	var ws []Session
+	for _, w := range all {
+		if w.Herd == "" && sidebar.Names(w.StartedBy, boss.ID, boss.Name, true) {
+			ws = append(ws, Session{ID: w.Name, Name: w.Name})
+		}
+	}
+	return ws, nil
+}
+
 // Read is the list as its boards show it at now; a missing file is an empty list.
 func (s Store) Read(now time.Time) (List, error) {
 	f, err := s.read()
@@ -236,7 +300,7 @@ func (s Store) Read(now time.Time) (List, error) {
 	f.prune(now)
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Link: it.Link, Done: it.Done != 0, Until: it.Until})
+		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until})
 	}
 	slices.SortStableFunc(l.Items, func(a, b Shown) int {
 		return cmp.Compare(min(len(a.On), 1), min(len(b.On), 1))
@@ -263,6 +327,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			f.Next = 1
 		}
 		it.ID, it.Done = max(f.Next, 1), 0
+		if it.On == Me {
+			it.On, it.Session = "", nil
+		}
 		f.Items = append(f.Items, it)
 		f.Next, id = it.ID+1, it.ID
 		return nil
@@ -270,8 +337,8 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	return id, err
 }
 
-// Replace puts it in the place of open item id, keeping its number and the On, Link and Until it doesn't set;
-// an id that isn't one is an error.
+// Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link and
+// Until it doesn't set; On Me gives it back to the user. An id that isn't one is an error.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
@@ -280,7 +347,13 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		}
 		old := f.Items[i]
 		it.ID, it.Done = id, 0
-		it.On, it.Link, it.Until = cmp.Or(it.On, old.On), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
+		switch it.On {
+		case Me:
+			it.On, it.Session = "", nil
+		case "":
+			it.On, it.Session = old.On, old.Session
+		}
+		it.Text, it.Link, it.Until = cmp.Or(it.Text, old.Text), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
 		f.Items[i] = it
 		return nil
 	})
@@ -411,7 +484,10 @@ func (l List) lines(limit int) string {
 			continue
 		}
 		fmt.Fprintf(&b, "\n%d. %s", it.ID, it.Text)
-		if it.On != "" {
+		switch {
+		case it.Gone:
+			b.WriteString(" (on " + it.On + ", session gone)")
+		case it.On != "":
 			b.WriteString(" (on " + it.On + ")")
 		}
 		if it.Until != 0 {
@@ -424,6 +500,9 @@ func (l List) lines(limit int) string {
 	return b.String()
 }
 
+// whoLine asks a boss to say who does each item, as the reminders end.
+const whoLine = "\nAn item a worker session or someone else does, not the user: dev todo add --replaces <n> --on <worker name|person>."
+
 // Reminder is the open items for a boss reading worker notes, numbered, with a line asking it to tick what the
 // notes closed; "" when none is open.
 func (l List) Reminder() string {
@@ -432,7 +511,7 @@ func (l List) Reminder() string {
 		return ""
 	}
 	return "[dev todo] Your open to do list:" + items +
-		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."
+		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"." + whoLine
 }
 
 // StartReminder is the open items for a boss starting or /clear'ed, at most startShown, with how long ago the
@@ -447,7 +526,7 @@ func (l List) StartReminder(kept bool, age string) string {
 		from = "kept from your last boss session, " + from
 	}
 	return "[dev todo] Your open to do list (" + from + "):" + items +
-		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."
+		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")." + whoLine
 }
 
 // Clean is s as one board row: control characters dropped, space runs collapsed, trimmed.
@@ -470,4 +549,21 @@ func (it Shown) PR() int {
 	}
 	n, _ := strconv.Atoi(m[1])
 	return n
+}
+
+// Match is the worker on names: by id, else the only worker by that name, case and outer spaces aside.
+func Match(on string, workers []Session) (Session, bool) {
+	if i := slices.IndexFunc(workers, func(w Session) bool { return w.ID == on }); i >= 0 {
+		return workers[i], true
+	}
+	var found []Session
+	for _, w := range workers {
+		if strings.EqualFold(strings.TrimSpace(w.Name), strings.TrimSpace(on)) {
+			found = append(found, w)
+		}
+	}
+	if len(found) != 1 {
+		return Session{}, false
+	}
+	return found[0], true
 }

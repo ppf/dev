@@ -264,3 +264,64 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 		t.Errorf("worker start: %q, %q, %v; want nothing", got, stderr, err)
 	}
 }
+
+// --on a worker of the boss, by its local_… id or its name, links its session, shown under its name; --on
+// anyone else is a person; --on me gives an item back to the user.
+func TestTodoOnWorker(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "add", "By id", "--on", "local_w")
+	run(t, "", "todo", "add", "By name", "--on", " w ")
+	if _, stderr, err := execute(t, "", "todo", "add", "A person", "--on", "Marek"); err != nil || !strings.Contains(stderr, "on Marek: no single worker of this boss by that name or id, so a person\n") {
+		t.Errorf("--on a person: stderr %q, %v; want a note", stderr, err)
+	}
+	run(t, "", "todo", "add", "Handed over", "--on", "Ola")
+	run(t, "", "todo", "add", "Handed over", "--replaces", "4", "--on", "local_w")
+	if got := run(t, "", "todo", "add", "Back to me", "--replaces", "3", "--on", "ME"); got != "replaced 3 · to do 4, 3 on others\n" {
+		t.Errorf("--on me: %q", got)
+	}
+	got := run(t, "", "todo", "--json")
+	for _, want := range []string{
+		`"text": "By id",
+      "on": "W",
+      "session": {
+        "id": "local_w",
+        "name": "W"
+      }`,
+		`"text": "By name",
+      "on": "W",
+      "session": {`,
+		`"text": "Back to me",
+      "done": false`,
+		`"text": "Handed over",
+      "on": "W",
+      "session": {
+        "id": "local_w",`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("--json = %s\nwant it to hold %s", got, want)
+		}
+	}
+	// Its record gone (archived), the worker's items print as session gone
+	home := os.Getenv("HOME")
+	if err := os.Remove(filepath.Join(home, "Library", "Application Support", "Claude", "claude-code-sessions", "acct", "org", "local_w.json")); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, "", "todo"); !strings.Contains(got, "1\t◌\tBy id\ton W, session gone\n") {
+		t.Errorf("dev todo = %q, want By id on W, session gone", got)
+	}
+}
+
+// --replaces may leave out the text to only change who does it; an add without text is refused. A worker whose
+// record can't be read is never called gone.
+func TestTodoReplacesWithoutText(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "add", "Rework companion", "--on", "Marek")
+	run(t, "", "todo", "add", "--replaces", "1", "--on", "local_w")
+	run(t, "", "todo", "add", "Unreadable worker", "--on", "local_broken")
+	if _, _, err := execute(t, "", "todo", "add", "--on", "Marek"); err == nil || err.Error() != "no item: only --replaces keeps the item's text" {
+		t.Errorf("add without text: %v", err)
+	}
+	if got := run(t, "", "todo"); got != "1\t◌\tRework companion\ton W\n2\t◌\tUnreadable worker\ton local_broken\n" {
+		t.Errorf("dev todo = %q", got)
+	}
+}

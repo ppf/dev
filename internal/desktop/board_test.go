@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -926,5 +927,28 @@ func TestEarlier(t *testing.T) {
 	write(t, filepath.Join(p.Live, "6.json"), "{not json")
 	if _, err := Earlier(p, "local_new"); err == nil {
 		t.Error("an unreadable live file: no error; want one, as a running boss could look stopped")
+	}
+}
+
+// Workers names the board's workers as the board does: by id, with their spawn name, else their title.
+func TestWorkers(t *testing.T) {
+	p := fixture(t)
+	named, warnings, err := Workers(p.Records, boss)
+	if err != nil || len(warnings) != 1 {
+		t.Fatalf("Workers: %v, warnings %v", err, warnings)
+	}
+	workers, _, err := Board(p, boss, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []Named
+	for _, w := range workers {
+		want = append(want, Named{ID: w.ID, Name: cmp.Or(w.Name, w.Title)})
+	}
+	sortByID := func(ns []Named) { slices.SortFunc(ns, func(a, b Named) int { return cmp.Compare(a.ID, b.ID) }) }
+	sortByID(named)
+	sortByID(want)
+	if !slices.Equal(named, want) {
+		t.Errorf("Workers = %+v, want %+v", named, want)
 	}
 }

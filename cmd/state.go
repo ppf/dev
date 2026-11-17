@@ -187,7 +187,7 @@ func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return inbox.StartContext(s, e.Source, time.Now())
+		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, e.Source, time.Now())
 	}
 	if e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") {
 		return "", nil
@@ -201,6 +201,9 @@ func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 	}
 	l, err := s.Read(time.Now())
 	if err != nil {
+		return "", err
+	}
+	if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(id, stderr) }); err != nil {
 		return "", err
 	}
 	if text := l.Reminder(); text != "" {

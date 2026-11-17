@@ -183,7 +183,9 @@ async function readTodo(run: Run, boss: string, now: number): Promise<Todo | nul
   if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `${DEV_BIN} todo exited ${ran.exitCode}`)
   const list: { items?: TodoItem[]; updated?: number; stale?: boolean } = JSON.parse(ran.stdout)
   const isOptional = (v: unknown) => v === undefined || typeof v === 'string'
-  const isRead = (it: TodoItem) => typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isOptional(it.link)
+  const isSession = (v: TodoItem['session']) => v === undefined || (typeof v?.id === 'string' && typeof v.name === 'string')
+  const isRead = (it: TodoItem) =>
+    typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isSession(it.session) && isOptional(it.link)
   if (!Array.isArray(list?.items) || !list.items.every(isRead) || typeof list.updated !== 'number') {
     throw new Error(`${DEV_BIN} todo printed a list this mod does not read`)
   }
@@ -221,10 +223,29 @@ const label = (w: Worker) => w.name || w.title
 /** A worker's section; a status a newer dev adds counts as Working rather than nowhere. */
 const groupOf = (w: Worker) => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working')
 
-/** The worker a to do item's `on` names: its board label, name or title, case and spaces aside. */
-function ownerOf(on: string, workers: Worker[]): Worker | undefined {
-  const key = on.trim().toLowerCase()
-  return workers.find(w => [label(w), w.name, w.title].some(n => n !== '' && n.trim().toLowerCase() === key))
+/** The worker an open to do item is on: its linked session's, else the one worker its `on` names by board label, name or title, case and outer spaces aside. */
+function ownerOf(it: TodoItem, workers: Worker[]): Worker | undefined {
+  if (it.done || !it.on) return undefined
+  const linked = it.session?.id
+  if (linked !== undefined) return workers.find(w => w.id === linked)
+  const key = it.on.trim().toLowerCase()
+  const named = workers.filter(w => [label(w), w.name, w.title].some(n => n !== '' && n.trim().toLowerCase() === key))
+  return named.length === 1 ? named[0] : undefined
+}
+
+/** Whether an open item's linked worker is no longer on the board (archived or gone); never while the board, or that worker's record, can't be read. */
+const isGone = (it: TodoItem, b: Board) =>
+  !it.done && it.session !== undefined && b.error === '' && !b.warnings.includes(it.session.id) && ownerOf(it, b.workers) === undefined
+
+/** The to do items as the board lists them: the person's own first, then those on a worker that needs them, then on a worker that's gone, then the rest, each in dev's order. */
+function todoOrder(items: TodoItem[], b: Board): TodoItem[] {
+  const rank = (it: TodoItem) => {
+    if (!it.on) return 0
+    if (isGone(it, b)) return 2
+    const owner = ownerOf(it, b.workers)
+    return owner !== undefined && groupOf(owner) === 'Needs you' ? 1 : 3
+  }
+  return items.map((it, i) => ({ it, i, rank: rank(it) })).sort((x, y) => x.rank - y.rank || x.i - y.i).map(x => x.it)
 }
 
 /**
@@ -995,14 +1016,14 @@ export const register: Register = on => {
       )
     }
 
-    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who it waits on (a worker on the board with its section's dot and state, opening its row), else its link (a PR's icon and number). */
+    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who does it (a worker on the board with its section's dot and state, opening its row; ✕ and session gone for a linked one no longer there; a person), else its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
       // No icon until the state is read, or when it could not be
       const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
       const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
-      const owner = it.on && !it.done ? ownerOf(it.on, b.workers) : undefined
+      const owner = ownerOf(it, b.workers)
       return (
         <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
@@ -1023,6 +1044,12 @@ export const register: Register = on => {
                   {`${label(owner)} · ${groupOf(owner).toLowerCase()}`}
                 </Text>
               </Button>
+            </Box>
+          ) : isGone(it, b) ? (
+            <Box flexShrink={1} minWidth={0}>
+              <Text size={SIZE.meta} color={TONE.danger} wrap="truncate-end">
+                {`✕ ${it.session?.name ?? it.on} · session gone`}
+              </Text>
             </Box>
           ) : it.on ? (
             <Box flexShrink={1} minWidth={0}>
@@ -1068,7 +1095,8 @@ export const register: Register = on => {
     const todoBlock = (t: Todo) => {
       const open = t.items.filter(it => !it.done)
       const onOthers = open.filter(it => it.on).length
-      const shownItems = v.todoOpen ? t.items : t.items.slice(0, TODO_SHOWN)
+      const ordered = todoOrder(t.items, b)
+      const shownItems = v.todoOpen ? ordered : ordered.slice(0, TODO_SHOWN)
       const foldable = t.items.length > TODO_SHOWN
       const toggleTodo = () => void update($, view, s => ({ ...s, todoOpen: !s.todoOpen }))
       return (
