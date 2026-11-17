@@ -399,9 +399,15 @@ func IsManagerPane(c *tmux.Client, pane string) bool {
 	return err == nil && strings.TrimSpace(out) == Manager
 }
 
-// TakeOver makes boss session the Manager's, pane being its coordinator, as if it had started it: refused for a
-// boss another session that is still there started.
-func TakeOver(c *tmux.Client, session, pane string) error {
+// TakeOver makes boss session, open and checked against start, the Manager's, pane being its coordinator, as if it
+// had started it: refused for a boss another session that is still there started.
+func TakeOver(c *tmux.Client, session, pane string, start agent.Start) error {
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err != nil {
+		return fmt.Errorf("%s isn't open: nothing to adopt", session)
+	}
+	if err := checkExisting(c, session, start); err != nil {
+		return err
+	}
 	by, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(session), OptStartedBy)
 	if err != nil {
 		return err
@@ -415,8 +421,12 @@ func TakeOver(c *tmux.Client, session, pane string) error {
 		if !sidebar.IsSessionID(by) {
 			target = tmux.SessionTarget(by)
 		}
-		if _, err := c.Run("has-session", "-t", target); err == nil {
+		_, err := c.Run("has-session", "-t", target)
+		if err == nil {
 			return fmt.Errorf("%s was started by %s: only a boss with no parent is adopted", session, by)
+		}
+		if !strings.Contains(err.Error(), "can't find session") {
+			return err
 		}
 	}
 	return MarkStartedBy(c, session, pane, false)

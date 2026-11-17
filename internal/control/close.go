@@ -22,8 +22,8 @@ import (
 // Closed is what Close did, as `dev agent close --json` reports it.
 type Closed struct {
 	Session  string `json:"session"`
-	Worktree string `json:"worktree"`
-	Branch   string `json:"branch,omitempty"` // deleted branch; "" for a detached HEAD or the default branch
+	Worktree string `json:"worktree,omitempty"` // "" for a boss
+	Branch   string `json:"branch,omitempty"`   // deleted branch; "" for a detached HEAD or the default branch
 	// Results is where the worktree's untracked files were copied; omitted when it had none.
 	Results string   `json:"results,omitempty"`
 	Files   []string `json:"files,omitempty"`

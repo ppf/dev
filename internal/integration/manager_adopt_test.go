@@ -19,7 +19,7 @@ func TestManagerAdoptClose(t *testing.T) {
 	stateDir := filepath.Join(d.tmp, "state")
 	t.Setenv("XDG_STATE_HOME", stateDir) // inbox.Here runs in this process
 	env := d.scriptEnv(writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)},
-		[2]string{"web", tempDir(t)}, [2]string{"old", tempDir(t)}), "XDG_STATE_HOME="+stateDir)
+		[2]string{"web", tempDir(t)}, [2]string{"old", tempDir(t)}, [2]string{"api", tempDir(t)}), "XDG_STATE_HOME="+stateDir)
 	dev := func(pane, stdin string, argv ...string) (string, error) {
 		t.Helper()
 		cmd := exec.Command(devBin, argv...)
@@ -90,6 +90,10 @@ func TestManagerAdoptClose(t *testing.T) {
 	refused(manager, "--adopt needs --background", "boss", "app", "--adopt")
 	refused(hq, "--adopt runs only in the manager's pane", "boss", "app", "--background", "--adopt")
 	refused(manager, "boss-web was started by boss-hq: only a boss with no parent is adopted", "boss", "web", "--background", "--adopt")
+	refused(manager, "boss-api isn't open: nothing to adopt", "boss", "api", "--background", "--adopt")
+	if _, err := d.Try("has-session", "-t", "=boss-api:"); err == nil {
+		t.Error("❌ --adopt started boss-api")
+	}
 	check(t, "web stays hq's", startedBy("boss-web"), "boss-hq")
 	check(t, "adopt", ok(manager, "boss", "app", "--background", "--adopt"), "boss-app\n")
 	check(t, "adopted", startedBy("boss-app"), "manager")

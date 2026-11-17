@@ -94,20 +94,23 @@ previews, and it keeps its workers and list.`,
 }
 
 // openBackground is dev boss <project> --background: the boss exists detached, started by the boss session this
-// runs in, and is printed once its Claude registered; adopt makes an existing one the manager's (herd.TakeOver).
+// runs in, and is printed once its Claude registered; adopt only makes an open one the manager's (herd.TakeOver).
 func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, start agent.Start, timeout time.Duration, adopt bool) error {
 	pane := os.Getenv("TMUX_PANE")
-	if adopt && !herd.IsManagerPane(c, pane) {
-		return errors.New("--adopt runs only in the manager's pane")
+	if adopt {
+		if !herd.IsManagerPane(c, pane) {
+			return errors.New("--adopt runs only in the manager's pane")
+		}
+		session := herd.SessionName(project)
+		if err := herd.TakeOver(c, session, pane, start); err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), session)
+		return nil
 	}
 	session, created, err := herd.OpenBackground(c, project, dir, start)
 	if err != nil {
 		return err
-	}
-	if !created && adopt {
-		if err := herd.TakeOver(c, session, pane); err != nil {
-			return err
-		}
 	}
 	if created {
 		if pane != "" && herd.IsBossPane(c, pane) {
