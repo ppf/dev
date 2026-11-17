@@ -69,17 +69,13 @@ boss is only printed.`,
 			if err != nil {
 				return err
 			}
-			// After the first-run restore, so a saved boss is attached rather than replaced
-			// A background boss's stdout is its name only
-			restoreOut := cmd.OutOrStdout()
-			if background {
-				restoreOut = cmd.ErrOrStderr()
-			}
-			if err := open.RestoreOnce(c, os.Getenv("HOME"), restoreOut); err != nil {
-				return err
-			}
+			// A detached boss skips the first-run restore, which switches clients (as dev agent start does)
 			if background {
 				return openBackground(cmd, c, p.Name, dir, start, timeout)
+			}
+			// After the first-run restore, so a saved boss is attached rather than replaced
+			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
+				return err
 			}
 			return herd.Open(c, p.Name, dir, start)
 		},

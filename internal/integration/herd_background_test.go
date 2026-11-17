@@ -29,10 +29,12 @@ func TestHerdBackground(t *testing.T) {
 		return stdout.String(), stderr.String(), status
 	}
 	clients := d.T("list-clients", "-F", "#{client_session}")
+	wasRestored := d.T("show-option", "-gqv", "@dev_restored")
 
 	out, errOut, status := run(env, "boss", "hq", "--background", "--timeout", "30s")
 	check(t, "new boss", status+" "+out+errOut, "0 boss-hq\n")
 	check(t, "client stays", d.T("list-clients", "-F", "#{client_session}"), clients)
+	check(t, "no first-run restore", d.T("show-option", "-gqv", "@dev_restored"), wasRestored)
 	check(t, "herd option", d.T("show-option", "-qv", "-t", "=boss-hq:", "@dev_herd"), "1")
 	check(t, "no starter from outside a boss", d.T("show-option", "-qv", "-t", "=boss-hq:", "@dev_started_by"), "")
 	if _, err := d.Try("has-session", "-t", "=boss-hq:"); err != nil {
