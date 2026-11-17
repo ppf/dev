@@ -372,6 +372,8 @@ func TestTodoAnswerRefused(t *testing.T) {
 		{"", []string{"todo", "answer", "local_boss", "1", "Merge"}, "has no dev inbox"},
 		{"", []string{"todo", "answer", "boss-dev", "1", "Merge", "--boss", "boss-x"}, "leave out --boss"},
 		{"", []string{"todo", "answer", "boss-dev", "x", "Merge"}, `item number "x"`},
+		{"1", []string{"todo", "answer", "boss-dev", "1", "Merge", "--from-board"}, "--from-board needs --question"},
+		{"1", []string{"todo", "answer", "local_boss", "1", "Merge", "--from-board", "--question", "Merge?"}, "has no dev inbox"},
 		{"", []string{"todo", "--all", "--boss", "boss-x"}, "leave out --boss"},
 	} {
 		t.Setenv("CLAUDECODE", tt.claude)

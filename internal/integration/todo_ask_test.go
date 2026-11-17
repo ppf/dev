@@ -68,7 +68,11 @@ func TestTodoAskAnswer(t *testing.T) {
 	out, _ = dev(user, "todo", "--all")
 	check(t, "--all", out, "boss-a\t1\t☐\tMerge #148?\toptions: Merge (Recommended) · Wait\n")
 
-	out, err = dev(user, "todo", "answer", "boss-a", "1", "1")
+	// A board's button runs inside Claude Code: allowed with its question, refused when item 1 reads otherwise
+	if _, err := dev(boss, "todo", "answer", "boss-a", "1", "1", "--from-board", "--question", "Another?"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), `is "Merge #148?" now, not "Another?"`) {
+		t.Errorf("❌ board answer with a changed question: %v, want refused", err)
+	}
+	out, err = dev(boss, "todo", "answer", "boss-a", "1", "1", "--from-board", "--question", "Merge #148?")
 	check(t, "answer", out, "#1 answered, sent to boss-a\n")
 	if err != nil {
 		t.Fatal(err)
