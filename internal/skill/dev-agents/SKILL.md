@@ -202,7 +202,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
 
 ## Manager
 
-In the `manager` session (bare `dev boss`) your workers are bosses, not workers: start one with `dev boss <project> --background` only when the user asks, never with `--model`/`--effort` (the model table and the fresh-worker rule are for workers). A boss that was already open is only printed and stays the user's: its news doesn't reach you. Relay what they send up; you may forward a question between bosses and answer a boss's `asks:` from what the user said to you. Never answer an item on a boss's list, a permission prompt or a dialog: tell the user to answer it from the sidebar's NEEDS YOU, the desktop board or `dev todo answer`.
+In the `manager` session (bare `dev boss`) your workers are bosses, not workers: start one with `dev boss <project> --background` only when the user asks, never with `--model`/`--effort` (the model table and the fresh-worker rule are for workers). A boss that was already open is only printed and stays the user's: its news doesn't reach you, until the user asks you to take it over: `dev boss <project> --background --adopt` (only a boss with no parent; then read `dev todo --all`). Close a boss of yours only when the user asks, with `dev agent close boss-<project>`: refused unless it is idle with no workers and no open asks left; its list stays. Relay what they send up; you may forward a question between bosses and answer a boss's `asks:` from what the user said to you. Never answer an item on a boss's list, a permission prompt or a dialog: tell the user to answer it from the sidebar's NEEDS YOU, the desktop board or `dev todo answer`.
 
 ## Messages between bosses
 

@@ -18,7 +18,7 @@ import (
 )
 
 func newHerdCmd() *cobra.Command {
-	var previews, background bool
+	var previews, background, adopt bool
 	var timeout time.Duration
 	var start agent.Start
 	cmd := &cobra.Command{
@@ -35,7 +35,9 @@ boss's coordinator with them (with a boss that exists they are an error unless t
 with); it keeps them when dev restarts it.
 --background creates the boss without attaching or switching a client, marks it started by the boss session
 dev runs in, prints its name and waits until its Claude registered (as dev agent start does); an existing
-boss is only printed.`,
+boss is only printed. With --adopt, run in the manager's pane, an existing boss no live session started becomes
+the manager's as if it had started it: its news goes up to the manager, it shows in the manager's --mine list and
+previews, and it keeps its workers and list.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,6 +51,9 @@ boss is only printed.`,
 					return errors.New("Must run inside tmux")
 				}
 				return herd.Run(c, pane)
+			}
+			if adopt && !background {
+				return errors.New("--adopt needs --background: dev boss <project> --background --adopt")
 			}
 			if background && len(args) == 0 {
 				return errors.New("--background needs a project: dev boss <project> --background")
@@ -70,7 +75,7 @@ boss is only printed.`,
 			}
 			// A detached boss skips the first-run restore, which switches clients (as dev agent start does)
 			if background {
-				return openBackground(cmd, c, p.Name, dir, start, timeout)
+				return openBackground(cmd, c, p.Name, dir, start, timeout, adopt)
 			}
 			// After the first-run restore, so a saved boss is attached rather than replaced
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
@@ -82,20 +87,33 @@ boss is only printed.`,
 	cmd.Flags().BoolVar(&previews, "previews", false, "run the previews pane (inside the boss session)")
 	_ = cmd.Flags().MarkHidden("previews")
 	cmd.Flags().BoolVar(&background, "background", false, "create the boss detached and wait until its Claude registered")
+	cmd.Flags().BoolVar(&adopt, "adopt", false, "with --background in the manager's pane: make an existing boss no live session started the manager's")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background or no terminal, give up when no Claude registered within this")
 	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd
 }
 
 // openBackground is dev boss <project> --background: the boss exists detached, started by the boss session this
-// runs in, and is printed once its Claude registered.
-func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, start agent.Start, timeout time.Duration) error {
+// runs in, and is printed once its Claude registered; adopt only makes an open one the manager's (herd.TakeOver).
+func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, start agent.Start, timeout time.Duration, adopt bool) error {
+	pane := os.Getenv("TMUX_PANE")
+	if adopt {
+		if !herd.IsManagerPane(c, pane) {
+			return errors.New("--adopt runs only in the manager's pane")
+		}
+		session := herd.SessionName(project)
+		if err := herd.TakeOver(c, session, pane, start); err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), session)
+		return nil
+	}
 	session, created, err := herd.OpenBackground(c, project, dir, start)
 	if err != nil {
 		return err
 	}
 	if created {
-		if pane := os.Getenv("TMUX_PANE"); pane != "" && herd.IsBossPane(c, pane) {
+		if pane != "" && herd.IsBossPane(c, pane) {
 			if err := herd.MarkStartedBy(c, session, pane, false); err != nil {
 				return err
 			}
