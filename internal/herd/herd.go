@@ -96,9 +96,12 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`that project's boss. Use the dev-agents skill. ` +
 	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + `, never with --model or ` +
 	`--effort (a boss runs on its project's settings); projects are ` + "`dev list`" + `. A boss that was already open is ` +
-	`only printed and stays the user's: not in your --mine list, its news never reaches you; say so when you name it. Hand a boss work with ` +
-	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. You can't close a boss (dev agent ` +
-	`close is for worktree workers): the user closes it with × on its sidebar row. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
+	`only printed and stays the user's (not in your --mine list, its news doesn't reach you): say so when you name it. When ` +
+	`the user asks you to take one over, adopt it with ` + "`dev boss <project> --background --adopt`" + ` (only a boss ` +
+	`with no parent), then read ` + "`dev todo --all`" + ` for what it had before. Hand a boss work with ` +
+	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. Close one of your bosses only when the user asks, ` +
+	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
+	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
 	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user), ` +
 	`asks (its turn ended on a question), needs a decision (its own permission prompt or dialog), failed, stuck, and messages ` +
@@ -386,4 +389,46 @@ func MarkStartedBy(c *tmux.Client, session, pane string, outside bool) error {
 func IsBossPane(c *tmux.Client, pane string) bool {
 	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptHerd+"}")
 	return err == nil && strings.TrimSpace(out) != ""
+}
+
+// IsManagerPane reports whether pane is in the Manager's session.
+func IsManagerPane(c *tmux.Client, pane string) bool {
+	if pane == "" {
+		return false
+	}
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+	return err == nil && strings.TrimSpace(out) == Manager
+}
+
+// TakeOver makes boss session, open and checked against start, the Manager's, pane being its coordinator, as if it
+// had started it: refused for a boss another session that is still there started.
+func TakeOver(c *tmux.Client, session, pane string, start agent.Start) error {
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err != nil {
+		return fmt.Errorf("%s isn't open: nothing to adopt", session)
+	}
+	if err := checkExisting(c, session, start); err != nil {
+		return err
+	}
+	by, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(session), OptStartedBy)
+	if err != nil {
+		return err
+	}
+	switch by = strings.TrimSpace(by); by {
+	case Manager:
+		return nil
+	case "":
+	default:
+		target := by
+		if !sidebar.IsSessionID(by) {
+			target = tmux.SessionTarget(by)
+		}
+		_, err := c.Run("has-session", "-t", target)
+		if err == nil {
+			return fmt.Errorf("%s was started by %s: only a boss with no parent is adopted", session, by)
+		}
+		if !strings.Contains(err.Error(), "can't find session") {
+			return err
+		}
+	}
+	return MarkStartedBy(c, session, pane, false)
 }

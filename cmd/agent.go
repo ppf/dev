@@ -430,7 +430,9 @@ repository (on GitHub also origin's PR to its upstream) that is open, or merged 
 with --boss outside tmux is refused unless closed that way.
 Its untracked, not ignored files (e.g. RESULT.md) are copied to $XDG_STATE_HOME/dev/results/<session>/ first.
 Then clients watching it move to this (or --boss's) session, its session is killed, its worktree removed and its
-branch force-deleted.`,
+branch force-deleted.
+A boss (dev boss) is closed only by the manager that started or adopted it, as the sidebar's × closes it: refused
+unless it is idle, no session it started is left and its to do list has no open ask; its list stays.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
@@ -447,6 +449,9 @@ branch force-deleted.`,
 			}
 			if a.Outside && !outsideBoss(boss) {
 				return fmt.Errorf("%s was started by a coordinator outside tmux (--boss): leave it to that coordinator", a.Session)
+			}
+			if a.Boss {
+				return closeBoss(cmd, c, pane, a, asJSON)
 			}
 			done, closeErr := control.Close(c, pane, a)
 			// Once files are archived, print where even if a later step failed
@@ -474,6 +479,25 @@ branch force-deleted.`,
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
 	addBossFlag(cmd, &boss)
 	return cmd
+}
+
+// closeBoss is dev agent close of boss a, run in pane, the manager's.
+func closeBoss(cmd *cobra.Command, c *tmux.Client, pane string, a control.Agent, asJSON bool) error {
+	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(own) != herd.Manager {
+		return fmt.Errorf("%s is a boss: only the manager closes a boss; the user closes it with × on its sidebar row", a.Session)
+	}
+	if err := control.CloseBoss(c, pane, a); err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(cmd.OutOrStdout(), control.Closed{Session: a.Session})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Closed %s; its to do list stays\n", a.Session)
+	return nil
 }
 
 func newAgentSkillCmd() *cobra.Command {
