@@ -120,13 +120,12 @@ func (b board) offset(sel, h int) int {
 
 // hitAt is what's under column x, row y of the pane, on the board as scrolled.
 func (m Model) hitAt(x, y int) (hit, bool) {
-	gh := m.height - len(m.bottom())
-	top := m.boardTop(gh)
-	if y -= top; len(m.snap.tiles) == 0 || y < 0 || y >= gh-top {
+	top, bh := m.boardSpan(m.height - len(m.bottom()))
+	if y -= top; len(m.snap.tiles) == 0 || y < 0 || y >= bh {
 		return hit{}, false
 	}
 	b := m.board()
-	y += b.offset(index(m.snap.tiles, m.selected), gh-top)
+	y += b.offset(index(m.snap.tiles, m.selected), bh)
 	// The last match wins: a fold arrow over its card's row
 	for _, h := range slices.Backward(b.hits) {
 		if h.y == y && x >= h.x0 && x < h.x1 {
