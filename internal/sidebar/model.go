@@ -84,6 +84,18 @@ type Model struct {
 	err       error      // last refresh failure; nil once a refresh succeeds
 
 	winWidth, winHeight int // Bubble Tea's window size: where an error shows before the first snapshot
+
+	// NEEDS YOU: every boss's open list items (dev todo --all), read apart from the tick; nil funcs mean none
+	needs       []needList
+	needsErr    error
+	needsLoad   func() ([]needList, error)
+	needsAnswer func(boss string, id int, question, option string) (string, error)
+	// The cursor is local: @sidebar_selected_session only names sessions. needKey keeps it on its row across reads.
+	answering          bool  // an answer is running: a second key would send another
+	answerErr          error // the last answer's failure, kept on the bottom row until the next key: a flash can be missed
+	needMode, needOpen bool
+	needIdx            int
+	needKey            string
 }
 
 // tickMsg starts a refresh.
@@ -115,12 +127,12 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c)}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: answerNeed}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
 func (m Model) Init() tea.Cmd {
-	return m.refresh()
+	return tea.Batch(m.refresh(), m.readNeeds(true))
 }
 
 // Update routes refreshes to the model and input to the actions.
@@ -129,7 +141,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, m.refresh()
 	case refreshMsg:
-		return m.apply(msg), tick()
+		m = m.apply(msg)
+		m.fixNeeds()
+		return m, tick()
+	case needsTickMsg:
+		return m, m.readNeeds(true)
+	case needsMsg:
+		// A failed read keeps the last lists: the section and SESSIONS stay, the bottom row says why
+		m.needsErr = msg.err
+		if msg.err == nil {
+			m.needs = msg.lists
+		}
+		m.fixNeeds()
+		if !msg.chain {
+			return m, nil
+		}
+		return m, needsTick()
+	case answeredMsg:
+		m.answering, m.answerErr = false, msg.err
+		if msg.err != nil {
+			showMessage(m.c, msg.client, "❌ "+msg.err.Error())
+		} else {
+			showMessage(m.c, msg.client, "✅ "+msg.out)
+		}
+		m.needOpen = false
+		return m, m.readNeeds(false)
 	case tea.WindowSizeMsg:
 		m.winWidth, m.winHeight = msg.Width, msg.Height
 		return m, nil

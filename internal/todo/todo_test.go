@@ -621,3 +621,28 @@ func TestReminderAsk(t *testing.T) {
 		t.Errorf("lines = %q", got)
 	}
 }
+
+// A board's answer carries the question it showed: numbers restart once a list empties, so a stale board's #1 may be a newer ask.
+func TestAnswerQuestionGuard(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "Merge #148?", Options: []string{"Merge", "Wait"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(now); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Add(Item{Text: "Release now?", Options: []string{"Merge", "Wait"}}, now)
+	if err != nil || id != 1 {
+		t.Fatalf("new ask: %d, %v, want #1 again", id, err)
+	}
+	if _, err := s.Answer(1, "Merge #148?", "Merge", now); err == nil || !strings.Contains(err.Error(), "look at the list again") {
+		t.Errorf("answer by the old question: %v, want refused", err)
+	}
+	if l := read(t, s, now); l.Items[0].Done {
+		t.Error("refused answer ticked the item")
+	}
+	if it, err := s.Answer(1, "Release now?", "Wait", now); err != nil || it.Answer != "Wait" {
+		t.Errorf("answer by its own question: %+v, %v", it, err)
+	}
+}
