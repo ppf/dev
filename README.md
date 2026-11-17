@@ -114,6 +114,9 @@ dev agent wait <target> [--until idle|waiting|settled] [--timeout 90s]
 dev agent read <target> [--lines 50]           # the pane's screen (plus scrollback, if any)
 dev agent send-keys <target> esc|enter|ctrl+c|1|…
 dev agent close <target> [--json]              # close a finished worker: session, worktree, branch
+dev agent message <boss> "text" [--fyi]        # message another boss (or manager); prints its id (m12)
+dev agent reply <id> "text" [--done]           # reply in its thread; --done ends it
+dev agent messages [--json]                    # threads: a boss's own; every thread elsewhere
 dev delivered <worktree> [--json]              # close's delivered checks only, for a desktop-app boss: exit 0 if delivered
 dev agent skill > ~/.claude/skills/dev-agents/SKILL.md   # the coordinator skill
 dev agent skill desktop-boss > ~/.claude/skills/desktop-boss/SKILL.md   # its desktop-app twin (start_session, SendMessage)

@@ -181,7 +181,7 @@ func TestAddCaps(t *testing.T) {
 		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
 	}
 	bt, _ := b.Take()
-	if len(bt.Notes) != maxNotes || bt.Dropped != 3 || !strings.HasSuffix(bt.String(), "(3 older update(s) dropped: run dev agent list --mine)") {
+	if len(bt.Notes) != maxNotes || bt.Dropped != 3 || !strings.HasSuffix(bt.String(), "(3 older update(s) dropped: run dev agent list --mine and dev agent messages)") {
 		t.Errorf("got %d notes, %d dropped", len(bt.Notes), bt.Dropped)
 	}
 }

@@ -35,6 +35,7 @@ const (
 	Stuck    = "stuck"
 	Context  = "high context"
 	Resumed  = "resumed"
+	Message  = "message" // from another boss: dev agent message
 )
 
 // Note is one line about a worker; Key dedupes it against the worker's previous note.
@@ -50,8 +51,11 @@ type Note struct {
 // leaveIt ends an Outside note's line.
 const leaveIt = "started by a coordinator outside tmux: leave it to that coordinator"
 
-// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside.
+// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside; a Message's is "message <text>".
 func (n Note) String() string {
+	if n.Kind == Message {
+		return n.Kind + " " + n.Text
+	}
 	if n.Outside {
 		return n.Worker + " " + n.Summary() + "; " + leaveIt
 	}
@@ -229,7 +233,10 @@ func (bt Batch) String() string {
 		b.WriteString("\n- " + n.String())
 	}
 	if bt.Dropped > 0 {
-		fmt.Fprintf(&b, "\n(%d older update(s) dropped: run dev agent list --mine)", bt.Dropped)
+		fmt.Fprintf(&b, "\n(%d older update(s) dropped: run dev agent list --mine and dev agent messages)", bt.Dropped)
+	}
+	if slices.ContainsFunc(bt.Notes, func(n Note) bool { return n.Kind == Message }) {
+		b.WriteString("\n" + messageHint)
 	}
 	return b.String()
 }
@@ -237,7 +244,7 @@ func (bt Batch) String() string {
 // Message is the batch as sent over Claude's messaging socket, which Claude shows as another session's message
 // and would try to answer.
 func (bt Batch) Message() string {
-	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; dev reads no reply)"
+	return bt.String() + "\n(from dev's boss inbox: act on these like any inbox batch; don't reply to this session, dev reads no reply here)"
 }
 
 // state is an inbox file: the pending notes, each worker's last note key (dedupe) and health, the last paste,
@@ -293,11 +300,14 @@ func Open(socket, session string) (Box, error) {
 }
 
 // lock takes the inbox's exclusive lock; close the file to release it.
-func (b Box) lock() (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(b.path), 0o700); err != nil {
+func (b Box) lock() (*os.File, error) { return lockPath(b.path) }
+
+// lockPath takes the exclusive lock of the file at path; close the file to release it.
+func lockPath(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(b.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -344,15 +354,20 @@ func (b Box) update(f func(*state) error) error {
 	if err := f(&s); err != nil {
 		return err
 	}
-	data, err := json.Marshal(s)
+	return writeJSON(b.path, s)
+}
+
+// writeJSON replaces the file at path with v as JSON; call it under the file's lock.
+func writeJSON(path string, v any) error {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	tmp := b.path + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, b.path)
+	return os.Rename(tmp, path)
 }
 
 // Add queues n unless it repeats its worker's last note; past maxNotes the oldest go. added reports
@@ -379,10 +394,13 @@ func (s *state) health(worker string) *health {
 }
 
 func (s *state) add(n Note) bool {
-	if s.Last[n.Worker] == n.Key {
-		return false
+	// A message's sender is no worker of this boss: its key would spoil that worker's dedupe
+	if n.Kind != Message {
+		if s.Last[n.Worker] == n.Key {
+			return false
+		}
+		s.Last[n.Worker] = n.Key
 	}
-	s.Last[n.Worker] = n.Key
 	s.Notes = append(s.Notes, n)
 	if over := len(s.Notes) - maxNotes; over > 0 {
 		s.Notes, s.Dropped = s.Notes[over:], s.Dropped+over
