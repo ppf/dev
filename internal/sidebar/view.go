@@ -56,12 +56,13 @@ func (m Model) render() frame {
 	if buttons {
 		header += strings.Repeat(" ", btn-9) + gold + bold + "+" + reset
 	}
-	f := frame{lines: []string{header, ""}}
+	needs, hits := m.renderNeeds(w, h)
+	f := frame{lines: append(needs, header, ""), needs: hits, header: len(needs)}
 
 	if len(m.snap.sessions) == 0 {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
-	unwrapped := listLines(m.snap.sessions)
+	unwrapped := len(needs) + listLines(m.snap.sessions)
 	rolls := rollups(m.snap.sessions)
 	prevGroup := ""
 	for i, s := range m.snap.sessions {
@@ -218,6 +219,12 @@ func (m Model) bottomRow() string {
 	switch {
 	case m.err != nil:
 		return errorRow(m.err, m.snap.width)
+	case m.answerErr != nil:
+		return AlertRow(m.answerErr.Error(), m.snap.width)
+	case m.needMode:
+		return m.needsHint()
+	case m.needsErr != nil:
+		return AlertRow(m.needsErr.Error(), m.snap.width)
 	case m.snap.focused && len(m.snap.sessions) > 0:
 		return hint
 	}

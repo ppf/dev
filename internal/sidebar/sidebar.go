@@ -79,9 +79,11 @@ type Origin struct {
 
 // frame is one rendered screen: at most height lines, where each session row starts and where its PR tag is.
 type frame struct {
-	lines []string
-	rows  []rowStart // display order
-	links []link
+	lines  []string
+	rows   []rowStart // display order
+	links  []link
+	needs  []needHit // NEEDS YOU's rows, above the header
+	header int       // the line of the SESSIONS header
 }
 
 // link is a clickable PR tag: columns [from, to) of line.

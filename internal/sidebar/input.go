@@ -16,7 +16,13 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if target == "" {
 		target = current
 	}
+	m.answerErr = nil
+	if m.needMode {
+		return m.handleNeedsKey(k)
+	}
 	switch k.String() {
+	case "n":
+		return m.enterNeeds(), nil
 	case "j", "down":
 		return m.moveSelection(client, target, 1), nil
 	case "k", "up":
@@ -57,16 +63,22 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, runAction(c, client, func() error { return m.prs.open(l.url) })
 		}
 	}
+	for _, h := range f.needs {
+		if rows := m.needRows(); ms.Y == h.line && h.idx < len(rows) {
+			m.needMode, m.needIdx, m.needKey, m.needOpen = true, h.idx, rows[h.idx].key(), false
+			return m.openNeed(rows[h.idx])
+		}
+	}
 	session, exact, ok := rowAt(f.rows, ms.Y)
 	if buttonZone(ms.X, m.snap.width) {
-		if ms.Y == 0 {
+		if ms.Y == f.header {
 			return m, runAction(c, client, func() error { return OpenPicker(c, client) })
 		}
 		if ok && exact {
 			return m, runAction(c, client, func() error { return Close(c, client, current, session) })
 		}
 	}
-	if !ok {
+	if !ok || ms.Y < f.header {
 		return m, nil
 	}
 	if err := m.setSelection(session); err != nil {
