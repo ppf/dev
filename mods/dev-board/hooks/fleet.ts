@@ -18,12 +18,13 @@ const readJson = async (run: Run, argv: string[]): Promise<unknown> => {
 
 const isArray = (v: unknown): v is any[] => Array.isArray(v)
 
-/** Every tmux boss's items waiting on the person (not `--on` anyone), from `dev todo --all --json`; throws on output it does not read. */
-export async function readAsks(run: Run, bin: string): Promise<FleetItem[]> {
+/** Every tmux boss's items waiting on the person (not `--on` anyone), from `dev todo --all --json`, and each list it couldn't read into `errors`; throws on output it does not read. */
+export async function readAsks(run: Run, bin: string, errors: string[] = []): Promise<FleetItem[]> {
   const lists = await readJson(run, [bin, 'todo', '--all', '--json'])
   if (!isArray(lists)) throw new Error('dev todo --all --json printed no array')
   return lists.flatMap(l => {
     if (typeof l?.boss !== 'string' || !isArray(l.items)) throw new Error('dev todo --all --json printed a list this mod does not read')
+    if (typeof l.error === 'string' && l.error !== '') errors.push(`${l.boss}: ${l.error}`)
     return l.items.flatMap((it: any): FleetItem[] => {
       if (typeof it?.id !== 'number' || typeof it.text !== 'string' || typeof it.done !== 'boolean') throw new Error('dev todo --all --json printed an item this mod does not read')
       if (it.on) return []
@@ -64,7 +65,7 @@ export async function readFleet(run: Run, bin: string): Promise<{ fleet: Fleet; 
       errors.push(err instanceof Error ? err.message : String(err))
       return [] as T[]
     })
-  const [asks, agents, threads] = await Promise.all([take(() => readAsks(run, bin)), take(() => readAgents(run, bin)), take(() => readThreads(run, bin))])
+  const [asks, agents, threads] = await Promise.all([take(() => readAsks(run, bin, errors)), take(() => readAgents(run, bin)), take(() => readThreads(run, bin))])
   return { fleet: { asks, agents, threads }, errors }
 }
 

@@ -38,20 +38,32 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		return "", false, nil
 	}
 	if e.Name == "SessionStart" {
+		if e.Source == "clear" || e.Source == "startup" {
+			// A new conversation never saw the user's earlier words
+			if b, ok, err := Coordinator(c, pane); ok && err == nil {
+				if err := b.Box.ForgetPrompt(); err != nil {
+					return "", false, err
+				}
+			}
+		}
 		out, err = startList(c, pane, e.Source)
 		return out, false, err
 	}
 	if e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
 		return "", false, nil
 	}
+	if e.Name == "UserPromptSubmit" {
+		b, ok, err := Coordinator(c, pane)
+		if !ok || err != nil {
+			return "", false, err
+		}
+		if err := b.Box.Arrived(e.Prompt, time.Now()); err != nil {
+			return "", false, err
+		}
+	}
 	b, ok, err := Self(c, pane)
 	if !ok || err != nil {
 		return "", false, err
-	}
-	if e.Name == "UserPromptSubmit" {
-		if err := b.Box.Arrived(e.Prompt); err != nil {
-			return "", false, err
-		}
 	}
 	bt, err := b.Box.Take()
 	if err != nil {

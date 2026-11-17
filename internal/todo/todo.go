@@ -59,6 +59,7 @@ type Item struct {
 	Until   int64    `json:"until,omitempty"`
 	Options []string `json:"options,omitempty"`
 	Answer  string   `json:"answer,omitempty"`
+	Added   int64    `json:"added,omitempty"` // when it was added or last replaced, unix seconds
 }
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty.
@@ -318,7 +319,7 @@ func (s Store) Set(texts []string, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		f.Items = make([]Item, len(texts))
 		for i, t := range texts {
-			f.Items[i] = Item{ID: i + 1, Text: t}
+			f.Items[i] = Item{ID: i + 1, Text: t, Added: now.Unix()}
 		}
 		f.Next = len(texts) + 1
 		return nil
@@ -331,7 +332,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 		if len(f.Items) == 0 {
 			f.Next = 1
 		}
-		it.ID, it.Done = max(f.Next, 1), 0
+		it.ID, it.Done, it.Added = max(f.Next, 1), 0, now.Unix()
 		if it.On == Me {
 			it.On, it.Session = "", nil
 		}
@@ -351,7 +352,7 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 			return fmt.Errorf("no open item %d", id)
 		}
 		old := f.Items[i]
-		it.ID, it.Done = id, 0
+		it.ID, it.Done, it.Added = id, 0, now.Unix()
 		switch it.On {
 		case Me:
 			it.On, it.Session = "", nil
@@ -421,8 +422,8 @@ func Pick(options []string, arg string) (string, error) {
 
 // Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
 // that isn't an ask, is on someone else or isn't open is an error; so is one whose text isn't question ("" skips the check),
-// as item numbers restart once a list empties.
-func (s Store) Answer(id int, question, arg string, now time.Time) (Item, error) {
+// as item numbers restart once a list empties. A before other than 0 also refuses an item not added before it (unix seconds).
+func (s Store) Answer(id int, question, arg string, before int64, now time.Time) (Item, error) {
 	var it Item
 	err := s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
@@ -439,6 +440,10 @@ func (s Store) Answer(id int, question, arg string, now time.Time) (Item, error)
 			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
 		case len(p.Options) == 0:
 			return fmt.Errorf("item %d is no question (dev todo ask): tick it with dev todo done", id)
+		case before != 0 && p.Added == 0:
+			return fmt.Errorf("item %d has no time added (an older dev's): the user answers it", id)
+		case before != 0 && p.Added >= before:
+			return fmt.Errorf("item %d is newer than the user's latest prompt: the user hasn't seen it", id)
 		}
 		answer, err := Pick(p.Options, arg)
 		if err != nil {

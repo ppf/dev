@@ -197,6 +197,16 @@ func resolveOther(c *tmux.Client, target string) (control.Agent, error) {
 	return a, err
 }
 
+// typeInto is resolveOther for a command that types into the pane, refusing a Claude Code session the manager: its
+// prompts count as the user's words (dev todo answer --via manager).
+func typeInto(c *tmux.Client, target string) (control.Agent, error) {
+	a, err := resolveOther(c, target)
+	if err == nil && a.Session == herd.Manager && os.Getenv("CLAUDECODE") != "" {
+		return a, errors.New("refused in a Claude Code session: the manager's prompts are the user's; use dev agent message manager")
+	}
+	return a, err
+}
+
 func newAgentPromptCmd() *cobra.Command {
 	var wait bool
 	var stall, timeout time.Duration
@@ -226,7 +236,7 @@ agent's new conversation started (its hook recorded a new session).`,
 				text = strings.TrimRight(string(in), "\n")
 			}
 			c := tmux.New()
-			a, err := resolveOther(c, args[0])
+			a, err := typeInto(c, args[0])
 			if err != nil {
 				return err
 			}
@@ -295,7 +305,7 @@ Claude fires no hook for that.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			c := tmux.New()
-			a, err := resolveOther(c, args[0])
+			a, err := typeInto(c, args[0])
 			if err != nil {
 				return err
 			}

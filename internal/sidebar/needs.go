@@ -31,6 +31,7 @@ const (
 // shape is read here, not shared).
 type needList struct {
 	Boss  string     `json:"boss"`
+	Error string     `json:"error"` // the list wasn't read
 	Items []needItem `json:"items"`
 }
 
@@ -51,12 +52,16 @@ type needRow struct {
 	options []string
 	session string // where ⏎ goes: the boss, or the session with the dialog
 	dialog  bool
+	broken  bool // the boss's list wasn't read: text is why
 }
 
 // key identifies the row across reads: a list's numbers restart once it empties, so the text is part of it.
 func (r needRow) key() string {
-	if r.dialog {
+	switch {
+	case r.dialog:
 		return "dialog\x00" + r.session
+	case r.broken:
+		return "broken\x00" + r.boss
 	}
 	return fmt.Sprintf("ask\x00%s\x00%d\x00%s", r.boss, r.id, r.text)
 }
@@ -137,7 +142,8 @@ func (m Model) readNeeds(chain bool) tea.Cmd {
 	}
 }
 
-// needRows are the lines of NEEDS YOU: each open item no one else is on, then each session waiting on a dialog.
+// needRows are the lines of NEEDS YOU: each open item no one else is on (a list not read: why), then each session
+// waiting on a dialog.
 func (m Model) needRows() []needRow {
 	group := map[string]string{}
 	for _, s := range m.snap.sessions {
@@ -148,6 +154,9 @@ func (m Model) needRows() []needRow {
 		project, ok := group[l.Boss]
 		if !ok {
 			project = l.Boss
+		}
+		if l.Error != "" {
+			rows = append(rows, needRow{project: project, boss: l.Boss, text: l.Error, session: l.Boss, broken: true})
 		}
 		for _, it := range l.Items {
 			if !it.Done && it.On == "" {
@@ -326,8 +335,11 @@ func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 func (m Model) needLine(r needRow, w int, selected bool) string {
 	project := truncate(r.project, max(1, min(12, w/3)))
 	mark := "☐"
-	if r.dialog {
+	switch {
+	case r.dialog:
 		mark = red + "●" + reset
+	case r.broken:
+		mark = gold + "⚠" + reset
 	}
 	vis := 1 + ansi.StringWidth(project) + 2 + 1 + 1
 	text := truncate(r.text, max(1, w-vis-1))

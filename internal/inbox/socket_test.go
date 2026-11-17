@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,13 +84,13 @@ func TestSendFlight(t *testing.T) {
 	if pending, _ := b.Pending(); !pending {
 		t.Error("in flight isn't pending")
 	}
-	if err := b.Arrived("some other prompt"); err != nil {
+	if err := b.Arrived("some other prompt", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got, _, _ := b.TakeForSend(now); len(got.Notes) != 0 {
 		t.Error("another prompt cleared the batch in flight")
 	}
-	if err := b.Arrived(bt.Message()); err != nil {
+	if err := b.Arrived(bt.Message(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ := b.TakeForSend(now)
@@ -146,5 +147,56 @@ func TestUnsend(t *testing.T) {
 	got, paste, _ := b.TakeForSend(now)
 	if got.String() != "[dev boss inbox] 2 worker update(s):\n- a finished: 1\n- b finished: 2" || paste {
 		t.Errorf("after unsend: %q, paste %v", got, paste)
+	}
+}
+
+// The user's latest prompt is kept for an answer the manager relays; a batch or ResumePrompt dev sent isn't one.
+func TestArrivedUserPrompt(t *testing.T) {
+	b := testBox(t)
+	if p, err := b.UserPrompt(); p != nil || err != nil {
+		t.Fatalf("before any prompt: %+v, %v", p, err)
+	}
+	at := time.Unix(1700000000, 0)
+	for i, prompt := range []string{"merge 148", Header + " 1 worker update(s):\n- boss-a waits on you: #1 Merge?", ResumePrompt, "  "} {
+		if err := b.Arrived(prompt, at.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p, err := b.UserPrompt(); err != nil || p == nil || *p != (Prompt{Text: "merge 148", At: at.Unix()}) {
+		t.Errorf("UserPrompt = %+v, %v; want merge 148 at %d", p, err, at.Unix())
+	}
+	// The user quoting a batch is still their prompt
+	quote := "for " + Header + " #1 Merge?: merge"
+	if err := b.Arrived(quote, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.UserPrompt(); err != nil || p == nil || p.Text != quote {
+		t.Errorf("UserPrompt = %+v, %v; want %q", p, err, quote)
+	}
+}
+
+// A relayed answer quotes the user's words, cleaned, and stays a "you answered" note for its item.
+func TestAnswerVia(t *testing.T) {
+	n := AnswerVia(4, "Merge #148?", "Merge", "merge 148,\n  wait on the API one")
+	if got := n.String(); got != `you answered #4 "Merge #148?" via manager ("merge 148, wait on the API one"): Merge` || n.Key != Answer(4, "", "").Key {
+		t.Errorf("AnswerVia = %q, key %q", got, n.Key)
+	}
+}
+
+// A long prompt keeps both ends, where an answer may be; a new conversation forgets it.
+func TestPromptClipForget(t *testing.T) {
+	long := "merge 148 " + strings.Repeat("x ", 300) + "wait on the API one"
+	if got := clip(long); len([]rune(got)) > maxText || !strings.HasPrefix(got, "merge 148") || !strings.HasSuffix(got, "wait on the API one") {
+		t.Errorf("clip = %q", got)
+	}
+	b := testBox(t)
+	if err := b.Arrived("merge 148", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ForgetPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.UserPrompt(); p != nil || err != nil {
+		t.Errorf("after ForgetPrompt: %+v, %v", p, err)
 	}
 }
