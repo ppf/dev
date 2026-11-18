@@ -93,3 +93,10 @@ func TestParseDialogGrokBox(t *testing.T) {
 		t.Errorf("parseDialog = %v %+v", ok, d)
 	}
 }
+
+func TestParseDialogTitleGutter(t *testing.T) {
+	d, ok := parseDialog("────────\n│\n│ ❓ Which color?\n\n❯ 1. Red\n  2. Green\n")
+	if !ok || d.title != "❓ Which color?" {
+		t.Errorf("title %q ok %v", d.title, ok)
+	}
+}
