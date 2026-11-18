@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,5 +366,30 @@ func TestSubtreeSpentFromPanes(t *testing.T) {
 	}
 	if r := snap(); r.HasCost || !r.Warn || !strings.Contains(r.CostErr, ledgers[0]) || !hasRollLine(r) {
 		t.Errorf("unreadable: has cost %v, warn %v, err %q", r.HasCost, r.Warn, r.CostErr)
+	}
+}
+
+// A manager's bosses and workers are whole or dropped, workers first: never a cut count or a dangling "…".
+func TestRollLineManagerPartsWhole(t *testing.T) {
+	ss := []Session{
+		{Name: "m", ID: "$1", Boss: true, Root: "m", State: agent.Working, CostUSD: 1, HasCost: true},
+		{Name: "b1", ID: "$2", Boss: true, StartedBy: "m", Root: "m", State: agent.Idle},
+		{Name: "b2", ID: "$3", Boss: true, StartedBy: "m", Root: "m", State: agent.Idle},
+	}
+	for i := 4; i < 10; i++ {
+		ss = append(ss, Session{Name: fmt.Sprint("w", i), ID: fmt.Sprint("$", i), StartedBy: "b1", Root: "m", Depth: 2, Agent: "Claude", State: agent.Working, CostUSD: 2, HasCost: true})
+	}
+	r := Subtree(ss, map[string]ListCount{"m": {Plain: 6}})["m"]
+	for width, want := range map[int]string{
+		60: "6 working · 6 need you · 2 bosses · 6 workers · $13.00",
+		44: "6 working · 6 need you · 2 bosses",
+		40: "6 working · 6 need you · 2 bosses",
+		36: "6 working · 6 need you · 2 bosses",
+		32: "6 working · 6 need you",
+	} {
+		got, _ := rollLine(r, width)
+		if ansi.Strip(got) != want {
+			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
+		}
 	}
 }
