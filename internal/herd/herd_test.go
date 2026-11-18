@@ -722,6 +722,13 @@ func TestPromptAskRules(t *testing.T) {
 	if !strings.Contains(skill.DevAgents, "> "+bossBriefAsk+"\n") {
 		t.Error("bossBriefAsk isn't the dev-agents skill's boss brief line")
 	}
+	// The manager pastes it into a double-quoted shell argument.
+	if strings.Contains(bossBriefAsk, "`") {
+		t.Error("bossBriefAsk has a backtick: the shell would run it")
+	}
+	if strings.Contains(coordinatorPrompt, "AskUserQuestion before every use of ultracode") {
+		t.Error("coordinatorPrompt: ultracode is asked with AskUserQuestion, not dev todo ask")
+	}
 	for _, tt := range []struct {
 		name, prompt string
 		want         []string
