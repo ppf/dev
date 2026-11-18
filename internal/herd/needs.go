@@ -35,9 +35,13 @@ func (s snapshot) needLists() []sidebar.NeedList {
 		for _, b := range s.bosses {
 			out = append(out, sidebar.NeedList{Boss: b, Error: s.asksErr.Error()})
 		}
+		// A manager reads its closed bosses' lists too, with no boss of its own open: its own row says so
+		if len(s.bosses) == 0 {
+			out = append(out, sidebar.NeedList{Boss: s.name, Error: s.asksErr.Error()})
+		}
 	}
 	for _, l := range s.asks {
-		nl := sidebar.NeedList{Boss: l.Boss, Items: needItems(l.Items), Updated: l.Updated, Stale: l.Stale}
+		nl := sidebar.NeedList{Boss: l.Boss, Items: needItems(l.Items), Updated: l.Updated, Stale: l.Stale, Closed: l.Closed}
 		if l.Err != nil {
 			nl.Error = l.Err.Error()
 		}
@@ -49,7 +53,7 @@ func (s snapshot) needLists() []sidebar.NeedList {
 func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
-		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options}
+		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Added: it.Added, Check: it.Check}
 	}
 	return out
 }
@@ -66,7 +70,8 @@ func (m Model) needRows() []needRow {
 		switch {
 		case r.Boss == s.name:
 			n.label = "to do"
-		case manager && slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == r.Session && a.Boss }):
+		// A list's row is a boss's, closed ones' too
+		case manager && (r.Boss != "" || slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == r.Session && a.Boss })):
 			n.label = r.Project
 		case manager:
 			n.label = r.Project + " › " + r.Who
@@ -104,6 +109,9 @@ func pickOptions(p *pick) []string {
 
 // answerable reports a row whose options 1-9 send: a list ask, a dialog on screen, a question on the board.
 func (m Model) answerable(r needRow) bool {
+	if r.Closed {
+		return false
+	}
 	switch r.Kind {
 	case sidebar.NeedListAsk:
 		return true
@@ -188,9 +196,14 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.needMode = false
 	case "ctrl+c":
 		return m, tea.Quit
-	case "g", "enter":
-		return m, m.switchTo(r.Session)
-	case "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case "g", "enter", "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if r.Closed {
+			m.msg = info(r.ClosedHint())
+			return m, nil
+		}
+		if key == "g" || key == "enter" {
+			return m, m.switchTo(r.Session)
+		}
 		if r.sig == m.needDone {
 			m.needKey, m.needDone = r.sig, ""
 			m.msg = info("⏳ " + r.label + " answered: press again to answer it anew")
@@ -430,7 +443,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 	spans = make([][]optSpan, len(lines))
 	if age != "" {
 		// Right-aligned on the first line, past the text's room
-		lines[0] += strings.Repeat(" ", max(1, in+room+1-ansi.StringWidth(lines[0]))) + rule + age + reset
+		lines[0] += strings.Repeat(" ", max(1, in+room+1-ansi.StringWidth(lines[0]))) + r.Tone().Colour() + age + reset
 	}
 	if len(r.Options) > 0 {
 		answers := m.answerable(r)

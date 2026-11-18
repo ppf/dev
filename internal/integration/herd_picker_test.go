@@ -203,7 +203,7 @@ func TestHerdReplyBlur(t *testing.T) {
 }
 
 // A boss's to do item sits in NEEDS YOU unmarked while its list is fresh; once the list is stale (no change
-// for hours) the row wears the list's age at its right edge.
+// for hours) the row wears the item's own age at its right edge.
 func TestHerdNeedsStaleAge(t *testing.T) {
 	d, _, coord, previews := herdServer(t, "")
 	cmd := exec.Command(devBin, "todo", "add", "Call Vince")
@@ -228,6 +228,7 @@ func TestHerdNeedsStaleAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	list["updated"] = time.Now().Add(-18 * time.Hour).Unix()
+	list["items"].([]any)[0].(map[string]any)["added"] = time.Now().Add(-18 * time.Hour).Unix()
 	b, _ := json.Marshal(list)
 	writeFile(t, files[0], string(b))
 	waitPane(t, d, previews, "the stale item, marked", func(s string) bool {

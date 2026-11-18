@@ -864,7 +864,7 @@ func TestBoardPlannedWait(t *testing.T) {
 	if strings.Contains(board, "WORKING") || strings.Contains(board, "Run the desktop tests") {
 		t.Errorf("a planned wait still shows working:\n%s", board)
 	}
-	row := todoItem(m.snap.todo.Items[1], m.todoOwner(m.snap.todo.Items[1]), 90)
+	row := todoItem(m.snap.todo.Items[1], m.todoOwner(m.snap.todo.Items[1]), 90, time.Now())
 	if got := strings.TrimSpace(ansi.Strip(row)); !strings.HasSuffix(got, "● docs-api · waiting until "+at) || !strings.Contains(row, sidebar.Green+"waiting until "+at) {
 		t.Errorf("to do row = %q", row)
 	}

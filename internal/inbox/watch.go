@@ -16,6 +16,7 @@ import (
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 	"github.com/ppf/dev/internal/wait"
 )
 
@@ -267,11 +268,16 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 // limit reset (resume; a worker that is a boss without a resumed note), wakes those whose planned wait ended (wake), checks on its workers (see state.observe) and queues their notes, also recording them on the worker's pane (OptNote), then delivers
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
-// StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find.
+// StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find, then looks up the PRs its to do
+// items link to (lookupList).
 func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	b, ok, err := Here(c, pane)
-	if !ok || err != nil {
+	switch {
+	case err != nil:
 		return err
+	case !ok:
+		// Its inbox off: its board still shows its list
+		return lookupList(c, pane, clk.Now())
 	}
 	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}")
 	if err != nil {
@@ -421,7 +427,27 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if len(due) > 0 {
 		errs = append(errs, checkPRs(c, clk, b, due))
 	}
-	return errors.Join(errs...)
+	return errors.Join(append(errs, lookupList(c, pane, now))...)
+}
+
+// listLookups caps the PR lookups of to do items one watch makes: gh takes up to a second each.
+const listLookups = 2
+
+// viewPR looks a to do item's PR up; tests replace it.
+var viewPR = sidebar.ViewPR
+
+// lookupList looks up the PRs the boss's open to do items link to, those not looked up within todo.LookupTTL, at
+// most listLookups; a failed lookup is kept on its item, not reported, as gh may be down for long. None for a pane
+// not in a boss session.
+func lookupList(c *tmux.Client, pane string, now time.Time) error {
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return s.Lookup(now, todo.LookupTTL, listLookups, viewPR)
 }
 
 // deliverPending delivers b's inbox when notes wait.

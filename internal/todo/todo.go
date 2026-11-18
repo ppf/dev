@@ -31,6 +31,8 @@ const (
 	doneShown = 5 * time.Second
 	// stale is how long a list goes unchanged before its boards dim its age: it may be out of date.
 	stale = time.Hour
+	// unchanged is how long an open item goes without a --replaces before it is checked as unchanged.
+	unchanged = 48 * time.Hour
 )
 
 // UntilLayout is how an item's Until time is written: local date and minute.
@@ -62,11 +64,13 @@ type Item struct {
 	Added   int64    `json:"added,omitempty"` // when it was added or last replaced, unix seconds
 }
 
-// file is a list as stored; Next is the id the next add gets, reset once the list is empty.
+// file is a list as stored; Next is the id the next add gets, reset once the list is empty; Boss is its boss
+// session's name, once a change through ForPane wrote it.
 type file struct {
 	Items   []Item `json:"items"`
 	Updated int64  `json:"updated"`
 	Next    int    `json:"next"`
+	Boss    string `json:"boss,omitempty"`
 }
 
 // List is a list as its boards show it, for dev todo --json: items waiting on the user first, then those
@@ -78,19 +82,21 @@ type List struct {
 	Stale   bool    `json:"stale"`
 }
 
-// Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never). A Session the board
-// doesn't list any more is gone.
+// Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never); Added when it was added or
+// last replaced (0: an older dev's); Check why it may be out of date. A Session the board doesn't list any more is gone.
 type Shown struct {
-	ID      int      `json:"id"`
-	Text    string   `json:"text"`
-	On      string   `json:"on,omitempty"`
-	Session *Session `json:"session,omitempty"`
-	Link    string   `json:"link,omitempty"`
-	Done    bool     `json:"done"`
-	Until   int64    `json:"until,omitempty"`
-	Options []string `json:"options,omitempty"`
-	Answer  string   `json:"answer,omitempty"`
-	Gone    bool     `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+	ID      int            `json:"id"`
+	Text    string         `json:"text"`
+	On      string         `json:"on,omitempty"`
+	Session *Session       `json:"session,omitempty"`
+	Link    string         `json:"link,omitempty"`
+	Done    bool           `json:"done"`
+	Until   int64          `json:"until,omitempty"`
+	Options []string       `json:"options,omitempty"`
+	Answer  string         `json:"answer,omitempty"`
+	Added   int64          `json:"added,omitempty"`
+	Check   *sidebar.Check `json:"check,omitempty"`
+	Gone    bool           `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
@@ -124,8 +130,8 @@ func (l List) Open() (n, on int) {
 // ErrNotBoss is ForPane's error for a session not marked a dev boss.
 var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is its boss's")
 
-// Store is one boss's list file.
-type Store struct{ path string }
+// Store is one boss's list file; boss is its session's name when known.
+type Store struct{ path, boss string }
 
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
@@ -166,14 +172,14 @@ func (s Store) AdoptDesktop(earlier func() (func(id string) bool, error)) (adopt
 		if path == s.path || !isEarlier(id) {
 			continue
 		}
-		l, err := Store{path}.Read(time.Now())
+		l, err := Store{path: path}.Read(time.Now())
 		if err != nil {
 			unread = append(unread, err)
 			continue
 		}
 		// An emptied list stays a file: a newer empty one mustn't win over open items
 		if n, _ := l.Open(); n > 0 && (from.path == "" || l.Updated > updated) {
-			from, updated = Store{path}, l.Updated
+			from, updated = Store{path: path}, l.Updated
 		}
 	}
 	if from.path != "" {
@@ -194,7 +200,11 @@ func (s Store) take(from Store) (taken bool, err error) {
 				return nil
 			}
 			taken = true
-			return os.Rename(from.path, s.path)
+			if err := os.Rename(from.path, s.path); err != nil {
+				return err
+			}
+			// Its checks go with it, under its lock, which guards them too
+			return ignoreMissing(os.Rename(from.checksPath(), s.checksPath()))
 		})
 	})
 	return taken, err
@@ -256,6 +266,7 @@ func ForPane(c *tmux.Client, pane string) (Store, error) {
 	if err != nil {
 		return st, err
 	}
+	st.boss = s.Name
 	old, err := open(s.Socket + "-" + s.ID + "-" + s.Created)
 	if err != nil {
 		return st, err
@@ -296,17 +307,19 @@ func Workers(c *tmux.Client, pane string) ([]Session, error) {
 	return ws, nil
 }
 
-// BossList is one boss's list, as All reads it; Err is why it couldn't be read.
+// BossList is one boss's list, as All reads it; Err is why it couldn't be read; Closed that its boss session is gone.
 type BossList struct {
-	Boss string
-	Err  error
+	Boss   string
+	Err    error
+	Closed bool
 	List
 }
 
 // All is each dev boss session's list with items on c's server, by session name, only the bosses keep takes (nil
 // takes all); none without a server. A list it can't read comes with its error, the others still read; a boss
-// closed since list-sessions is left out.
-func All(c *tmux.Client, now time.Time, keep func(name string) bool) ([]BossList, error) {
+// closed since list-sessions is left out. With closed, the lists with open items of the bosses closed on this server
+// follow (Closed), each open item checked as boss closed unless its PR moved.
+func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed bool) ([]BossList, error) {
 	type boss struct {
 		Name string `tmux:"session_name"`
 		Herd string `tmux:"@dev_herd"`
@@ -317,7 +330,9 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool) ([]BossList
 	}
 	slices.SortFunc(sessions, func(a, b boss) int { return strings.Compare(a.Name, b.Name) })
 	var lists []BossList
+	live := map[string]bool{}
 	for _, sess := range sessions {
+		live[sessionKey(sess.Name)] = true
 		if sess.Herd == "" || keep != nil && !keep(sess.Name) {
 			continue
 		}
@@ -338,7 +353,78 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool) ([]BossList
 			lists = append(lists, BossList{Boss: sess.Name, List: l})
 		}
 	}
-	return lists, nil
+	if !closed || len(sessions) == 0 {
+		return lists, nil
+	}
+	// Any session's socket, they share the server: the first still open
+	var socket string
+	for _, sess := range sessions {
+		if first, err := paneSession(c, tmux.SessionTarget(sess.Name)); err == nil {
+			socket = first.Socket
+			break
+		} else if _, gone := c.Run("has-session", "-t", tmux.SessionTarget(sess.Name)); gone == nil {
+			return nil, err
+		}
+	}
+	if socket == "" {
+		return lists, nil
+	}
+	gone, err := closedLists(socket, live, now)
+	if err != nil {
+		return nil, err
+	}
+	return append(lists, gone...), nil
+}
+
+// closedLists are the lists with open items of the bosses closed on the server at socket, by name; one it can't read
+// comes with its error. live holds the key (sessionKey) of each session on it: a session by a list's name, boss or not,
+// isn't closed. A list's boss is the name it stored, only a boss's name (boss-<project>, manager) whose key is its
+// file's: not another server's whose socket starts alike. An older dev's list stored none: whose it is can't be told
+// (a socket default-boss-x starts like default), so it shows once its boss writes it again. A list it can't read is
+// named by its file.
+func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList, error) {
+	probe, err := open(socket + "-x")
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.TrimSuffix(filepath.Base(probe.path), "x.json")
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(probe.path), prefix+"*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var out []BossList
+	for _, path := range paths {
+		s := Store{path: path}
+		key := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), prefix), ".json")
+		if live[key] {
+			continue
+		}
+		name := key
+		f, err := s.read()
+		var l List
+		if err == nil {
+			name = f.Boss
+			l, err = s.Read(now)
+		}
+		if (name != sidebar.Manager && !strings.HasPrefix(name, "boss-")) || sessionKey(name) != key {
+			continue
+		}
+		if err != nil {
+			out = append(out, BossList{Boss: name, Err: err, Closed: true, List: List{Items: []Shown{}, Stale: true}})
+			continue
+		}
+		if n, _ := l.Open(); n == 0 {
+			continue
+		}
+		for i, it := range l.Items {
+			if !it.Done && (it.Check == nil || !it.Check.Event()) {
+				l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
+			}
+		}
+		out = append(out, BossList{Boss: name, Closed: true, List: l})
+	}
+	slices.SortFunc(out, func(a, b BossList) int { return strings.Compare(a.Boss, b.Boss) })
+	return out, nil
 }
 
 // Read is the list as its boards show it at now; a missing file is an empty list.
@@ -348,9 +434,17 @@ func (s Store) Read(now time.Time) (List, error) {
 		return List{Items: []Shown{}}, err
 	}
 	f.prune(now)
+	facts, err := s.readChecks()
+	if err != nil {
+		return List{Items: []Shown{}}, err
+	}
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		l.Items = append(l.Items, Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Answer: it.Answer})
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Answer: it.Answer, Added: it.Added}
+		if !sh.Done {
+			sh.Check = check(it, facts[it.key()], now)
+		}
+		l.Items = append(l.Items, sh)
 	}
 	slices.SortStableFunc(l.Items, func(a, b Shown) int {
 		return cmp.Compare(min(len(a.On), 1), min(len(b.On), 1))
@@ -396,7 +490,8 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 			return fmt.Errorf("no open item %d", id)
 		}
 		old := f.Items[i]
-		it.ID, it.Done, it.Added = id, 0, now.Unix()
+		// A new Added even within its second: its checks start afresh
+		it.ID, it.Done, it.Added = id, 0, max(now.Unix(), old.Added+1)
 		switch it.On {
 		case Me:
 			it.On, it.Session = "", nil
@@ -598,6 +693,9 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 			return err
 		}
 		f.Updated = now.Unix()
+		if s.boss != "" {
+			f.Boss = s.boss
+		}
 		data, err := json.Marshal(f)
 		if err != nil {
 			return err
@@ -632,17 +730,24 @@ func ParseUntil(s string, now time.Time) (time.Time, error) {
 // startShown is how many open items the list a boss gets at its start names before "+N more".
 const startShown = 20
 
-// lines is the open items, numbered, one per line after a newline; past limit (0: none) a "+N more" line.
-func (l List) lines(limit int) string {
+// lines is the open items, numbered, one per line after a newline; past limit (0: none) a "+N more" line. Items to
+// re-check (Flagged) come first under a line saying so, each with why, then the rest under "The rest:".
+func (l List) lines(limit int, now time.Time) string {
+	var flagged, rest []Shown
+	for _, it := range l.Items {
+		switch {
+		case it.Done:
+		case it.Flagged():
+			flagged = append(flagged, it)
+		default:
+			rest = append(rest, it)
+		}
+	}
 	var b strings.Builder
 	n := 0
-	for _, it := range l.Items {
-		if it.Done {
-			continue
-		}
-		n++
-		if limit > 0 && n > limit {
-			continue
+	write := func(it Shown) {
+		if n++; limit > 0 && n > limit {
+			return
 		}
 		fmt.Fprintf(&b, "\n%d. %s", it.ID, it.Text)
 		switch {
@@ -657,6 +762,21 @@ func (l List) lines(limit int) string {
 		if len(it.Options) > 0 {
 			b.WriteString(" (asked, options: " + strings.Join(it.Options, " · ") + ")")
 		}
+		if it.Check != nil {
+			b.WriteString(" ⚠ " + it.Check.Long(now))
+		}
+	}
+	if len(flagged) > 0 {
+		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):")
+		for _, it := range flagged {
+			write(it)
+		}
+		if len(rest) > 0 && (limit == 0 || n < limit) {
+			b.WriteString("\nThe rest:")
+		}
+	}
+	for _, it := range rest {
+		write(it)
 	}
 	if limit > 0 && n > limit {
 		fmt.Fprintf(&b, "\n+%d more: dev todo", n-limit)
@@ -664,13 +784,16 @@ func (l List) lines(limit int) string {
 	return b.String()
 }
 
+// Flagged reports an open item to re-check: its worker is gone, or it has a Check.
+func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
+
 // whoLine asks a boss to say who does each item, as the reminders end.
 const whoLine = "\nAn item a worker session or someone else does, not the user: dev todo add --replaces <n> --on <worker name|person>."
 
-// Reminder is the open items for a boss reading worker notes, numbered, with a line asking it to tick what the
+// Reminder is the open items for a boss reading worker notes at now, numbered, with a line asking it to tick what the
 // notes closed; "" when none is open.
-func (l List) Reminder() string {
-	items := l.lines(0)
+func (l List) Reminder(now time.Time) string {
+	items := l.lines(0, now)
 	if items == "" {
 		return ""
 	}
@@ -678,10 +801,10 @@ func (l List) Reminder() string {
 		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"." + whoLine
 }
 
-// StartReminder is the open items for a boss starting or /clear'ed, at most startShown, with how long ago the
+// StartReminder is the open items for a boss starting or /clear'ed at now, at most startShown, with how long ago the
 // list changed (age, e.g. "2h ago") and, when kept, that an earlier boss session left it; "" when none is open.
-func (l List) StartReminder(kept bool, age string) string {
-	items := l.lines(startShown)
+func (l List) StartReminder(kept bool, age string, now time.Time) string {
+	items := l.lines(startShown, now)
 	if items == "" {
 		return ""
 	}

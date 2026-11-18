@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/todo"
 )
 
 // todoEnv runs dev todo as the desktop app session local_boss, whose worker is local_w (desktopHome).
@@ -18,6 +20,9 @@ func todoEnv(t *testing.T) {
 	desktopHome(t)
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
 	t.Setenv("TMUX_PANE", "")
+	old := viewPR
+	viewPR = func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }
+	t.Cleanup(func() { viewPR = old })
 }
 
 func run(t *testing.T, stdin string, args ...string) string {
@@ -414,5 +419,15 @@ func TestPickFor(t *testing.T) {
 		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
 			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
 		}
+	}
+}
+
+// dev todo's line ends with why to re-check the item.
+func TestTodoLineCheck(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	it := todo.Shown{ID: 2, Text: "PR #412 open", On: "reviewers", Link: "https://github.com/acme/orbit/pull/412",
+		Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 412, Since: now.Add(-40 * time.Minute).Unix()}}
+	if got, want := todoLine(it, now), "2\t◌\tPR #412 open\ton reviewers\thttps://github.com/acme/orbit/pull/412\t⚠ PR #412 merged 40m ago"; got != want {
+		t.Errorf("line = %q, want %q", got, want)
 	}
 }

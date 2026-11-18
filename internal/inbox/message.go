@@ -16,11 +16,12 @@ import (
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 // Manager is the session of the manager over the bosses: it sees every thread.
-const Manager = "manager"
+const Manager = sidebar.Manager
 
 const (
 	// ThreadCap is the most messages a thread holds, its first one included.

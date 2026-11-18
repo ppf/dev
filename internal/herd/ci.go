@@ -2,7 +2,6 @@ package herd
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -12,9 +11,9 @@ import (
 
 // CI states, as a PR row shows them; "" until a read succeeded, or for a PR without checks.
 const (
-	ciPassed  = "passed"
-	ciFailed  = "failed"
-	ciRunning = "running"
+	ciPassed  = sidebar.CIPassed
+	ciFailed  = sidebar.CIFailed
+	ciRunning = sidebar.CIRunning
 )
 
 // ciTTL is how long a PR's checks are kept before gh is asked again; ciEmptyTTL while none were read yet, for
@@ -37,61 +36,16 @@ type ci struct {
 	err   string // why the last read failed; the fields above keep the last checks read
 }
 
-// rollupCheck is one of gh's statusCheckRollup entries: a check run (name, status, conclusion) or a commit
-// status (context, state).
-type rollupCheck struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	Context    string `json:"context"`
-	State      string `json:"state"`
-}
-
-// failedChecks and runningChecks are the conclusions and states that make a check failed or running; any
-// other one passed (success, skipped, neutral, and whatever gh adds).
-var (
-	failedChecks = []string{"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
-	// A stale check's result is for an older commit: not passed yet
-	runningChecks = []string{"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED", "STALE"}
-)
-
 // parseRollup reads gh pr view --json statusCheckRollup's output.
 func parseRollup(out []byte) (ci, error) {
 	var v struct {
-		Checks []rollupCheck `json:"statusCheckRollup"`
+		Checks []sidebar.RollupCheck `json:"statusCheckRollup"`
 	}
 	if err := json.Unmarshal(out, &v); err != nil {
 		return ci{}, err
 	}
-	var failed, running, all []string
-	// A check run on push and pull_request, or re-run, is named once
-	add := func(names *[]string, name string) {
-		if !slices.Contains(*names, name) {
-			*names = append(*names, name)
-		}
-	}
-	for _, c := range v.Checks {
-		name := c.Name
-		if name == "" {
-			name = c.Context
-		}
-		add(&all, name)
-		switch {
-		case slices.Contains(failedChecks, c.Conclusion), slices.Contains(failedChecks, c.State):
-			add(&failed, name)
-		case slices.Contains(runningChecks, c.Status), slices.Contains(runningChecks, c.State), slices.Contains(runningChecks, c.Conclusion):
-			add(&running, name)
-		}
-	}
-	switch {
-	case len(failed) > 0:
-		return ci{state: ciFailed, names: failed}, nil
-	case len(running) > 0:
-		return ci{state: ciRunning, names: running}, nil
-	case len(all) > 0:
-		return ci{state: ciPassed, names: all}, nil
-	}
-	return ci{}, nil
+	state, names := sidebar.CIState(v.Checks)
+	return ci{state: state, names: names}, nil
 }
 
 // ciCache reads PRs' checks with gh in the background, per pane, since each has its own @dev_pr_gen: a
