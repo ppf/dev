@@ -131,7 +131,7 @@ const Manager = inbox.Manager
 // managerStart is start with the manager's default model and effort where it leaves them unset.
 func managerStart(start agent.Start) agent.Start {
 	if start.Model == "" {
-		start.Model = "sonnet"
+		start.Model = "fable"
 	}
 	if start.Effort == "" {
 		start.Effort = "medium"
@@ -146,7 +146,7 @@ func Open(c *tmux.Client, project, dir string, start agent.Start) error {
 	return openBoss(c, SessionName(project), project, dir, start, start)
 }
 
-// OpenManager is Open for the Manager in dir, a new one on sonnet · medium unless start says otherwise.
+// OpenManager is Open for the Manager in dir, a new one on fable · medium unless start says otherwise.
 func OpenManager(c *tmux.Client, dir string, start agent.Start) error {
 	return openBoss(c, Manager, Manager, dir, start, managerStart(start))
 }

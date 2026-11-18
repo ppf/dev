@@ -28,7 +28,7 @@ func newHerdCmd() *cobra.Command {
 		Long: `Open or attach the project's boss session ("boss-<project>"): a coordinator Claude started in the
 project's main checkout that drives the other sessions with the dev-agents skill, next to live previews of
 the workers it started. Without a project it opens or attaches the manager (session "manager", in
-~/.config/dev/manager), a boss whose workers are bosses, on sonnet and medium effort unless --model or
+~/.config/dev/manager), a boss whose workers are bosses, on fable and medium effort unless --model or
 --effort say otherwise; with no terminal (stdin or stdout not one) it starts the manager detached when
 missing, waits until its Claude registered, and prints how to reach it. --model and --effort start a new
 boss's coordinator with them (with a boss that exists they are an error unless they equal what it was started
