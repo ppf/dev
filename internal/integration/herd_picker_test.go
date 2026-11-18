@@ -80,12 +80,15 @@ func TestHerdPicker(t *testing.T) {
 	_, errOut, status := devAgent(env, "", "prompt", "w1", "ask")
 	check(t, "prompt", status+errOut, "0")
 	waitFor(t, "w1 waiting with its question", func() bool {
-		return d.T("show-option", "-pqv", "-t", w1, "@agent_question") != "" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "▾ ● w1")
+		return d.T("show-option", "-pqv", "-t", w1, "@agent_question") != "" && strings.Contains(d.T("capture-pane", "-p", "-t", previews), "▸ ● w1")
 	})
-	waitPane(t, d, previews, "the dialog on w1's card", func(screen string) bool {
-		return strings.Contains(screen, "Bash  rm -rf build") && strings.Contains(screen, "[1 Yes]") && strings.Contains(screen, " 2 No")
+	waitPane(t, d, previews, "the dialog in NEEDS YOU, its card pointing there", func(screen string) bool {
+		return strings.Contains(screen, "allow Bash: rm -rf build") && strings.Contains(screen, "1 Yes   2 No") && strings.Contains(screen, "in the block ↑")
 	})
 	d.T("send-keys", "-t", previews, "i")
+	waitPane(t, d, previews, "the dialog on w1's card, its picker open", func(screen string) bool {
+		return strings.Contains(screen, "Bash  rm -rf build") && strings.Contains(screen, "[1 Yes]") && strings.Contains(screen, " 2 No")
+	})
 	waitPane(t, d, previews, "the picker's keys", func(screen string) bool { return strings.Contains(screen, "←→ move · ⏎ pick") })
 	if styled := d.T("capture-pane", "-p", "-e", "-t", previews); !strings.Contains(styled, "38;2;228;104;118m┃╭") {
 		t.Errorf("❌ w1's card isn't framed in its red accent:\n%s", styled)
@@ -109,18 +112,21 @@ func TestHerdPicker(t *testing.T) {
 	}
 }
 
-// A click on an option on a worker's card answers its dialog with that option.
+// A click on an option on a worker's card, opened (f), answers its dialog with that option.
 func TestHerdPickerClick(t *testing.T) {
 	d, w1, _, previews := herdServer(t, "set -g mouse on\n")
 	_, errOut, status := devAgent(d.scriptEnv(), "", "prompt", "w1", "ask")
 	check(t, "prompt", status+errOut, "0")
+	waitPane(t, d, previews, "w1's card pointing at NEEDS YOU", func(s string) bool { return strings.Contains(s, "in the block ↑") })
+	d.T("send-keys", "-t", previews, "f")
 	var screen string
 	waitPane(t, d, previews, "the dialog on w1's card", func(s string) bool {
 		screen = s
 		return strings.Contains(s, "[1 Yes]") && strings.Contains(s, " 2 No")
 	})
 	for y, l := range strings.Split(screen, "\n") {
-		if i := strings.Index(l, " 2 No"); i >= 0 {
+		// The card's chips, not NEEDS YOU's options line
+		if i := strings.Index(l, " 2 No"); i >= 0 && strings.Contains(l, "[1 Yes]") {
 			actClick(d, previews, utf8.RuneCountInString(l[:i])+2, y)
 			break
 		}
@@ -129,6 +135,26 @@ func TestHerdPickerClick(t *testing.T) {
 		return strings.Contains(d.T("capture-pane", "-p", "-t", w1), "answered: 2")
 	})
 	waitPane(t, d, previews, "answer verified", func(s string) bool { return strings.Contains(s, "Answered w1") })
+}
+
+// NEEDS YOU answers a worker's dialog: n focuses it on the dialog's row, 1 sends that key to the worker through
+// its picker, and the row goes.
+func TestHerdNeedsBlock(t *testing.T) {
+	d, w1, _, previews := herdServer(t, "")
+	_, errOut, status := devAgent(d.scriptEnv(), "", "prompt", "w1", "ask")
+	check(t, "prompt", status+errOut, "0")
+	waitPane(t, d, previews, "the dialog in NEEDS YOU", func(s string) bool {
+		return strings.Contains(s, "NEEDS YOU 1 · n") && strings.Contains(s, "1 Yes   2 No")
+	})
+	d.T("send-keys", "-t", previews, "n")
+	waitPane(t, d, previews, "NEEDS YOU focused", func(s string) bool { return strings.Contains(s, "esc cards") })
+	d.T("send-keys", "-t", previews, "1")
+	waitFor(t, "w1 got the key", func() bool {
+		return strings.Contains(d.T("capture-pane", "-p", "-t", w1), "answered: 1")
+	})
+	waitPane(t, d, previews, "answer verified, the row gone", func(s string) bool {
+		return strings.Contains(s, "Answered w1") && !strings.Contains(s, "NEEDS YOU 1")
+	})
 }
 
 // waitPane is waitFor on pane's screen, showing the screen when it times out.

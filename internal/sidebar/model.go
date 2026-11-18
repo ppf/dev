@@ -92,9 +92,9 @@ type Model struct {
 	winWidth, winHeight int // Bubble Tea's window size: where an error shows before the first snapshot
 
 	// NEEDS YOU: every boss's open list items (dev todo --all), read apart from the tick; nil funcs mean none
-	needs       []needList
+	needs       []NeedList
 	needsErr    error
-	needsLoad   func() ([]needList, error)
+	needsLoad   func() ([]NeedList, error)
 	needsAnswer func(boss string, id int, question, option string) (string, error)
 	// The cursor is local: @sidebar_selected_session only names sessions. needKey keeps it on its row across reads.
 	answering          bool  // an answer is running: a second key would send another
@@ -133,7 +133,7 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: answerNeed}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.

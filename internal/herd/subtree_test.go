@@ -116,7 +116,7 @@ func sidebarSessions(rows []row) []sidebar.Session {
 	return out
 }
 
-// A boss's own dialog still shows on its card, under Needs you, open.
+// A boss's own dialog puts its card under Needs you, folded: NEEDS YOU asks it.
 func TestBossCardOwnDialog(t *testing.T) {
 	rows := managerRows()
 	rows[1].State, rows[1].WaitingFor = agent.Waiting, "permission_prompt"
@@ -126,7 +126,7 @@ func TestBossCardOwnDialog(t *testing.T) {
 	}
 	s.rollUp()
 	dev := s.tiles[index(s.tiles, "boss-dev")]
-	if dev.section() != needsYouSection || dev.folded(nil) || dev.roll.Text() != "needs you · 1 question · 2 working" {
+	if dev.section() != needsYouSection || !dev.folded(nil) || dev.roll.Text() != "needs you · 1 question · 2 working" {
 		t.Errorf("boss-dev: section %d folded %v roll %q", dev.section(), dev.folded(nil), dev.roll.Text())
 	}
 }
@@ -193,7 +193,8 @@ func TestBossCardWaitingAndWarn(t *testing.T) {
 	}
 }
 
-// A boss's own turn-ending question shows as its own asks card does, the roll-up under it.
+// A boss's own turn-ending question folds its card (NEEDS YOU asks it); opened, it shows as an asks card does, the
+// roll-up under it.
 func TestBossCardOwnAsks(t *testing.T) {
 	rows := managerRows()
 	rows[1].Note = inbox.Note{Kind: inbox.Asks, Text: "Connect the VPN?"}.Summary()
@@ -203,9 +204,9 @@ func TestBossCardOwnAsks(t *testing.T) {
 	}
 	s.rollUp()
 	m := board4()
-	m.snap = s
+	m.snap, m.folds = s, map[string]bool{"boss-dev": false}
 	dev := s.tiles[index(s.tiles, "boss-dev")]
-	if !dev.asks() || dev.folded(nil) {
+	if !dev.asks() || !dev.folded(nil) {
 		t.Fatalf("boss-dev: asks %v folded %v", dev.asks(), dev.folded(nil))
 	}
 	cardRows, _ := m.card(dev, 100)

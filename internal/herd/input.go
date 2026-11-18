@@ -40,6 +40,7 @@ type replyBox struct {
 	hl      int    // the picker's highlighted option
 	hlSig   string // the dialog hl is for: another one starts on its own cursor
 	other   bool   // ed holds the picker's free-text answer
+	block   bool   // opened from NEEDS YOU on a dialog: it closes once its answer is done, a multi-select's once it's gone
 	// sent is the key of the dialog being answered: cleared when the answer fails, once the screen shows
 	// another dialog, or after staleRefreshes still showing it
 	sent  string
@@ -100,7 +101,11 @@ func (m *Model) syncPick() {
 	b := &m.box
 	t, ok := m.bound()
 	if !ok || t.pick == nil {
-		// A capture mid-redraw may miss the dialog: free text being typed stays
+		// A capture mid-redraw may miss the dialog: free text being typed stays; NEEDS YOU's picker closes once
+		// its answer's dialog is gone
+		if b.block && b.sent != "" && !b.other {
+			m.blur()
+		}
 		b.sent = ""
 		return
 	}
@@ -133,14 +138,21 @@ func (m *Model) syncPick() {
 	}
 }
 
+// multiPick reports the reply box answering a multi-select dialog, which takes several answers.
+func (m Model) multiPick() bool {
+	t, ok := m.bound()
+	return ok && t.pick != nil && t.pick.d.multi
+}
+
 // waiting reports an answer whose keys are in flight, or that took while the screen still shows its dialog.
 func (m Model) waiting(p *pick) bool {
 	return m.answering != "" || m.box.sent != "" && p.d.key() == m.box.sent
 }
 
 // handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
-// here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
-// fold or unfold it, t fold or open the to do block, ctrl+c quit.
+// here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n; a deeper session's boss
+// closes it), v show more of its screen or less again, f fold or unfold it, t fold or open the to do block, n focus
+// NEEDS YOU (its keys: handleNeedKey), ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -156,15 +168,17 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.needMode {
+		return m.handleNeedKey(k)
+	}
 	i := index(m.snap.tiles, m.selected)
-	if len(m.snap.tiles) > 0 && m.snap.tiles[i].via != "" {
-		switch key {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "m", "i", "x":
-			m.msg = info(viaOnly(m.snap.tiles[i]))
-			return m, nil
-		}
+	if len(m.snap.tiles) > 0 && m.snap.tiles[i].via != "" && key == "x" {
+		m.msg = info(viaOnly(m.snap.tiles[i]))
+		return m, nil
 	}
 	switch key {
+	case "n":
+		return m.enterNeeds(), nil
 	case "j", "down":
 		m.selected = m.move(i, 1)
 	case "k", "up":
@@ -180,16 +194,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		t := m.snap.tiles[i]
-		if opts := t.options(); len(opts) > 0 && t.sess.State != agent.Waiting {
-			n := int(key[0] - '1')
-			if n >= len(opts) {
-				m.msg = info(fmt.Sprintf("%s's question has %d options", t.sess.Name, len(opts)))
-				return m, nil
-			}
-			// As a typed reply, without touching a draft kept for t
-			m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1}
-			m.box.ed.set(opts[n])
-			return m.sendReply()
+		if len(t.options()) > 0 && t.sess.State != agent.Waiting {
+			return m.sendOption(t, int(key[0]-'1'))
 		}
 		if t.sess.State != agent.Waiting {
 			m.msg = info("1-9 answer a waiting worker's dialog or a question's options; " + t.sess.Name + " has neither (m to reply)")
@@ -224,18 +230,25 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click on a card's ▸/▾ folds or unfolds it; on one of its dialog's options picks it
-// (Submit goes on), as its key does; on Open switches to the worker, on Message… opens the reply box for it,
-// on its PR opens it, on × asks to close it; elsewhere on a card it selects it, for the keys. A deeper session's
-// card only folds, opens, opens its PR or selects: a click elsewhere on it says where it is answered.
+// handleMouse: a left click on a row of NEEDS YOU selects it there; on a card it leaves NEEDS YOU: on its ▸/▾ folds
+// or unfolds it; on one of its dialog's options picks it (Submit goes on), as its key does; on Open switches to the
+// worker, on Message… opens the reply box for it, on its PR opens it, on × asks to close it; elsewhere on it selects
+// it, for the keys. A deeper session's card has no Message… or ×: its boss closes it.
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	if _, at := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
+		if i := at[ms.Y]; i >= 0 && m.box.session == "" {
+			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].sig, message{}, ""
+		}
 		return m, nil
 	}
 	h, ok := m.hitAt(ms.X, ms.Y)
 	if !ok {
 		return m, nil
 	}
+	m.needMode = false
 	t := m.snap.tiles[h.tile]
 	// A click is no y to a kill asked before it
 	m.msg, m.confirm = message{}, ""
@@ -256,12 +269,6 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case hitPR:
 		m.selected = t.sess.Name
 		return m.openPR(h.tile)
-	}
-	if t.via != "" {
-		// Keys go on to the card now selected, not a box left open on another
-		m.blur()
-		m.selected, m.msg = t.sess.Name, info(viaOnly(t))
-		return m, nil
 	}
 	if h.kind == hitClose {
 		// Its y would go into a draft, and the box hides the question; a typed reply waits for its box
@@ -304,9 +311,21 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m.pickOption(p, h.k)
 }
 
-// viaOnly says where a deeper session's card is answered: its own session, or its boss.
+// viaOnly says where a deeper session is closed: by its boss.
 func viaOnly(t tile) string {
-	return t.sess.Name + " is " + t.via + "'s: answer it there or in its session (g/⏎)"
+	return t.sess.Name + " is " + t.via + "'s: close it there"
+}
+
+// sendOption sends option n of t's question as a typed reply, without touching a draft kept for t.
+func (m Model) sendOption(t tile, n int) (tea.Model, tea.Cmd) {
+	opts := t.options()
+	if n >= len(opts) {
+		m.msg = info(fmt.Sprintf("%s's question has %d options", t.sess.Name, len(opts)))
+		return m, nil
+	}
+	m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1}
+	m.box.ed.set(opts[n])
+	return m.sendReply()
 }
 
 // move is the session dir tiles away from tile i, wrapping.

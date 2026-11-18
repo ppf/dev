@@ -64,7 +64,7 @@ func (m Model) render() frame {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
 	unwrapped := len(needs) + listLines(m.snap.sessions)
-	rolls := Subtree(m.snap.sessions, needCounts(m.needs))
+	rolls := Subtree(m.snap.sessions, NeedCounts(m.needs))
 	for i, s := range m.snap.sessions {
 		if h, ok := headFor(m.snap.sessions, i); ok {
 			if h.gap {

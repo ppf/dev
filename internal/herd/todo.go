@@ -20,112 +20,28 @@ const (
 	strike    = "\x1b[9m"
 )
 
-// todoRows is the to do block above the cards, in at most half the gh rows above the bottom rows: the boss's own
-// list, then what waits on the user on its bosses' lists.
+// panelItems are the own list's items the to do block lists: those on someone else, or ticked.
+func (m Model) panelItems() []todo.Shown {
+	return slices.DeleteFunc(slices.Clone(m.snap.todo.Items), func(it todo.Shown) bool { return !it.Done && it.On == "" })
+}
+
+// todoRows is the to do block above the cards: the boss's own list (panelItems), in at most half the gh rows above
+// the bottom rows (header in any): header (TO DO n, those still open on others, ── updated <age>), up to todoShown items, an answered ask's with
+// its answer's row, "+N more"; header only while folded (t); none if empty, unreadable (NEEDS YOU says why) or no
+// rows.
 func (m Model) todoRows(gh int) []string {
-	// A row for each boss's header, up to a quarter of the rows, comes out of the own list's half
-	keep := min(len(m.snap.asks), gh/4)
-	if m.snap.asksErr != nil {
-		keep = min(1, gh/4)
-	}
-	rows := m.ownRows(gh, keep)
-	return append(rows, m.askRows(gh/2-len(rows))...)
-}
-
-// askRows is what waits on the user on the lists of the bosses under this one, in room rows: per boss a header
-// (its name, how many, and how to answer an ask) and, unless folded, its items as ownRows lists them, "+N more"
-// after them, keeping a row for each header still to come; "+N more bosses" for those out of rows; a list not
-// read is its header with why.
-func (m Model) askRows(room int) []string {
 	w := m.width
-	if room < 1 {
+	items := m.panelItems()
+	if gh < 1 || m.snap.todoErr != nil || len(items) == 0 {
 		return nil
-	}
-	if m.snap.asksErr != nil {
-		return []string{sidebar.AlertRow("❌ bosses' to do: "+m.snap.asksErr.Error(), w)}
-	}
-	var rows []string
-	left := room
-	for b, l := range m.snap.asks {
-		rest := len(m.snap.asks) - b - 1
-		if rest > 0 && left == 1 {
-			rows = append(rows, sidebar.HintRow("  +"+strconv.Itoa(rest+1)+" more bosses wait on you", w))
-			break
-		}
-		if left < 1 {
-			break
-		}
-		rows, left = append(rows, askHeader(l, m.todoFolded, w)), left-1
-		if m.todoFolded || l.Err != nil {
-			continue
-		}
-		budget, used, shown := left-rest, 0, 0
-		for i, it := range l.Items {
-			item := []string{todoItem(it, nil, w)}
-			if r := todoOptions(it, w); r != "" {
-				item = append(item, r)
-			}
-			need := len(item)
-			if i < len(l.Items)-1 {
-				// Room for the "+N more" row
-				need++
-			}
-			if used+need > budget {
-				break
-			}
-			rows, used, shown = append(rows, item...), used+len(item), shown+1
-		}
-		if more := len(l.Items) - shown; more > 0 && used < budget {
-			rows, used = append(rows, sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w)), used+1
-		}
-		left -= used
-	}
-	return rows
-}
-
-// askHeader is a boss's header over its items waiting on the user, ▸ first while folded: its name and their
-// count, or why its list wasn't read, then at the right how to answer an ask, when it has one and it fits.
-func askHeader(l todo.BossList, folded bool, w int) string {
-	left := " " + bold + l.Boss + reset + " " + sidebar.Muted + "· " + strconv.Itoa(len(l.Items)) + " wait on you" + reset + " "
-	right := ""
-	if slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return len(it.Options) > 0 }) {
-		right = " " + sidebar.Muted + "dev todo answer " + l.Boss + " <n> <option>" + reset + " "
-	}
-	if l.Err != nil {
-		left = " " + bold + l.Boss + reset + " " + sidebar.Red + "⚠ list not read: " + l.Err.Error() + reset + " "
-	}
-	if folded {
-		left = " " + rule + "▸" + reset + left
-	}
-	if ansi.StringWidth(left)+ansi.StringWidth(right) > w {
-		right = ""
-	}
-	left = ansi.Truncate(left, w-ansi.StringWidth(right), "…")
-	fill := max(0, w-ansi.StringWidth(left)-ansi.StringWidth(right))
-	return left + rule + strings.Repeat("─", fill) + reset + right
-}
-
-// ownRows is the boss's own list, in at most half the gh rows less keep (header in any): header (TO DO n · k on
-// others ── updated <age>), up to todoShown items, an ask's with its options' row, "+N more"; header only while
-// folded (t); an alert row if unreadable; none if empty or no rows.
-func (m Model) ownRows(gh, keep int) []string {
-	w := m.width
-	if gh < 1 {
-		return nil
-	}
-	if m.snap.todoErr != nil {
-		return []string{sidebar.AlertRow("❌ to do: "+m.snap.todoErr.Error(), w)}
 	}
 	l := m.snap.todo
-	if len(l.Items) == 0 {
-		return nil
-	}
 	rows := []string{m.todoHeader(l, w)}
-	room := max(0, gh/2-1-keep)
+	room := max(0, gh/2-1)
 	if m.todoFolded || room == 0 {
 		return rows
 	}
-	all := m.todoOrder(l.Items)
+	all := m.todoOrder(items)
 	shown := 0
 	for i, it := range all[:min(todoShown, len(all))] {
 		item := []string{todoItem(it.Shown, it.owner, w)}
@@ -142,7 +58,7 @@ func (m Model) ownRows(gh, keep int) []string {
 		}
 		rows, shown = append(rows, item...), shown+1
 	}
-	if more := len(l.Items) - shown; more > 0 {
+	if more := len(items) - shown; more > 0 {
 		rows = append(rows, sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w))
 	}
 	return rows
@@ -150,15 +66,16 @@ func (m Model) ownRows(gh, keep int) []string {
 
 // todoHeader is the block's header: ▸ first while folded; its age dims once the list is stale.
 func (m Model) todoHeader(l todo.List, w int) string {
-	n, on := l.Open()
+	_, on := l.Open()
 	left := ""
 	if m.todoFolded {
 		left = " " + rule + "▸" + reset
 	}
-	left += " " + bold + "TO DO " + strconv.Itoa(n) + reset + " "
+	left += " " + bold + "TO DO"
 	if on > 0 {
-		left += sidebar.Muted + "· " + strconv.Itoa(on) + " on others" + reset + " "
+		left += " " + strconv.Itoa(on)
 	}
+	left += reset + " "
 	age := "updated " + span(m.clk.Now().Sub(time.Unix(l.Updated, 0)))
 	ageColour := sidebar.Muted
 	if l.Stale {
@@ -221,8 +138,8 @@ type ownedItem struct {
 	owner *owner
 }
 
-// todoOrder is the items as the block lists them: the user's own first, then those on a worker that needs the
-// user, then on a worker that's gone, then the rest, each group in the list's order.
+// todoOrder is the items as the block lists them: those on no one (ticked: open ones are NEEDS YOU's) first, then
+// on a worker that needs the user, then on a worker that's gone, then the rest, each group in the list's order.
 func (m Model) todoOrder(items []todo.Shown) []ownedItem {
 	rank := func(it ownedItem) int {
 		switch o := it.owner; {

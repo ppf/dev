@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
@@ -135,24 +136,17 @@ func (m Model) hitAt(x, y int) (hit, bool) {
 	return hit{}, false
 }
 
-// folded reports whether t's card shows as one row: never while it needs the user itself, else the user's
-// choice, else a boss's card (its row says its subtree) or an idle card without a warning is.
+// folded reports whether t's card shows as one row: the user's choice, else a boss's card (its row says its
+// subtree), one needing the user itself (NEEDS YOU asks it) or an idle card without a warning is.
 func (t tile) folded(folds map[string]bool) bool {
-	if t.own() == needsYouSection {
-		return false
-	}
 	if f, ok := folds[t.sess.Name]; ok {
 		return f
 	}
-	return t.roll != nil || t.section() == restingSection && len(warnings(t)) == 0
+	return t.roll != nil || t.own() == needsYouSection || t.section() == restingSection && len(warnings(t)) == 0
 }
 
-// fold flips t's card between one row and open, for as long as its session is listed; a card needing the user
-// itself stays open.
+// fold flips t's card between one row and open, for as long as its session is listed.
 func (m *Model) fold(t tile) {
-	if t.own() == needsYouSection {
-		return
-	}
 	if m.folds == nil {
 		m.folds = map[string]bool{}
 	}
@@ -200,8 +194,8 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		}
 		return sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
 	}
-	// The arrow, a cell wider each side so it's easy to hit
-	if t.folded(m.folds) {
+	// The arrow, a cell wider each side so it's easy to hit; the reply box answering it opens it, for its dialog
+	if t.folded(m.folds) && (m.box.session != t.sess.Name || m.activePick() == nil) && (t.own() != needsYouSection || m.blockShown()) {
 		return []string{gutter + band(m.headRow(t, sec, true, w-1))}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
 	}
 	hits = append(hits, hit{y: 1, x0: 2, x1: 5, kind: hitFold})
@@ -439,6 +433,8 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	if folded {
 		if t.roll != nil && !t.deciding {
 			left += "  " + rollText(*t.roll)
+		} else if t.own() == needsYouSection {
+			left += "  " + sidebar.Red + blockStatus(t) + reset
 		} else if s := m.statusText(t, sec); s != "" {
 			left += "  " + sidebar.Muted + s + reset
 		}
@@ -466,6 +462,23 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	room := max(1, w-ansi.StringWidth(right)-1)
 	left = ansi.Truncate(" "+left, room, "…")
 	return left + strings.Repeat(" ", max(1, w-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
+}
+
+// blockShown reports a pane tall enough for NEEDS YOU (needBlock), which then asks what folded cards point at.
+func (m Model) blockShown() bool { return m.height-1 >= minBlockRows }
+
+// blockStatus is a folded card's status while NEEDS YOU asks its question: what it is, and where.
+func blockStatus(t tile) string {
+	what := "question"
+	switch {
+	case t.pick != nil && t.pick.tool != "":
+		what = t.pick.tool + " prompt"
+	case t.pick == nil && t.deciding && t.question.Tool != "" && t.question.Tool != agent.AskUserQuestion:
+		what = t.question.Tool + " prompt"
+	case !t.deciding:
+		what = "asks"
+	}
+	return what + " · in the block ↑"
 }
 
 // span is d as a card's time: now under a minute, else inbox's 12m, 3h.

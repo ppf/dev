@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// A boss asks a decision: the sidebar shows it under NEEDS YOU, n goes in, ⏎ shows the options and 1 answers it as dev todo
-// answer does: the item ticks and the boss's inbox gets "you answered". The server carries CLAUDECODE, as one started from a
-// Claude session does: the sidebar still answers, as the user.
+// A boss asks a decision: the sidebar points NEEDS YOU at its board, n and ⏎ go there and focus the board's block, and 1
+// answers it as dev todo answer does: the item ticks and the boss's inbox gets "you answered". The server carries
+// CLAUDECODE, as one started from a Claude session does: the board still answers, as the user.
 func TestSidebarNeedsYouAnswer(t *testing.T) {
 	d := actServer(t)
 	script := filepath.Join(d.tmp, "boss.sh")
@@ -48,15 +48,19 @@ func TestSidebarNeedsYouAnswer(t *testing.T) {
 		t.Fatalf("❌ answer for another question: %v %s, want refused", err, out)
 	}
 
+	previews := d.T("split-window", "-t", pane, "-h", "-l", "90", "-PF", "#{pane_id}", devBin+" boss --previews")
+	d.T("set-option", "-p", "-t", pane, "@dev_boss_pane", "coordinator")
+	d.T("set-option", "-p", "-t", previews, "@dev_boss_pane", "previews")
 	sidebar := actEnsure(d, "boss-a")
-	waitScreen(t, d.server, sidebar, "NEEDS YOU 1")
+	waitScreen(t, d.server, sidebar, "NEEDS YOU 1  → board")
 	d.T("select-pane", "-t", sidebar)
-	waitScreen(t, d.server, sidebar, "NEEDS YOU 1 · n")
 	d.T("send-keys", "-t", sidebar, "n")
-	waitScreen(t, d.server, sidebar, "⏎ options")
+	waitScreen(t, d.server, sidebar, "⏎ board")
 	d.T("send-keys", "-t", sidebar, "Enter")
-	waitScreen(t, d.server, sidebar, "1 ★ Merge")
-	d.T("send-keys", "-t", sidebar, "1")
+	waitScreen(t, d.server, previews, "esc cards")
+	waitScreen(t, d.server, previews, "1 ★ Merge   2 Wait")
+	check(t, "the board focused", d.T("display", "-t", previews, "-p", "#{pane_active}"), "1")
+	d.T("send-keys", "-t", previews, "1")
 	waitFor(t, "boss-a gets the answer", func() bool {
 		data, _ := os.ReadFile(log)
 		return strings.Contains(string(data), "- you answered #1 \"Merge #148?\": Merge\n")

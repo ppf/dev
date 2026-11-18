@@ -61,6 +61,7 @@ type row struct {
 	WaitUntil    string `tmux:"@dev_wait_until"`
 	WaitReason   string `tmux:"@dev_wait_reason"`
 	ResumeAt     string `tmux:"@dev_resume_at"`
+	NeedsFocus   string `tmux:"@dev_needs_focus"`
 }
 
 // tile is one worker session's preview.
@@ -79,7 +80,7 @@ type tile struct {
 	tail     desktop.Tail    // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error           // why its transcript could not be read
 	ci       ci              // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
-	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, never answered here; "" for this boss's own
+	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, closed only by that boss; "" for this boss's own
 	roll     *sidebar.Rollup // a boss's whole subtree (sidebar.Subtree), which places its card; nil for a worker or a deeper session
 }
 
@@ -96,11 +97,13 @@ type snapshot struct {
 	visible bool              // a client shows own window
 	focused bool              // own pane is its window's active pane
 	zoomed  bool              // own window is zoomed
-	client  string            // tty of the client viewing own session; "" lets tmux pick
-	todo    todo.List
-	todoErr error          // why the to do list could not be read
-	threads []inbox.Thread // own open message threads (openThreads)
-	msgsErr error          // why the messages could not be read
+	// The sidebar asked to focus NEEDS YOU (sidebar.OptNeedsFocus), cleared as read
+	needsFocus bool
+	client     string // tty of the client viewing own session; "" lets tmux pick
+	todo       todo.List
+	todoErr    error          // why the to do list could not be read
+	threads    []inbox.Thread // own open message threads (openThreads)
+	msgsErr    error          // why the messages could not be read
 }
 
 // Model is the Bubble Tea previews pane.
@@ -130,6 +133,13 @@ type Model struct {
 	todoFolded    bool            // the to do block shows as its header only (t)
 	msgs          *inbox.Messages // the tmux server's messages; nil reads none, unless findMsgs
 	findMsgs      bool            // refresh looks up msgs until it's found
+	// NEEDS YOU
+	needMode   bool                                                               // its keys act on it
+	needIdx    int                                                                // the selected row, clamped to the rows at each use
+	needKey    string                                                             // the selected row's sig when chosen: keys act only while it's the same; "" after an answer
+	needDone   string                                                             // the answered row's sig: the cursor waits on it until it goes
+	needFor    string                                                             // the session or boss needDone's answer went to
+	answerList func(boss string, id int, question, option string) (string, error) // dev todo answer
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -178,7 +188,8 @@ func Run(c *tmux.Client, pane string) error {
 func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
-	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true}
+	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true,
+		answerList: sidebar.AnswerNeed}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).
@@ -261,6 +272,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selected = m.validSelection()
 			m.syncPick()
+			if msg.snap.needsFocus {
+				m = m.enterNeeds()
+			}
+			m.fixNeeds()
 			for _, byName := range []map[string]bool{m.folds, m.expands} {
 				for name := range byName {
 					if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }) {
@@ -289,11 +304,23 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 	case actionMsg:
 		m.msg = msg.msg
+		if msg.msg.alert && m.needDone != "" {
+			// A reply from NEEDS YOU not sent: its row takes keys again
+			m.needKey, m.needDone = m.needDone, ""
+		}
 		return m, nil
 	case answeredMsg:
 		m.msg, m.answering = msg.msg, ""
-		if !msg.took && msg.session == m.box.session {
+		switch {
+		case m.box.block && msg.session == m.box.session && (!msg.took || !m.multiPick()):
+			// NEEDS YOU's answer is done, or failed: its keys go back to the block, which shows the row as it is now
+			m.blur()
+		case !msg.took && msg.session == m.box.session:
 			m.box.sent = ""
+		}
+		if !msg.took && m.needDone != "" && msg.session == m.needFor {
+			// Not answered: its row takes keys again
+			m.needKey, m.needDone = m.needDone, ""
 		}
 		return m, nil
 	case watchMsg:
@@ -336,6 +363,11 @@ func (m Model) refresh() tea.Cmd {
 		snap, err := buildSnapshot(rows, clients, m.pane, host, m.look)
 		if err != nil {
 			return refreshMsg{err: err}
+		}
+		if snap.needsFocus {
+			if _, err := m.c.Run("set-option", "-pu", "-t", m.pane, sidebar.OptNeedsFocus); err != nil {
+				return refreshMsg{err: err}
+			}
 		}
 		// Looked up here, not at start: a restored boss's previews start before its session is marked one
 		store := m.todo
@@ -475,6 +507,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	for _, r := range rows {
 		if r.ID == pane {
 			s.self, s.name, s.focused, s.zoomed, own = r.SessionID, r.Session, r.Active, r.Zoomed, true
+			s.needsFocus = r.NeedsFocus != ""
 			_, viewed := sidebar.ActiveClient(clients, r.Session)
 			s.visible = viewed && r.WindowActive
 		}
@@ -517,6 +550,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			r = rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
 			full.Agent, full.State, full.CostUSD, full.HasCost = a.Label, a.State, a.Cost, a.CostOK
 			full.Deciding, full.Note, full.Resume = agent.Deciding(a.State, r.WaitingFor), r.Note, r.ResumeAt != ""
+			full.Question = r.Question
 			full.Wait = wait.FromOptions(r.WaitUntil, r.WaitReason)
 		}
 		s.all = append(s.all, full)
@@ -573,20 +607,7 @@ func (s *snapshot) rollUp() {
 			s.all[i].Deciding, s.all[i].State = t.deciding, t.sess.State
 		}
 	}
-	lists := map[string]sidebar.ListCount{}
-	if s.asksErr != nil {
-		for _, b := range s.bosses {
-			lists[b] = sidebar.ListCount{Unread: true}
-		}
-	}
-	for _, l := range s.asks {
-		c := sidebar.ListCount{Unread: l.Err != nil}
-		for _, it := range l.Items {
-			c.Add(it.Done, it.On, len(it.Options))
-		}
-		lists[l.Boss] = c
-	}
-	rolls := sidebar.Subtree(s.all, lists)
+	rolls := sidebar.Subtree(s.all, sidebar.NeedCounts(s.needLists()))
 	for i, t := range s.tiles {
 		if t.via == "" {
 			s.tiles[i].roll = rolls[t.sess.Name]

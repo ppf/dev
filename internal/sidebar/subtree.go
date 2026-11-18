@@ -103,10 +103,7 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 			r.Idle = NoteFinished
 		}
 		r.add(s, lists, true)
-		for _, u := range sessions[i+1:] {
-			if manager && u.Root != s.Root || !manager && u.Depth <= s.Depth {
-				break
-			}
+		for _, u := range under(sessions, i) {
 			if manager && u.Boss && u.Depth == s.Depth {
 				r.Bosses++
 			}
@@ -116,6 +113,20 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 		out[s.Name] = r
 	}
 	return out
+}
+
+// under is the sessions under sessions[i] in Order: a manager's whole group (its Root), else those after it at a
+// greater Depth.
+func under(sessions []Session, i int) []Session {
+	s := sessions[i]
+	manager := s.Root != "" && s.Root == s.Name
+	end := i + 1
+	for ; end < len(sessions); end++ {
+		if u := sessions[end]; manager && u.Root != s.Root || !manager && u.Depth <= s.Depth {
+			break
+		}
+	}
+	return sessions[i+1 : end]
 }
 
 // add counts s into r, the boss itself when own: its working or waiting isn't counted, only ranked.

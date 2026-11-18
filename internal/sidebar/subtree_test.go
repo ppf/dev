@@ -136,16 +136,16 @@ func TestSubtreeFromPanes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := Subtree(s.sessions, needCounts([]needList{{Boss: "boss", Items: []needItem{{ID: 1, Text: "DM"}}}}))["boss"]
+	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM"}}}}))["boss"]
 	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 to do" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }
 
-// needCounts counts open items on no one, asks apart; a list not read is unread.
+// NeedCounts counts open items on no one, asks apart; a list not read is unread.
 func TestNeedCounts(t *testing.T) {
-	got := needCounts([]needList{
-		{Boss: "a", Items: []needItem{{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3, Done: true}, {ID: 4, On: "w"}}},
+	got := NeedCounts([]NeedList{
+		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3, Done: true}, {ID: 4, On: "w"}}},
 		{Boss: "b", Error: "bad json"},
 	})
 	if got["a"] != (ListCount{Asks: 1, Plain: 1}) || got["b"] != (ListCount{Unread: true}) {
