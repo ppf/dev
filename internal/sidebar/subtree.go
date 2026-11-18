@@ -80,7 +80,7 @@ type Rollup struct {
 	Working   int  // sessions under it working
 	Waiting   int  // sessions under it in a planned wait or rate-limit resume
 	ToDo      int  // plain items on its and its bosses' lists
-	Under     int  // sessions under it
+	Under     int  // bosses and sessions with an agent under it: a session with no agent isn't a worker, as the board counts
 	Bosses    int  // a manager's: the bosses in its group, at its Depth (Order)
 	Warn      bool // a failed, stuck or high-context note, its own too, or a list not read
 	CostUSD   float64
@@ -100,10 +100,12 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 		r := &Rollup{Rank: RankIdle}
 		r.add(s, lists, true)
 		for _, u := range under(sessions, i) {
-			if manager && u.Boss && u.Depth == s.Depth {
-				r.Bosses++
+			if u.Agent != "" || u.Boss {
+				if manager && u.Boss && u.Depth == s.Depth {
+					r.Bosses++
+				}
+				r.Under++
 			}
-			r.Under++
 			r.add(u, lists, false)
 		}
 		out[s.Name] = r
