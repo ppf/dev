@@ -68,7 +68,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, check {kind, pr, since} when it may be out of date), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
@@ -174,7 +174,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until not given")
+	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on not given")
 	return cmd
 }
 
@@ -422,8 +423,12 @@ func newTodoCheckCmd(boss *string) *cobra.Command {
 to re-check marked ⚠ with why: its PR merged or closed; approved, changes requested, checks green or failing since the
 item was added or replaced (its first lookup after that); its PR's lookups failing for 20 minutes; unchanged for 2 days
 or more (not an ask, nor a dated item before its --until). An item on a worker session gone says so (session gone).
+An item added with --done-on ticks by itself once a lookup finds its PR in that state.
 A dev boss's previews look its items' PRs up by themselves: every 15 seconds two of those not looked up for 10 minutes;
-a desktop app boss runs this. A lookup that failed prints on stderr; the list still prints.`,
+then, with its inbox on, they tell the boss in it, once per item and reason, of each PR move, worker gone, and of each item unchanged
+for 2 days (again after 2 more without --replaces), and of each item ticked by --done-on; an --until tick, and on a
+desktop app boss every tick, is in the boss's next reminder. A desktop app boss runs this. A lookup that failed prints
+on stderr; the list still prints.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
@@ -702,6 +707,9 @@ func todoLine(it todo.Shown, now time.Time) string {
 	}
 	if it.Link != "" {
 		parts = append(parts, it.Link)
+	}
+	if it.DoneOn != "" {
+		parts = append(parts, "done on "+it.DoneOn)
 	}
 	switch {
 	case it.Answer != "":

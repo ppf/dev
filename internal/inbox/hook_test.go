@@ -279,3 +279,34 @@ func TestWorkerHookBossAsksUp(t *testing.T) {
 		})
 	}
 }
+
+// A start or /clear tells an --until tick once; a compaction leaves it, as do workers that can't be read.
+func TestStartContextTicked(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s, err := todo.Desktop("local_boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	then := time.Unix(1700000000, 0)
+	if _, err := s.Add(todo.Item{Text: "Sync", Until: then.Add(time.Hour).Unix()}, then); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(todo.Item{Text: "Rework", On: "fix", Session: &todo.Session{ID: "fix", Name: "fix"}}, then); err != nil {
+		t.Fatal(err)
+	}
+	later := then.Add(2 * time.Hour)
+	none := func() ([]todo.Session, error) { return nil, nil }
+	if out, _ := StartContext(s, none, "compact", later); out != "" {
+		t.Errorf("compact = %q, want nothing", out)
+	}
+	if _, err := StartContext(s, func() ([]todo.Session, error) { return nil, errors.New("no workers") }, "clear", later); err == nil {
+		t.Errorf("workers failing: no error")
+	}
+	tick := `#1 \"Sync\" ticked by itself: its --until time came`
+	if out, err := StartContext(s, none, "clear", later); err != nil || !strings.Contains(out, tick) {
+		t.Errorf("clear = %q, %v; want the tick", out, err)
+	}
+	if out, _ := StartContext(s, none, "clear", later); strings.Contains(out, "ticked by itself") {
+		t.Errorf("again = %q, want the tick told once", out)
+	}
+}

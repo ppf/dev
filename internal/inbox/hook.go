@@ -112,7 +112,8 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 	return string(data), e.Name == "Stop", listErr
 }
 
-// openList is the open to do list of the boss session pane is in (todo.List.Reminder), "" when none is open.
+// openList is the open to do list of the boss session pane is in, after its items ticked by themselves, told once
+// (todo.List.Reminder); "" when none ticked and none is open.
 func openList(c *tmux.Client, pane string) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if err != nil {
@@ -124,8 +125,12 @@ func openList(c *tmux.Client, pane string) (string, error) {
 		return "", err
 	}
 	// The list still goes out: what it says of each item holds without the workers
-	err = l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, pane) })
-	return l.Reminder(now), err
+	gone := l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, pane) })
+	ticked, err := s.TakeTicked(now, nil, nil)
+	if err != nil {
+		return "", errors.Join(gone, err)
+	}
+	return l.Reminder(ticked, now), gone
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list; "" otherwise.
@@ -160,11 +165,16 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), source s
 	if err := l.MarkGone(workers); err != nil {
 		return "", err
 	}
+	// Taken last: a reminder that doesn't go out leaves them for the next
+	ticked, err := s.TakeTicked(now, nil, nil)
+	if err != nil {
+		return "", err
+	}
 	age := "just now"
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	text := l.StartReminder(source == "startup", age, now)
+	text := l.StartReminder(source == "startup", age, ticked, now)
 	if text == "" {
 		return "", nil
 	}

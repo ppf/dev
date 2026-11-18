@@ -207,7 +207,12 @@ func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 	if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(id, stderr) }); err != nil {
 		return "", err
 	}
-	if text := l.Reminder(now); text != "" {
+	// Taken last: a reminder that doesn't go out leaves them for the next
+	ticked, err := s.TakeTicked(now, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	if text := l.Reminder(ticked, now); text != "" {
 		return inbox.PromptContext(text)
 	}
 	return "", nil

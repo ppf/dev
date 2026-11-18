@@ -269,7 +269,7 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
 // StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find, then looks up the PRs its to do
-// items link to (lookupList).
+// items link to (lookupList), and queues and delivers its to do notes (nudgeList).
 func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	b, ok, err := Here(c, pane)
 	switch {
@@ -427,7 +427,14 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if len(due) > 0 {
 		errs = append(errs, checkPRs(c, clk, b, due))
 	}
-	return errors.Join(append(errs, lookupList(c, pane, now))...)
+	if err := lookupList(c, pane, now); err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	queued, err := nudgeList(c, b, pane, live, now)
+	if queued {
+		err = errors.Join(err, deliverPending(c, clk, b))
+	}
+	return errors.Join(append(errs, err)...)
 }
 
 // listLookups caps the PR lookups of to do items one watch makes: gh takes up to a second each.
@@ -449,6 +456,54 @@ func lookupList(c *tmux.Client, pane string, now time.Time) error {
 	}
 	return s.Lookup(now, todo.LookupTTL, listLookups, viewPR)
 }
+
+// nudgeList queues a note for each item on the boss's list that ticked by itself on its PR's move, and each it should
+// re-check (todo.Store.Nudges; live is its workers' sessions); queued reports any. An --until tick waits for the boss's
+// next reminder. None for a pane not in a boss session. Run only with its inbox on: with it off, a tick waits for the
+// boss's next start or /clear, and no re-check note goes out.
+func nudgeList(c *tmux.Client, b Boss, pane string, live map[string]bool, now time.Time) (queued bool, err error) {
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Taken and told only once queued: a failed queue leaves them for the next watch
+	add := func(n Note) error {
+		_, err := b.Box.Add(n, now)
+		return err
+	}
+	ticked, err := s.TakeTicked(now, func(t todo.Ticked) bool { return t.PR != 0 }, func(ts []todo.Ticked) error {
+		for _, t := range ts {
+			if err := add(Note{Kind: ToDo, Text: t.String(), Key: tickKey}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	nudges, err := s.Nudges(now, func() ([]todo.Session, error) {
+		var ws []todo.Session
+		for name := range live {
+			ws = append(ws, todo.Session{ID: name, Name: name})
+		}
+		return ws, nil
+	}, func(ns []todo.Nudge) error {
+		for _, n := range ns {
+			if err := add(Note{Kind: ToDo, Text: n.String()}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return len(ticked)+len(nudges) > 0, err
+}
+
+// tickKey marks a ToDo note of an item ticked by itself: off the list, so no reminder repeats it.
+const tickKey = "ticked"
 
 // deliverPending delivers b's inbox when notes wait.
 func deliverPending(c *tmux.Client, clk control.Clock, b Boss) error {
