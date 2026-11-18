@@ -610,11 +610,7 @@ func said(t tile) []string {
 // (asked nil) when the question is above the lines read.
 func reply(t tile) (lines []string, ask string, asked []string) {
 	strip := strings.NewReplacer("**", "", "`", "")
-	for _, l := range t.tail.Lines {
-		if _, _, marker := desktop.Marker([]string{l}); !marker {
-			lines = append(lines, l)
-		}
-	}
+	lines = replyLines(t)
 	if t.asks() {
 		if i := inbox.QuestionAt(lines); i >= 0 {
 			lines, asked = lines[:i], lines[i:]
@@ -633,6 +629,17 @@ func reply(t tile) (lines []string, ask string, asked []string) {
 		ask = asked[0]
 	}
 	return lines, ask, asked
+}
+
+// replyLines is t's newest reply lines read without a turn-end marker line.
+func replyLines(t tile) []string {
+	var lines []string
+	for _, l := range t.tail.Lines {
+		if _, _, marker := desktop.Marker([]string{l}); !marker {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // tableRow reports a reply line that is a table's row or rule, markdown or box-drawn, or a "---" break: cut

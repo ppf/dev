@@ -48,17 +48,16 @@ func (t tile) section() section {
 // asks reports a Needs you card for the question t's turn ended on in its reply, not a dialog.
 func (t tile) asks() bool { return !t.deciding && t.section() == needsYouSection }
 
-// options are the options an asks card's reply read under its question, without list markers; 1-9 send one.
+// options are the options an asks card's reply read with its question (inbox.Options); 1-9 send one.
 func (t tile) options() []string {
-	_, _, asked := reply(t)
-	if len(asked) < 2 {
+	if !t.asks() {
 		return nil
 	}
-	opts := make([]string, len(asked)-1)
-	for i, o := range asked[1:] {
-		opts[i] = inbox.OptionText(o)
+	lines := replyLines(t)
+	if i := inbox.QuestionAt(lines); i >= 0 {
+		return inbox.Options(lines[i:])
 	}
-	return opts
+	return nil
 }
 
 // noteKind is the kind of a note as inbox.Note.Summary writes it, "<kind>: <text>" or "<kind>".

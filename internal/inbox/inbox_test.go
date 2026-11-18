@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -595,5 +596,64 @@ func TestObserveWaiting(t *testing.T) {
 	deciding.waiting = true
 	if got, _ := o.round(0, deciding); !strings.Contains(got, "w stuck: waiting on a decision for 3m, unanswered") {
 		t.Errorf("a decision in a planned wait = %q, want it reported", got)
+	}
+}
+
+// Real turn ends (boss-nocworx-core, 2026-11-18): an instruction to reply naming its options, and list items asking
+// questions with a recommendation under a lead-in.
+const (
+	replyTurn = "**Step 2 of 4: connect the VPN.** I just checked and git.liquidweb.com still times out. Once you're connected, the pr-care worker (still open) checks the lw merge requests, including whether !2408 (CLOUD-539) has a reviewer yet.\n\n" +
+		"Reply **Done** once it's connected, or **Skip** to leave the lw check for later."
+	questionsTurn = "## To do\n1. ✅ Triage permission prompt\n2. ✅ lw merge request check\n" +
+		"3. 👉 #11691: what to do with Priyanka's 2 non-blocking threads (Step 3 above)\n4. ⏳ !2408: add Carl as reviewer\n" +
+		"5. ⏳ Send your Slack drafts: Vince (COM-120), Martin (CLOUD-360), David handover DM (#23)\n\n" +
+		"Two questions:\n" +
+		"- **#11691 threads:** should I post the two \"follow-up\" replies and file an unassigned COM card? I recommend **Yes**.\n" +
+		"- **!2408:** should the pr-care worker add Carl as reviewer? I recommend **Yes**. He already plans to review it, and the reviewer notification is the only message he'd get."
+)
+
+// A turn ending on an instruction to reply with named options, or on list items that are questions, asks; a reply
+// line naming no option and a courtesy closing don't.
+func TestFromHookTurnEndAsks(t *testing.T) {
+	tests := []struct {
+		name, last, want string
+		options          []string
+	}{
+		{"reply with bold options", replyTurn, "w asks: Reply **Done** once it's connected, or **Skip** to leave the lw check for later.", []string{"Done", "Skip"}},
+		{"reply with slash options", "Merged.\nReply Done / Skip.", "w asks: Reply Done / Skip.", []string{"Done", "Skip"}},
+		{"answer with code options", "Answer with `yes` or `no`.", "w asks: Answer with `yes` or `no`.", []string{"yes", "no"}},
+		{"reply after a sentence", "The VPN is down. Reply **Done** when it's up.", "w asks: The VPN is down. Reply **Done** when it's up.", []string{"Done"}},
+		{"questions with recommendations", questionsTurn,
+			"w asks: …- **#11691 threads:** should I post the two \"follow-up\" replies and file an unassigned COM card? I recommend **Yes**. - **!2408:** should the pr-care worker add Carl as reviewer? I recommend **Yes**.", nil},
+		{"questions without a lead-in", "Done.\n- Post it? I recommend **Yes**.\n- Ping Carl? I'd suggest no.",
+			"w asks: - Post it? I recommend **Yes**. - Ping Carl? I'd suggest no.", nil},
+		{"a reply sent", "Reply sent to Vince.", "w finished: Reply sent to Vince.", nil},
+		{"a bold name after a reply verb", "Reply sent to **Vince**.", "w finished: Reply sent to **Vince**.", nil},
+		{"a courtesy closing", "Merged and released v1.2.\nLet me know if anything breaks.", "w finished: Merged and released v1.2. Let me know if anything breaks.", nil},
+		{"a reply instruction above the end", "Reply **Done** when connected.\nI'll wait.", "w finished: Reply **Done** when connected. I'll wait.", nil},
+		{"a summary list", "Summary:\n- a\n- b", "w finished: Summary: - a - b", nil},
+		{"answered questions in a list", "Findings:\n- Why did it fail? The cache was stale.\n- Fixed? Yes.", "w finished: Findings: - Why did it fail? The cache was stale. - Fixed? Yes.", nil},
+		{"some items aren't questions", "Two things:\n- Post it? I recommend **Yes**.\n- Done the rest.", "w finished: Two things: - Post it? I recommend **Yes**. - Done the rest.", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in, _ := json.Marshal(map[string]string{"hook_event_name": "Stop", "last_assistant_message": tt.last})
+			if n, _ := FromHook("w", in); n.String() != tt.want {
+				t.Errorf("FromHook = %q\nwant        %q", n.String(), tt.want)
+			}
+			var lines []string
+			for l := range strings.Lines(tt.last) {
+				if strings.TrimSpace(l) != "" {
+					lines = append(lines, strings.TrimRight(l, "\n"))
+				}
+			}
+			var opts []string
+			if i := QuestionAt(lines); i >= 0 {
+				opts = Options(lines[i:])
+			}
+			if !slices.Equal(opts, tt.options) {
+				t.Errorf("Options = %q, want %q", opts, tt.options)
+			}
+		})
 	}
 }

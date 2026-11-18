@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -195,5 +196,45 @@ func TestBossHookStartBeforeMarked(t *testing.T) {
 	out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"resume"}`))
 	if out != "" || err != nil {
 		t.Errorf("BossHook = %q, %v; want nothing", out, err)
+	}
+}
+
+// A boss under a manager sends the manager the ask its turn ended on, an instruction to reply included, not its
+// finished turns.
+func TestWorkerHookBossAsksUp(t *testing.T) {
+	for _, tt := range []struct {
+		name, last, want string
+	}{
+		{"asks", replyTurn, "boss-x asks: Reply **Done** once it's connected, or **Skip** to leave the lw check for later."},
+		{"finished", "Merged.", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			c := tmux.NewFake(func(args []string) (string, error) {
+				if args[0] != "display-message" {
+					return "", nil
+				}
+				if strings.Contains(args[len(args)-1], "@dev_started_by") {
+					// The worker pane %5: boss-x, a boss (@dev_herd) the manager started
+					return tmux.FormatRow("manager", "boss-x", "", "", "", "1"), nil
+				}
+				return tmux.FormatRow("$1", "1700000000", "manager", "1", "", "/tmp/tmux-1/default"), nil
+			})
+			in, _ := json.Marshal(map[string]string{"hook_event_name": "Stop", "last_assistant_message": tt.last})
+			clk := control.Clock{Now: func() time.Time { return time.Unix(1700000100, 0) }, Sleep: func(time.Duration) {}}
+			// The manager's coordinator isn't on the fake server: the note stays queued in its inbox
+			_ = WorkerHook(c, clk, "%5", in)
+			b, _, ok, err := BossOf(c, "%5")
+			if !ok || err != nil {
+				t.Fatalf("BossOf = %v, %v", ok, err)
+			}
+			bt, err := b.Box.Take()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := bt.String(); tt.want == "" && got != "" || tt.want != "" && !strings.HasSuffix(got, "\n- "+tt.want) {
+				t.Errorf("manager's inbox = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
