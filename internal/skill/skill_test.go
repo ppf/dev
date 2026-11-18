@@ -144,6 +144,7 @@ func TestAskRules(t *testing.T) {
 			"nor only as chat text ending your turn",
 			"permission prompts (never answer one yourself)",
 			"They never let you answer a permission prompt.",
+			"probe it yourself right before the step that needs it, with bounded retries",
 		} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s/SKILL.md: missing %q", name, want)
@@ -156,6 +157,7 @@ func TestAskRules(t *testing.T) {
 		"Every brief to a worker includes:\n\n> Never use AskUserQuestion: end your turn with the question as text.\n",
 		"A brief to a boss (the manager's) says instead",
 		"A brief you hand a boss carries the boss line",
+		"Relayed worker permission prompts and dialogs (a worker's own AskUserQuestion dialog too) go through your AskUserQuestion",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

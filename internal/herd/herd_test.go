@@ -727,7 +727,8 @@ func TestPromptAskRules(t *testing.T) {
 		want         []string
 	}{
 		{"coordinatorPrompt", coordinatorPrompt, []string{"probe it yourself with bounded retries", "File a run's outward asks",
-			"never ask it with AskUserQuestion or only as chat text", "never let you answer a permission prompt"}},
+			"never ask your own decisions with AskUserQuestion or only as chat text",
+			"relay them through your AskUserQuestion", "never let you answer a permission prompt"}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "never as chat text ending a turn nor AskUserQuestion",
 			"answer a permission prompt or dialog", "do anything destructive"}},
 	} {

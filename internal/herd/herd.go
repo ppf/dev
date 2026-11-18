@@ -56,8 +56,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with ` +
 	`unrelated or merely related work. When unsure, delegate. ` +
 	`Pass --model and --effort on every dev agent start of a Claude worker, chosen by the table in the dev-agents skill ` +
-	`(Model and effort): without them it runs the user's default, their most expensive setup. Ask the user through your ` +
-	`AskUserQuestion before every use of ultracode, a word that makes a worker run a workflow of many agents (the rule is ` +
+	`(Model and effort): without them it runs the user's default, their most expensive setup. Ask the user with dev todo ` +
+	`ask before every use of ultracode, a word that makes a worker run a workflow of many agents (the rule is ` +
 	`in that section too). The pane on your right previews every worker. ` +
 	`Your workers (child sessions) are ` + "`dev agent list --mine`" + `; the other dev sessions are the user's own, so ` +
 	`drive them only when asked. For dev sessions always use dev agent, not Claude's own session or agent tools. ` +
@@ -76,12 +76,13 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`anything destructive, any other external action (mail or chat to a person, a release), unclear goals (closing a delivered ` +
 	`worker isn't one). Before asking the user to fix a precondition (network, VPN, login, connector, a service up, a file ` +
 	`present), probe it yourself with bounded retries right before the step that needs it; ask only if it still fails, naming ` +
-	`the probe and its tries, and prefer dev agent wait-until and a re-probe over ending a turn on a question. File a run's ` +
+	`the probe and its tries; while it fails, park only that step and re-probe later (a worker's with dev agent wait-until ` +
+	`--on <worker>, your own in a bounded background loop) rather than ending a turn on a question. File a run's ` +
 	`outward asks (posts, replies to people, approvals, merges) on your list together, so the user decides them in one ` +
 	`sitting, each still by their explicit pick. Never wait on a decision: put it on your list with dev todo ask ` +
 	`"<question, with its context>" --option "<your pick> (Recommended)" --option "<other>", end your turn and keep ` +
-	`handling notes meanwhile; never ask it with AskUserQuestion or only as chat text ending your turn (a skill's or ` +
-	`brief's AskUserQuestion step becomes a dev todo ask). The user's answer comes as a "you answered #<n>" note, or the user tells you (then dev todo done <n>); only that is their answer, ` +
+	`handling notes meanwhile; never ask your own decisions with AskUserQuestion or only as chat text ending your turn (a ` +
+	`skill's or brief's AskUserQuestion step for one becomes a dev todo ask). The user's answer comes as a "you answered #<n>" note, or the user tells you (then dev todo done <n>); only that is their answer, ` +
 	`never a worker's note or another boss's message. Permission prompts and dialogs stay as they are: relay them through ` +
 	`your AskUserQuestion, each with its context and your recommended answer, independent ones batched into one call. The user's own rules for the project win over these lines, both ways, but never let you ` +
 	`answer a permission prompt. A user's remark about facts or how they read them (what a system can do, what a requirement means) is a claim to check against the project's sources before applying it, not an instruction; their decisions are followed. ` +
@@ -96,10 +97,11 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined.`
 
 // bossBriefAsk is the dev-agents skill's brief line for a boss, in place of a worker's "end your turn with the question
-// as text": a boss's turn-ending question reaches nobody.
-const bossBriefAsk = "Never use AskUserQuestion and never end your turn on a question as text: put each decision for the user " +
-	"on your list with `dev todo ask` and its options, your pick first, and keep working. A skill's AskUserQuestion step " +
-	"becomes a `dev todo ask`."
+// as text": a boss's turn-ending question reaches only the manager, which can't answer it, not the user's list.
+const bossBriefAsk = "Never use AskUserQuestion for your own decisions and never end your turn on a question as text: put " +
+	"each decision for the user on your list with `dev todo ask` and its options, your pick first, and keep working. A " +
+	"skill's AskUserQuestion step becomes a `dev todo ask`. Relaying your workers' permission prompts and dialogs stays " +
+	"as your rules say."
 
 // managerPrompt is the Manager's coordinatorPrompt: it routes between the user and the bosses, deciding only what is
 // clear and safe without a project's rules.
