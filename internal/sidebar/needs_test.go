@@ -25,8 +25,8 @@ func needsModel(calls *[]answerCall) Model {
 	return Model{
 		c: tmux.NewFake(func([]string) (string, error) { return "", nil }),
 		snap: snapshot{width: 40, height: 30, current: "boss-dev", focused: true, sessions: []Session{
-			{Name: "boss-dev", Group: "dev", Boss: true, ID: "$1", Agent: "Claude", State: "idle"},
-			{Name: "w1", Group: "dev", ID: "$2", StartedBy: "boss-dev", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true},
+			{Name: "boss-dev", Group: "dev", Project: "dev", Boss: true, ID: "$1", Agent: "Claude", State: "idle"},
+			{Name: "w1", Group: "dev", Project: "dev", ID: "$2", StartedBy: "boss-dev", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true},
 		}},
 		needs: []needList{{Boss: "boss-dev", Items: []needItem{
 			{ID: 1, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}},
@@ -61,7 +61,7 @@ func TestNeedsRows(t *testing.T) {
 	want := []needRow{
 		{project: "dev", boss: "boss-dev", id: 1, text: "Merge #148?", options: []string{"Merge (Recommended)", "Wait"}, session: "boss-dev"},
 		{project: "dev", boss: "boss-dev", id: 4, text: "Call Vince", session: "boss-dev"},
-		{project: "dev", text: "w1", session: "w1", dialog: true},
+		{project: "w1", text: "w1", session: "w1", dialog: true},
 	}
 	if !slices.EqualFunc(got, want, func(a, b needRow) bool {
 		return a.key() == b.key() && a.project == b.project && slices.Equal(a.options, b.options) && a.session == b.session
@@ -74,10 +74,10 @@ func TestNeedsRows(t *testing.T) {
 	if r := m.needRows(); len(r) != 4 || !r[2].broken || r[2].text != "list not read: bad JSON" || r[2].session != "boss-web" || !strings.Contains(m.needLine(r[2], 40, false), "⚠") {
 		t.Errorf("rows with a list not read = %+v", r)
 	}
-	// A boss no session carries is shown by its own name
+	// A boss no session carries is shown by its name without "boss-"
 	m = needsModel(&calls)
 	m.snap.sessions = nil
-	if r := m.needRows(); r[0].project != "boss-dev" {
+	if r := m.needRows(); r[0].project != "dev" {
 		t.Errorf("project without a session = %q", r[0].project)
 	}
 }
@@ -87,7 +87,7 @@ func TestNeedsRender(t *testing.T) {
 	m := needsModel(&calls)
 	f := m.render()
 	plain := func(i int) string { return strings.TrimRight(ansi.Strip(f.lines[i]), " ") }
-	for i, want := range []string{" NEEDS YOU 3 · n", "", " dev  ☐ Merge #148?", " dev  ☐ Call Vince", " dev  ● w1", "", " SESSIONS                           +"} {
+	for i, want := range []string{" NEEDS YOU 3 · n", "", " dev  ☐ Merge #148?", " dev  ☐ Call Vince", " w1  ● w1", "", " SESSIONS                           +"} {
 		if got := plain(i); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
@@ -227,6 +227,9 @@ func TestNeedsEnterDialog(t *testing.T) {
 	m, _ = key(m, "k")
 	if m.needIdx != 2 {
 		t.Fatalf("idx %d", m.needIdx)
+	}
+	if m, _ = key(m, "enter"); !m.needOpen || m.selected != "" {
+		t.Fatalf("first ⏎ must expand: open %v selected %q", m.needOpen, m.selected)
 	}
 	m, cmd := key(m, "enter")
 	if m.needMode || m.selected != "w1" || cmd == nil {
@@ -459,5 +462,135 @@ func TestNeedsHiddenTakesNoKeys(t *testing.T) {
 	}
 	if m, _ = key(m, "n"); m.needMode {
 		t.Error("n entered a hidden section")
+	}
+}
+
+// Project is the group before Order regroups it: a worker under a manager keeps its own, and its boss's rows use it.
+func TestNeedsLabelIsProject(t *testing.T) {
+	sessions := Order([]Session{
+		{Name: "manager", Group: "manager", ID: "$1", Boss: true},
+		{Name: "boss-nocworx-core", Group: "nocworx-core", ID: "$2", Boss: true, StartedBy: "$1"},
+	})
+	if sessions[1].Group != "manager" || sessions[1].Project != "nocworx-core" {
+		t.Fatalf("order: %+v", sessions[1])
+	}
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.snap.sessions = sessions
+	m.needs = []needList{{Boss: "boss-nocworx-core", Items: []needItem{{ID: 1, Text: "Call"}}}}
+	if r := m.needRows(); len(r) != 1 || r[0].project != "nocworx-core" {
+		t.Errorf("rows = %+v", r)
+	}
+}
+
+func dialogModel(q string) Model {
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.needs = nil
+	m.snap.sessions = []Session{{Name: "w1", Group: "dev", Project: "dev", Deciding: true, Question: q}}
+	return m
+}
+
+func TestNeedsDialogText(t *testing.T) {
+	for _, tc := range []struct {
+		q, text string
+		options []string
+	}{
+		{`{"tool":"Bash","command":"echo hi"}`, "Bash: echo hi", nil},
+		{`{"tool":"Bash","command":"echo a\necho  b"}`, "Bash: echo a echo b", nil},
+		{`{"tool":"Read","file":"/a"}`, "Read", nil},
+		{`{"tool":"AskUserQuestion","questions":[{"question":"Which?","options":[{"label":"A (Recommended)"},{"label":"B"}]}]}`, "Which?", []string{"A (Recommended)", "B"}},
+		{`{"tool":"AskUserQuestion"}`, "AskUserQuestion", nil},
+		{"", "w1", nil},
+		{"junk", "w1", nil},
+	} {
+		r := dialogModel(tc.q).needRows()
+		if len(r) != 1 || r[0].text != tc.text || r[0].project != "w1" || !slices.Equal(r[0].options, tc.options) {
+			t.Errorf("%q → %+v, want text %q options %v", tc.q, r, tc.text, tc.options)
+		}
+	}
+}
+
+// ⏎ expands a plain item with its full text, then goes to its boss; a dialog's choices are shown, and a digit sends nothing.
+func TestNeedsExpandPlainAndDialog(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.needs[0].Items = []needItem{{ID: 4, Text: "Be reachable Tuesday night and Wednesday morning for the rollout"}}
+	m, _ = key(m, "n")
+	m, _ = key(m, "enter")
+	all := ansi.Strip(strings.Join(m.render().lines, "\n"))
+	if !m.needOpen || !strings.Contains(all, "rollout") || strings.Contains(m.needsHint(), "1-9") {
+		t.Fatalf("not expanded (open %v, hint %q):\n%s", m.needOpen, m.needsHint(), all)
+	}
+	if _, cmd := key(m, "enter"); cmd == nil {
+		t.Error("second ⏎ must go to the boss")
+	}
+
+	m = dialogModel(`{"tool":"AskUserQuestion","questions":[{"question":"Which database should the new service use for storage?","options":[{"label":"Postgres (Recommended)"},{"label":"SQLite"}]}]}`)
+	m, _ = key(m, "n")
+	m, _ = key(m, "enter")
+	all = ansi.Strip(strings.Join(m.render().lines, "\n"))
+	for _, want := range []string{"storage?", "★ Postgres", "· SQLite"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("%q missing:\n%s", want, all)
+		}
+	}
+	for _, l := range m.render().lines {
+		if ansi.StringWidth(l) > 40 {
+			t.Errorf("%q wider than 40", l)
+		}
+	}
+	m.needsAnswer = func(string, int, string, string) (string, error) {
+		t.Error("a dialog's choice was answered from the sidebar")
+		return "", nil
+	}
+	if m, cmd := key(m, "1"); cmd != nil || m.answering {
+		t.Error("a digit on a dialog did something")
+	}
+}
+
+// A list not read: ⏎ shows the whole error, then goes to the boss.
+func TestNeedsBrokenRowExpands(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.needs = []needList{{Boss: "boss-web", Error: "list not read: a long reason that does not fit in one line"}}
+	m.snap.sessions = nil
+	m, _ = key(m, "n")
+	m, cmd := key(m, "enter")
+	if !m.needOpen || cmd != nil || !strings.Contains(ansi.Strip(strings.Join(m.render().lines, "\n")), "one line") {
+		t.Fatalf("first ⏎: open %v cmd %v", m.needOpen, cmd)
+	}
+	if _, cmd := key(m, "enter"); cmd == nil {
+		t.Error("second ⏎ must go to the boss")
+	}
+}
+
+// Clicks follow ⏎: the first expands a plain row, the second on it goes to its boss.
+func TestNeedsMouseSecondClickGoes(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	click := func(m Model) (Model, tea.Cmd) {
+		next, cmd := m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 3, Y: m.render().needs[1].line})
+		return next.(Model), cmd
+	}
+	m, cmd := click(m)
+	if !m.needOpen || cmd != nil {
+		t.Fatalf("first click: open %v cmd %v", m.needOpen, cmd)
+	}
+	if m, cmd = click(m); m.needMode || cmd == nil {
+		t.Errorf("second click: mode %v cmd %v", m.needMode, cmd)
+	}
+}
+
+// A second click on an open ask keeps its options open: it has answers to pick, not a session to go to.
+func TestNeedsMouseOpenAskStaysOpen(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	for range 2 {
+		next, cmd := m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 3, Y: m.render().needs[0].line})
+		m = next.(Model)
+		if cmd != nil || !m.needOpen {
+			t.Fatalf("open %v cmd %v", m.needOpen, cmd)
+		}
 	}
 }

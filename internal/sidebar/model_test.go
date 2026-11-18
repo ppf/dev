@@ -57,13 +57,13 @@ func TestModelBuildSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Session{
-		{Name: "app", Group: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50", CostUSD: 1.5, HasCost: true},
-		{Name: "app-2", Group: "app"},
-		{Name: "gen", Group: "gen", Branch: "br/gen", Agent: "Claude", State: "idle", Wait: wait.Wait{Until: time.Unix(1700000000, 0), Reason: "CI reruns"}},
-		{Name: "side", Group: "side"},
-		{Name: "stale", Group: "stale"},
-		{Name: "w2", Group: "w2"},
-		{Name: "web", Group: "zz", Branch: "br/web", Agent: "Codex", Title: "task on repo"},
+		{Name: "app", Group: "app", Project: "app", Branch: "br/app", Agent: "Claude", State: "working", Title: "Fix login", PR: PR{Number: 7, State: "open", URL: "u"}, Cost: "$1.50", CostUSD: 1.5, HasCost: true},
+		{Name: "app-2", Group: "app", Project: "app"},
+		{Name: "gen", Group: "gen", Project: "gen", Branch: "br/gen", Agent: "Claude", State: "idle", Wait: wait.Wait{Until: time.Unix(1700000000, 0), Reason: "CI reruns"}},
+		{Name: "side", Group: "side", Project: "side"},
+		{Name: "stale", Group: "stale", Project: "stale"},
+		{Name: "w2", Group: "w2", Project: "w2"},
+		{Name: "web", Group: "zz", Project: "zz", Branch: "br/web", Agent: "Codex", Title: "task on repo"},
 	}
 	if !slices.Equal(s.sessions, want) {
 		t.Errorf("sessions =\n%+v\nwant\n%+v", s.sessions, want)
@@ -190,7 +190,7 @@ func (f *modelFakeServer) client() *tmux.Client {
 }
 
 func modelPaneLine(session, id, active, sidebar, selected string) string {
-	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "", "", "")
+	return tmux.FormatRow(session, "1", id, "/", "", "zsh", "", "", "", "", "", active, "40", "30", "", sidebar, selected, "$"+session, "", "", "120", "3", "0", "40", "", "", "", "", "")
 }
 
 func modelTestModel(c *tmux.Client) Model {
@@ -208,7 +208,7 @@ func TestModelRefresh(t *testing.T) {
 	}
 	want := [][]string{
 		{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_id}\x1f#{pane_current_path}\x1f#{pane_title}\x1f" +
-			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{@agent_waiting_for}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
+			"#{pane_current_command}\x1f#{@agent_state}\x1f#{@agent_cmd}\x1f#{@agent_cost}\x1f#{@agent_waiting_for}\x1f#{@agent_question}\x1f#{pane_active}\x1f#{pane_width}\x1f#{pane_height}\x1f" +
 			"#{@project}\x1f#{@sidebar_pane}\x1f#{@sidebar_selected_session}\x1f#{session_id}\x1f#{@dev_started_by}\x1f#{@dev_herd}\x1f#{window_width}\x1f#{window_panes}\x1f#{window_zoomed_flag}\x1f#{@sidebar_width}\x1f#{@dev_cost}\x1f#{@dev_pr}\x1f#{@dev_pr_gen}\x1f#{@dev_wait_until}\x1f#{@dev_wait_reason}\x1f"},
 		{"list-clients", "-F", "#{client_tty}\x1f#{client_session}\x1f#{client_activity}\x1f"},
 		{"set-option", "-gq", "@sidebar_session_order", "app\nweb\n"},
@@ -335,8 +335,8 @@ func TestModelBuildSnapshotCostOff(t *testing.T) {
 func TestModelDeciding(t *testing.T) {
 	rows := []paneRow{
 		{Session: "app", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Active: true, Width: 40, Height: 30},
-		{Session: "ask", Window: 1, ID: "%1", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: "permission_prompt", Sidebar: "%0"},
-		{Session: "rest", Window: 1, ID: "%2", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: agent.IdlePrompt, Sidebar: "%0"},
+		{Session: "ask", Window: 1, ID: "%1", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: "permission_prompt", Question: `{"tool":"Bash"}`, Sidebar: "%0"},
+		{Session: "rest", Window: 1, ID: "%2", Command: "claude", State: "waiting", StateCmd: "claude", WaitingFor: agent.IdlePrompt, Question: `{"tool":"Bash"}`, Sidebar: "%0"},
 	}
 	snap, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(_, _, _, _, _ string) PR { return PR{} })
 	if err != nil {
@@ -345,6 +345,10 @@ func TestModelDeciding(t *testing.T) {
 	got := map[string]bool{}
 	for _, s := range snap.sessions {
 		got[s.Name] = s.Deciding
+		// Only a dialog carries its question
+		if want := s.Name == "ask"; (s.Question != "") != want {
+			t.Errorf("%s: Question %q", s.Name, s.Question)
+		}
 	}
 	if !got["ask"] || got["rest"] {
 		t.Errorf("Deciding = %v, want ask only", got)

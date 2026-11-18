@@ -66,7 +66,7 @@ func Order(sessions []Session) []Session {
 			}
 			placed[s.ID] = true
 		}
-		s.Depth, s.Group = depth, group
+		s.Depth, s.Project, s.Group = depth, s.Group, group
 		out = append(out, s)
 		for _, c := range children[s.ID] {
 			place(c, depth+1, group)

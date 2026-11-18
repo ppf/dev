@@ -16,6 +16,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/ppf/dev/internal/agent"
 )
 
 // Each read runs dev todo --all, once per sidebar.
@@ -45,12 +47,12 @@ type needItem struct {
 
 // needRow is one line of NEEDS YOU: a list item waiting on the user, or a session waiting on a dialog.
 type needRow struct {
-	project string
+	project string // the label: the list owner's project, or a dialog's session name
 	boss    string // the boss whose list it is; "" for a dialog
 	id      int
-	text    string // the item's text, or the session's name for a dialog
-	options []string
-	session string // where ⏎ goes: the boss, or the session with the dialog
+	text    string   // the item's text, or what the dialog asks
+	options []string // an ask's answers; a dialog's choices, shown only
+	session string   // where ⏎ goes: the boss, or the session with the dialog
 	dialog  bool
 	broken  bool // the boss's list wasn't read: text is why
 }
@@ -144,16 +146,19 @@ func (m Model) readNeeds(chain bool) tea.Cmd {
 
 // needRows are the lines of NEEDS YOU: each open item no one else is on (a list not read: why), then each session
 // waiting on a dialog.
-func (m Model) needRows() []needRow {
-	group := map[string]string{}
-	for _, s := range m.snap.sessions {
-		group[s.Name] = s.Group
+func (m Model) needRows() []needRow { return buildNeedRows(m.snap.sessions, m.needs) }
+
+// buildNeedRows is needRows from plain data, free of the model.
+func buildNeedRows(sessions []Session, needs []needList) []needRow {
+	project := map[string]string{}
+	for _, s := range sessions {
+		project[s.Name] = s.Project
 	}
 	var rows []needRow
-	for _, l := range m.needs {
-		project, ok := group[l.Boss]
+	for _, l := range needs {
+		project, ok := project[l.Boss]
 		if !ok {
-			project = l.Boss
+			project = strings.TrimPrefix(l.Boss, "boss-")
 		}
 		if l.Error != "" {
 			rows = append(rows, needRow{project: project, boss: l.Boss, text: l.Error, session: l.Boss, broken: true})
@@ -164,12 +169,31 @@ func (m Model) needRows() []needRow {
 			}
 		}
 	}
-	for _, s := range m.snap.sessions {
+	for _, s := range sessions {
 		if s.Deciding {
-			rows = append(rows, needRow{project: s.Group, text: s.Name, session: s.Name, dialog: true})
+			text, options := dialogText(s)
+			rows = append(rows, needRow{project: s.Name, text: text, options: options, session: s.Name, dialog: true})
 		}
 	}
 	return rows
+}
+
+// dialogText falls back to the session's name when no question was recorded.
+func dialogText(s Session) (text string, options []string) {
+	oneLine := func(v string) string { return strings.Join(strings.Fields(v), " ") }
+	q, _ := agent.ParseQuestion(s.Question)
+	switch {
+	case q.Tool == agent.AskUserQuestion && len(q.Questions) > 0:
+		for _, c := range q.Questions[0].Options {
+			options = append(options, oneLine(c.Label))
+		}
+		return oneLine(q.Questions[0].Question), options
+	case q.Command != "":
+		return oneLine(q.Tool + ": " + q.Command), nil
+	case q.Tool != "":
+		return q.Tool, nil
+	}
+	return s.Name, nil
 }
 
 // fixNeeds keeps the cursor on its row after the rows changed; a row that went moves it to its place, options shut.
@@ -192,7 +216,7 @@ func (m *Model) fixNeeds() {
 	m.needKey, m.needOpen = rows[m.needIdx].key(), false
 }
 
-// handleNeedsKey: j/k move, ⏎ opens an ask's options or goes to the session, 1-9 answers an open ask, esc/q leaves.
+// handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session, 1-9 answers an open ask, esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if m.needIdx >= len(rows) || rows[m.needIdx].key() != m.needKey {
@@ -222,7 +246,7 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		n, _ := strconv.Atoi(s)
-		if !m.needOpen || m.answering || n > len(row.options) {
+		if !m.needOpen || m.answering || row.dialog || n > len(row.options) {
 			return m, nil
 		}
 		m.answering = true
@@ -236,8 +260,12 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openNeed(row needRow) (tea.Model, tea.Cmd) {
-	if !row.dialog && len(row.options) > 0 {
+	switch {
+	case !row.dialog && len(row.options) > 0:
 		m.needOpen = !m.needOpen
+		return m, nil
+	case !m.needOpen:
+		m.needOpen = true
 		return m, nil
 	}
 	c, client, current := m.c, m.client(), m.snap.current
@@ -352,7 +380,9 @@ func (m Model) openLines(r needRow, w int) []string {
 	vis := 1 + ansi.StringWidth(truncate(r.project, max(1, min(12, w/3)))) + 2 + 1 + 1
 	lines := []string{m.needLine(r, w, true)}
 	if text := strings.Split(ansi.Wrap(r.text, max(1, w-vis-1), ""), "\n"); len(text) > 1 {
-		lines = []string{m.needLine(needRow{project: r.project, text: text[0]}, w, true)}
+		first := r
+		first.text = text[0]
+		lines = []string{m.needLine(first, w, true)}
 		for _, t := range text[1:] {
 			lines = append(lines, cardLine(strings.Repeat(" ", vis)+t, vis+ansi.StringWidth(t), w, true))
 		}
@@ -362,7 +392,11 @@ func (m Model) openLines(r needRow, w int) []string {
 		if rec {
 			label = gold + "★ " + reset + label
 		}
-		line := "    " + green + strconv.Itoa(i+1) + reset + " " + truncate(label, max(1, w-7))
+		num := green + strconv.Itoa(i+1) + reset
+		if r.dialog {
+			num = muted + "·" + reset
+		}
+		line := "    " + num + " " + truncate(label, max(1, w-7))
 		lines = append(lines, cardLine(line, ansi.StringWidth(line), w, true))
 	}
 	return lines
@@ -373,12 +407,18 @@ func (m Model) needsHint() string {
 	if m.needIdx >= len(rows) {
 		return ""
 	}
-	hint := "j/k ⏎ go · esc leave"
+	row := rows[m.needIdx]
+	ask := !row.dialog && len(row.options) > 0
+	var hint string
 	switch {
-	case m.needOpen:
+	case m.needOpen && ask:
 		hint = "1-9 answer · esc back"
-	case !rows[m.needIdx].dialog && len(rows[m.needIdx].options) > 0:
+	case m.needOpen:
+		hint = "⏎ go · esc back"
+	case ask:
 		hint = "j/k ⏎ options · esc leave"
+	default:
+		hint = "j/k ⏎ expand · esc leave"
 	}
 	return " " + faint + hint + reset
 }

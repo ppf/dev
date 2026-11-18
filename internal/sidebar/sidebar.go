@@ -47,12 +47,14 @@ func IsSessionID(v string) bool {
 // Session is one sidebar entry.
 type Session struct {
 	Name     string
-	Group    string    // see Group
+	Group    string    // see Group, regrouped under its starter's root by Order
+	Project  string    // Group before Order regroups it
 	Branch   string    // the agent pane's branch; "" without an agent pane
 	Named    bool      // Name is SessionName(Group before Order regroups it, Branch), so the row leaves the branch out
 	Agent    string    // "Claude", "Codex", "Grok", or "" for no agent
 	State    string    // trusted hook state (working, waiting, idle) or ""
 	Deciding bool      // State is waiting on a permission prompt or question, not Claude's idle reminder
+	Question string    // its dialog's @agent_question as recorded (JSON); "" when none
 	Title    string    // the agent pane's cleaned title, "" when generic
 	PR       PR        // Branch's pull request; none without a branch or while no client views this sidebar
 	Cost     string    // the agent's estimated session cost, e.g. "$1.24"; "" when unknown or hidden (@dev_cost off)

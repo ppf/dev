@@ -65,7 +65,10 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	for _, h := range f.needs {
 		if rows := m.needRows(); ms.Y == h.line && h.idx < len(rows) {
-			m.needMode, m.needIdx, m.needKey, m.needOpen = true, h.idx, rows[h.idx].key(), false
+			// A second click on an open row with nothing to answer goes on, like a second ⏎
+			row := rows[h.idx]
+			again := m.needMode && m.needOpen && m.needKey == row.key() && (row.dialog || len(row.options) == 0)
+			m.needMode, m.needIdx, m.needKey, m.needOpen = true, h.idx, rows[h.idx].key(), again
 			return m.openNeed(rows[h.idx])
 		}
 	}
