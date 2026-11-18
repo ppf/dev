@@ -294,7 +294,11 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 	if total > room {
 		room--
 	}
-	room = max(room, len(block[max(cur, 0)]))
+	// The selected row fits, cut to the pane: the header, its blank, "+N more" and the blank after stay
+	room = min(max(room, len(block[max(cur, 0)])), gh-4)
+	if cur >= 0 && len(block[cur]) > room {
+		block[cur] = block[cur][:room]
+	}
 	span := func(from int) int {
 		used := 0
 		for i := from; i <= cur; i++ {

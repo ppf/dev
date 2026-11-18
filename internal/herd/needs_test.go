@@ -541,3 +541,20 @@ func TestNeedsKeepsDraftAndClickLeaves(t *testing.T) {
 		t.Errorf("click on a card: mode %v selected %q", m.needMode, m.selected)
 	}
 }
+
+// A selected row wrapping past the pane is cut to it: the block never outgrows the rows it has.
+func TestNeedsBlockFits(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.todo.Items[0].Text = strings.Repeat("a very long item ", 60)
+	m = selectKind(t, m, sidebar.NeedPlain)
+	for _, h := range []int{8, 10, 14} {
+		m.height = h
+		if got := m.render(); len(got) != h {
+			t.Errorf("height %d: %d lines", h, len(got))
+		}
+		if lines, _ := m.needBlock(h - 1); len(lines) > h-1 {
+			t.Errorf("height %d: block of %d lines", h, len(lines))
+		}
+	}
+}
