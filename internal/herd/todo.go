@@ -20,10 +20,95 @@ const (
 	strike    = "\x1b[9m"
 )
 
-// todoRows is the boss's list above the cards, in at most half the gh rows above the bottom rows (header in any):
-// header (TO DO n · k on others ── updated <age>), up to todoShown items, an ask's with its options' row, "+N more";
-// header only while folded (t); an alert row if unreadable; none if empty or no rows.
+// todoRows is the to do block above the cards, in at most half the gh rows above the bottom rows: the boss's own
+// list, then what waits on the user on its bosses' lists.
 func (m Model) todoRows(gh int) []string {
+	// A row for each boss's header, up to a quarter of the rows, comes out of the own list's half
+	keep := min(len(m.snap.asks), gh/4)
+	if m.snap.asksErr != nil {
+		keep = min(1, gh/4)
+	}
+	rows := m.ownRows(gh, keep)
+	return append(rows, m.askRows(gh/2-len(rows))...)
+}
+
+// askRows is what waits on the user on the lists of the bosses under this one, in room rows: per boss a header
+// (its name, how many, and how to answer an ask) and, unless folded, its items as ownRows lists them, "+N more"
+// after them, keeping a row for each header still to come; "+N more bosses" for those out of rows; a list not
+// read is its header with why.
+func (m Model) askRows(room int) []string {
+	w := m.width
+	if room < 1 {
+		return nil
+	}
+	if m.snap.asksErr != nil {
+		return []string{sidebar.AlertRow("❌ bosses' to do: "+m.snap.asksErr.Error(), w)}
+	}
+	var rows []string
+	left := room
+	for b, l := range m.snap.asks {
+		rest := len(m.snap.asks) - b - 1
+		if rest > 0 && left == 1 {
+			rows = append(rows, sidebar.HintRow("  +"+strconv.Itoa(rest+1)+" more bosses wait on you", w))
+			break
+		}
+		if left < 1 {
+			break
+		}
+		rows, left = append(rows, askHeader(l, m.todoFolded, w)), left-1
+		if m.todoFolded || l.Err != nil {
+			continue
+		}
+		budget, used, shown := left-rest, 0, 0
+		for i, it := range l.Items {
+			item := []string{todoItem(it, nil, w)}
+			if r := todoOptions(it, w); r != "" {
+				item = append(item, r)
+			}
+			need := len(item)
+			if i < len(l.Items)-1 {
+				// Room for the "+N more" row
+				need++
+			}
+			if used+need > budget {
+				break
+			}
+			rows, used, shown = append(rows, item...), used+len(item), shown+1
+		}
+		if more := len(l.Items) - shown; more > 0 && used < budget {
+			rows, used = append(rows, sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w)), used+1
+		}
+		left -= used
+	}
+	return rows
+}
+
+// askHeader is a boss's header over its items waiting on the user, ▸ first while folded: its name and their
+// count, or why its list wasn't read, then at the right how to answer an ask, when it has one and it fits.
+func askHeader(l todo.BossList, folded bool, w int) string {
+	left := " " + bold + l.Boss + reset + " " + sidebar.Muted + "· " + strconv.Itoa(len(l.Items)) + " wait on you" + reset + " "
+	right := ""
+	if slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return len(it.Options) > 0 }) {
+		right = " " + sidebar.Muted + "dev todo answer " + l.Boss + " <n> <option>" + reset + " "
+	}
+	if l.Err != nil {
+		left = " " + bold + l.Boss + reset + " " + sidebar.Red + "⚠ list not read: " + l.Err.Error() + reset + " "
+	}
+	if folded {
+		left = " " + rule + "▸" + reset + left
+	}
+	if ansi.StringWidth(left)+ansi.StringWidth(right) > w {
+		right = ""
+	}
+	left = ansi.Truncate(left, w-ansi.StringWidth(right), "…")
+	fill := max(0, w-ansi.StringWidth(left)-ansi.StringWidth(right))
+	return left + rule + strings.Repeat("─", fill) + reset + right
+}
+
+// ownRows is the boss's own list, in at most half the gh rows less keep (header in any): header (TO DO n · k on
+// others ── updated <age>), up to todoShown items, an ask's with its options' row, "+N more"; header only while
+// folded (t); an alert row if unreadable; none if empty or no rows.
+func (m Model) ownRows(gh, keep int) []string {
 	w := m.width
 	if gh < 1 {
 		return nil
@@ -36,7 +121,7 @@ func (m Model) todoRows(gh int) []string {
 		return nil
 	}
 	rows := []string{m.todoHeader(l, w)}
-	room := max(0, gh/2-1)
+	room := max(0, gh/2-1-keep)
 	if m.todoFolded || room == 0 {
 		return rows
 	}
@@ -102,16 +187,19 @@ func (m Model) todoOwner(it todo.Shown) *owner {
 	if it.Done || it.On == "" {
 		return nil
 	}
-	tiles := make([]todo.Session, len(m.snap.tiles))
-	for i, t := range m.snap.tiles {
-		tiles[i] = todo.Session{ID: t.sess.Name, Name: t.sess.Name}
+	// Its own workers: a deeper session is its boss's
+	var tiles []todo.Session
+	for _, t := range m.snap.tiles {
+		if t.via == "" {
+			tiles = append(tiles, todo.Session{ID: t.sess.Name, Name: t.sess.Name})
+		}
 	}
 	on := it.On
 	if it.Session != nil {
 		on = it.Session.ID
 	}
 	if w, ok := todo.Match(on, tiles); ok && (it.Session == nil || w.ID == on) {
-		t := m.snap.tiles[slices.IndexFunc(tiles, func(s todo.Session) bool { return s == w })]
+		t := m.snap.tiles[index(m.snap.tiles, w.Name)]
 		o := &owner{name: w.Name, sec: t.section()}
 		if o.sec == waitingSection && t.sess.Wait.Held() {
 			o.until = wait.Clock(t.sess.Wait.Until, m.clk.Now())

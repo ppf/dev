@@ -157,6 +157,13 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	i := index(m.snap.tiles, m.selected)
+	if len(m.snap.tiles) > 0 && m.snap.tiles[i].via != "" {
+		switch key {
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "m", "i", "x":
+			m.msg = info(viaOnly(m.snap.tiles[i]))
+			return m, nil
+		}
+	}
 	switch key {
 	case "j", "down":
 		m.selected = m.move(i, 1)
@@ -219,7 +226,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleMouse: a left click on a card's ▸/▾ folds or unfolds it; on one of its dialog's options picks it
 // (Submit goes on), as its key does; on Open switches to the worker, on Message… opens the reply box for it,
-// on its PR opens it, on × asks to close it; elsewhere on a card it selects it, for the keys.
+// on its PR opens it, on × asks to close it; elsewhere on a card it selects it, for the keys. A deeper session's
+// card only folds, opens, opens its PR or selects: a click elsewhere on it says where it is answered.
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
@@ -248,7 +256,14 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case hitPR:
 		m.selected = t.sess.Name
 		return m.openPR(h.tile)
-	case hitClose:
+	}
+	if t.via != "" {
+		// Keys go on to the card now selected, not a box left open on another
+		m.blur()
+		m.selected, m.msg = t.sess.Name, info(viaOnly(t))
+		return m, nil
+	}
+	if h.kind == hitClose {
 		// Its y would go into a draft, and the box hides the question; a typed reply waits for its box
 		m.blur()
 		m.selected, m.confirm = t.sess.Name, t.sess.Name
@@ -287,6 +302,11 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	m.box.other, m.box.ed, m.box.hl = false, editor{}, h.k
 	return m.pickOption(p, h.k)
+}
+
+// viaOnly says where a deeper session's card is answered: its own session, or its boss.
+func viaOnly(t tile) string {
+	return t.sess.Name + " is " + t.via + "'s: answer it there or in its session (g/⏎)"
 }
 
 // move is the session dir tiles away from tile i, wrapping.
