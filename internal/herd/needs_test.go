@@ -138,11 +138,18 @@ func TestNeedsLabelCap(t *testing.T) {
 	}
 }
 
-// Two labels that cut alike at 20 keep their full width, up to 2/5 of the pane.
+// Labels that cut alike at 20 widen the column only until they read apart, up to 2/5 of the pane.
 func TestNeedsLabelCollision(t *testing.T) {
 	rows := []needRow{{label: "kite › billing-export-us"}, {label: "kite › billing-export-eu"}, {label: "noc"}}
 	if got := labelWidth(rows, 60); got != 24 {
 		t.Errorf("colliding = %d, want 24", got)
+	}
+	long := append([]needRow{{label: "kite › a-very-long-worker-name-for-the-report"}}, rows...)
+	if got := labelWidth(long, 160); got != 24 {
+		t.Errorf("colliding beside a long label = %d, want 24", got)
+	}
+	if got := labelWidth(rows, 50); got != 20 {
+		t.Errorf("narrow pane = %d, want 20", got)
 	}
 	if got := labelWidth(rows[1:], 60); got != 20 {
 		t.Errorf("one long = %d, want 20", got)

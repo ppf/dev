@@ -353,20 +353,31 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 	return append(lines, padRow("", w)), append(at, -1), append(spans, nil)
 }
 
-// labelWidth is the rows' label column: the longest label, cut at 20 unless two labels would cut alike (hiding
-// which worker an answer goes to), and at 2/5 of the pane.
+// labelWidth is the rows' label column: the longest label, cut at 20, or wider until no two labels cut alike
+// (hiding which worker an answer goes to), and at 2/5 of the pane.
 func labelWidth(rows []needRow, w int) int {
-	labelW, capW := 0, 20
-	cuts := map[string]string{}
+	labelW := 0
 	for _, r := range rows {
 		labelW = max(labelW, ansi.StringWidth(r.label))
-		cut := ansi.Truncate(r.label, 20, "…")
+	}
+	capW := 20
+	for capW < labelW && cutsAlike(rows, capW) {
+		capW++
+	}
+	return min(labelW, capW, max(4, w*2/5))
+}
+
+// cutsAlike says two different labels read the same cut at w.
+func cutsAlike(rows []needRow, w int) bool {
+	cuts := map[string]string{}
+	for _, r := range rows {
+		cut := ansi.Truncate(r.label, w, "…")
 		if full, ok := cuts[cut]; ok && full != r.label {
-			capW = w
+			return true
 		}
 		cuts[cut] = r.label
 	}
-	return min(labelW, capW, max(4, w*2/5))
+	return false
 }
 
 // minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.
