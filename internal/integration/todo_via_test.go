@@ -88,6 +88,53 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		return strings.Contains(string(data), `- you answered #1 "Merge #148?" via manager ("merge 148, wait on the API one"): Merge`)
 	})
 
+	// The user's pick in the manager's AskUserQuestion answers one item; a dismissed question keeps nothing
+	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Rebase #150?", "--option", "Rebase (Recommended)", "--option", "Leave it"); err != nil {
+		t.Fatal(err, stderr)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	ask := func(answers string) {
+		t.Helper()
+		in := `{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"boss-a #2: Rebase #150?"}]` + answers + `}}`
+		if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, in, "state", "working"); err != nil {
+			t.Fatalf("❌ manager pick: %v %s", err, stderr)
+		}
+	}
+	ask(`,"answers":{"boss-a #2: Rebase #150?":"Rebase"}`)
+	ask("")
+	// #2, added after the typed prompt, goes through on the pick: only with --question naming the item the pick asked
+	// and the option it picked; a refused answer leaves the pick for the right one
+	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Tag it?", "--option", "Tag"); err != nil {
+		t.Fatal(err, stderr)
+	}
+	answer := func(n, option, question string) (string, string, error) {
+		argv := []string{"todo", "answer", "boss-a", n, option, "--via", "manager"}
+		if question != "" {
+			argv = append(argv, "--question", question)
+		}
+		return dev(claude(pane["manager"]), "", argv...)
+	}
+	for _, tt := range []struct{ n, option, question, want string }{
+		{"2", "Rebase", "", "needs --question"},
+		{"3", "Tag", "Tag it?", `not boss-a #3 "Tag it?"`},
+		{"2", "Leave it", "Rebase #150?", `the user picked "Rebase", not "Leave it"`},
+	} {
+		if _, stderr, err := answer(tt.n, tt.option, tt.question); err == nil || !strings.Contains(stderr, tt.want) {
+			t.Errorf("❌ #%s %s from the pick: %v %q, want %q", tt.n, tt.option, err, stderr, tt.want)
+		}
+	}
+	if out, stderr, err := answer("2", "1", "Rebase #150?"); err != nil || out != "#2 answered, sent to boss-a\n" {
+		t.Fatalf("❌ answer via manager from a pick: %q %v %s", out, err, stderr)
+	}
+	// boss-a, still busy with the first answer's paste, gets it through its Stop hook
+	if out, stderr, err := dev([]string{"TMUX_PANE=" + pane["boss-a"]}, `{"hook_event_name":"Stop"}`, "state", "idle"); err != nil ||
+		!strings.Contains(out, `- you answered #2 \"Rebase #150?\" via manager (\"boss-a #2: Rebase #150? picked Rebase\"): Rebase`) {
+		t.Errorf("❌ boss-a's note quoting the pick: %q %v %s", out, err, stderr)
+	}
+	if _, stderr, err := answer("2", "Rebase", "Rebase #150?"); err == nil || !strings.Contains(stderr, "the user's latest pick answered an item already") {
+		t.Errorf("❌ a spent pick: %v %q", err, stderr)
+	}
+
 	// After /clear the manager's new conversation never saw the user's words, its inbox off then or not
 	s.T("set-option", "-t", "=manager:", "@dev_boss_inbox", "off")
 	prompt("merge it")
@@ -122,7 +169,7 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		t.Errorf("❌ --all --json with boss-b broken = %s, %v %s", out, err, stderr)
 	}
 	out, _, err = dev(user, "", "todo", "--all")
-	if err != nil || !strings.Contains(out, "boss-a\t2\t☐\tRelease?") || !strings.Contains(out, "boss-b\t⚠ list not read: ") {
+	if err != nil || !strings.Contains(out, "boss-a\t4\t☐\tRelease?") || !strings.Contains(out, "boss-b\t⚠ list not read: ") {
 		t.Errorf("❌ --all with boss-b broken = %q, %v", out, err)
 	}
 }
