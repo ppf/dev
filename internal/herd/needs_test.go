@@ -626,3 +626,46 @@ func TestNeedsTick(t *testing.T) {
 		t.Error("the row didn't take keys again")
 	}
 }
+
+// A selected row shows every option in full, one per line when they don't fit one; an unselected row stays cut,
+// and the block still fits the pane.
+func TestNeedsLongOptions(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	long := []string{"★ Keep the grouping, add the items under their boss", "Plain items also move the boss to NEEDS YOU and the sidebar", "Drop it"}
+	m.snap.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Release now?", Options: long}}}}}
+	m = selectKind(t, m, sidebar.NeedListAsk)
+	all := strings.Join(plain(m.render()), "\n")
+	for _, o := range long {
+		if !strings.Contains(all, strings.TrimPrefix(o, "★ ")) {
+			t.Errorf("option %q cut:\n%s", o, all)
+		}
+	}
+	if !strings.Contains(all, "\n     1 ★ Keep") || !strings.Contains(all, "\n     3 Drop it") {
+		t.Errorf("options not one per line:\n%s", all)
+	}
+	for _, h := range []int{8, 10, 14, 40} {
+		m.height = h
+		if got := m.render(); len(got) != h {
+			t.Errorf("height %d: %d lines", h, len(got))
+		}
+	}
+	m.height = 40
+	for _, w := range []int{40, 20} {
+		m.width = w
+		for i, l := range m.render() {
+			if got := ansi.StringWidth(l); got > w {
+				t.Errorf("width %d, line %d is %d wide", w, i, got)
+			}
+		}
+	}
+	m.width = 40
+	if all := strings.Join(plain(m.render()), "\n"); !strings.Contains(all, "\n       ") || !strings.Contains(all, "NEEDS YOU and") {
+		t.Errorf("long option not wrapped under its number at 40 columns:\n%s", all)
+	}
+	m.width = 80
+	m, _ = keys(m, "esc")
+	if strings.Contains(strings.Join(plain(m.render()), "\n"), "Drop it") {
+		t.Error("unselected row shows all options")
+	}
+}

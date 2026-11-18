@@ -500,6 +500,7 @@ func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 	open := map[int][]string{}
 	if m.needMode && m.needOpen && m.needIdx < len(rows) {
 		open[m.needIdx] = m.openLines(rows[m.needIdx], w)
+		open[m.needIdx] = open[m.needIdx][:min(len(open[m.needIdx]), max(1, h-3))]
 	}
 	height := func(i int) int {
 		if l, ok := open[i]; ok {
@@ -568,7 +569,7 @@ func (r NeedRow) label() string {
 	return r.Project
 }
 
-// openLines is the open ask: wrapped question, then a numbered line per option.
+// openLines is the open ask: wrapped question, then each option numbered, wrapped under its number.
 func (m Model) openLines(r NeedRow, w int) []string {
 	vis := 1 + ansi.StringWidth(truncate(r.label(), max(1, min(12, w/3)))) + 2 + 1 + 1
 	lines := []string{m.needLine(r, w, true)}
@@ -589,8 +590,13 @@ func (m Model) openLines(r NeedRow, w int) []string {
 		if r.Kind != NeedListAsk {
 			num = muted + "·" + reset
 		}
-		line := "    " + num + " " + truncate(label, max(1, w-7))
-		lines = append(lines, cardLine(line, ansi.StringWidth(line), w, true))
+		for j, p := range strings.Split(ansi.Wrap(label, max(1, w-7), ""), "\n") {
+			line := "      " + p
+			if j == 0 {
+				line = "    " + num + " " + p
+			}
+			lines = append(lines, cardLine(line, ansi.StringWidth(line), w, true))
+		}
 	}
 	return lines
 }

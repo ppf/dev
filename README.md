@@ -10,6 +10,8 @@ Status: in daily use. It replaced the bash `dev` scripts with strict parity, the
 go install github.com/ppf/dev@latest
 ```
 
+`dev --version` prints the installed version.
+
 ## Usage
 
 Projects live in `~/.config/dev/projects.toml` (`[[project]]` entries with `name`, `path`, `description`).
