@@ -273,7 +273,7 @@ func TestTodoOnWorker(t *testing.T) {
 	todoEnv(t)
 	run(t, "", "todo", "add", "By id", "--on", "local_w")
 	run(t, "", "todo", "add", "By name", "--on", " w ")
-	if _, stderr, err := execute(t, "", "todo", "add", "A person", "--on", "Marek"); err != nil || !strings.Contains(stderr, "on Marek: no single worker of this boss by that name or id, so a person\n") {
+	if _, stderr, err := execute(t, "", "todo", "add", "A person", "--on", "Marek"); err != nil || !strings.Contains(stderr, "on Marek: no single session this boss started (worker or boss) by that name or id, so a person\n") {
 		t.Errorf("--on a person: stderr %q, %v; want a note", stderr, err)
 	}
 	run(t, "", "todo", "add", "Handed over", "--on", "Ola")

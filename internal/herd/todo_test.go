@@ -364,6 +364,25 @@ func TestTodoWorkers(t *testing.T) {
 	}
 }
 
+// An item linked to a boss this one started (a manager's) shows the boss's state, its whole subtree's; once the
+// boss is closed, session gone.
+func TestTodoOnBoss(t *testing.T) {
+	m := board4()
+	m.snap.tiles = append(m.snap.tiles, tile{sess: sidebar.Session{Name: "boss-orbit", Agent: "Claude", State: "working"},
+		roll: &sidebar.Rollup{Rank: sidebar.RankNeedsYou}})
+	m.snap.started = map[string]bool{"boss-orbit": true}
+	on := func(name string) todo.Shown {
+		return todo.Shown{ID: 1, Text: "Ship v2.3", On: name, Session: &todo.Session{ID: name, Name: name}}
+	}
+	checkRows(t, []string{
+		todoItem(on("boss-orbit"), m.todoOwner(on("boss-orbit")), 70),
+		todoItem(on("boss-harbor"), m.todoOwner(on("boss-harbor")), 70),
+	}, []string{
+		" 1 ◌ Ship v2.3                                  ● boss-orbit · asking ",
+		" 1 ◌ Ship v2.3                             ✕ boss-har… · session gone ",
+	}, 70)
+}
+
 // The block lists those on a worker that needs the user first, then on a session that's gone, then the rest in
 // the list's order (the user's own are NEEDS YOU's); five of them, then +N more.
 func TestTodoWorkerOrder(t *testing.T) {

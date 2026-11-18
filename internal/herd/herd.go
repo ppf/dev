@@ -115,7 +115,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`only printed and stays the user's (not in your --mine list, its news doesn't reach you): say so when you name it. When ` +
 	`the user asks you to take one over, adopt it with ` + "`dev boss <project> --background --adopt`" + ` (only a boss ` +
 	`with no parent), then read ` + "`dev todo --all`" + ` for what it had before. Hand a boss work with ` +
-	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. A brief you hand a boss says, in ` +
+	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. An item on your list that a boss does gets ` + "`dev todo add --on boss-<project>`" + `: your board shows its live ` +
+	`state, or that it's gone. A brief you hand a boss says, in ` +
 	`place of a worker's "end your turn with the question as text": "` + bossBriefAsk + `" Close one of your bosses only when the user asks, ` +
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
