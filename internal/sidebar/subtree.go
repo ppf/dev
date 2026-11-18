@@ -38,16 +38,18 @@ const (
 	RankIdle
 )
 
-// Rank is s's own state, the first that holds: a dialog, a planned wait or rate-limit resume, working, a turn
+// Rank is s's own state, the first that holds: a dialog, a planned wait, working, a rate-limit resume, a turn
 // that ended on a question (an asks note; a needs a decision note outlives its dialog), else idle.
 func (s Session) Rank() Rank {
 	switch {
 	case s.Deciding:
 		return RankNeedsYou
-	case s.Wait.Held() || s.Resume:
+	case s.Wait.Held():
 		return RankWaiting
 	case s.State == agent.Working:
 		return RankWorking
+	case s.Resume:
+		return RankWaiting
 	case NoteKind(s.Note) == NoteAsks:
 		return RankNeedsYou
 	}

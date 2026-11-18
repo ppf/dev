@@ -399,6 +399,10 @@ func rollLine(r *Rollup, width int) (string, int) {
 			colour = red
 		}
 		add(colour, p)
+		if i == 0 && r.Warn {
+			// By the state, where the cut never takes it
+			plain, styled = plain+" ⚠", styled+" "+gold+"⚠"+reset
+		}
 	}
 	if r.Bosses > 0 {
 		add(muted, plural(r.Bosses, "boss", "bosses"))
@@ -410,9 +414,6 @@ func rollLine(r *Rollup, width int) (string, int) {
 				add(muted, p)
 			}
 		}
-	}
-	if r.Warn {
-		add(gold, "⚠")
 	}
 	if r.HasCost {
 		if cost := FormatCost(r.CostUSD); fits(cost) {

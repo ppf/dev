@@ -574,6 +574,11 @@ func (s *snapshot) rollUp() {
 		}
 	}
 	lists := map[string]sidebar.ListCount{}
+	if s.asksErr != nil {
+		for _, b := range s.bosses {
+			lists[b] = sidebar.ListCount{Unread: true}
+		}
+	}
 	for _, l := range s.asks {
 		c := sidebar.ListCount{Unread: l.Err != nil}
 		for _, it := range l.Items {

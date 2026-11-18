@@ -77,6 +77,7 @@ func TestSubtreeEdges(t *testing.T) {
 		{"rate limited", under(Session{State: agent.Idle, Resume: true, Note: "failed: rate limit"}), nil, RankWaiting, "1 waiting", true},
 		{"stale needs a decision note", under(Session{State: agent.Idle, Note: "needs a decision: Bash"}), nil, RankIdle, "idle", false},
 		{"asks note", under(Session{State: agent.Idle, Note: "asks: Merge?"}), nil, RankNeedsYou, "needs you · 1 question", false},
+		{"resumed by hand", under(Session{State: agent.Working, Resume: true}), nil, RankWorking, "1 working", false},
 		{"asks note while working", under(Session{State: agent.Working, Note: "asks: Merge?"}), nil, RankWorking, "1 working", false},
 		{"idle reminder", under(Session{State: agent.Waiting}), nil, RankIdle, "idle", false},
 		{"stuck worker working", under(Session{State: agent.Working, Note: "stuck: 20m"}), nil, RankWorking, "1 working", true},
@@ -136,7 +137,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Subtree(s.sessions, needCounts([]needList{{Boss: "boss", Items: []needItem{{ID: 1, Text: "DM"}}}}))["boss"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working · 1 waiting · 1 to do · ⚠" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 to do" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }

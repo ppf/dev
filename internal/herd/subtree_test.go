@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -211,5 +212,20 @@ func TestBossCardOwnAsks(t *testing.T) {
 	body := ansi.Strip(strings.Join(cardRows, "\n"))
 	if !strings.Contains(body, "Connect the VPN?") || !strings.Contains(body, "needs you · 1 question · 2 working") {
 		t.Errorf("open card:\n%s", body)
+	}
+}
+
+// Lists that couldn't be read flag every boss ⚠.
+func TestRollUpListsNotRead(t *testing.T) {
+	s, err := buildSnapshot(managerRows(), nil, "%1", "", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.asksErr = errors.New("no server")
+	s.rollUp()
+	for _, name := range []string{"boss-dev", "boss-mag", "boss-noc"} {
+		if !s.tiles[index(s.tiles, name)].roll.Warn {
+			t.Errorf("%s: no ⚠", name)
+		}
 	}
 }
