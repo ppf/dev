@@ -134,6 +134,38 @@ func firstDiff(a, b string) string {
 	return ""
 }
 
+// Bosses ask the user less and where the user sees it; the hard limits stay.
+func TestAskRules(t *testing.T) {
+	for name, text := range byName {
+		for _, want := range []string{
+			"probe it yourself with bounded retries right before the step",
+			"**Batch a run's outward asks:**",
+			"Every one still needs the user's explicit pick.",
+			"nor only as chat text ending your turn",
+			"permission prompts (never answer one yourself)",
+			"They never let you answer a permission prompt.",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: missing %q", name, want)
+			}
+		}
+	}
+	// Workers keep asking as text (their boss reads it); a boss's brief says dev todo ask, so the manager must not hand
+	// a boss the worker line.
+	for _, want := range []string{
+		"Every brief to a worker includes:\n\n> Never use AskUserQuestion: end your turn with the question as text.\n",
+		"A brief to a boss (the manager's) says instead",
+		"A brief you hand a boss carries the boss line",
+	} {
+		if !strings.Contains(DevAgents, want) {
+			t.Errorf("dev-agents/SKILL.md: missing %q", want)
+		}
+	}
+	if strings.Contains(DevAgents, "Every brief includes:") {
+		t.Error("dev-agents/SKILL.md: the worker's brief line isn't scoped to workers")
+	}
+}
+
 // A boss that writes a worker's state into an item's text makes it look like the user's own.
 func TestTodoOwnerRule(t *testing.T) {
 	for name, text := range byName {

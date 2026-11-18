@@ -15,6 +15,7 @@ import (
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -712,6 +713,29 @@ func TestCoordinatorArgv(t *testing.T) {
 		want := append(tt.want, "--append-system-prompt", coordinatorPrompt, "--remote-control=boss-p")
 		if got := coordinatorArgv("boss-p", tt.args...); !slices.Equal(got, want) {
 			t.Errorf("%s: %q, want %q", tt.name, got[:len(got)-3], tt.want)
+		}
+	}
+}
+
+// The prompts carry the skill's ask rules: the manager's boss briefs say dev todo ask (as the skill's boss line does),
+// bosses probe preconditions and batch outward asks, and neither answers a permission prompt.
+func TestPromptAskRules(t *testing.T) {
+	if !strings.Contains(skill.DevAgents, "> "+bossBriefAsk+"\n") {
+		t.Error("bossBriefAsk isn't the dev-agents skill's boss brief line")
+	}
+	for _, tt := range []struct {
+		name, prompt string
+		want         []string
+	}{
+		{"coordinatorPrompt", coordinatorPrompt, []string{"probe it yourself with bounded retries", "File a run's outward asks",
+			"never ask it with AskUserQuestion or only as chat text", "never let you answer a permission prompt"}},
+		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "never as chat text ending a turn nor AskUserQuestion",
+			"answer a permission prompt or dialog", "do anything destructive"}},
+	} {
+		for _, want := range tt.want {
+			if !strings.Contains(tt.prompt, want) {
+				t.Errorf("%s: missing %q", tt.name, want)
+			}
 		}
 	}
 }
