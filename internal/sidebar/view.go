@@ -440,19 +440,27 @@ func rollLine(r *Rollup, width int) (string, int) {
 			plain, styled = plain+" ⚠", styled+" "+gold+"⚠"+reset
 		}
 	}
-	if r.Bosses > 0 {
-		add(muted, plural(r.Bosses, "boss", "bosses"))
-		if w := r.Under - r.Bosses; w > 0 {
-			add(muted, plural(w, "worker", "workers"))
-		}
-	}
 	rest, others := parts[lead:], ""
 	if r.OnOthers > 0 {
 		rest, others = rest[:len(rest)-1], rest[len(rest)-1]
 	}
 	dropped := false
+	if r.Bosses > 0 {
+		// Whole or dropped from the end: workers before bosses
+		group := []string{plural(r.Bosses, "boss", "bosses")}
+		if w := r.Under - r.Bosses; w > 0 {
+			group = append(group, plural(w, "worker", "workers"))
+		}
+		for _, p := range group {
+			if !dropped && fits(p) {
+				add(muted, p)
+			} else {
+				dropped = true
+			}
+		}
+	}
 	for _, p := range rest {
-		if fits(p) {
+		if !dropped && fits(p) {
 			add(muted, p)
 		} else {
 			dropped = true
