@@ -360,11 +360,11 @@ func labelWidth(rows []needRow, w int) int {
 	for _, r := range rows {
 		labelW = max(labelW, ansi.StringWidth(r.label))
 	}
-	capW := 20
-	for capW < labelW && cutsAlike(rows, capW) {
+	limit, capW := min(labelW, max(4, w*2/5)), 20
+	for capW < limit && cutsAlike(rows, capW) {
 		capW++
 	}
-	return min(labelW, capW, max(4, w*2/5))
+	return min(limit, capW)
 }
 
 // cutsAlike says two different labels read the same cut at w.
