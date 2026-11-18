@@ -3,6 +3,7 @@ package todo
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -679,5 +680,56 @@ func TestAnswerBefore(t *testing.T) {
 	}
 	if _, err := s.Answer(legacy, "", "Yes", added.Unix()+100, added); err == nil {
 		t.Error("an unstamped item answered via the manager")
+	}
+}
+
+// All reads each boss session's list, by name: a session that isn't a boss and an empty list are left out, a list
+// not read comes with why, a boss closed since list-sessions is left out.
+func TestAll(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			return tmux.FormatRow("boss-z", "1") + tmux.FormatRow("w", "") + tmux.FormatRow("boss-a", "1") +
+				tmux.FormatRow("boss-empty", "1") + tmux.FormatRow("boss-gone", "1") + tmux.FormatRow("boss-bad", "1"), nil
+		case "display-message":
+			name := strings.Trim(args[3], "=:")
+			if name == "boss-gone" {
+				return "", errors.New("can't find session")
+			}
+			return tmux.FormatRow("/tmp/tmux-1/default", name, "1", "$1", "1700000000"), nil
+		case "has-session":
+			if strings.Contains(args[2], "boss-gone") {
+				return "", errors.New("can't find session")
+			}
+		}
+		return "", nil
+	})
+	now := time.Now()
+	for _, name := range []string{"boss-a", "boss-z", "boss-bad"} {
+		s, err := ForPane(c, tmux.SessionTarget(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Add(Item{Text: name + "'s"}, now); err != nil {
+			t.Fatal(err)
+		}
+		if name == "boss-bad" {
+			if err := os.WriteFile(s.path, []byte("{"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	all, err := All(c, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, l := range all {
+		got = append(got, fmt.Sprintf("%s %q %v", l.Boss, ids(l.List), l.Err != nil))
+	}
+	want := []string{`boss-a ["1 boss-a's"] false`, `boss-bad [] true`, `boss-z ["1 boss-z's"] false`}
+	if !slices.Equal(got, want) {
+		t.Errorf("All = %q, want %q", got, want)
 	}
 }

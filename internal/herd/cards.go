@@ -375,7 +375,10 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 		label string
 		kind  hitKind
 	}
-	bs := []button{{"Open", hitOpen}, {"Message…", hitMessage}}
+	bs := []button{{"Open", hitOpen}}
+	if t.via == "" {
+		bs = append(bs, button{"Message…", hitMessage})
+	}
 	if t.sess.PR.Number != 0 {
 		bs = append(bs, button{"PR #" + strconv.Itoa(t.sess.PR.Number), hitPR})
 	}
@@ -404,7 +407,7 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 		hits = append(hits, hit{x0: x, x1: x + bw, kind: bt.kind})
 		x += bw
 	}
-	if gap := w - x - 2; gap > 0 {
+	if gap := w - x - 2; gap > 0 && t.via == "" {
 		b.WriteString(strings.Repeat(" ", gap) + sidebar.Muted + "×" + reset)
 		hits = append(hits, hit{x0: w - 3, x1: w, kind: hitClose})
 	}
@@ -419,6 +422,9 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		arrow = "▸"
 	}
 	left := rule + arrow + reset + " " + sidebar.StateColour(t.sess.Agent, t.sess.State) + "●" + reset + " " + bold + t.sess.Name + reset
+	if t.via != "" {
+		left += "  " + sidebar.Muted + "via " + t.via + reset
+	}
 	if folded {
 		if s := m.statusText(t, sec); s != "" {
 			left += "  " + sidebar.Muted + s + reset
