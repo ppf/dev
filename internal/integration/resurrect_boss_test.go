@@ -134,7 +134,7 @@ func TestResurrectManager(t *testing.T) {
 	d.T("run-shell", save+" quiet")
 	last, _ := os.Readlink(filepath.Join(resurrectDir, "last"))
 	state, _ := os.ReadFile(filepath.Join(resurrectDir, last+".dev"))
-	for _, line := range []string{":started_with\tmanager\tsonnet\tmedium\n", ":boss\tmanager\t1.1\t1.2\n"} {
+	for _, line := range []string{":started_with\tmanager\tfable\tmedium\n", ":boss\tmanager\t1.1\t1.2\n"} {
 		if !strings.Contains(string(state), line) {
 			t.Errorf("saved state lacks %q:\n%s", line, state)
 		}
@@ -163,7 +163,7 @@ func TestResurrectManager(t *testing.T) {
 	out, err := again.Output()
 	check(t, "restored manager only printed", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
 	start, _ := d.Try("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}")
-	if !strings.Contains(start, `'claude' '--model' 'sonnet' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
+	if !strings.Contains(start, `'claude' '--model' 'fable' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
 		!strings.Contains(start, `'--remote-control=manager'`) {
 		t.Errorf("restored manager's coordinator: %q", start)
 	}
