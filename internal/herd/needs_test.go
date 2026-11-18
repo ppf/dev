@@ -669,3 +669,34 @@ func TestNeedsLongOptions(t *testing.T) {
 		t.Error("unselected row shows all options")
 	}
 }
+
+// A question's row lists the options it was given, not the dialog's free-text and chat entries.
+func TestNeedsQuestionOptions(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	i := index(m.snap.tiles, "noc-triage")
+	capture := golden(t, "claude-ask-q1")
+	d, _ := parseDialog(capture)
+	p := newPick(d, colors, ansi.Strip(capture))
+	m.snap.tiles[i].pick, m.snap.tiles[i].question = &p, colors
+	r := m.needRows()[0]
+	if !slices.Equal(r.Options, []string{"Red", "Green", "Blue"}) {
+		t.Errorf("options %q", r.Options)
+	}
+}
+
+// A permission dialog keeps every option, whatever its labels.
+func TestPickOptionsPermission(t *testing.T) {
+	p := &pick{d: dialog{opts: []option{{num: 1, label: "Yes"}, {num: 2, label: "Chat about this"}}}, cur: -1, other: -1, tool: "Bash"}
+	if got := pickOptions(p); !slices.Equal(got, []string{"Yes", "Chat about this"}) {
+		t.Errorf("options %q", got)
+	}
+}
+
+// Only the dialog's own trailing chat entry is dropped: a supplied option of that name keeps its number.
+func TestPickOptionsSuppliedChat(t *testing.T) {
+	opts := []option{{num: 1, label: "Chat about this"}, {num: 2, label: "Proceed"}, {num: 3, label: "Type something."}, {num: 4, label: "Chat about this"}}
+	p := &pick{d: dialog{opts: opts, tabs: []string{"Q"}}, cur: -1, other: 2}
+	if got := pickOptions(p); !slices.Equal(got, []string{"Chat about this", "Proceed"}) {
+		t.Errorf("options %q", got)
+	}
+}

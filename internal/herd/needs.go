@@ -87,11 +87,15 @@ func (m Model) needRows() []needRow {
 	return out
 }
 
-// pickOptions are the labels of p's options as its card's chips say them.
+// pickOptions are the labels of p's options as its card's chips say them; a question's free-text and chat entries
+// are the dialog's own, not options it was given.
 func pickOptions(p *pick) []string {
-	out := make([]string, len(p.d.opts))
+	var out []string
 	for i, o := range p.d.opts {
-		out[i] = optionLabel(p, o)
+		if p.question() && (i == p.other || i == len(p.d.opts)-1 && o.label == "Chat about this") {
+			continue
+		}
+		out = append(out, optionLabel(p, o))
 	}
 	return out
 }

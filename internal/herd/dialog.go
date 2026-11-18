@@ -147,7 +147,9 @@ func parseDialog(capture string) (dialog, bool) {
 	}
 	var title []string
 	for ; i >= 0 && strings.TrimSpace(plain[i]) != "" && !isRule(plain[i]) && !tabRow(plain[i]); i-- {
-		title = append([]string{strings.TrimSpace(plain[i])}, title...)
+		if l := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(plain[i]), "│")); l != "" {
+			title = append([]string{l}, title...)
+		}
 	}
 	d.title, d.titleAt = strings.Join(title, " "), i+1
 	for i >= 0 && strings.TrimSpace(plain[i]) == "" {
