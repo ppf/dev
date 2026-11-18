@@ -218,7 +218,7 @@ func replyOptions(l string) []string {
 		var opts []string
 		for {
 			m := replyWord.FindStringSubmatchIndex(rest)
-			if m == nil || m[0] != 0 && len(opts) == 0 {
+			if m == nil || (m[0] != 0 && len(opts) == 0) {
 				break
 			}
 			opts = append(opts, rest[max(m[2], m[4]):max(m[3], m[5])])
