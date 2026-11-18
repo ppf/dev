@@ -236,7 +236,9 @@ takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), 
 and for a desktop app boss, which has no dev inbox: answer it in its chat. --question refuses the answer unless item n
 still reads that text (item numbers restart once a list empties). --via manager is the manager relaying what the user
 told it: only in the manager's coordinator pane, only for an item older than the user's latest prompt there, and the
-note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<prompt>\"): <answer>".`,
+note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<prompt>\"): <answer>". The user's pick in
+the manager's AskUserQuestion counts as that prompt for one answer: its one question must contain --question, and the
+answer must be the option picked.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -257,11 +259,17 @@ note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<promp
 				return fmt.Errorf("item number %q: %w", args[1], err)
 			}
 			c := tmux.New()
+			var manager inbox.Boss
 			var said *inbox.Prompt
 			var before int64
 			if via != "" {
-				if said, err = managerPrompt(c); err != nil {
+				if manager, said, err = managerPrompt(c); err != nil {
 					return err
+				}
+				if said.Pick {
+					if err := pickFor(said, name, id, question); err != nil {
+						return err
+					}
 				}
 				before = said.At
 			}
@@ -278,8 +286,19 @@ note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<promp
 			if err != nil {
 				return err
 			}
-			it, err := s.Answer(id, question, args[2], before, time.Now())
+			var picked string
+			if said != nil && said.Pick {
+				// Right before ticking: a pick answers one item, also with two answers relayed at once
+				if err := manager.Box.Claim(*said); err != nil {
+					return fmt.Errorf("--via manager: %w", err)
+				}
+				picked = said.Answer
+			}
+			it, err := s.AnswerPick(id, question, args[2], picked, before, time.Now())
 			if err != nil {
+				if said != nil && said.Pick {
+					err = errors.Join(err, manager.Box.Unclaim(*said))
+				}
 				return err
 			}
 			note := inbox.Answer(it.ID, it.Text, it.Answer)
@@ -305,29 +324,50 @@ note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<promp
 	return cmd
 }
 
-// managerPrompt is the user's latest prompt to the manager, for an answer relayed from its coordinator pane.
-func managerPrompt(c *tmux.Client) (*inbox.Prompt, error) {
+// managerPrompt is the manager and the user's latest prompt to it, for an answer relayed from its coordinator pane.
+func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	notHere := errors.New("--via manager runs only in the manager's coordinator pane")
 	pane := os.Getenv("TMUX_PANE")
 	if pane == "" {
-		return nil, notHere
+		return inbox.Boss{}, nil, notHere
 	}
 	self, ok, err := inbox.Coordinator(c, pane)
 	switch {
 	case err != nil:
-		return nil, err
+		return self, nil, err
 	case !ok || self.Name != inbox.Manager:
-		return nil, notHere
+		return self, nil, notHere
 	}
 	p, err := self.Box.UserPrompt()
 	switch {
 	case err != nil:
-		return nil, err
+		return self, nil, err
 	case p == nil:
-		return nil, errors.New("--via manager: the user hasn't prompted the manager yet")
+		return self, nil, errors.New("--via manager: the user hasn't prompted the manager yet")
 	}
-	return p, nil
+	return self, p, nil
 }
+
+// pickFor refuses a pick, the user's latest words to the manager, that isn't one question asking item id of boss,
+// question, or that left it open.
+func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
+	asked := strings.ToLower(pick.Question)
+	switch {
+	case question == "":
+		return errors.New("--via manager from a pick needs --question with the item's text")
+	case pick.Question == "":
+		return errors.New("--via manager: the user's pick wasn't one question: ask one item per question")
+	case !strings.Contains(asked, strings.ToLower(question)) || !strings.Contains(asked, fmt.Sprintf("#%d", id)) ||
+		!strings.Contains(asked, strings.ToLower(strings.TrimPrefix(boss, "boss-"))):
+		return fmt.Errorf("--via manager: the user's pick was for %q, not %s #%d %q", pick.Question, boss, id, question)
+	case strings.EqualFold(pick.Answer, leaveOpen):
+		return fmt.Errorf("--via manager: the user picked %q: the item stays open", leaveOpen)
+	}
+	return nil
+}
+
+// leaveOpen is the option the manager adds beside an ask's only one: picked, the item stays open.
+const leaveOpen = "Leave it open"
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
 	return &cobra.Command{

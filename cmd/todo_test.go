@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/inbox"
 )
 
 // todoEnv runs dev todo as the desktop app session local_boss, whose worker is local_w (desktopHome).
@@ -383,6 +385,31 @@ func TestTodoAnswerRefused(t *testing.T) {
 		t.Setenv("CLAUDECODE", tt.claude)
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
+		}
+	}
+}
+
+// A pick relays only for the one question it answered, naming the boss, the item and its text, and not when the
+// user left the item open.
+func TestPickFor(t *testing.T) {
+	pick := func(q, a string) *inbox.Prompt { return &inbox.Prompt{Pick: true, Question: q, Answer: a} }
+	for _, tt := range []struct {
+		name     string
+		pick     *inbox.Prompt
+		question string
+		want     string
+	}{
+		{"its item", pick("dev #7: Merge #148? (CI green)", "Merge"), "Merge #148?", ""},
+		{"no --question", pick("dev #7: Merge #148?", "Merge"), "", "needs --question"},
+		{"several questions", pick("", ""), "Merge #148?", "wasn't one question"},
+		{"another item number", pick("dev #6: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
+		{"another boss", pick("terminal #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
+		{"another text", pick("dev #7: Ship?", "Ship"), "Merge #148?", "not boss-dev #7"},
+		{"left open", pick("dev #7: Merge #148?", "leave it open"), "Merge #148?", "the item stays open"},
+	} {
+		err := pickFor(tt.pick, "boss-dev", 7, tt.question)
+		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
 		}
 	}
 }

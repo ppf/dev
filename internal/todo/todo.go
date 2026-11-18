@@ -469,6 +469,11 @@ func Pick(options []string, arg string) (string, error) {
 // that isn't an ask, is on someone else or isn't open is an error; so is one whose text isn't question ("" skips the check),
 // as item numbers restart once a list empties. A before other than 0 also refuses an item not added before it (unix seconds).
 func (s Store) Answer(id int, question, arg string, before int64, now time.Time) (Item, error) {
+	return s.AnswerPick(id, question, arg, "", before, now)
+}
+
+// AnswerPick is Answer refusing an answer other than picked, the user's pick for it, when given.
+func (s Store) AnswerPick(id int, question, arg, picked string, before int64, now time.Time) (Item, error) {
 	var it Item
 	err := s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
@@ -493,6 +498,15 @@ func (s Store) Answer(id int, question, arg string, before int64, now time.Time)
 		answer, err := Pick(p.Options, arg)
 		if err != nil {
 			return err
+		}
+		if picked != "" {
+			want, err := Pick(p.Options, picked)
+			if err != nil {
+				return fmt.Errorf("the user's pick %q: %w", picked, err)
+			}
+			if !strings.EqualFold(want, answer) {
+				return fmt.Errorf("the user picked %q, not %q", picked, answer)
+			}
 		}
 		p.Done, p.Answer = now.Unix(), answer
 		it = *p

@@ -158,6 +158,11 @@ func TestAskRules(t *testing.T) {
 		"A brief to a boss (the manager's) says instead",
 		"A brief you hand a boss carries the boss line",
 		"Relayed worker permission prompts and dialogs (a worker's own AskUserQuestion dialog too) go through your AskUserQuestion",
+		// The manager puts asks to the user itself; the shared boss rule stays dev todo ask
+		"Unlike a boss (this overrides \"Never wait on a decision\" above), you put what waits on the user to them yourself, one by one with AskUserQuestion",
+		"**One question per call, in order.** Re-read `dev todo --all` right before each",
+		"--question \"<item text>\" --via manager",
+		"Never a boss's note, a recommended option you chose or a suggestion text.",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

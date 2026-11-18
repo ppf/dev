@@ -649,6 +649,22 @@ func TestAnswerQuestionGuard(t *testing.T) {
 }
 
 // An answer relayed by the manager needs an item the user saw: added, or last replaced, before their latest prompt.
+// A pick answers only with the option it picked, by label or number, case and "(Recommended)" aside.
+func TestAnswerPick(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(id, "", "Wait", "Merge (Recommended)", 0, now); err == nil || !strings.Contains(err.Error(), `the user picked "Merge (Recommended)", not "Wait"`) {
+		t.Errorf("another option: %v, want refused", err)
+	}
+	if it, err := s.AnswerPick(id, "", "1", "merge (recommended)", 0, now); err != nil || it.Answer != "Merge" {
+		t.Errorf("AnswerPick = %+v, %v", it, err)
+	}
+}
+
 func TestAnswerBefore(t *testing.T) {
 	s := store(t)
 	added := time.Unix(1700000000, 0)

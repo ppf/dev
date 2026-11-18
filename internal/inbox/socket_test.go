@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/agent"
 )
 
 // listen is a unix listener with a short path (macOS caps them at 104 bytes).
@@ -147,6 +149,40 @@ func TestUnsend(t *testing.T) {
 	got, paste, _ := b.TakeForSend(now)
 	if got.String() != "[dev boss inbox] 2 worker update(s):\n- a finished: 1\n- b finished: 2" || paste {
 		t.Errorf("after unsend: %q, paste %v", got, paste)
+	}
+}
+
+// The user's AskUserQuestion pick is their latest prompt, claimed by one relayed answer only; a prompt since isn't
+// claimed, nor is a typed one.
+func TestPickedClaim(t *testing.T) {
+	b := testBox(t)
+	at := time.Unix(1700000000, 0)
+	if err := b.Picked([]agent.Pick{{Question: "boss-a #1: Merge #148?", Answer: "Merge"}}, at); err != nil {
+		t.Fatal(err)
+	}
+	pick, err := b.UserPrompt()
+	want := Prompt{Text: "boss-a #1: Merge #148? picked Merge", At: at.Unix(), Pick: true, Question: "boss-a #1: Merge #148?", Answer: "Merge"}
+	if err != nil || pick == nil || *pick != want {
+		t.Fatalf("UserPrompt = %+v, %v; want %+v", pick, err, want)
+	}
+	if err := b.Claim(*pick); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "answered an item already") {
+		t.Errorf("second Claim: %v, want refused", err)
+	}
+	if err := b.Arrived("merge it", at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "said something since") {
+		t.Errorf("Claim after a prompt: %v, want refused", err)
+	}
+	// Several questions in one pick: the words, no single question
+	if err := b.Picked([]agent.Pick{{Question: "A?", Answer: "x"}, {Question: "B?", Answer: "y"}}, at.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.UserPrompt(); err != nil || p == nil || p.Text != "A? picked x; B? picked y" || p.Question != "" {
+		t.Errorf("two picks: %+v, %v", p, err)
 	}
 }
 
