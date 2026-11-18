@@ -810,3 +810,26 @@ func TestWorkerlessBossRollLine(t *testing.T) {
 		t.Errorf("listLines = %d, want %d", with, without+1)
 	}
 }
+
+func TestViewAsksNote(t *testing.T) {
+	m := Model{snap: snapshot{width: 60, height: 24, current: "x", sessions: []Session{
+		{Name: "a", Group: "g", Agent: "Claude", State: "idle", Note: "asks: which one?", Title: "t"},
+		{Name: "b", Group: "g", Agent: "Codex", State: "idle", Note: "asks: which one?"},
+		{Name: "c", Group: "g", Agent: "Claude", State: "idle", Title: "t"},
+		{Name: "d", Group: "g", Agent: "Claude", State: "working", Note: "asks: stale", Title: "w"},
+		{Name: "e", Group: "g", Agent: "Claude", State: "idle", Note: "asks: later", Wait: wait.Wait{Until: time.Now().Add(time.Hour), Reason: "limit"}},
+	}}}
+	raw := strings.Join(m.render().lines, "\n")
+	if n := strings.Count(raw, red+"●"+reset); n != 2 {
+		t.Errorf("red dots = %d, want 2 (the asks rows):\n%s", n, raw)
+	}
+	plain := ansi.Strip(raw)
+	if !strings.Contains(plain, "working · w") || strings.Contains(plain, "asks · w") || strings.Contains(plain, "asks · limit") {
+		t.Errorf("a working or planned-wait session with an asks note reads as asks:\n%s", plain)
+	}
+	for _, want := range []string{"asks · t", "Codex · asks", "idle · t"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+}
