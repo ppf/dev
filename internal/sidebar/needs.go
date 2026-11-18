@@ -526,7 +526,7 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 	switch r.Kind {
 	case NeedDialog:
 		mark = red + "●" + reset
-	case NeedAsk:
+	case NeedAsk, NeedListAsk:
 		mark = gold + bold + "?" + reset
 	case NeedUnread:
 		mark = gold + "⚠" + reset

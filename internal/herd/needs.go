@@ -326,7 +326,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 // minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.
 const minBlockRows = 6
 
-// needLines are row r's lines, w columns: its mark (● dialog, ? question, ☐ list item, ⚠ list not read), its
+// needLines are row r's lines, w columns: its mark (● dialog, ? question or list ask, ☐ list item, ⚠ list not read), its
 // label padded to labelW, its text (wrapped when selected, else cut), then its options numbered when 1-9 answer
 // them (★ on the recommended one; m to reply to a question; a selected row's go one per line, wrapped, when they
 // don't fit one); the selected row on the selection band.
@@ -335,7 +335,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	switch r.Kind {
 	case sidebar.NeedDialog:
 		mark = sidebar.Red + "●" + reset
-	case sidebar.NeedAsk:
+	case sidebar.NeedAsk, sidebar.NeedListAsk:
 		mark = sidebar.Gold + bold + "?" + reset
 	case sidebar.NeedUnread:
 		mark = sidebar.Gold + "⚠" + reset

@@ -161,7 +161,7 @@ func TestNeedsRender(t *testing.T) {
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ☐ noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
 		"noc-triage  via boss-noc  Bash prompt · in the block ↑", "n needs"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
