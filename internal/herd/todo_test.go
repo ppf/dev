@@ -448,9 +448,9 @@ func TestTodoItemCheck(t *testing.T) {
 		t.Errorf("row = %q", ansi.Strip(row))
 	}
 	it.On = "the platform reviewers group"
-	for _, w := range []int{84, 50} {
+	for _, w := range []int{84, 60} {
 		row := ansi.Strip(todoItem(it, nil, w, now))
-		if !strings.Contains(row, "⚠ #412 approved 2h") || ansi.StringWidth(row) != w {
+		if !strings.Contains(row, "⚠ #412 approved"+map[int]string{84: " 2h"}[w]) || ansi.StringWidth(row) != w {
 			t.Errorf("width %d: row = %q", w, row)
 		}
 	}
@@ -468,5 +468,31 @@ func TestTodoItemWorkerCheck(t *testing.T) {
 	it = todo.Shown{ID: 2, Text: "Review", On: "the platform reviewers group of the payments team", Link: "https://github.com/acme/orbit/pull/412"}
 	if row := ansi.Strip(todoItem(it, nil, 84, now)); !strings.HasSuffix(strings.TrimRight(row, " "), "· #412") || ansi.StringWidth(row) != 84 {
 		t.Errorf("row = %q", row)
+	}
+}
+
+// A worker's name stays readable beside a check: whole while the row has room, else the check gives up its age, then
+// itself, before the name is cut below 8 columns.
+func TestTodoOwnerWidth(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	check := &sidebar.Check{Kind: sidebar.CheckMerged, PR: 301, Since: now.Add(-10 * time.Minute).Unix()}
+	boss := todo.Shown{ID: 4, Text: "Approve boss-orbit's release plan", On: "boss-orbit", Check: check}
+	ana := todo.Shown{ID: 5, Text: "Approve boss-orbit's release plan", On: "Ana", Check: check}
+	for _, c := range []struct {
+		it   todo.Shown
+		o    *owner
+		w    int
+		want string
+	}{
+		{boss, &owner{name: "boss-orbit", sec: needsYouSection}, 100, "● boss-orbit · asking · ⚠ #301 merged 10m"},
+		{boss, &owner{name: "boss-orbit", sec: needsYouSection}, 62, "● boss-orbit · asking"},
+		{ana, nil, 100, "Ana · ⚠ #301 merged 10m"},
+		{ana, nil, 62, "Ana · ⚠ #301 merged"},
+		{todo.Shown{ID: 6, Text: "Approve boss-orbit's release plan", On: "Ana", Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 301, Since: now.Add(-18*time.Hour - 19*time.Minute).Unix()}}, nil, 62, "Ana · ⚠ #301 merged"},
+	} {
+		row := ansi.Strip(todoItem(c.it, c.o, c.w, now))
+		if !strings.HasSuffix(strings.TrimRight(row, " "), c.want) || ansi.StringWidth(row) != c.w {
+			t.Errorf("%d columns: %q, want …%q", c.w, row, c.want)
+		}
 	}
 }
