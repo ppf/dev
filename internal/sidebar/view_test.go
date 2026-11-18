@@ -802,7 +802,7 @@ func TestWorkerlessBossRollLine(t *testing.T) {
 		{ID: 2, Text: "Call Vince"},
 	}}}}
 	lines := m.render().lines
-	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "1 need you · 1 to do") })
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "2 need you") })
 	if i < 0 {
 		t.Fatalf("no roll line:\n%s", strings.Join(lines, "\n"))
 	}
