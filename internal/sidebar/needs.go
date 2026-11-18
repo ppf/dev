@@ -129,7 +129,7 @@ func runTodo(timeout time.Duration, args ...string) (stdout, warning string, err
 	warning = strings.Join(strings.Fields(stderr.String()), " ")
 	switch {
 	case ctx.Err() != nil:
-		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, an answer may be ticked", args[0], timeout)
+		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, it may be ticked", args[0], timeout)
 	case err != nil:
 		return "", "", errors.New(cmp.Or(warning, err.Error()))
 	}
@@ -152,6 +152,12 @@ func loadNeeds() ([]NeedList, error) {
 func AnswerNeed(boss string, id int, question, option string) (string, error) {
 	out, warning, err := runTodo(answerTimeout, "answer", "--question="+question, "--", boss, strconv.Itoa(id), option)
 	// A note queued for a boss that isn't resting says so on stderr
+	return strings.TrimSpace(out + " " + warning), err
+}
+
+// TickNeed ticks item id of boss's list, as dev todo done does, only while it still reads text.
+func TickNeed(boss string, id int, text string) (string, error) {
+	out, warning, err := runTodo(answerTimeout, "done", "--text="+text, "--boss", boss, strconv.Itoa(id))
 	return strings.TrimSpace(out + " " + warning), err
 }
 
@@ -364,7 +370,7 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session (the boards' row to its board), 1-9 answers an
-// open ask, esc/q leaves.
+// open ask, d ticks a plain item, esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if m.needIdx >= len(rows) || rows[m.needIdx].key() != m.needKey {
@@ -392,6 +398,19 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "d":
+		if row.Kind != NeedPlain {
+			showMessage(m.c, m.client(), "d ticks a plain item")
+		}
+		if m.answering || row.Kind != NeedPlain || row.key() == m.ticked {
+			return m, nil
+		}
+		m.answering, m.ticked = true, row.key()
+		client, tick := m.client(), m.needsDone
+		return m, func() tea.Msg {
+			out, err := tick(row.Boss, row.ID, row.Text)
+			return answeredMsg{out: out, err: err, client: client}
+		}
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		n, _ := strconv.Atoi(s)
 		if !m.needOpen || m.answering || row.Kind != NeedListAsk || n > len(row.Options) {
@@ -593,6 +612,8 @@ func (m Model) needsHint() string {
 		hint = "⏎ go · esc back"
 	case ask:
 		hint = "j/k ⏎ options · esc leave"
+	case row.Kind == NeedPlain:
+		hint = "d tick (stays till ticked) · esc leave"
 	default:
 		hint = "j/k ⏎ expand · esc leave"
 	}

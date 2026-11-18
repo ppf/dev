@@ -689,3 +689,56 @@ func TestNeedsBoardLine(t *testing.T) {
 		t.Errorf("no rows: header %d", f.header)
 	}
 }
+
+// d ticks a plain item as dev todo done does, never an ask; a failure shows on the bottom row.
+func TestNeedsTick(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	var ticked [][2]any
+	m.needsDone = func(boss string, id int, text string) (string, error) {
+		ticked = append(ticked, [2]any{boss, id})
+		return "done 4", nil
+	}
+	m, _ = key(m, "n")
+	if m, cmd := key(m, "d"); cmd != nil || m.answering {
+		t.Error("d on an ask did something")
+	}
+	m, _ = key(m, "j")
+	if hint := ansi.Strip(m.needsHint()); !strings.Contains(hint, "d tick (stays till ticked)") {
+		t.Errorf("hint %q", hint)
+	}
+	m, cmd := key(m, "d")
+	if cmd == nil || !m.answering {
+		t.Fatal("d on a plain item sent nothing")
+	}
+	if _, again := key(m, "d"); again != nil {
+		t.Error("a second d while the tick is out sent another")
+	}
+	next, _ := m.Update(cmd())
+	if m = next.(Model); m.answering || m.answerErr != nil || len(ticked) != 1 || ticked[0] != [2]any{"boss-dev", 4} || len(calls) != 0 {
+		t.Errorf("answering %v err %v ticked %v answers %v", m.answering, m.answerErr, ticked, calls)
+	}
+	if _, again := key(m, "d"); again != nil {
+		t.Error("d took the ticked row before a read showed it gone")
+	}
+	gone := slices.Clone(m.needs)
+	gone[0].Items = slices.Clone(gone[0].Items)
+	gone[0].Items[3].Done = true
+	next, _ = m.Update(needsMsg{lists: gone})
+	if m = next.(Model); m.ticked != "" {
+		t.Errorf("ticked %q after the row went", m.ticked)
+	}
+
+	m = needsModel(&calls)
+	m.needsDone = func(string, int, string) (string, error) { return "", errors.New("timed out") }
+	m, _ = key(m, "n")
+	m, _ = key(m, "j")
+	m, cmd = key(m, "d")
+	next, _ = m.Update(cmd())
+	if m = next.(Model); m.answerErr == nil || !strings.Contains(m.answerErr.Error(), "timed out") {
+		t.Errorf("failure not kept: %v", m.answerErr)
+	}
+	if _, again := key(m, "d"); again == nil {
+		t.Error("the row didn't take d again after a failed tick")
+	}
+}
