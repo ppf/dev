@@ -56,6 +56,14 @@ func (c Check) Short(now time.Time) string {
 	return c.Kind
 }
 
+// Bare is Short without its age: "#412 approved", "unchanged".
+func (c Check) Bare() string {
+	if c.Event() && c.Kind != CheckLookupFailing {
+		return fmt.Sprintf("#%d %s", c.PR, c.Kind)
+	}
+	return c.Kind
+}
+
 // Long is the check as dev todo and a boss's reminder say it: "PR #412 approved 2h ago", "unchanged 5d: check it
 // at its source", "boss closed", "PR #412 lookup failing for 20m: dev todo check shows why".
 func (c Check) Long(now time.Time) string {
