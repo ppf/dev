@@ -287,3 +287,19 @@ func TestWaitsOnUser(t *testing.T) {
 		t.Error("waitsOnUser: want true only for an item on no one or a list not read")
 	}
 }
+
+// A folded boss card too narrow for its counts drops them whole, "N on others" first, never cutting one mid-word.
+func TestBossCardCountsDropWhole(t *testing.T) {
+	m := board4()
+	tl := tile{sess: sidebar.Session{Name: "boss-orbit-long-name", Agent: "Claude", State: agent.Idle},
+		roll: &sidebar.Rollup{Rank: sidebar.RankIdle, Under: 1, ToDo: 1, OnOthers: 1}}
+	for w, want := range map[int]string{
+		80: "▸ ● boss-orbit-long-name idle · 1 to do · 1 on others",
+		51: "▸ ● boss-orbit-long-name idle · 1 to do",
+		40: "▸ ● boss-orbit-long-name idle",
+	} {
+		if got := strings.Join(strings.Fields(ansi.Strip(m.headRow(tl, tl.section(), true, w))), " "); got != want {
+			t.Errorf("%d columns: %q, want %q", w, got, want)
+		}
+	}
+}
