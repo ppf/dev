@@ -354,6 +354,8 @@ func (m Model) refresh() tea.Cmd {
 		if len(snap.bosses) > 0 {
 			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, m.clk.Now())
 		}
+		// Before the captures, which skip folded cards; again after them
+		snap.rollUp()
 		msgs := m.msgs
 		if msgs == nil && m.findMsgs {
 			if _, socket, err := inbox.Viewer(m.c, m.pane); err != nil {
@@ -565,7 +567,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 // rollUp places each of this boss's own boss cards by its whole subtree (sidebar.Subtree), its bosses' lists
 // as read, then sorts the cards by section again.
 func (s *snapshot) rollUp() {
-	// A capture's word on a dialog (answered No or Esc, or one an ask's hook recorded) over the hooks'
+	// A capture's word on a dialog (answered No or Esc, or one an ask's hook recorded) wins over the hooks'
 	for _, t := range s.tiles {
 		if i := slices.IndexFunc(s.all, func(a sidebar.Session) bool { return a.Name == t.sess.Name }); i >= 0 {
 			s.all[i].Deciding, s.all[i].State = t.deciding, t.sess.State

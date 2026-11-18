@@ -191,3 +191,25 @@ func TestBossCardWaitingAndWarn(t *testing.T) {
 		t.Errorf("open card:\n%s", body)
 	}
 }
+
+// A boss's own turn-ending question shows as its own asks card does, the roll-up under it.
+func TestBossCardOwnAsks(t *testing.T) {
+	rows := managerRows()
+	rows[1].Note = inbox.Note{Kind: inbox.Asks, Text: "Connect the VPN?"}.Summary()
+	s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rollUp()
+	m := board4()
+	m.snap = s
+	dev := s.tiles[index(s.tiles, "boss-dev")]
+	if !dev.asks() || dev.folded(nil) {
+		t.Fatalf("boss-dev: asks %v folded %v", dev.asks(), dev.folded(nil))
+	}
+	cardRows, _ := m.card(dev, 100)
+	body := ansi.Strip(strings.Join(cardRows, "\n"))
+	if !strings.Contains(body, "Connect the VPN?") || !strings.Contains(body, "needs you · 1 question · 2 working") {
+		t.Errorf("open card:\n%s", body)
+	}
+}

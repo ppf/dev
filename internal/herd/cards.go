@@ -234,13 +234,16 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 			rowHits(r.hits)
 			rows = append(rows, line(in+r.text))
 		}
-	case sec == needsYouSection && (t.roll == nil || t.deciding):
+	case sec == needsYouSection && (t.roll == nil || t.own() == needsYouSection):
 		status := statusText(t, sec)
 		// Its options show on screen, under it
 		if _, ask, _ := reply(t); len(optionRows(t, iw-len(in))) > 0 {
 			status = strings.Join(strings.Fields(ask), " ")
 		}
 		text(sidebar.Red+bold, status)
+		if t.roll != nil {
+			rows = append(rows, line(in+rollText(*t.roll)))
+		}
 	case t.roll != nil:
 		rows = append(rows, line(in+rollText(*t.roll)))
 	default:
@@ -266,7 +269,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	for _, l := range lines {
 		text(rule, l)
 	}
-	if t.roll != nil && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) {
+	if t.roll != nil && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) && !t.asks() {
 		text(rule, t.note)
 	}
 	for _, n := range warnings(t) {
