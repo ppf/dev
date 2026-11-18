@@ -217,21 +217,21 @@ func TestRollLineMatchesNeedsYou(t *testing.T) {
 	if n := needCount(NeedRows(ss, []NeedList{list}, "")); n != 3 {
 		t.Errorf("NEEDS YOU = %d, want 3", n)
 	}
-	// Plain items alone keep the state and say them as "need you"
+	// Plain items alone say "need you", the state left to the row above
 	r = Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["b"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "idle · 2 need you" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "2 need you" {
 		t.Errorf("plain only = %q", ansi.Strip(got))
 	}
 }
 
-// A manager's "N need you" by its plain items alone stays by its state, whatever the width.
+// A manager's "N need you" by its plain items alone leads, whatever the width.
 func TestRollLineManagerPlainOnly(t *testing.T) {
 	ss := []Session{
 		{Name: "m", ID: "$1", Boss: true, Root: "m", State: agent.Idle},
 		{Name: "b", ID: "$2", Boss: true, Root: "m", Depth: 1, State: agent.Idle},
 	}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["m"]
-	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "idle · 2 need you") {
+	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "2 need you") {
 		t.Errorf("line = %q", ansi.Strip(got))
 	}
 }
@@ -391,5 +391,57 @@ func TestRollLineManagerPartsWhole(t *testing.T) {
 		if ansi.Strip(got) != want {
 			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
 		}
+	}
+}
+
+// A bare idle or working is the row above's: the roll line starts with the next part; a count stays.
+func TestRollLineLeavesOutOwnState(t *testing.T) {
+	boss := func(state string) Session { return Session{Name: "b", ID: "$1", Boss: true, State: state} }
+	worker := func(state string) Session {
+		return Session{Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: state}
+	}
+	list := map[string]ListCount{"b": {Plain: 7, On: 6}}
+	for _, tc := range []struct {
+		name string
+		ss   []Session
+		want string
+	}{
+		{"working boss, idle worker", []Session{boss(agent.Working), worker(agent.Idle)}, "7 need you · 6 on others"},
+		{"working boss, no workers", []Session{boss(agent.Working)}, "7 need you · 6 on others"},
+		// A held wait is not on the row above: it stays
+		{"resuming boss", []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle, Resume: true}, worker(agent.Idle)}, "waiting · 7 need you · 6 on others"},
+		{"idle boss, idle worker", []Session{boss(agent.Idle), worker(agent.Idle)}, "7 need you · 6 on others"},
+		{"idle boss, no workers", []Session{boss(agent.Idle)}, "7 need you · no workers · 6 on others"},
+		{"idle boss, working worker", []Session{boss(agent.Idle), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
+		{"working boss, working worker", []Session{boss(agent.Working), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
+	} {
+		r := Subtree(tc.ss, list)["b"]
+		for _, width := range []int{36, 40} {
+			got, _ := rollLine(r, width)
+			want := tc.want
+			if width == 36 && strings.HasSuffix(want, " · 6 on others") && ansi.StringWidth(want) > 36 {
+				want = strings.TrimSuffix(want, " · 6 on others")
+			}
+			if ansi.Strip(got) != want {
+				t.Errorf("%s, %d columns: %q, want %q", tc.name, width, ansi.Strip(got), want)
+			}
+		}
+	}
+	// Nothing else to say: the state stays rather than an empty line
+	r := Subtree([]Session{boss(agent.Working), worker(agent.Idle)}, nil)["b"]
+	if got, _ := rollLine(r, 40); ansi.Strip(got) != "working" {
+		t.Errorf("state only = %q", ansi.Strip(got))
+	}
+}
+
+// Nothing but the state fits the width: the state, not an empty line; the first part is measured without a separator.
+func TestRollLineNarrowKeepsSomething(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
+	r := Subtree(ss, map[string]ListCount{"b": {On: 12}})["b"]
+	if got, _ := rollLine(r, 13); ansi.Strip(got) != "12 on others" {
+		t.Errorf("first part = %q", ansi.Strip(got))
+	}
+	if got, _ := rollLine(r, 8); ansi.Strip(got) != "idle" {
+		t.Errorf("nothing fits = %q", ansi.Strip(got))
 	}
 }

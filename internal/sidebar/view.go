@@ -384,7 +384,7 @@ func hasRollLine(r *Rollup) bool {
 }
 
 // rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state
-// with its ⚠, red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a
+// with its ⚠ (a bare idle or working is left out, the row above says it), red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a
 // manager's bosses · workers first), what it and everything under it cost, closed sessions included, and "N on others"
 // last and only whole; the cost goes before the counts do, "N on others" before the cost.
 func rollLine(r *Rollup, width int) (string, int) {
@@ -397,7 +397,12 @@ func rollLine(r *Rollup, width int) (string, int) {
 		plain += text
 		styled += colour + text + reset
 	}
-	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
+	fits := func(text string) bool {
+		if plain == "" {
+			return ansi.StringWidth(text) <= width
+		}
+		return ansi.StringWidth(plain+" · "+text) <= width
+	}
 	parts := r.Parts()
 	// Plain items count in "need you", as NEEDS YOU counts them
 	parts = slices.DeleteFunc(parts, func(p string) bool { return strings.HasSuffix(p, " to do") })
@@ -405,14 +410,22 @@ func rollLine(r *Rollup, width int) (string, int) {
 	lead := 0          // the parts before a manager's bosses and workers
 	needAt := 0        // index of the "need you" part that sits by the state, red
 	needFirst := false // "need you" leads, the state left to the row above
+	// A bare idle or working is the row above's, left out; a held wait or resume ("waiting") it doesn't say
+	state := ""
+	if r.Rank != RankNeedsYou && (parts[0] == "idle" || parts[0] == "working") {
+		state = parts[0]
+	}
+	stateDropped := state != "" && (need > 0 || !r.Warn)
+	if stateDropped {
+		parts = parts[1:]
+	}
 	switch {
 	case r.Rank == RankNeedsYou:
 		// "needs you · 2 questions" as "2 need you", to fit a sidebar's width
 		parts = append([]string{fmt.Sprintf("%d need you", need)}, parts[2:]...)
 		lead = 1
-	case need > 0 && r.Under == 0 && r.Rank == RankIdle:
-		// A workerless boss's row above already says idle: "1 need you · no workers"
-		parts = slices.Insert(parts[1:], 0, fmt.Sprintf("%d need you", need))
+	case stateDropped && need > 0:
+		parts = slices.Insert(parts, 0, fmt.Sprintf("%d need you", need))
 		lead, needFirst = 1, true
 	case need > 0:
 		// The count stays by the state, where the width never cuts it
@@ -421,7 +434,7 @@ func rollLine(r *Rollup, width int) (string, int) {
 	}
 	if r.Bosses == 0 && needAt == 0 {
 		lead = len(parts)
-	} else if lead == 0 {
+	} else if lead == 0 && !stateDropped {
 		// A manager's: its bosses and workers after the state, then the other counts only whole
 		lead = 1
 	}
@@ -473,6 +486,10 @@ func rollLine(r *Rollup, width int) (string, int) {
 	}
 	if others != "" && fits(others) {
 		add(muted, others)
+	}
+	if plain == "" && stateDropped {
+		// Nothing else fits: the state rather than an empty line
+		add(muted, state)
 	}
 	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
 }
