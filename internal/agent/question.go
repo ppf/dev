@@ -84,6 +84,41 @@ func HookQuestion(input []byte) (Question, bool) {
 		Description: cut(e.Input.Description), Questions: e.Input.Questions}, true
 }
 
+// Pick is the answer the user picked or typed for one AskUserQuestion question.
+type Pick struct {
+	Question string
+	Answer   string
+}
+
+// String is p as the user's words: "<question> picked <answer>".
+func (p Pick) String() string { return p.Question + " picked " + p.Answer }
+
+// HookPick is the user's picks in a PostToolUse hook's input of AskUserQuestion, one per question in order (Answer ""
+// for one left unanswered); none for other input or no answer at all (a dismissed dialog).
+func HookPick(input []byte) []Pick {
+	var e struct {
+		Event string `json:"hook_event_name"`
+		Tool  string `json:"tool_name"`
+		Input struct {
+			Questions []Ask             `json:"questions"`
+			Answers   map[string]string `json:"answers"`
+		} `json:"tool_input"`
+	}
+	if json.Unmarshal(input, &e) != nil || e.Event != "PostToolUse" || e.Tool != AskUserQuestion {
+		return nil
+	}
+	picks := make([]Pick, len(e.Input.Questions))
+	answered := false
+	for i, q := range e.Input.Questions {
+		picks[i] = Pick{Question: q.Question, Answer: strings.TrimSpace(e.Input.Answers[q.Question])}
+		answered = answered || picks[i].Answer != ""
+	}
+	if !answered {
+		return nil
+	}
+	return picks
+}
+
 // Ask is what q asks in one line: AskUserQuestion's first question with its options' labels and how many
 // follow it, or the tool a permission is for with its command, file or URL.
 func (q Question) Ask() string {

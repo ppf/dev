@@ -16,19 +16,25 @@ import (
 // @dev_herd its to do list reads ("" makes the list unreadable).
 func bossTmux(t *testing.T, todoHerd string) *tmux.Client {
 	t.Helper()
+	return namedTmux(t, "boss", todoHerd)
+}
+
+// namedTmux is bossTmux with the boss session called name.
+func namedTmux(t *testing.T, name, todoHerd string) *tmux.Client {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	return tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("boss", "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", ""), nil
+			return tmux.FormatRow(name, "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
 			if args[len(args)-1] == "#{@dev_boss_pane}" {
 				return map[string]string{"%1": "coordinator\n", "%2": "previews\n"}[args[3]], nil
 			}
 			if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
-				return tmux.FormatRow("$1", "1700000000", "boss", "1", "", "/tmp/tmux-1/default"), nil
+				return tmux.FormatRow("$1", "1700000000", name, "1", "", "/tmp/tmux-1/default"), nil
 			}
-			return tmux.FormatRow("/tmp/tmux-1/default", "boss", todoHerd, "$1", "1700000000"), nil
+			return tmux.FormatRow("/tmp/tmux-1/default", name, todoHerd, "$1", "1700000000"), nil
 		}
 		return "", nil
 	})
@@ -98,6 +104,41 @@ func TestBossHookTodo(t *testing.T) {
 			}
 			if text := got.Reason + got.Out.Context; text != tt.want || busy != tt.busy {
 				t.Errorf("BossHook = %q, busy %v; want %q, busy %v", text, busy, tt.want, tt.busy)
+			}
+		})
+	}
+}
+
+// The manager coordinator's AskUserQuestion pick is kept as the user's latest prompt; a dismissed one, another
+// pane's, another boss's or another tool's isn't.
+func TestBossHookPick(t *testing.T) {
+	const pick = `{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"boss-a #1: Merge #148?"}],"answers":{"boss-a #1: Merge #148?":"Merge"}}}`
+	for _, tt := range []struct {
+		name, session, pane, input, want string
+	}{
+		{"pick", Manager, "%1", pick, "boss-a #1: Merge #148? picked Merge"},
+		{"another boss", "boss", "%1", pick, ""},
+		{"previews pane", Manager, "%2", pick, ""},
+		{"dismissed", Manager, "%1", `{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Q?"}]}}`, ""},
+		{"other tool", Manager, "%1", `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := namedTmux(t, tt.session, "")
+			if out, busy, err := BossHook(c, tt.pane, []byte(tt.input)); out != "" || busy || err != nil {
+				t.Fatalf("BossHook = %q, %v, %v", out, busy, err)
+			}
+			b, _, err := Self(c, "%1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := b.Box.UserPrompt()
+			switch {
+			case err != nil:
+				t.Fatal(err)
+			case tt.want == "" && p != nil:
+				t.Errorf("kept %+v, want none", p)
+			case tt.want != "" && (p == nil || p.Text != tt.want || !p.Pick):
+				t.Errorf("kept %+v, want pick %q", p, tt.want)
 			}
 		})
 	}
