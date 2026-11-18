@@ -107,10 +107,10 @@ func TestNeedsRows(t *testing.T) {
 	}
 	if w := []want{
 		{sidebar.NeedDialog, "noc › triage", "allow Bash: rm -rf build", []string{"Yes", "No"}},
-		{sidebar.NeedAsk, "dev › boss", vpnAskPlain, []string{"Done", "Skip"}},
-		{sidebar.NeedListAsk, "noc › boss", "Release now?", []string{"Now", "Later"}},
+		{sidebar.NeedAsk, "dev", vpnAskPlain, []string{"Done", "Skip"}},
+		{sidebar.NeedListAsk, "noc", "Release now?", []string{"Now", "Later"}},
 		{sidebar.NeedPlain, "to do", "Call Vince", nil},
-		{sidebar.NeedPlain, "noc › boss", "DM David", nil},
+		{sidebar.NeedPlain, "noc", "DM David", nil},
 	}; !slices.EqualFunc(got, w, func(a, b want) bool {
 		return a.kind == b.kind && a.label == b.label && a.text == b.text && slices.Equal(a.options, b.options)
 	}) {
@@ -124,6 +124,32 @@ func TestNeedsRows(t *testing.T) {
 }
 
 const vpnAskPlain = "Reply Done once it's connected, or Skip to leave the lw check for later."
+
+// A long worker's label ends in … at 20 columns, the text after it.
+func TestNeedsLabelCap(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	i := slices.IndexFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == "noc-triage" })
+	if i < 0 {
+		t.Fatal("no noc-triage")
+	}
+	m.snap.all[i].Name = "noc-triage-for-the-weekly-report"
+	if got, want := strings.TrimRight(plain(m.render())[2], " "), " ● noc › triage-for-th…  Bash: echo hi"; got != want {
+		t.Errorf("line 2 = %q, want %q", got, want)
+	}
+}
+
+// A worker named <project>-boss keeps "project › boss": only a boss session's rows are labelled by project.
+func TestNeedsWorkerNamedBoss(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	i := slices.IndexFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == "noc-triage" })
+	if i < 0 {
+		t.Fatal("no noc-triage")
+	}
+	m.snap.all[i].Name = "noc-boss"
+	if got := m.needRows()[0].label; got != "noc › boss" {
+		t.Errorf("label = %q, want %q", got, "noc › boss")
+	}
+}
 
 // A boss's own board scopes the block to its workers and list, labelled by who, its own question left out.
 func TestNeedsBossBoard(t *testing.T) {
@@ -156,14 +182,14 @@ func TestNeedsRender(t *testing.T) {
 		"",
 		" ● noc › triage  allow Bash: rm -rf build",
 		"     1 Yes   2 No",
-		" ? dev › boss    Reply Done once it's connected, or Skip to leave the lw check…",
+		" ? dev           Reply Done once it's connected, or Skip to leave the lw check…",
 	} {
 		if got := strings.TrimRight(lines[i], " "); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc           Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
 		"noc-triage  via boss-noc  Bash prompt · in the block ↑", "n needs"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)

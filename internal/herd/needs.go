@@ -55,8 +55,8 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 }
 
 // needRows are this board's NEEDS YOU rows: what waits on the user under it, labelled "project › who" on a
-// manager's board, "who" on a boss's and "to do" for its own list; a dialog or question on the board says what its
-// card does, with its options.
+// manager's board ("project" for a boss), "who" on a boss's and "to do" for its own list; a dialog or question on
+// the board says what its card does, with its options.
 func (m Model) needRows() []needRow {
 	s := m.snap
 	manager := slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == s.name && a.Root == s.name })
@@ -66,6 +66,8 @@ func (m Model) needRows() []needRow {
 		switch {
 		case r.Boss == s.name:
 			n.label = "to do"
+		case manager && slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == r.Session && a.Boss }):
+			n.label = r.Project
 		case manager:
 			n.label = r.Project + " › " + r.Who
 		}
@@ -309,7 +311,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 	for _, r := range rows {
 		labelW = max(labelW, ansi.StringWidth(r.label))
 	}
-	labelW = min(labelW, 36, max(4, w*2/5))
+	labelW = min(labelW, 20, max(4, w*2/5))
 	cur := -1
 	if m.needMode {
 		cur = min(m.needIdx, len(rows)-1)

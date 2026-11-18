@@ -343,7 +343,7 @@ func TestTodoWorkers(t *testing.T) {
 		" 1 ☐ Answer Vince                                                     ",
 		" 2 ◌ Document the API                            ● docs-api · working ",
 		" 3 ◌ Rework companion importer             ✕ companio… · session gone ",
-		" 4 ◌ Fix login                                ● fix-login · needs you ",
+		" 4 ◌ Fix login                                   ● fix-login · asking ",
 		" 5 ◌ Get CI green                                  ● ci-fix · waiting ",
 		" 6 ◌ Spike notes                                   ● old-spike · idle ",
 		" 7 ◌ Shell job                                    ● shell-only · idle ",
@@ -356,8 +356,8 @@ func TestTodoWorkers(t *testing.T) {
 	if !strings.Contains(rows[2], sidebar.Red+"✕ ") || !strings.Contains(rows[2], sidebar.Red+" · session gone") {
 		t.Errorf("gone: red: %q", rows[2])
 	}
-	if !strings.Contains(rows[3], sidebar.Red+"needs you") {
-		t.Errorf("needs you: red state: %q", rows[3])
+	if !strings.Contains(rows[3], sidebar.Red+"asking") {
+		t.Errorf("asking: red state: %q", rows[3])
 	}
 	if !strings.Contains(rows[7], sidebar.Gold+"on Marek") {
 		t.Errorf("a person stays gold: %q", rows[7])
@@ -385,7 +385,7 @@ func TestTodoWorkerOrder(t *testing.T) {
 // than overflow the row.
 func TestTodoWorkerNarrow(t *testing.T) {
 	m := withWorkers()
-	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40)); !strings.HasSuffix(row, " · needs you ") {
+	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40)); !strings.HasSuffix(row, " · asking ") {
 		t.Errorf("40 columns: %q, want the state whole", row)
 	}
 	for _, w := range []int{12, 20, 30, 40} {

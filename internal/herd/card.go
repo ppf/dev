@@ -33,8 +33,8 @@ func (t tile) section() section {
 	return t.own()
 }
 
-// own is t's own section, the first that holds: needs you while a dialog waits on the user; waiting while its
-// planned wait (dev agent wait-until) holds; working while its agent works; needs you when its turn ended on
+// own is t's own section, the first that holds: asking while a dialog waits on the user; waiting while its
+// planned wait (dev agent wait-until) holds; working while its agent works; asking when its turn ended on
 // a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself decides);
 // waiting when the newest marker in its last reply is WAITING; else resting.
 func (t tile) own() section {
@@ -54,7 +54,7 @@ func (t tile) own() section {
 	return restingSection
 }
 
-// asks reports a Needs you card for the question t's turn ended on in its reply, not a dialog.
+// asks reports an Asking card for the question t's turn ended on in its reply, not a dialog.
 func (t tile) asks() bool { return !t.deciding && t.own() == needsYouSection }
 
 // options are the options an asks card's reply read with its question (inbox.Options); 1-9 send one.

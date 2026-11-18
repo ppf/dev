@@ -46,8 +46,8 @@ func board4() Model {
 // question NEEDS YOU asks.
 func TestBoardLayout(t *testing.T) {
 	want := []string{
-		" NEEDS YOU 1 ─────────────────────────────────────────────────────────",
-		"┃ ▸ ● fix-login  Bash prompt · in the block ↑       default model  3m ",
+		" ASKING 1 ────────────────────────────────────────────────────────────",
+		"┃ ▸ ● fix-login  Bash prompt · in the block ↑                      3m ",
 		" WORKING 1 ───────────────────────────────────────────────────────────",
 		" ╭───────────────────────────────────────────────────────────────────╮",
 		" │ ▾ ● docs-api                                                  12m │",
@@ -350,7 +350,7 @@ func TestBoardAsks(t *testing.T) {
 		{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Merge #68 now?"},
 	}}}
 	got := strings.Join(m.board().lines, "\n")
-	if !strings.Contains(got, "NEEDS YOU 1") || !strings.Contains(got, sidebar.Red+bold+"Merge #68 now?") || strings.Count(got, "Merge #68 now?") != 1 || !strings.Contains(ansi.Strip(got), "▾ ● a") {
+	if !strings.Contains(got, "ASKING 1") || !strings.Contains(got, sidebar.Red+bold+"Merge #68 now?") || strings.Count(got, "Merge #68 now?") != 1 || !strings.Contains(ansi.Strip(got), "▾ ● a") {
 		t.Errorf("asks card:\n%s", ansi.Strip(got))
 	}
 }
@@ -805,8 +805,8 @@ func TestSaidOnScreenCut(t *testing.T) {
 	}
 }
 
-// A Claude worker's meta row carries its model and effort, a gold default model warning when no model was
-// passed, nothing for Codex and Grok; a narrow card drops the branch first, then the model, never the cost.
+// A Claude worker's meta row carries its model and effort, nothing when no model was passed nor for Codex and
+// Grok; a narrow card drops the branch first, then the model, never the cost.
 func TestModelOnCard(t *testing.T) {
 	claude := func(model, effort string) tile {
 		return tile{sess: sidebar.Session{Agent: "Claude", Branch: "feature/long-branch-name", Cost: "$4.10"}, context: "62", model: model, effort: effort}
@@ -818,7 +818,7 @@ func TestModelOnCard(t *testing.T) {
 	}{
 		{"model and effort", "opus·medium  $4.10 · 62%", claude("opus", "medium"), 60},
 		{"model alone", "opus  $4.10 · 62%", claude("opus", ""), 60},
-		{"default", "default model  $4.10 · 62%", claude("", ""), 60},
+		{"no model passed", "branch-name                        $4.10 · 62%", claude("", ""), 60},
 		{"branch cut first", "opus·medium  $4.10 · 62%", claude("opus", "medium"), 36},
 		{"model dropped before cost", " $4.10 · 62%", claude("opus", "medium"), 20},
 	}
@@ -830,9 +830,6 @@ func TestModelOnCard(t *testing.T) {
 		if w := ansi.StringWidth(got); w != tt.w-1 {
 			t.Errorf("%s: %d wide, want %d", tt.name, w, tt.w-1)
 		}
-	}
-	if got := metaRow(claude("", ""), 60); !strings.Contains(got, sidebar.Gold+"default model") {
-		t.Errorf("default not gold: %q", got)
 	}
 	cx := claude("opus", "medium")
 	cx.sess.Agent = "Codex"
