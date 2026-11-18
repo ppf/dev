@@ -12,7 +12,7 @@ import (
 )
 
 // subtreeSessions is a manager over three bosses, in Order: boss-noc's own turn ended, one worker on a dialog,
-// two working, one idle; boss-dev idle over five working; boss-mag with nothing under it.
+// two working, one idle; boss-dev idle over five working; boss-mag with no workers.
 func subtreeSessions() []Session {
 	w := func(name, by, state string, depth int) Session {
 		return Session{Name: name, ID: "$" + name, StartedBy: by, Depth: depth, Agent: "Claude", State: state}
@@ -42,7 +42,7 @@ func TestSubtreeText(t *testing.T) {
 	for name, want := range map[string]string{
 		"boss-noc": "needs you · 2 questions · 2 working · 1 to do",
 		"boss-dev": "5 working · 1 to do",
-		"boss-mag": "finished · nothing under it",
+		"boss-mag": "idle · no workers",
 		"manager":  "needs you · 2 questions · 7 working · 2 to do",
 	} {
 		if got := rolls[name].Text(); got != want {

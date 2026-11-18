@@ -250,7 +250,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			// A card entering Needs you shows screenRows of its screen again, where it asks
+			// A card entering Asking shows screenRows of its screen again, where it asks
 			for _, t := range msg.snap.tiles {
 				was := slices.IndexFunc(m.snap.tiles, func(u tile) bool { return u.sess.Name == t.sess.Name })
 				if t.section() == needsYouSection && (was < 0 || m.snap.tiles[was].section() != needsYouSection) {
@@ -450,7 +450,7 @@ func (m Model) refresh() tea.Cmd {
 				t.body = trimBlank(t.body[:min(cut, len(t.body))])
 			}
 		}
-		// A dialog found gone moves its card out of Needs you, a deeper session's off the board
+		// A dialog found gone moves its card out of Asking, a deeper session's off the board
 		snap.rollUp()
 		snap.tiles = slices.DeleteFunc(snap.tiles, offBoard)
 		return refreshMsg{snap: snap, todo: store, msgs: msgs, inputs: inputs}
