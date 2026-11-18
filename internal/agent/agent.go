@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Hook states passed to `dev state`.
@@ -117,6 +118,14 @@ func GrokStale(c *tmux.Client, pane string, h Hook) (bool, error) {
 	return current != "" && current != h.PromptID, nil
 }
 
+// taskEnded is the start of the prompt Claude Code starts a turn with when a background task ends: a shell's
+// notification, or a subagent's hand-back after any indented notes (a cross-session message is an <agent-message>
+// without that frame).
+var taskEnded = regexp.MustCompile(`^(<task-notification>\n<task-id>|<agent-message from="[^"]*">\n(?:[ \t][^\n]*\n)*\[Subagent hand-back\])`)
+
+// TaskEnded reports a UserPromptSubmit prompt starting the turn a background task's end starts: no one's prompt.
+func TaskEnded(prompt string) bool { return taskEnded.MatchString(prompt) }
+
 // IdlePrompt is the Notification type Claude sends after a minute idle: waiting, but safe to prompt.
 const IdlePrompt = "idle_prompt"
 
@@ -134,6 +143,7 @@ type Hook struct {
 	Event            string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type"`
 	PromptID         string `json:"promptId"` // Grok's turn id
+	Prompt           string `json:"prompt"`
 	PermissionMode   string `json:"permission_mode"`
 	ToolInput        struct {
 		Command string `json:"command"` // a shell tool's command
@@ -232,6 +242,11 @@ func Record(c *tmux.Client, pane, state string, s Session, h Hook) error {
 			cmds = append(cmds, []string{"set-option", "-pF", "-t", pane, "@agent_prompts", "#{e|+:#{@agent_prompts},1}"})
 			if h.PromptID != "" {
 				cmds = append(cmds, set("@agent_prompt_id", h.PromptID))
+			}
+			if TaskEnded(h.Prompt) {
+				// Not a prompt: a planned wait no prompt came since moves its count along, so the boss's Watch keeps it
+				cmds = append(cmds, []string{"if-shell", "-F", "-t", pane, "#{==:#{" + wait.OptPrompts + "},#{e|-:#{@agent_prompts},1}}",
+					"set-option -pF -t " + pane + " " + wait.OptPrompts + " '#{@agent_prompts}'"})
 			}
 		}
 		if state == Waiting {

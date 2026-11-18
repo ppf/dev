@@ -206,7 +206,7 @@ func TestRecordStatePrunes(t *testing.T) {
 	}
 }
 
-// dev agent wait-until records a desktop session's planned wait in its hook file; its next prompt ends it.
+// dev agent wait-until records a desktop session's planned wait in its hook file; its next prompt ends it, its own background task's turn doesn't.
 func TestSetWait(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC)
@@ -223,6 +223,12 @@ func TestSetWait(t *testing.T) {
 	h, err := ReadHook(filepath.Join(dir, "s1.json"))
 	if err != nil || !h.Wait.Until.Equal(w.Until) || h.Wait.Reason != w.Reason || h.State != "idle" {
 		t.Errorf("hook = %+v, %v; want the wait kept through its turn's end", h, err)
+	}
+	if err := RecordState(dir, "working", []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"<task-notification>\n<task-id>a1</task-id>"}`), now); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := ReadHook(filepath.Join(dir, "s1.json")); err != nil || !h.Wait.Held() {
+		t.Errorf("hook = %+v, %v; want its own background task's turn to keep the wait", h, err)
 	}
 	if err := RecordState(dir, "working", []byte(`{"hook_event_name":"UserPromptSubmit","session_id":"s1"}`), now); err != nil {
 		t.Fatal(err)

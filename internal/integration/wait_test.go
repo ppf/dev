@@ -117,6 +117,50 @@ func TestPlannedWait(t *testing.T) {
 	watch()
 	check(t, "woken once", take(), "")
 
+	// The turns its own background tasks' ends start (a shell's task notification, a subagent's hand-back: each a
+	// UserPromptSubmit) don't end it: the last ends on the waiting note and dev wakes it at its time
+	run(w, "working", prompt)
+	_, _ = dev(w, "", "agent", "wait-until", "+30m", "CI reruns")
+	held := opt(wait.OptUntil)
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Waiting on CI.","background_tasks":[{"id":"a1","type":"subagent","status":"running"},{"id":"b1","type":"shell","status":"running"}]}`)
+	check(t, "backgrounded: no note", take(), "")
+	run(w, "working", `{"hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>"}`)
+	check(t, "task notification keeps it", opt(wait.OptUntil)+"/"+opt(wait.OptPrompts), held+"/"+opt("@agent_prompts"))
+	watch()
+	check(t, "working on it, not due: kept", take()+"/"+opt(wait.OptUntil), "/"+held)
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Shell done.","background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`)
+	run(w, "working", `{"hook_event_name":"UserPromptSubmit","prompt":"<agent-message from=\"a1\">\n[Subagent hand-back] The report follows:\n  OK\n</agent-message>"}`)
+	check(t, "subagent hand-back keeps it", opt(wait.OptUntil)+"/"+opt(wait.OptPrompts), held+"/"+opt("@agent_prompts"))
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Review done.","background_tasks":[]}`)
+	heldAt := wait.FromOptions(held, "CI reruns")
+	check(t, "its turn ends waiting", take(), "[dev boss inbox] 1 worker update(s):\n- w waiting: "+heldAt.Phrase(time.Now())+", dev wakes it then")
+	watch()
+	check(t, "still held", take()+"/"+opt(wait.OptUntil), "/"+held)
+	// Another such turn after the waiting note went out: no second one
+	notified := `{"hook_event_name":"UserPromptSubmit","prompt":"<task-notification>\n<task-id>m1</task-id>"}`
+	run(w, "working", notified)
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Still waiting.","background_tasks":[]}`)
+	check(t, "no repeat waiting note", take()+"/"+opt(wait.OptUntil), "/"+held)
+	// A prompt its hook missed isn't hidden by a later such turn's count
+	stamped := opt(wait.OptPrompts)
+	s.T("set-option", "-pF", "-t", w, "@agent_prompts", "#{e|+:#{@agent_prompts},1}")
+	run(w, "working", notified)
+	check(t, "missed prompt: count kept", opt(wait.OptPrompts), stamped)
+	s.T("set-option", "-p", "-t", w, wait.OptPrompts, opt("@agent_prompts"))
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Still waiting.","background_tasks":[]}`)
+	take()
+	s.T("set-option", "-p", "-t", w, wait.OptUntil, strconv.FormatInt(time.Now().Add(-time.Second).Unix(), 10))
+	due = wait.FromOptions(opt(wait.OptUntil), "CI reruns")
+	watch()
+	check(t, "woken at its time", take(), "[dev boss inbox] 1 worker update(s):\n- w resumed: its wait "+due.Phrase(time.Now())+" ended, dev sent it: continue")
+	waitFor(t, "w sent the wake prompt", func() bool {
+		data, _ := os.ReadFile(log)
+		return strings.Contains(string(data), inbox.WakePrompt(due, time.Now()))
+	})
+	run(w, "working", prompt)
+	run(w, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Done."}`)
+	take()
+
 	// The boss sets one; a prompt ends it early
 	out, err = dev(boss, "", "agent", "wait-until", "+30m", "CI reruns", "--on", "w")
 	check(t, "--on", strconv.FormatBool(err == nil && strings.HasPrefix(out, "w waits until ")), "true")
