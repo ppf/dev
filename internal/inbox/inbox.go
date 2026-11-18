@@ -244,6 +244,9 @@ func replyOptions(l string) []string {
 	return nil
 }
 
+// quoted is a line quoting someone else's question, not asking one: a blockquote or a "Your question:" style label.
+var quoted = regexp.MustCompile(`(?i)^(?:>|[*_]*(?:your question|question|q|you asked)[*_]*\s*:)`)
+
 // QuestionAt is where among a message's non-blank lines is the question it ends on, among its last askLines
 // lines; -1 when none. It is the last line ending in "?" (markdown emphasis aside), not a heading, followed only
 // by list items, its options; or the last line, telling how to reply with the options it names (replyOptions);
@@ -254,6 +257,11 @@ func QuestionAt(lines []string) int {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-askLines; i-- {
 		l := strings.TrimSpace(lines[i])
 		switch {
+		case quoted.MatchString(l):
+			if asking && i < len(lines)-1 {
+				return i + 1
+			}
+			return -1
 		case strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#"):
 			return i
 		case i == len(lines)-1 && len(replyOptions(l)) > 0:
