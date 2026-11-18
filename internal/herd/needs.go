@@ -26,7 +26,7 @@ type needRow struct {
 // needLists are the lists NEEDS YOU and the roll-ups read: this boss's own, then its bosses' (a read that failed
 // marks each unread).
 func (s snapshot) needLists() []sidebar.NeedList {
-	own := sidebar.NeedList{Boss: s.name, Items: needItems(s.todo.Items)}
+	own := sidebar.NeedList{Boss: s.name, Items: needItems(s.todo.Items), Updated: s.todo.Updated, Stale: s.todo.Stale}
 	if s.todoErr != nil {
 		own.Error = s.todoErr.Error()
 	}
@@ -37,7 +37,7 @@ func (s snapshot) needLists() []sidebar.NeedList {
 		}
 	}
 	for _, l := range s.asks {
-		nl := sidebar.NeedList{Boss: l.Boss, Items: needItems(l.Items)}
+		nl := sidebar.NeedList{Boss: l.Boss, Items: needItems(l.Items), Updated: l.Updated, Stale: l.Stale}
 		if l.Err != nil {
 			nl.Error = l.Err.Error()
 		}
@@ -355,7 +355,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 const minBlockRows = 6
 
 // needLines are row r's lines, w columns: its mark (● dialog, ? question or list ask, ☐ list item, ⚠ list not read), its
-// label padded to labelW, its text (wrapped when selected, else cut), then its options numbered when 1-9 answer
+// label padded to labelW, its text (wrapped when selected, else cut), then a stale list's age at the right edge, then its options numbered when 1-9 answer
 // them (★ on the recommended one; m to reply to a question; a selected row's go one per line, wrapped, when they
 // don't fit one); the selected row on the selection band.
 func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []string, spans [][]optSpan) {
@@ -371,7 +371,12 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 	label := ansi.Truncate(r.label, labelW, "…")
 	pre := " " + mark + " " + sidebar.Muted + label + reset + strings.Repeat(" ", labelW-ansi.StringWidth(label)+2)
 	in := 3 + labelW + 2
-	room := max(1, w-in-1)
+	room, age := max(1, w-in-1), r.Age(m.clk.Now())
+	if age != "" && room-len(age)-1 >= sidebar.MinTextAfterAge {
+		room -= len(age) + 1
+	} else {
+		age = ""
+	}
 	text := strings.Join(strings.Fields(r.Text), " ")
 	if selected {
 		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
@@ -383,6 +388,10 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 		lines = []string{pre + ansi.Truncate(text, room, "…")}
 	}
 	spans = make([][]optSpan, len(lines))
+	if age != "" {
+		// Right-aligned on the first line, past the text's room
+		lines[0] += strings.Repeat(" ", max(1, in+room+1-ansi.StringWidth(lines[0]))) + rule + age + reset
+	}
 	if len(r.Options) > 0 {
 		answers := m.answerable(r)
 		opts := make([]string, len(r.Options))

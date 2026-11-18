@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -774,6 +775,33 @@ func TestNeedsOpenLongOptionsFitPane(t *testing.T) {
 	lines, _ := m.renderNeeds(40, 12)
 	if len(lines) > 12 || !strings.Contains(ansi.Strip(lines[0]), "NEEDS YOU") {
 		t.Errorf("%d lines, first %q", len(lines), lines[0])
+	}
+}
+
+// A row of a stale list shows its list's age at the right edge, unless the text would keep under MinTextAfterAge.
+func TestNeedLineStaleAge(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.needs[0].Stale, m.needs[0].Updated = true, time.Now().Add(-18*time.Hour-30*time.Second).Unix()
+	rows := m.needRows()
+	line := ansi.Strip(m.needLine(rows[0], 40, false))
+	if !strings.HasSuffix(line, " 18h") || ansi.StringWidth(line) != 39 {
+		t.Errorf("line = %q (%d wide)", line, ansi.StringWidth(line))
+	}
+	if line := ansi.Strip(m.needLine(rows[0], 22, false)); strings.Contains(line, "18h") {
+		t.Errorf("narrow line = %q", line)
+	}
+	openAsk, _ := m.openLines(rows[0], 40)
+	if open := ansi.Strip(strings.Join(openAsk, "\n")); strings.Contains(open, "18h") {
+		t.Errorf("open ask marked:\n%s", open)
+	}
+	m.needs[0].Error = "list not read: bad JSON"
+	if r := m.needRows(); r[len(r)-1].Kind != NeedUnread || r[len(r)-1].Age(time.Now()) != "" {
+		t.Errorf("unread row marked: %+v", r[len(r)-1])
+	}
+	m.needs[0].Error, m.needs[0].Stale = "", false
+	if line := ansi.Strip(m.needLine(m.needRows()[0], 40, false)); strings.Contains(line, "18h") {
+		t.Errorf("fresh list marked: %q", line)
 	}
 }
 

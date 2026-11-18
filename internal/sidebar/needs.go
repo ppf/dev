@@ -19,6 +19,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Each read runs dev todo --all, once per sidebar.
@@ -33,9 +34,11 @@ const (
 // NeedList is one boss's list as dev todo --all --json prints it (internal/todo imports this package, so the
 // shape is read here, not shared); a board builds it from its own read.
 type NeedList struct {
-	Boss  string     `json:"boss"`
-	Error string     `json:"error"` // the list wasn't read
-	Items []NeedItem `json:"items"`
+	Boss    string     `json:"boss"`
+	Error   string     `json:"error"` // the list wasn't read
+	Items   []NeedItem `json:"items"`
+	Updated int64      `json:"updated"` // the list's last change, unix seconds
+	Stale   bool       `json:"stale"`   // unchanged for long: its items may be out of date
 }
 
 // NeedItem is a list item as dev todo --all --json prints it.
@@ -82,6 +85,18 @@ type NeedRow struct {
 	Text    string   // the item's text, what the dialog or the question asks, or why the list wasn't read
 	Options []string // a list ask's answers; a dialog's choices (the sidebar only shows them; a board answers them)
 	Session string   // where ⏎ goes: the session, or the list's boss
+	Updated int64    // a stale list's last change, unix seconds; 0 for a fresh list's row and the others
+}
+
+// MinTextAfterAge is the text width a row keeps beside its age mark; with less the mark is left off.
+const MinTextAfterAge = 12
+
+// Age is how long ago the row's stale list last changed ("18h 19m"); "" for any other row.
+func (r NeedRow) Age(now time.Time) string {
+	if d := now.Sub(time.Unix(r.Updated, 0)); r.Updated != 0 && d > 0 {
+		return wait.Span(d)
+	}
+	return ""
 }
 
 // key identifies the row across reads: a list's numbers restart once it empties, so the text is part of it.
@@ -303,6 +318,9 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 		if l.Error != "" {
 			row.Kind, row.Text = NeedUnread, l.Error
 			rows = append(rows, row)
+		}
+		if l.Stale {
+			row.Updated = l.Updated
 		}
 		for _, it := range l.Items {
 			if it.Done || it.On != "" {
@@ -561,9 +579,21 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 		mark = faint + "→" + reset
 	}
 	vis := 1 + ansi.StringWidth(project) + 2 + 1 + 1
-	text := truncate(r.Text, max(1, w-vis-1))
+	room, age := max(1, w-vis-1), r.Age(time.Now())
+	if age != "" && room-len(age)-1 >= MinTextAfterAge {
+		room -= len(age) + 1
+	} else {
+		age = ""
+	}
+	text := truncate(r.Text, room)
 	line := " " + muted + project + reset + "  " + mark + " " + text
-	return cardLine(line, vis+ansi.StringWidth(text), w, selected)
+	width := vis + ansi.StringWidth(text)
+	if age != "" {
+		pad := room - ansi.StringWidth(text) + 1
+		line += strings.Repeat(" ", pad) + faint + age + reset
+		width += pad + len(age)
+	}
+	return cardLine(line, width, w, selected)
 }
 
 // label is the row's project column: a session's name, else the list owner's project.
@@ -581,6 +611,7 @@ func (r NeedRow) label() string {
 // line's option number when 1-9 answer it, else 0.
 func (m Model) openLines(r NeedRow, w int) (lines []string, opts []int) {
 	vis := 1 + ansi.StringWidth(truncate(r.label(), max(1, min(12, w/3)))) + 2 + 1 + 1
+	r.Updated = 0 // its age mark belongs to the one-line row
 	lines = []string{m.needLine(r, w, true)}
 	if text := strings.Split(ansi.Wrap(r.Text, max(1, w-vis-1), ""), "\n"); len(text) > 1 {
 		first := r
