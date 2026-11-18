@@ -420,7 +420,8 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 }
 
 // headRow is a card's first row, w columns: its fold arrow, state dot and name, then at the right its time in
-// its state. Folded, the status, PR and a ⚠ for a warning follow the name and the model comes before the time.
+// its state. Folded, the status, PR and a ⚠ for a warning follow the name and the model comes before the time; a
+// roll-up's "N on others" goes first when the row is too narrow.
 func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	arrow := "▾"
 	if folded {
@@ -430,28 +431,6 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	if t.via != "" {
 		left += "  " + sidebar.Muted + "via " + t.via + reset
 	}
-	if folded {
-		if t.roll != nil && !t.deciding {
-			left += "  " + rollText(*t.roll)
-		} else if t.own() == needsYouSection {
-			left += "  " + sidebar.Red + blockStatus(t) + reset
-		} else if s := m.statusText(t, sec); s != "" {
-			left += "  " + sidebar.Muted + s + reset
-		}
-		if pr := t.sess.PR; pr.Number != 0 {
-			left += "  " + prColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
-			if icon := ciIcon(t.ci.state); icon != "" {
-				left += " " + icon
-			}
-			if t.ci.err != "" {
-				// Its checks couldn't be read again: the icon may be stale
-				left += sidebar.Muted + "?" + reset
-			}
-		}
-		if len(warnings(t)) > 0 || t.roll != nil && t.roll.Warn {
-			left += " " + sidebar.Gold + "⚠" + reset
-		}
-	}
 	right := ""
 	if !t.since.IsZero() {
 		right = sidebar.Muted + span(m.clk.Now().Sub(t.since)) + reset + " "
@@ -460,6 +439,35 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		right = sidebar.Muted + mt + reset + "  " + right
 	}
 	room := max(1, w-ansi.StringWidth(right)-1)
+	if folded {
+		status, badges := "", ""
+		if t.roll != nil && !t.deciding {
+			status = "  " + rollText(*t.roll)
+		} else if t.own() == needsYouSection {
+			status = "  " + sidebar.Red + blockStatus(t) + reset
+		} else if s := m.statusText(t, sec); s != "" {
+			status = "  " + sidebar.Muted + s + reset
+		}
+		if pr := t.sess.PR; pr.Number != 0 {
+			badges += "  " + prColour(pr.State) + prIcon(pr.State) + " #" + strconv.Itoa(pr.Number) + reset
+			if icon := ciIcon(t.ci.state); icon != "" {
+				badges += " " + icon
+			}
+			if t.ci.err != "" {
+				// Its checks couldn't be read again: the icon may be stale
+				badges += sidebar.Muted + "?" + reset
+			}
+		}
+		if len(warnings(t)) > 0 || t.roll != nil && t.roll.Warn {
+			badges += " " + sidebar.Gold + "⚠" + reset
+		}
+		if t.roll != nil && !t.deciding && t.roll.OnOthers > 0 && ansi.StringWidth(" "+left+status+badges) > room {
+			r := *t.roll
+			r.OnOthers = 0
+			status = "  " + rollText(r)
+		}
+		left += status + badges
+	}
 	left = ansi.Truncate(" "+left, room, "…")
 	return left + strings.Repeat(" ", max(1, w-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 }
@@ -497,14 +505,17 @@ func (m Model) statusText(t tile, sec section) string {
 	return statusText(t, sec)
 }
 
-// rollText is a boss card's status, its subtree's roll-up, in its section's colour but a trailing "N to do" muted.
+// rollText is a boss card's status, its subtree's roll-up, in its section's colour but a trailing "N to do" and
+// "N on others" muted.
 func rollText(r sidebar.Rollup) string {
 	ps := r.Parts()
-	todo := ""
-	if r.ToDo > 0 && len(ps) > 1 {
-		todo, ps = sidebar.Muted+" · "+ps[len(ps)-1]+reset, ps[:len(ps)-1]
+	n := min(len(ps)-1, min(r.ToDo, 1)+min(r.OnOthers, 1))
+	head, tail := ps[:len(ps)-n], ps[len(ps)-n:]
+	out := sectionColours[r.Rank] + strings.Join(head, " · ") + reset
+	if len(tail) > 0 {
+		out += sidebar.Muted + " · " + strings.Join(tail, " · ") + reset
 	}
-	return sectionColours[r.Rank] + strings.Join(ps, " · ") + reset + todo
+	return out
 }
 
 // statusText is what a card says about its worker, leaving out what its section says: the dialog it waits on

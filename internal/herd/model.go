@@ -89,7 +89,7 @@ type snapshot struct {
 	tiles   []tile
 	started map[string]bool   // sessions this boss started, an agent in them or not, by name
 	bosses  []string          // the bosses under this one, at any depth, by name
-	asks    []todo.BossList   // their lists' items waiting on the user, by boss; none without items or an error
+	asks    []todo.BossList   // their lists' open items (on no one or on others), by boss; none without items or an error
 	asksErr error             // why their lists could not be read
 	all     []sidebar.Session // every session on the server in sidebar.Order, for the bosses' roll-ups
 	self    string            // own session's id
@@ -204,7 +204,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && !waitsOnUser(m.snap.asks) && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -386,7 +386,7 @@ func (m Model) refresh() tea.Cmd {
 			snap.todo, snap.todoErr = store.Read(m.clk.Now())
 		}
 		if len(snap.bosses) > 0 {
-			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, m.clk.Now())
+			snap.asks, snap.asksErr = bossLists(m.c, snap.bosses, m.clk.Now())
 		}
 		// Before the captures, which skip folded cards; again after them
 		snap.rollUp()
@@ -649,21 +649,28 @@ func descendants(names []string, panes map[string][]row, id, name string) map[st
 	return out
 }
 
-// bossAsks are the items waiting on the user (open, on no one) on the lists of bosses, by boss; a list not read
-// comes with its error.
-func bossAsks(c *tmux.Client, bosses []string, now time.Time) ([]todo.BossList, error) {
+// bossLists are the open items on the lists of bosses, by boss: those on no one wait on the user, the rest count
+// on the boss's card; a list not read comes with its error.
+func bossLists(c *tmux.Client, bosses []string, now time.Time) ([]todo.BossList, error) {
 	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) })
 	if err != nil {
 		return nil, err
 	}
 	var out []todo.BossList
 	for _, l := range all {
-		l.Items = slices.DeleteFunc(slices.Clone(l.Items), func(it todo.Shown) bool { return it.Done || it.On != "" })
+		l.Items = slices.DeleteFunc(slices.Clone(l.Items), func(it todo.Shown) bool { return it.Done })
 		if len(l.Items) > 0 || l.Err != nil {
 			out = append(out, l)
 		}
 	}
 	return out, nil
+}
+
+// waitsOnUser reports a boss list NEEDS YOU shows: one with an item on no one, or not read.
+func waitsOnUser(lists []todo.BossList) bool {
+	return slices.ContainsFunc(lists, func(l todo.BossList) bool {
+		return l.Err != nil || slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return it.On == "" })
+	})
 }
 
 // index is name's tile index, 0 when not listed.
