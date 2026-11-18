@@ -328,7 +328,8 @@ const minBlockRows = 6
 
 // needLines are row r's lines, w columns: its mark (● dialog, ? question or list ask, ☐ list item, ⚠ list not read), its
 // label padded to labelW, its text (wrapped when selected, else cut), then its options numbered when 1-9 answer
-// them (★ on the recommended one; m to reply to a question); the selected row on the selection band.
+// them (★ on the recommended one; m to reply to a question; a selected row's go one per line, wrapped, when they
+// don't fit one); the selected row on the selection band.
 func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	mark := "☐"
 	switch r.Kind {
@@ -356,12 +357,8 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	}
 	if len(r.Options) > 0 {
 		answers := m.answerable(r)
-		var b strings.Builder
-		b.WriteString("     ")
+		opts := make([]string, len(r.Options))
 		for i, o := range r.Options {
-			if i > 0 {
-				b.WriteString("   ")
-			}
 			num := sidebar.Muted + "·" + reset
 			if answers {
 				num = sidebar.Green + strconv.Itoa(i+1) + reset
@@ -370,12 +367,23 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 			if rec {
 				label = sidebar.Gold + "★ " + reset + label
 			}
-			b.WriteString(num + " " + label)
+			opts[i] = num + " " + label
 		}
 		if r.Kind == sidebar.NeedAsk && answers {
-			b.WriteString("   " + sidebar.Green + "m" + reset + rule + " reply" + reset)
+			opts = append(opts, sidebar.Green+"m"+reset+rule+" reply"+reset)
 		}
-		lines = append(lines, b.String())
+		line := "     " + strings.Join(opts, "   ")
+		if selected && ansi.StringWidth(line) >= w {
+			for _, o := range opts {
+				indent := "     "
+				for _, p := range strings.Split(ansi.Wrap(o, max(1, w-8), ""), "\n") {
+					lines = append(lines, indent+p)
+					indent = "       "
+				}
+			}
+		} else {
+			lines = append(lines, line)
+		}
 	}
 	for i, l := range lines {
 		l = padRow(l, w)
