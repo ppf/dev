@@ -259,21 +259,24 @@ func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 	return next.(Model), cmd
 }
 
+// optSpan is an answerable option's columns [x0, x1) on a line of the block, and its index.
+type optSpan struct{ x0, x1, n int }
+
 // needBlock is NEEDS YOU at the top of the pane, in about half the gh rows (more for a long selected row; none under
 // 6): its header, then each row (its
 // mark, label and text, the selected one's text wrapped) with its options under it, scrolled to keep the selected
-// row, "+N more" for the rest; at is each line's row, -1 for none.
-func (m Model) needBlock(gh int) (lines []string, at []int) {
+// row, "+N more" for the rest; at is each line's row, -1 for none; spans each line's answerable options.
+func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 	rows := m.needRows()
 	if len(rows) == 0 || gh < minBlockRows {
-		return nil, nil
+		return nil, nil, nil
 	}
 	w := m.width
 	head := " " + sidebar.Red + bold + "NEEDS YOU " + strconv.Itoa(len(rows)) + reset
 	if !m.needMode {
 		head += rule + " · n" + reset
 	}
-	lines, at = []string{padRow(head, w), padRow("", w)}, []int{-1, -1}
+	lines, at, spans = []string{padRow(head, w), padRow("", w)}, []int{-1, -1}, make([][]optSpan, 2)
 	labelW := 0
 	for _, r := range rows {
 		labelW = max(labelW, ansi.StringWidth(r.label))
@@ -284,9 +287,10 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 		cur = min(m.needIdx, len(rows)-1)
 	}
 	block := make([][]string, len(rows))
+	blockSpans := make([][][]optSpan, len(rows))
 	total := 0
 	for i, r := range rows {
-		block[i] = m.needLines(r, labelW, w, i == cur)
+		block[i], blockSpans[i] = m.needLines(r, labelW, w, i == cur)
 		total += len(block[i])
 	}
 	// Room for rows: half the rows less the header, its blank and the blank after, one of them for "+N more"
@@ -297,7 +301,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 	// The selected row fits, cut to the pane: the header, its blank, "+N more" and the blank after stay
 	room = min(max(room, len(block[max(cur, 0)])), gh-4)
 	if cur >= 0 && len(block[cur]) > room {
-		block[cur] = block[cur][:room]
+		block[cur], blockSpans[cur] = block[cur][:room], blockSpans[cur][:room]
 	}
 	span := func(from int) int {
 		used := 0
@@ -312,15 +316,15 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 	}
 	used, shown := 0, 0
 	for i := start; i < len(rows) && used+len(block[i]) <= room; i++ {
-		for _, l := range block[i] {
-			lines, at = append(lines, l), append(at, i)
+		for j, l := range block[i] {
+			lines, at, spans = append(lines, l), append(at, i), append(spans, blockSpans[i][j])
 		}
 		used, shown = used+len(block[i]), shown+1
 	}
 	if more := len(rows) - shown; more > 0 {
-		lines, at = append(lines, padRow(sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w), w)), append(at, -1)
+		lines, at, spans = append(lines, padRow(sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w), w)), append(at, -1), append(spans, nil)
 	}
-	return append(lines, padRow("", w)), append(at, -1)
+	return append(lines, padRow("", w)), append(at, -1), append(spans, nil)
 }
 
 // minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.
@@ -330,7 +334,7 @@ const minBlockRows = 6
 // label padded to labelW, its text (wrapped when selected, else cut), then its options numbered when 1-9 answer
 // them (★ on the recommended one; m to reply to a question; a selected row's go one per line, wrapped, when they
 // don't fit one); the selected row on the selection band.
-func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
+func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []string, spans [][]optSpan) {
 	mark := "☐"
 	switch r.Kind {
 	case sidebar.NeedDialog:
@@ -345,7 +349,6 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	in := 3 + labelW + 2
 	room := max(1, w-in-1)
 	text := strings.Join(strings.Fields(r.Text), " ")
-	var lines []string
 	if selected {
 		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
 		lines = []string{pre + parts[0]}
@@ -355,6 +358,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	} else {
 		lines = []string{pre + ansi.Truncate(text, room, "…")}
 	}
+	spans = make([][]optSpan, len(lines))
 	if len(r.Options) > 0 {
 		answers := m.answerable(r)
 		opts := make([]string, len(r.Options))
@@ -374,15 +378,36 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 		}
 		line := "     " + strings.Join(opts, "   ")
 		if selected && ansi.StringWidth(line) >= w {
-			for _, o := range opts {
+			for i, o := range opts {
 				indent := "     "
 				for _, p := range strings.Split(ansi.Wrap(o, max(1, w-8), ""), "\n") {
 					lines = append(lines, indent+p)
+					var sp []optSpan
+					if i < min(len(r.Options), 9) {
+						sp = []optSpan{{5, w, i}}
+					}
+					spans = append(spans, sp)
 					indent = "       "
 				}
 			}
 		} else {
 			lines = append(lines, line)
+			var row []optSpan
+			x := 5
+			for i, o := range opts[:min(len(r.Options), 9)] {
+				ow := ansi.StringWidth(o)
+				// The column cut off by padRow shows an ellipsis, not the option
+				if end := x + ow; end <= w {
+					row = append(row, optSpan{x, end, i})
+				} else if x < w-1 {
+					row = append(row, optSpan{x, w - 1, i})
+				}
+				x += ow + 3
+			}
+			spans = append(spans, row)
+		}
+		if !answers {
+			clear(spans)
 		}
 	}
 	for i, l := range lines {
@@ -392,5 +417,5 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 		}
 		lines[i] = l
 	}
-	return lines
+	return lines, spans
 }

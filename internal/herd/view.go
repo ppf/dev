@@ -56,7 +56,7 @@ func (m Model) render() []string {
 
 // topRows are the rows above the board, in gh rows: NEEDS YOU, then the to do block.
 func (m Model) topRows(gh int) []string {
-	block, _ := m.needBlock(gh)
+	block, _, _ := m.needBlock(gh)
 	if len(block) == 0 && m.snap.todoErr != nil && gh > 0 {
 		// NEEDS YOU, too short to show, would say it
 		return []string{sidebar.AlertRow("❌ to do: "+m.snap.todoErr.Error(), m.width)}
