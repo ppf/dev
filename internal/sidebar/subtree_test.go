@@ -137,7 +137,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM"}}}}))["boss"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 to do" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 need you" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }
@@ -159,5 +159,38 @@ func TestRollLineListAsk(t *testing.T) {
 	got, _ := rollLine(Subtree(ss, map[string]ListCount{"b": {Asks: 1}})["b"], 40)
 	if !strings.HasPrefix(got, red+"1 need you") {
 		t.Errorf("line = %q", got)
+	}
+}
+
+// A roll line's "N need you" is what NEEDS YOU counts for the subtree: asks and the user's own plain items, no "to do".
+func TestRollLineMatchesNeedsYou(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Idle}}
+	list := NeedList{Boss: "b", Items: []NeedItem{
+		{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3}, {ID: 4, On: "w"},
+	}}
+	r := Subtree(ss, NeedCounts([]NeedList{list}))["b"]
+	got, _ := rollLine(r, 60)
+	if want := "3 need you"; ansi.Strip(got) != want {
+		t.Errorf("line = %q, want %q", ansi.Strip(got), want)
+	}
+	if n := needCount(NeedRows(ss, []NeedList{list}, "")); n != 3 {
+		t.Errorf("NEEDS YOU = %d, want 3", n)
+	}
+	// Plain items alone keep the state and say them as "need you"
+	r = Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["b"]
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "idle · 2 need you" {
+		t.Errorf("plain only = %q", ansi.Strip(got))
+	}
+}
+
+// A manager's "N need you" by its plain items alone stays by its state, whatever the width.
+func TestRollLineManagerPlainOnly(t *testing.T) {
+	ss := []Session{
+		{Name: "m", ID: "$1", Boss: true, Root: "m", State: agent.Idle},
+		{Name: "b", ID: "$2", Boss: true, Root: "m", Depth: 1, State: agent.Idle},
+	}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["m"]
+	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "idle · 2 need you") {
+		t.Errorf("line = %q", ansi.Strip(got))
 	}
 }

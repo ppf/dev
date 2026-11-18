@@ -371,8 +371,8 @@ func FormatCost(usd float64) string {
 func hasRollLine(r *Rollup) bool { return r != nil && (r.Under > 0 || r.Questions > 0 || r.ToDo > 0) }
 
 // rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
-// red "N need you" when it needs you, then its counts (a manager's bosses · workers first), ⚠ and what it and
-// everything under it cost; the cost goes before the counts do.
+// red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a manager's
+// bosses · workers first), ⚠ and what it and everything under it cost; the cost goes before the counts do.
 func rollLine(r *Rollup, width int) (string, int) {
 	var plain, styled string
 	add := func(colour, text string) {
@@ -385,12 +385,25 @@ func rollLine(r *Rollup, width int) (string, int) {
 	}
 	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
 	parts := r.Parts()
-	if r.Rank == RankNeedsYou {
+	// Plain items count in "need you", as NEEDS YOU counts them
+	parts = slices.DeleteFunc(parts, func(p string) bool { return strings.HasSuffix(p, " to do") })
+	need := r.Questions + r.ToDo
+	lead := 0 // the parts before a manager's bosses and workers
+	switch {
+	case r.Rank == RankNeedsYou:
 		// "needs you · 2 questions" as "2 need you", to fit a sidebar's width
-		parts = append([]string{fmt.Sprintf("%d need you", r.Questions)}, parts[2:]...)
+		parts = append([]string{fmt.Sprintf("%d need you", need)}, parts[2:]...)
+		lead = 1
+	case need > 0 && r.Bosses > 0:
+		// A manager's count stays by its state, where the width never cuts it
+		parts = slices.Insert(parts, 1, fmt.Sprintf("%d need you", need))
+		lead = 2
+	case need > 0:
+		parts = append(parts, fmt.Sprintf("%d need you", need))
 	}
-	lead := len(parts)
-	if r.Bosses > 0 {
+	if r.Bosses == 0 {
+		lead = len(parts)
+	} else if lead == 0 {
 		// A manager's: its bosses and workers after the state, then the other counts only whole
 		lead = 1
 	}
