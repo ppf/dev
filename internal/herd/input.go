@@ -237,7 +237,6 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if _, at := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
-		// A row of NEEDS YOU focuses it there, for its keys
 		if i := at[ms.Y]; i >= 0 && m.box.session == "" {
 			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].key, message{}, ""
 		}

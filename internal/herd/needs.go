@@ -309,13 +309,15 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) []string {
 	in := 3 + labelW + 2
 	room := max(1, w-in-1)
 	text := strings.Join(strings.Fields(r.Text), " ")
-	lines := []string{pre + ansi.Truncate(text, room, "…")}
+	var lines []string
 	if selected {
 		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
 		lines = []string{pre + parts[0]}
 		for _, p := range parts[1:] {
 			lines = append(lines, strings.Repeat(" ", in)+p)
 		}
+	} else {
+		lines = []string{pre + ansi.Truncate(text, room, "…")}
 	}
 	if len(r.Options) > 0 {
 		answers := m.answerable(r)

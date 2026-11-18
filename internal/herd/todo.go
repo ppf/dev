@@ -20,19 +20,16 @@ const (
 	strike    = "\x1b[9m"
 )
 
-// todoRows is the to do block above the cards, in at most half the gh rows above the bottom rows: the boss's own
-// list less what waits on the user, which NEEDS YOU shows.
-func (m Model) todoRows(gh int) []string { return m.ownRows(gh) }
-
 // panelItems are the own list's items the to do block lists: those on someone else, or ticked.
 func (m Model) panelItems() []todo.Shown {
 	return slices.DeleteFunc(slices.Clone(m.snap.todo.Items), func(it todo.Shown) bool { return !it.Done && it.On == "" })
 }
 
-// ownRows is the boss's own list (panelItems), in at most half the gh rows (header in any): header (TO DO n ──
-// updated <age>), up to todoShown items, an answered ask's with its answer's row, "+N more"; header only while
-// folded (t); none if empty, unreadable (NEEDS YOU says why) or no rows.
-func (m Model) ownRows(gh int) []string {
+// todoRows is the to do block above the cards: the boss's own list (panelItems), in at most half the gh rows above
+// the bottom rows (header in any): header (TO DO n ── updated <age>), up to todoShown items, an answered ask's with
+// its answer's row, "+N more"; header only while folded (t); none if empty, unreadable (NEEDS YOU says why) or no
+// rows.
+func (m Model) todoRows(gh int) []string {
 	w := m.width
 	items := m.panelItems()
 	if gh < 1 || m.snap.todoErr != nil || len(items) == 0 {
