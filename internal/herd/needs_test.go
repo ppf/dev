@@ -668,10 +668,27 @@ func TestNeedsShortPaneAndFailures(t *testing.T) {
 	if rows, _ := m.card(m.snap.tiles[index(m.snap.tiles, "noc-triage")], 80); len(rows) == 1 {
 		t.Error("short pane: the dialog's card folded with no block to show it")
 	}
+	// A mode left on in a pane that then shrinks drops: no block hint, and n won't enter it
+	tall := selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
+	next, _ := tall.Update(tea.WindowSizeMsg{Width: 80, Height: 6})
+	tall = next.(Model)
+	if tall.msg.text == "" {
+		t.Error("short pane: the mode dropped with no word")
+	}
+	if hint := strings.Join(plain(tall.render()), "\n"); tall.needMode || strings.Contains(hint, "j/k move") || strings.Contains(hint, "n needs") {
+		t.Errorf("short pane: mode %v hint:\n%s", tall.needMode, hint)
+	}
+	if tall = tall.enterNeeds(); tall.needMode {
+		t.Error("short pane: n entered the hidden block")
+	}
+	tall.height = minBlockRows + 1
+	if tall = tall.enterNeeds(); !tall.needMode {
+		t.Error("shortest pane showing the block: n refused")
+	}
 	m = selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
 	sig := m.needRows()[m.needIdx].sig
 	m, _ = keys(m, "1")
-	next, _ := m.Update(actionMsg{alert("❌ boss-dev: its agent is gone, reply not sent")})
+	next, _ = m.Update(actionMsg{alert("❌ boss-dev: its agent is gone, reply not sent")})
 	if m = next.(Model); m.needKey != sig || m.needDone != "" {
 		t.Errorf("failed reply: key %q done %q", m.needKey, m.needDone)
 	}

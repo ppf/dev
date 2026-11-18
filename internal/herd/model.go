@@ -293,6 +293,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.size == collapsed && msg.Width > collapsedW {
 			m.size = unsized
 		}
+		m.fixNeeds()
 		return m, nil
 	case tea.KeyMsg:
 		m.focused, m.inputs = true, m.inputs+1

@@ -115,11 +115,18 @@ func (m Model) answerable(r needRow) bool {
 	return false
 }
 
+// tooShort reports a pane known to be too short for NEEDS YOU; before the first size message the height is unknown.
+func (m Model) tooShort() bool { return m.height > 0 && !m.blockShown() }
+
 // enterNeeds focuses NEEDS YOU on its first row.
 func (m Model) enterNeeds() Model {
 	rows := m.needRows()
-	if len(rows) == 0 {
+	switch {
+	case len(rows) == 0:
 		m.msg = info("Nothing needs you")
+		return m
+	case m.tooShort():
+		m.msg = info("Pane too short for NEEDS YOU")
 		return m
 	}
 	m.needMode, m.needIdx, m.needKey, m.needDone = true, 0, rows[0].sig, ""
@@ -134,6 +141,10 @@ func (m *Model) fixNeeds() {
 		return
 	}
 	rows := m.needRows()
+	if m.tooShort() {
+		m.needMode, m.msg = false, info("Pane too short for NEEDS YOU: keys act on the cards")
+		return
+	}
 	if len(rows) == 0 {
 		m.needMode = false
 		return
