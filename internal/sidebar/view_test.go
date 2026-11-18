@@ -554,7 +554,7 @@ func TestListLines(t *testing.T) {
 	for drawn > 0 && lines[drawn-1] == "" {
 		drawn--
 	}
-	if got := listLines(sessions); got != drawn || got != 11 {
+	if got := listLines(sessions, nil); got != drawn || got != 11 {
 		t.Errorf("listLines = %d, render drew %d, want 11", got, drawn)
 	}
 }
@@ -670,7 +670,7 @@ func TestViewBossRollupListLines(t *testing.T) {
 	m := Model{snap: snapshot{width: 40, height: 40, current: "x", sessions: ss}}
 	f := m.render()
 	rows := f.rows
-	if got, drawn := listLines(ss), rows[len(rows)-1].line-f.header+2; got != drawn || got != 14 {
+	if got, drawn := listLines(ss, nil), rows[len(rows)-1].line-f.header+2; got != drawn || got != 14 {
 		t.Errorf("listLines = %d, render drew %d, want 14", got, drawn)
 	}
 }
@@ -743,7 +743,7 @@ func TestViewManagerGroup(t *testing.T) {
 	if len(got) < len(want) || !slices.Equal(got[:len(want)], want) {
 		t.Errorf("layout =\n%s\nwant\n%s", strings.Join(got[:len(want)], "\n"), strings.Join(want, "\n"))
 	}
-	if n := listLines(Order(ss)); n != len(want) {
+	if n := listLines(Order(ss), nil); n != len(want) {
 		t.Errorf("listLines = %d, render drew %d", n, len(want))
 	}
 	if !strings.HasPrefix(f.lines[f.header+2], faint+"┌─") {
@@ -791,5 +791,22 @@ func TestViewManagerBossSameGroup(t *testing.T) {
 		t.Errorf("rollup = %+v", r)
 	} else if got, _ := rollLine(r, 40); strings.Contains(ansi.Strip(got), "worker") {
 		t.Errorf("zero workers shown: %q", ansi.Strip(got))
+	}
+}
+
+// A boss with no workers but an open ask and a to do item has its roll line, and listLines counts it.
+func TestWorkerlessBossRollLine(t *testing.T) {
+	sessions := []Session{{Name: "boss-solo", Group: "dev", ID: "$1", Boss: true, Agent: "Claude", State: "idle"}}
+	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: sessions}, needs: []NeedList{{Boss: "boss-solo", Items: []NeedItem{
+		{ID: 1, Text: "Merge?", Options: []string{"Merge", "Wait"}},
+		{ID: 2, Text: "Call Vince"},
+	}}}}
+	lines := m.render().lines
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "1 need you · 1 to do") })
+	if i < 0 {
+		t.Fatalf("no roll line:\n%s", strings.Join(lines, "\n"))
+	}
+	if with, without := listLines(sessions, NeedCounts(m.needs)), listLines(sessions, nil); with != without+1 {
+		t.Errorf("listLines = %d, want %d", with, without+1)
 	}
 }

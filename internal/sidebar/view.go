@@ -63,8 +63,9 @@ func (m Model) render() frame {
 	if len(m.snap.sessions) == 0 {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
-	unwrapped := len(needs) + listLines(m.snap.sessions)
-	rolls := Subtree(m.snap.sessions, NeedCounts(m.needs))
+	lists := NeedCounts(m.needs)
+	unwrapped := len(needs) + listLines(m.snap.sessions, lists)
+	rolls := Subtree(m.snap.sessions, lists)
 	for i, s := range m.snap.sessions {
 		if h, ok := headFor(m.snap.sessions, i); ok {
 			if h.gap {
@@ -194,9 +195,9 @@ func (m Model) render() frame {
 }
 
 // listLines is how many lines render draws for sessions when no title wraps.
-func listLines(sessions []Session) int {
+func listLines(sessions []Session, lists map[string]ListCount) int {
 	n := 2
-	rolls := Subtree(sessions, nil)
+	rolls := Subtree(sessions, lists)
 	for i := range sessions {
 		if h, ok := headFor(sessions, i); ok {
 			n++
@@ -366,8 +367,8 @@ func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
 }
 
-// hasRollLine reports a boss row with a third line: a boss with sessions under it.
-func hasRollLine(r *Rollup) bool { return r != nil && r.Under > 0 }
+// hasRollLine reports a boss row with a third line: a boss with sessions under it, or questions or to do items.
+func hasRollLine(r *Rollup) bool { return r != nil && (r.Under > 0 || r.Questions > 0 || r.ToDo > 0) }
 
 // rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
 // red "N need you" when it needs you, then its counts (a manager's bosses · workers first), ⚠ and what it and
