@@ -32,6 +32,7 @@ type paneRow struct {
 	Cost     string `tmux:"@agent_cost"`
 	// Why a waiting agent waits: Claude's idle reminder is not a decision
 	WaitingFor string `tmux:"@agent_waiting_for"`
+	Question   string `tmux:"@agent_question"`
 	Active     bool   `tmux:"pane_active"`
 	Width      int    `tmux:"pane_width"`
 	Height     int    `tmux:"pane_height"`
@@ -279,6 +280,9 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			}
 			i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
 			sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
+			if sess.Deciding {
+				sess.Question = rs[i].Question
+			}
 			sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
 			sess.Branch = branch(a.Pane.Path)
 			// Before Order moves a worker into its starter's group
