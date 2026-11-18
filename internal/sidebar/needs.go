@@ -471,7 +471,8 @@ const needsMinHeight = 10
 
 func needsBudget(h int) int { return max(5, h/2) }
 
-type needHit struct{ line, idx int }
+// needHit is a click target: row idx's line, or its open ask's option opt (1-9) on it.
+type needHit struct{ line, idx, opt int }
 
 func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 	rows := m.needRows()
@@ -498,9 +499,11 @@ func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 	lines := []string{truncate(head, w), ""}
 	var hits []needHit
 	open := map[int][]string{}
+	var openOpts []int
 	if m.needMode && m.needOpen && m.needIdx < len(rows) {
-		open[m.needIdx] = m.openLines(rows[m.needIdx], w)
-		open[m.needIdx] = open[m.needIdx][:min(len(open[m.needIdx]), max(1, h-3))]
+		open[m.needIdx], openOpts = m.openLines(rows[m.needIdx], w)
+		n := min(len(open[m.needIdx]), max(1, h-3))
+		open[m.needIdx], openOpts = open[m.needIdx][:n], openOpts[:n]
 	}
 	height := func(i int) int {
 		if l, ok := open[i]; ok {
@@ -531,6 +534,11 @@ func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 		used += height(i)
 		hits = append(hits, needHit{line: len(lines), idx: i})
 		if l, ok := open[i]; ok {
+			for j, o := range openOpts {
+				if o > 0 {
+					hits = append(hits, needHit{line: len(lines) + j, idx: i, opt: o})
+				}
+			}
 			lines = append(lines, l...)
 		} else {
 			lines = append(lines, m.needLine(rows[i], w, m.needMode && i == m.needIdx))
@@ -569,10 +577,11 @@ func (r NeedRow) label() string {
 	return r.Project
 }
 
-// openLines is the open ask: wrapped question, then each option numbered, wrapped under its number.
-func (m Model) openLines(r NeedRow, w int) []string {
+// openLines is the open ask: wrapped question, then each option numbered, wrapped under its number; opts is each
+// line's option number when 1-9 answer it, else 0.
+func (m Model) openLines(r NeedRow, w int) (lines []string, opts []int) {
 	vis := 1 + ansi.StringWidth(truncate(r.label(), max(1, min(12, w/3)))) + 2 + 1 + 1
-	lines := []string{m.needLine(r, w, true)}
+	lines = []string{m.needLine(r, w, true)}
 	if text := strings.Split(ansi.Wrap(r.Text, max(1, w-vis-1), ""), "\n"); len(text) > 1 {
 		first := r
 		first.Text = text[0]
@@ -581,7 +590,9 @@ func (m Model) openLines(r NeedRow, w int) []string {
 			lines = append(lines, cardLine(strings.Repeat(" ", vis)+t, vis+ansi.StringWidth(t), w, true))
 		}
 	}
+	opts = make([]int, len(lines))
 	for i, o := range r.Options {
+		n := 0
 		label, rec := optionLabel(o)
 		if rec {
 			label = gold + "★ " + reset + label
@@ -589,6 +600,8 @@ func (m Model) openLines(r NeedRow, w int) []string {
 		num := green + strconv.Itoa(i+1) + reset
 		if r.Kind != NeedListAsk {
 			num = muted + "·" + reset
+		} else if i < 9 {
+			n = i + 1
 		}
 		for j, p := range strings.Split(ansi.Wrap(label, max(1, w-7), ""), "\n") {
 			line := "      " + p
@@ -596,9 +609,10 @@ func (m Model) openLines(r NeedRow, w int) []string {
 				line = "    " + num + " " + p
 			}
 			lines = append(lines, cardLine(line, ansi.StringWidth(line), w, true))
+			opts = append(opts, n)
 		}
 	}
-	return lines
+	return lines, opts
 }
 
 func (m Model) needsHint() string {
