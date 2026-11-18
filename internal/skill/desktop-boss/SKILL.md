@@ -87,7 +87,7 @@ for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sl
 
 > To wait for a known time, run `dev agent wait-until <HH:MM|+90m> "<why>"` (at most 4h away) and end your turn: dev wakes you then. No background `sleep` for it.
 
-A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it.
+A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it (its own background task finishing doesn't).
 <!-- /boss-core:wait -->
 
 The app starts a session only in a turn the user's own message asked for it (or a `<side-sessions-event>` turn right after it, for a step the user asked to run in its own session, in this project). A turn a worker's note or a session's message started can't start one: propose it instead (`initiation: "own_initiative"`, a card the user starts) and say so in one line. An unrelated request starts with `initiation: "offer"` (the user picks New session or Do it here). Over Remote Control (the user on their phone or claude.ai) you can't start workers: tell them in one line to send the request from the desktop app; you can still message, check and archive existing ones.
