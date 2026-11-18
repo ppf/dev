@@ -137,7 +137,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM"}}}}))["boss"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 need you" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 need you · 1 waiting" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }
@@ -192,5 +192,37 @@ func TestRollLineManagerPlainOnly(t *testing.T) {
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["m"]
 	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "idle · 2 need you") {
 		t.Errorf("line = %q", ansi.Strip(got))
+	}
+}
+
+// A workerless boss with plain items only keeps a red "N need you" at sidebar widths; what is cut is the tail.
+func TestRollLineWorkerlessPlainOnly(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
+	for _, width := range []int{20, 36, 40} {
+		got, _ := rollLine(r, width)
+		if !strings.Contains(got, red+"1 need you"+reset) || !strings.HasPrefix(ansi.Strip(got), "idle · 1 need you") {
+			t.Errorf("width %d: %q", width, got)
+		}
+		if strings.Contains(ansi.Strip(got), "…") {
+			t.Errorf("width %d: need you cut: %q", width, ansi.Strip(got))
+		}
+	}
+}
+
+// Worker counts stay muted next to the red "need you", and the cost goes before they do.
+func TestRollLineCountsMutedCostLast(t *testing.T) {
+	ss := []Session{
+		{Name: "b", ID: "$1", Boss: true, State: agent.Idle},
+		{Name: "w1", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Working, CostUSD: 4, HasCost: true},
+		{Name: "w2", ID: "$3", StartedBy: "b", Depth: 1, State: agent.Waiting},
+	}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
+	got, _ := rollLine(r, 60)
+	if strings.Contains(got, red+"1 working") || strings.Contains(got, red+"1 waiting") || !strings.Contains(got, red+"1 need you") {
+		t.Errorf("colours: %q", got)
+	}
+	if got, _ := rollLine(r, 28); strings.Contains(ansi.Strip(got), "$") {
+		t.Errorf("cost shown over a dropped count: %q", ansi.Strip(got))
 	}
 }
