@@ -786,7 +786,7 @@ func TestViewManagerBossSameGroup(t *testing.T) {
 	}
 	if r := Subtree(Order([]Session{
 		{Name: "m", Group: "dev", ID: "$1", Boss: true},
-		{Name: "b", Group: "dev", ID: "$3", Boss: true, StartedBy: "m"},
+		{Name: "b", Group: "dev", ID: "$3", Boss: true, Agent: "Claude", StartedBy: "m"},
 	}), nil)["m"]; r == nil || r.Bosses != 1 {
 		t.Errorf("rollup = %+v", r)
 	} else if got, _ := rollLine(r, 40); strings.Contains(ansi.Strip(got), "worker") {
