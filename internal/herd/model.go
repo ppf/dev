@@ -78,12 +78,16 @@ type tile struct {
 	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error          // why its transcript could not be read
 	ci       ci             // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
+	via      string         // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, never answered here; "" for this boss's own
 }
 
 // snapshot is what one refresh saw.
 type snapshot struct {
 	tiles   []tile
 	started map[string]bool // sessions this boss started, an agent in them or not, by name
+	bosses  []string        // the bosses under this one, at any depth, by name
+	asks    []todo.BossList // their lists' items waiting on the user, by boss; none without items or an error
+	asksErr error           // why their lists could not be read
 	self    string          // own session's id
 	name    string          // own session's name
 	visible bool            // a client shows own window
@@ -185,7 +189,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -344,6 +348,9 @@ func (m Model) refresh() tea.Cmd {
 		if store != nil {
 			snap.todo, snap.todoErr = store.Read(m.clk.Now())
 		}
+		if len(snap.bosses) > 0 {
+			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, m.clk.Now())
+		}
 		msgs := m.msgs
 		if msgs == nil && m.findMsgs {
 			if _, socket, err := inbox.Viewer(m.c, m.pane); err != nil {
@@ -360,6 +367,7 @@ func (m Model) refresh() tea.Cmd {
 			snap.threads = openThreads(ts, m.clk.Now())
 		}
 		if !snap.visible {
+			snap.tiles = slices.DeleteFunc(snap.tiles, offBoard)
 			return refreshMsg{snap: snap, todo: store, msgs: msgs, inputs: inputs}
 		}
 		for _, i := range captures(snap.tiles, selected, folds) {
@@ -402,11 +410,15 @@ func (m Model) refresh() tea.Cmd {
 				t.body = trimBlank(t.body[:min(cut, len(t.body))])
 			}
 		}
-		// A dialog found gone moves its card out of Needs you
+		// A dialog found gone moves its card out of Needs you, a deeper session's off the board
+		snap.tiles = slices.DeleteFunc(snap.tiles, offBoard)
 		sortBySection(snap.tiles)
 		return refreshMsg{snap: snap, todo: store, msgs: msgs, inputs: inputs}
 	}
 }
+
+// offBoard reports a deeper session's card that doesn't need the user, as captured: shown only while it does.
+func offBoard(t tile) bool { return t.via != "" && t.section() != needsYouSection }
 
 // maxCaptures caps the captures per refresh.
 const maxCaptures = 12
@@ -447,7 +459,8 @@ func sortBySection(tiles []tile) {
 }
 
 // buildSnapshot turns the rows into tiles by section, in sidebar order within one, keeping only agent sessions
-// this boss started, bosses too. PRs, their checks and transcripts are only read while visible.
+// this boss started, bosses too, then (after them) those its bosses started, deeper too, while they need the user
+// or ask (see offBoard). PRs, their checks and transcripts are only read while visible.
 func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look lookups) (snapshot, error) {
 	var s snapshot
 	own := false
@@ -469,17 +482,25 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	}
 	c, _ := sidebar.ActiveClient(clients, s.name)
 	s.client = c.TTY
-	var sessions []sidebar.Session
+	var sessions, deeper []sidebar.Session
 	meta := map[string]tile{}
+	under := descendants(names, panes, s.self, s.name)
 	for _, name := range names {
 		rs := panes[name]
-		if !sidebar.Names(rs[0].StartedBy, s.self, s.name, true) {
+		via, deep := under[name]
+		mine := sidebar.Names(rs[0].StartedBy, s.self, s.name, true)
+		if rs[0].Herd != "" && (mine || deep) {
+			s.bosses = append(s.bosses, name)
+		}
+		if !mine && !deep {
 			continue
 		}
-		if s.started == nil {
-			s.started = map[string]bool{}
+		if mine {
+			if s.started == nil {
+				s.started = map[string]bool{}
+			}
+			s.started[name] = true
 		}
-		s.started[name] = true
 		ps := make([]agent.Pane, len(rs))
 		for i, r := range rs {
 			ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,
@@ -489,18 +510,22 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		if !ok {
 			continue
 		}
+		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
+		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort, via: via}
+		t.sess = sidebar.Session{State: a.State, Wait: wait.FromOptions(r.WaitUntil, r.WaitReason)}
+		t.question, _ = agent.ParseQuestion(r.Question)
+		// An asking one's capture tells (see refresh)
+		if deep && t.section() != needsYouSection && !t.asking() {
+			continue
+		}
 		sess := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), Agent: a.Label, State: a.State,
-			Branch: look.Branch(a.Pane.Path), Title: sidebar.PaneTitle(a.Label, a.Pane.Title, name, host)}
+			Branch: look.Branch(a.Pane.Path), Title: sidebar.PaneTitle(a.Label, a.Pane.Title, name, host), Wait: t.sess.Wait}
 		if a.CostOK && !sidebar.CostHidden(rs[0].CostOpt) {
 			sess.Cost = sidebar.FormatCost(a.Cost)
 		}
-		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
-		sess.Wait = wait.FromOptions(r.WaitUntil, r.WaitReason)
-		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort}
 		if sec, err := strconv.ParseInt(r.Since, 10, 64); err == nil {
 			t.since = time.Unix(sec, 0)
 		}
-		t.question, _ = agent.ParseQuestion(r.Question)
 		if s.visible {
 			sess.PR = look.PR(a.Pane.ID, r.PR, r.PRGen, a.Pane.Path, sess.Branch)
 			if pr := sess.PR; pr.URL != "" && (pr.State == "open" || pr.State == "draft") {
@@ -510,16 +535,65 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 				t.tail, t.tailErr = look.Tail(r.Transcript)
 			}
 		}
-		sessions = append(sessions, sess)
+		if deep {
+			deeper = append(deeper, sess)
+		} else {
+			sessions = append(sessions, sess)
+		}
 		meta[name] = t
 	}
-	for _, sess := range sidebar.Order(sessions) {
+	for _, sess := range slices.Concat(sidebar.Order(sessions), sidebar.Order(deeper)) {
 		t := meta[sess.Name]
 		t.sess = sess
 		s.tiles = append(s.tiles, t)
 	}
 	sortBySection(s.tiles)
 	return s, nil
+}
+
+// descendants are the sessions the bosses under this boss (id, name) started, bosses at any depth, each with the
+// name of the boss that started it; a worker's own sessions aren't followed.
+func descendants(names []string, panes map[string][]row, id, name string) map[string]string {
+	out := map[string]string{}
+	seen := map[string]bool{name: true}
+	bosses := []row{{SessionID: id, Session: name}}
+	for depth := 0; len(bosses) > 0; depth++ {
+		var next []row
+		for _, by := range bosses {
+			for _, n := range names {
+				r := panes[n][0]
+				if seen[n] || !sidebar.Names(r.StartedBy, by.SessionID, by.Session, true) {
+					continue
+				}
+				seen[n] = true
+				if depth > 0 {
+					out[n] = by.Session
+				}
+				if r.Herd != "" {
+					next = append(next, r)
+				}
+			}
+		}
+		bosses = next
+	}
+	return out
+}
+
+// bossAsks are the items waiting on the user (open, on no one) on the lists of bosses, by boss; a list not read
+// comes with its error.
+func bossAsks(c *tmux.Client, bosses []string, now time.Time) ([]todo.BossList, error) {
+	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) })
+	if err != nil {
+		return nil, err
+	}
+	var out []todo.BossList
+	for _, l := range all {
+		l.Items = slices.DeleteFunc(slices.Clone(l.Items), func(it todo.Shown) bool { return it.Done || it.On != "" })
+		if len(l.Items) > 0 || l.Err != nil {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // index is name's tile index, 0 when not listed.

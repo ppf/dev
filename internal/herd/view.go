@@ -98,7 +98,7 @@ func (m Model) bottom() []string {
 	}
 	hint := "j/k select  g/⏎ go  m message  v screen  f fold  x kill"
 	todo := ""
-	if len(m.snap.todo.Items) > 0 {
+	if len(m.snap.todo.Items) > 0 || len(m.snap.asks) > 0 {
 		todo = "t fold to do  "
 		if m.todoFolded {
 			todo = "t open to do  "
@@ -107,6 +107,8 @@ func (m Model) bottom() []string {
 	if sel < len(tiles) {
 		// o only offers what openPR does: the PR, or why its lookup failed
 		switch s := tiles[sel].sess; {
+		case tiles[sel].via != "":
+			hint = "j/k select  g/⏎ go  v screen  · " + tiles[sel].via + "'s: answered there"
 		case s.State == agent.Waiting || len(tiles[sel].options()) > 0:
 			hint = "1-9 answer  " + hint
 		case s.PR.Number != 0 || s.PR.Err != "":

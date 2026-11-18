@@ -387,41 +387,19 @@ type bossList struct {
 // printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
-	type session struct {
-		Name string `tmux:"session_name"`
-		Herd string `tmux:"@dev_herd"`
-	}
-	sessions, err := tmux.Query[session](c, "list-sessions")
-	if err != nil && !tmux.IsNoServer(err) {
+	all, err := todo.All(c, time.Now(), nil)
+	if err != nil {
 		return err
 	}
-	slices.SortFunc(sessions, func(a, b session) int { return strings.Compare(a.Name, b.Name) })
 	lists := []bossList{}
-	now := time.Now()
-	for _, sess := range sessions {
-		if sess.Herd == "" {
-			continue
-		}
-		target := tmux.SessionTarget(sess.Name)
-		s, err := todo.ForPane(c, target)
-		var l todo.List
-		if err == nil {
-			l, err = s.Read(now)
-		}
-		if err != nil {
-			if _, gone := c.Run("has-session", "-t", target); gone != nil {
-				// Closed since list-sessions
-				continue
-			}
-			lists = append(lists, bossList{Boss: sess.Name, Error: "list not read: " + err.Error(), List: todo.List{Items: []todo.Shown{}, Stale: true}})
-			continue
-		}
-		if len(l.Items) == 0 {
-			continue
-		}
-		bl := bossList{Boss: sess.Name, List: l}
-		if !asJSON {
+	for _, l := range all {
+		bl := bossList{Boss: l.Boss, List: l.List}
+		switch {
+		case l.Err != nil:
+			bl.Error = "list not read: " + l.Err.Error()
+		case !asJSON:
 			// The items still print: what each says holds without the workers
+			target := tmux.SessionTarget(l.Boss)
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, target) }); err != nil {
 				bl.Error = "workers not read: " + err.Error()
 			}
