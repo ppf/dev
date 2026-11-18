@@ -164,11 +164,12 @@ var option = regexp.MustCompile(`^\s*([-*•]|\d+[.)]|[A-Za-z][.)])\s`)
 // IsOption reports a list item line, as a question's options are.
 func IsOption(l string) bool { return option.MatchString(l) }
 
-// OptionText is option line l without its list marker.
-func OptionText(l string) string { return strings.TrimSpace(l[len(option.FindString(l)):]) }
+// optionText is option line l without its list marker.
+func optionText(l string) string { return strings.TrimSpace(l[len(option.FindString(l)):]) }
 
 // question is the question msg ends on (see QuestionAt) and its options after it; "" when none. List items that
-// ask questions themselves (questions) are all the question, each cut after its recommendation, with no options.
+// ask questions themselves (questions) come as its options, each cut after its recommendation, so a note cut to
+// length keeps the first.
 func question(msg string) (ask, options string) {
 	var lines []string
 	for l := range strings.Lines(msg) {
@@ -180,7 +181,7 @@ func question(msg string) (ask, options string) {
 	if i < 0 {
 		return "", ""
 	}
-	if !questions(lines[i]) {
+	if !questions(lines[i:]) {
 		return lines[i], strings.Join(lines[i+1:], "")
 	}
 	asks := slices.Clone(lines[i:])
@@ -189,33 +190,34 @@ func question(msg string) (ask, options string) {
 			asks[k] = l[:m[1]]
 		}
 	}
-	return strings.Join(asks, " "), ""
+	return asks[0], strings.Join(asks[1:], " ")
 }
 
 // askItem is a list item asking a question mid-line, then recommending an answer in bold: "- Post it? I recommend
 // **Yes**."; the match ends with the recommendation.
 var askItem = regexp.MustCompile(`^\s*(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s.*\?\s[^?]*?\bI(?:'d)? (?:recommend|suggest)\s+\*\*[^*]+\*\*\.?`)
 
-// questions reports a question line (QuestionAt) heading list items that ask questions themselves (askItem): the
-// first of them, or their lead-in ending in ":".
-func questions(l string) bool {
-	return askItem.MatchString(l) || strings.HasSuffix(strings.TrimSpace(l), ":")
+// questions reports a question (QuestionAt) and the lines under it that are list items asking questions themselves
+// (askItem): it is the first of them, its lead-in ends in ":", or all the lines under it are such items.
+func questions(asked []string) bool {
+	return askItem.MatchString(asked[0]) || strings.HasSuffix(strings.TrimSpace(asked[0]), ":") ||
+		len(asked) > 1 && !slices.ContainsFunc(asked[1:], func(l string) bool { return !askItem.MatchString(l) })
 }
 
 var (
-	// replyAsk starts a sentence telling the user how to reply: "Reply **Done**", "Pick one of **A** or **B**"
-	replyAsk = regexp.MustCompile(`(?:^|[.!?]\s+)(Reply|Answer|Say|Pick|Choose)(?:\s+(?:with|either|one of))?\s+`)
+	// replyAsk starts a sentence telling the user how to reply: "Reply **Done**", "Answer **yes** or **no**"
+	replyAsk = regexp.MustCompile(`(?:^|[.!?]\s+)(Reply|Answer)(?:\s+(?:with|either))?\s+`)
 	// sentenceEnd ends the reply's sentence: its options are in it
 	sentenceEnd = regexp.MustCompile(`[.!?](?:\s|$)`)
-	// replyWords is a reply's options as short words between slashes: "Done / Skip"
-	replyWords = regexp.MustCompile(`^\w+(?:\s*/\s*\w+)+`)
+	// replyWords is a reply's options as words between slashes, all its sentence says: "Done / Skip", "go/no-go"
+	replyWords = regexp.MustCompile(`^[\w-]+(?:\s*/\s*[\w-]+)+$`)
 	// replyWord is a reply's option in bold, after its verb, "or", a comma or a slash
 	replyWord = regexp.MustCompile(`(?:^|\bor\s+|,\s*|/\s*)\*\*([^*]{1,24})\*\*`)
 )
 
 // replyOptions are the options line l names in a sentence telling the user how to reply: "Reply **Done** once
-// it's connected, or **Skip** to leave it." offers Done and Skip, "Reply yes/no." yes and no. A sentence starting
-// with another verb than Reply needs two bold options ("Pick **A** or **B**"); nil when none does.
+// it's connected, or **Skip** to leave it." offers Done and Skip, "Reply yes/no." yes and no. An Answer sentence
+// needs two bold options ("Answer **yes** or **no**"); nil when none does.
 func replyOptions(l string) []string {
 	for _, m := range replyAsk.FindAllStringSubmatchIndex(l, -1) {
 		rest := l[m[1]:]
@@ -223,7 +225,7 @@ func replyOptions(l string) []string {
 			rest = rest[:end[0]]
 		}
 		reply := l[m[2]:m[3]] == "Reply"
-		if w := replyWords.FindString(rest); w != "" && reply {
+		if w := replyWords.FindString(strings.TrimSpace(rest)); w != "" && reply {
 			return strings.Fields(strings.ReplaceAll(w, "/", " "))
 		}
 		var opts []string
@@ -279,12 +281,12 @@ func Options(asked []string) []string {
 	if len(asked) == 1 {
 		return replyOptions(asked[0])
 	}
-	if questions(asked[0]) {
+	if questions(asked) {
 		return nil
 	}
 	var opts []string
 	for _, l := range asked[1:] {
-		opts = append(opts, unmark.Replace(OptionText(l)))
+		opts = append(opts, unmark.Replace(optionText(l)))
 	}
 	return opts
 }
