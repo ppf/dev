@@ -65,20 +65,12 @@ func (m Model) render() frame {
 	}
 	unwrapped := len(needs) + listLines(m.snap.sessions)
 	rolls := Subtree(m.snap.sessions, needCounts(m.needs))
-	prevGroup := ""
-	for _, s := range m.snap.sessions {
-		if s.Group != prevGroup {
-			if prevGroup != "" {
+	for i, s := range m.snap.sessions {
+		if h, ok := headFor(m.snap.sessions, i); ok {
+			if h.gap {
 				f.lines = append(f.lines, "")
 			}
-			label := truncate(s.Group, w-6)
-			// printf '%*s' pads a negative width to its absolute value, so a cut label gets one dash
-			n := w - 7 - ansi.StringWidth(label)
-			if n < 0 {
-				n = -n
-			}
-			f.lines = append(f.lines, " "+faint+"─"+reset+" "+muted+label+reset+" "+faint+strings.Repeat("─", n)+reset)
-			prevGroup = s.Group
+			f.lines = append(f.lines, h.line(w))
 		}
 		selected := s.Name == m.selected
 		f.rows = append(f.rows, rowStart{line: len(f.lines), session: s.Name})
@@ -95,9 +87,10 @@ func (m Model) render() frame {
 		if s.Name == m.snap.current {
 			styled = bold + display + reset
 		}
-		line := "  " + statusDot(s.Agent, s.State) + " " + styled
+		lead := s.lead()
+		line := lead + " " + statusDot(s.Agent, s.State) + " " + styled
 		if indent != "" {
-			line = "  " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
+			line = lead + " " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
 		}
 		vis := 4 + iw + ansi.StringWidth(display)
 		if s.Branch != "" && !s.Named {
@@ -177,13 +170,13 @@ func (m Model) render() frame {
 		}
 		body = truncate(body, avail)
 		meta += colour + body + reset
-		f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
+		f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
 		for _, l := range wrapped {
-			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
+			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
 		}
 		if r := rolls[s.Name]; hasRollLine(r) {
 			text, tw := rollLine(r, maxMeta-iw)
-			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
+			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
 		}
 	}
 
@@ -202,21 +195,84 @@ func (m Model) render() frame {
 
 // listLines is how many lines render draws for sessions when no title wraps.
 func listLines(sessions []Session) int {
-	n, prev := 2, ""
+	n := 2
 	rolls := Subtree(sessions, nil)
-	for _, s := range sessions {
-		if s.Group != prev {
-			if prev != "" {
+	for i := range sessions {
+		if h, ok := headFor(sessions, i); ok {
+			n++
+			if h.gap {
 				n++
 			}
-			n, prev = n+1, s.Group
 		}
 		n += 2
-		if hasRollLine(rolls[s.Name]) {
+		if hasRollLine(rolls[sessions[i].Name]) {
 			n++
 		}
 	}
 	return n
+}
+
+// head is a divider line above sessions[i]: a group's, a manager's, or a boss's group inside a manager's.
+type head struct {
+	label string
+	kind  headKind
+	gap   bool // a blank line goes first
+}
+
+type headKind int
+
+const (
+	headGroup   headKind = iota // ─ label ───
+	headManager                 // ┌─ MANAGER ───, opening a manager's group
+	headSub                     // ├─ label ───, a boss's group inside it
+)
+
+// headFor is the divider above sessions[i], if any: a manager's group has one header, then a divider
+// each time its boss's group changes; other rows get one per group, and one right after a manager's group.
+func headFor(sessions []Session, i int) (head, bool) {
+	s := sessions[i]
+	if i == 0 {
+		if s.Root != "" {
+			return head{label: "MANAGER", kind: headManager}, true
+		}
+		return head{label: s.Group}, true
+	}
+	prev := sessions[i-1]
+	switch {
+	case s.Root != prev.Root && s.Root != "":
+		return head{label: "MANAGER", kind: headManager, gap: true}, true
+	case s.Root != "" && s.Root == prev.Root:
+		// Each boss opens its own, even in the manager's group
+		return head{label: s.Group, kind: headSub}, s.Group != prev.Group || s.Depth == 0
+	case s.Group != prev.Group || prev.Root != "":
+		return head{label: s.Group, gap: true}, true
+	}
+	return head{}, false
+}
+
+func (h head) line(width int) string {
+	start, colour := " "+faint+"─"+reset, muted
+	switch h.kind {
+	case headManager:
+		start, colour = faint+"┌─"+reset, gold+bold
+	case headSub:
+		start = faint + "├─" + reset
+	}
+	label := truncate(h.label, width-6)
+	// printf '%*s' pads a negative width to its absolute value, so a cut label gets one dash
+	n := width - 7 - ansi.StringWidth(label)
+	if n < 0 {
+		n = -n
+	}
+	return start + " " + colour + label + reset + " " + faint + strings.Repeat("─", n) + reset
+}
+
+// lead is a row's first column: a faint rail inside a manager's group, else a space.
+func (s Session) lead() string {
+	if s.Root == "" {
+		return " "
+	}
+	return faint + "│" + reset
 }
 
 // bottomRow is the last line: the refresh error, else the hint while focused on a non-empty list
@@ -314,8 +370,8 @@ func FormatCost(usd float64) string {
 func hasRollLine(r *Rollup) bool { return r != nil && r.Under > 0 }
 
 // rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
-// red when it needs you, then its counts, ⚠ and what it and everything under it cost; the cost goes before the
-// counts do.
+// red "N need you" when it needs you, then its counts (a manager's bosses · workers first), ⚠ and what it and
+// everything under it cost; the cost goes before the counts do.
 func rollLine(r *Rollup, width int) (string, int) {
 	var plain, styled string
 	add := func(colour, text string) {
@@ -326,21 +382,50 @@ func rollLine(r *Rollup, width int) (string, int) {
 		plain += text
 		styled += colour + text + reset
 	}
-	for i, p := range r.Parts() {
+	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
+	parts := r.Parts()
+	if r.Rank == RankNeedsYou {
+		// "needs you · 2 questions" in a sidebar's width
+		parts = append([]string{fmt.Sprintf("%d need you", r.Questions)}, parts[2:]...)
+	}
+	lead := len(parts)
+	if r.Bosses > 0 {
+		// A manager's: its bosses and workers after the state, then the other counts only whole
+		lead = 1
+	}
+	for i, p := range parts[:lead] {
 		colour := muted
 		if i == 0 && r.Rank == RankNeedsYou {
 			colour = red
 		}
 		add(colour, p)
 	}
+	if r.Bosses > 0 {
+		add(muted, plural(r.Bosses, "boss", "bosses"))
+		if w := r.Under - r.Bosses; w > 0 {
+			add(muted, plural(w, "worker", "workers"))
+		}
+		for _, p := range parts[lead:] {
+			if fits(p) {
+				add(muted, p)
+			}
+		}
+	}
 	if r.Warn {
 		add(gold, "⚠")
 	}
 	if r.HasCost {
-		cost := FormatCost(r.CostUSD)
-		if ansi.StringWidth(plain+" · "+cost) <= width {
+		if cost := FormatCost(r.CostUSD); fits(cost) {
 			add(muted, cost)
 		}
 	}
 	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
+}
+
+// plural is "1 one" or "n many".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

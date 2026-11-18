@@ -79,27 +79,33 @@ type Rollup struct {
 	Waiting   int    // sessions under it in a planned wait or rate-limit resume
 	ToDo      int    // plain items on its and its bosses' lists
 	Under     int    // sessions under it
+	Bosses    int    // a manager's: the bosses in its group, at its Depth (Order)
 	Warn      bool   // a failed, stuck or high-context note, its own too, or a list not read
 	CostUSD   float64
 	HasCost   bool
 }
 
-// Subtree is each boss's Rollup by name, from sessions in Order (a boss's sessions follow it at a greater Depth)
-// and the bosses' lists by name: the boss board's tiles and the sidebar's roll-up lines read the same.
+// Subtree is each boss's Rollup by name, from sessions in Order (a boss's sessions follow it at a greater Depth,
+// a manager's group under its Root) and the bosses' lists by name: the boss board's tiles and the sidebar's
+// roll-up lines read the same.
 func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup {
 	out := map[string]*Rollup{}
 	for i, s := range sessions {
 		if !s.Boss {
 			continue
 		}
+		manager := s.Root != "" && s.Root == s.Name
 		r := &Rollup{Rank: RankIdle, Idle: "idle"}
 		if k := NoteKind(s.Note); s.Note != "" && !HealthNote(k) && k != NoteDecision && k != NoteAsks {
 			r.Idle = k
 		}
 		r.add(s, lists, true)
 		for _, u := range sessions[i+1:] {
-			if u.Depth <= s.Depth {
+			if manager && u.Root != s.Root || !manager && u.Depth <= s.Depth {
 				break
+			}
+			if manager && u.Boss && u.Depth == s.Depth {
+				r.Bosses++
 			}
 			r.Under++
 			r.add(u, lists, false)

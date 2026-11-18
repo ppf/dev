@@ -68,6 +68,7 @@ type Session struct {
 	Boss      bool   // a dev boss session (OptHerd)
 	StartedBy string // @dev_started_by: see Starter
 	Depth     int    // how deep Order nested it under the session that started it
+	Root      string // the manager (its name) whose group the row is in, the manager's own row included; "" outside one
 }
 
 // Client is an attached client as list-clients reports it.
