@@ -377,12 +377,14 @@ func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
 }
 
-// hasRollLine reports a boss row with a third line: a boss with sessions under it, or questions or to do items.
+// hasRollLine reports a boss row with a third line: a boss with sessions under it, or questions or to do items on
+// no one.
 func hasRollLine(r *Rollup) bool { return r != nil && (r.Under > 0 || r.Questions > 0 || r.ToDo > 0) }
 
 // rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
 // red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a manager's
-// bosses · workers first), ⚠ and what it and everything under it cost; the cost goes before the counts do.
+// bosses · workers first), "N on others" last and only whole, ⚠ and what it and everything under it cost; the cost
+// goes before the counts do.
 func rollLine(r *Rollup, width int) (string, int) {
 	var plain, styled string
 	add := func(colour, text string) {
@@ -415,6 +417,10 @@ func rollLine(r *Rollup, width int) (string, int) {
 	} else if lead == 0 {
 		// A manager's: its bosses and workers after the state, then the other counts only whole
 		lead = 1
+	}
+	if r.OnOthers > 0 {
+		// Last, only whole
+		lead = min(lead, len(parts)-1)
 	}
 	for i, p := range parts[:lead] {
 		colour := muted

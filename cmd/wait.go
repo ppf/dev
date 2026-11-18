@@ -31,7 +31,8 @@ check or a repeat of its question; its card and sidebar row show "until 16:30 ·
 it "waiting until 16:30", and dev agent list/get --json carry it as "wait". A turn ending on it sends the boss one
 waiting note in place of finished. When the time comes, the boss's previews prompt it to continue (if it's idle with
 an empty input box) and tell the boss with one resumed note; on a dialog or still working then, the wait just ends.
-A dialog still reports as needs a decision, and a prompt ends the wait early.
+A dialog still reports as needs a decision, and a prompt ends the wait early (not the turn its own background
+task's end starts).
 
 The time is a local HH:MM (the next one: 00:30 at 23:00 is tomorrow's) or +<duration> (+90m, +1h30m), at most 4h
 away. A new wait replaces the one held; --cancel ends it without a prompt. In a Claude desktop app session the

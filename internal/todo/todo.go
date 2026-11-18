@@ -286,10 +286,9 @@ func ForPane(c *tmux.Client, pane string) (Store, error) {
 type worker struct {
 	Name      string `tmux:"session_name"`
 	StartedBy string `tmux:"@dev_started_by"`
-	Herd      string `tmux:"@dev_herd"`
 }
 
-// Workers lists the sessions the boss session pane is in started, bosses aside, by name.
+// Workers lists the sessions the boss session pane is in started, bosses among them, by name.
 func Workers(c *tmux.Client, pane string) ([]Session, error) {
 	boss, err := paneSession(c, pane)
 	if err != nil {
@@ -301,7 +300,7 @@ func Workers(c *tmux.Client, pane string) ([]Session, error) {
 	}
 	var ws []Session
 	for _, w := range all {
-		if w.Herd == "" && sidebar.Names(w.StartedBy, boss.ID, boss.Name, true) {
+		if sidebar.Names(w.StartedBy, boss.ID, boss.Name, true) {
 			ws = append(ws, Session{ID: w.Name, Name: w.Name})
 		}
 	}

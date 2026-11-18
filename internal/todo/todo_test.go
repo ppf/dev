@@ -371,26 +371,26 @@ func TestMatch(t *testing.T) {
 	}
 }
 
-// Workers lists the sessions the pane's boss started, by name, leaving out other bosses and other sessions'
-// workers; a boss names them by its name, an older dev by its session id.
+// Workers lists the sessions the pane's boss started, bosses too (a manager's items go on them), by name, leaving
+// out other sessions' workers; a boss names them by its name, an older dev by its session id.
 func TestWorkers(t *testing.T) {
 	c := tmux.NewFake(func(args []string) (string, error) {
 		if args[0] == "display-message" {
 			return tmux.FormatRow("/tmp/tmux-1/default", "boss-p", "1", "$1", "1700000000"), nil
 		}
 		return strings.Join([]string{
-			tmux.FormatRow("boss-p", "", "1"),
-			tmux.FormatRow("fix-login", "boss-p", ""),
-			tmux.FormatRow("old-worker", "$1", ""),
-			tmux.FormatRow("sub-boss", "boss-p", "1"),
-			tmux.FormatRow("theirs", "boss-q", ""),
+			tmux.FormatRow("boss-p", ""),
+			tmux.FormatRow("fix-login", "boss-p"),
+			tmux.FormatRow("old-worker", "$1"),
+			tmux.FormatRow("sub-boss", "boss-p"),
+			tmux.FormatRow("theirs", "boss-q"),
 		}, ""), nil
 	})
 	got, err := Workers(c, "%1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Session{{"fix-login", "fix-login"}, {"old-worker", "old-worker"}}; !slices.Equal(got, want) {
+	if want := []Session{{"fix-login", "fix-login"}, {"old-worker", "old-worker"}, {"sub-boss", "sub-boss"}}; !slices.Equal(got, want) {
 		t.Errorf("Workers = %+v, want %+v", got, want)
 	}
 }

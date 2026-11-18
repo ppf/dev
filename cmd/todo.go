@@ -139,7 +139,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				if w, ok := todo.Match(it.On, ws); ok {
 					it.On, it.Session = w.Name, &w
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: no single worker of this boss by that name or id, so a person\n", it.On)
+					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: no single session this boss started (worker or boss) by that name or id, so a person\n", it.On)
 				}
 			}
 			now := time.Now()
@@ -171,7 +171,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a worker session (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
+	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until not given")

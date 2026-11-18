@@ -51,6 +51,29 @@ var managerAsks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []to
 	{ID: 2, Text: "DM David"},
 }}}}
 
+// An item on someone on a boss's list counts on its card as "on others", never as a NEEDS YOU row.
+func TestBossCardOnOthers(t *testing.T) {
+	s, err := buildSnapshot(managerRows(), nil, "%1", "", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := managerAsks[0]
+	l.Items = append(slices.Clone(l.Items), todo.Shown{ID: 3, Text: "Deploy", On: "noc-pr"})
+	s.asks = []todo.BossList{l}
+	s.rollUp()
+	m := board4()
+	m.snap = s
+	noc := s.tiles[index(s.tiles, "boss-noc")]
+	if got := ansi.Strip(rollText(*noc.roll)); !strings.HasSuffix(got, " · 1 to do · 1 on others") {
+		t.Errorf("boss-noc status = %q", got)
+	}
+	for _, r := range m.needRows() {
+		if r.Text == "Deploy" {
+			t.Errorf("NEEDS YOU row %+v: it's on noc-pr", r)
+		}
+	}
+}
+
 // A boss's card sits by its whole subtree, folded, its row the roll-up; its own note moves to the open card.
 func TestBossCardsRollUp(t *testing.T) {
 	s, err := buildSnapshot(managerRows(), nil, "%1", "", &fakeLookups{})
@@ -228,5 +251,39 @@ func TestRollUpListsNotRead(t *testing.T) {
 		if !s.tiles[index(s.tiles, name)].roll.Warn {
 			t.Errorf("%s: no ⚠", name)
 		}
+	}
+}
+
+// A boss card's status keeps its section's colour for the state; "N to do" and "N on others" trail it muted.
+func TestRollTextMutedTail(t *testing.T) {
+	got := rollText(sidebar.Rollup{Rank: sidebar.RankWorking, Working: 2, ToDo: 1, OnOthers: 3})
+	if want := sidebar.Gold + "2 working" + reset + sidebar.Muted + " · 1 to do · 3 on others" + reset; got != want {
+		t.Errorf("rollText = %q, want %q", got, want)
+	}
+	got = rollText(sidebar.Rollup{Rank: sidebar.RankIdle, Under: 1, OnOthers: 2})
+	if want := sidebar.Muted + "idle" + reset + sidebar.Muted + " · 2 on others" + reset; got != want {
+		t.Errorf("idle: %q, want %q", got, want)
+	}
+}
+
+// A folded boss card too narrow for its whole row drops "N on others" before its PR badge.
+func TestBossCardOnOthersNarrow(t *testing.T) {
+	m := board4()
+	tl := tile{sess: sidebar.Session{Name: "boss-orbit", Agent: "Claude", State: agent.Idle, PR: sidebar.PR{Number: 87, State: "open"}},
+		roll: &sidebar.Rollup{Rank: sidebar.RankWorking, Working: 2, OnOthers: 3}}
+	for w, want := range map[int]string{80: "▸ ● boss-orbit 2 working · 3 on others ○ #87", 40: "▸ ● boss-orbit 2 working ○ #87"} {
+		if got := strings.Join(strings.Fields(ansi.Strip(m.headRow(tl, tl.section(), true, w))), " "); got != want {
+			t.Errorf("%d columns: %q, want %q", w, got, want)
+		}
+	}
+}
+
+// Only a boss list with an item on no one, or one not read, is something NEEDS YOU shows.
+func TestWaitsOnUser(t *testing.T) {
+	on := todo.BossList{Boss: "b", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "x", On: "w"}}}}
+	mine := todo.BossList{Boss: "b", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "x"}}}}
+	bad := todo.BossList{Boss: "b", Err: errors.New("bad")}
+	if waitsOnUser(nil) || waitsOnUser([]todo.BossList{on}) || !waitsOnUser([]todo.BossList{on, mine}) || !waitsOnUser([]todo.BossList{bad}) {
+		t.Error("waitsOnUser: want true only for an item on no one or a list not read")
 	}
 }

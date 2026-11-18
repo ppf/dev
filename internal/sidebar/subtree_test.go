@@ -145,14 +145,14 @@ func TestSubtreeGrandchild(t *testing.T) {
 	}
 }
 
-// Only an open item on no one counts: an ask apart from a plain one.
+// Only an open item counts: on no one an ask apart from a plain one, else on others.
 func TestListCountAdd(t *testing.T) {
 	var c ListCount
 	c.Add(false, "", 2)
 	c.Add(false, "", 0)
 	c.Add(true, "", 2)
 	c.Add(false, "w1", 0)
-	if c != (ListCount{Asks: 1, Plain: 1}) {
+	if c != (ListCount{Asks: 1, Plain: 1, On: 1}) {
 		t.Errorf("count = %+v", c)
 	}
 }
@@ -177,13 +177,13 @@ func TestSubtreeFromPanes(t *testing.T) {
 	}
 }
 
-// NeedCounts counts open items on no one, asks apart; a list not read is unread.
+// NeedCounts counts open items on no one, asks apart, and on others; a list not read is unread.
 func TestNeedCounts(t *testing.T) {
 	got := NeedCounts([]NeedList{
 		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3, Done: true}, {ID: 4, On: "w"}}},
 		{Boss: "b", Error: "bad json"},
 	})
-	if got["a"] != (ListCount{Asks: 1, Plain: 1}) || got["b"] != (ListCount{Unread: true}) {
+	if got["a"] != (ListCount{Asks: 1, Plain: 1, On: 1}) || got["b"] != (ListCount{Unread: true}) {
 		t.Errorf("counts = %+v", got)
 	}
 }
@@ -197,7 +197,8 @@ func TestRollLineListAsk(t *testing.T) {
 	}
 }
 
-// A roll line's "N need you" is what NEEDS YOU counts for the subtree: asks and the user's own plain items, no "to do".
+// A roll line's "N need you" is what NEEDS YOU counts for the subtree: asks and the user's own plain items, no "to do";
+// an item on someone else is "on others".
 func TestRollLineMatchesNeedsYou(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
@@ -205,7 +206,7 @@ func TestRollLineMatchesNeedsYou(t *testing.T) {
 	}}
 	r := Subtree(ss, NeedCounts([]NeedList{list}))["b"]
 	got, _ := rollLine(r, 60)
-	if want := "3 need you"; ansi.Strip(got) != want {
+	if want := "3 need you · 1 on others"; ansi.Strip(got) != want {
 		t.Errorf("line = %q, want %q", ansi.Strip(got), want)
 	}
 	if n := needCount(NeedRows(ss, []NeedList{list}, "")); n != 3 {
@@ -259,5 +260,19 @@ func TestRollLineCountsMutedCostLast(t *testing.T) {
 	}
 	if got, _ := rollLine(r, 28); strings.Contains(ansi.Strip(got), "$") {
 		t.Errorf("cost shown over a dropped count: %q", ansi.Strip(got))
+	}
+}
+
+// "N on others" comes last on the roll line, whole or not at all: a narrow sidebar drops it, never "N need you".
+func TestRollLineOnOthers(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Working}}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1, On: 3}})["b"]
+	for width, want := range map[int]string{60: "1 working · 1 need you · 3 on others", 30: "1 working · 1 need you"} {
+		if got, _ := rollLine(r, width); ansi.Strip(got) != want {
+			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
+		}
+	}
+	if got := strings.Join(r.Parts(), " · "); got != "1 working · 1 to do · 3 on others" {
+		t.Errorf("parts = %q", got)
 	}
 }
