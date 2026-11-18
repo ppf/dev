@@ -80,7 +80,7 @@ type tile struct {
 	tail     desktop.Tail    // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error           // why its transcript could not be read
 	ci       ci              // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
-	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, never answered here; "" for this boss's own
+	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, closed only by that boss; "" for this boss's own
 	roll     *sidebar.Rollup // a boss's whole subtree (sidebar.Subtree), which places its card; nil for a worker or a deeper session
 }
 
@@ -133,12 +133,11 @@ type Model struct {
 	todoFolded    bool            // the to do block shows as its header only (t)
 	msgs          *inbox.Messages // the tmux server's messages; nil reads none, unless findMsgs
 	findMsgs      bool            // refresh looks up msgs until it's found
-	// NEEDS YOU: needMode while its keys act on it, on row needIdx, chosen while it was needKey ("" after an
-	// answer to needDone, until that row goes)
-	needMode   bool
-	needIdx    int
-	needKey    string
-	needDone   string
+	// NEEDS YOU
+	needMode   bool                                                               // its keys act on it
+	needIdx    int                                                                // the selected row, clamped to the rows at each use
+	needKey    string                                                             // the selected row's sig when chosen: keys act only while it's the same; "" after an answer
+	needDone   string                                                             // the answered row's sig: the cursor waits on it until it goes
 	answerList func(boss string, id int, question, option string) (string, error) // dev todo answer
 }
 
@@ -308,11 +307,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case answeredMsg:
 		m.msg, m.answering = msg.msg, ""
 		switch {
-		case m.box.block && msg.session == m.box.session && !m.multiPick():
-			// NEEDS YOU's answer is done: its keys go back to the block
-			m.box = replyBox{}
+		case m.box.block && msg.session == m.box.session && (!msg.took || !m.multiPick()):
+			// NEEDS YOU's answer is done, or failed: its keys go back to the block, which shows the row as it is now
+			m.blur()
 		case !msg.took && msg.session == m.box.session:
 			m.box.sent = ""
+		}
+		if !msg.took && m.needDone != "" {
+			// Not answered: its row takes keys again
+			m.needKey, m.needDone = m.needDone, ""
 		}
 		return m, nil
 	case watchMsg:

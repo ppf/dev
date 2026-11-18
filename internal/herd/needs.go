@@ -14,12 +14,13 @@ import (
 	"github.com/ppf/dev/internal/todo"
 )
 
-// needRow is a row of the board's NEEDS YOU (sidebar.NeedRows), as the tile it answers through shows it.
+// needRow is a row of the board's NEEDS YOU (sidebar.NeedRows); a dialog's or question's Text and Options are
+// rewritten as the tile it answers through shows them.
 type needRow struct {
 	sidebar.NeedRow
 	label string
 	tile  int    // the tile it answers through; -1 for a list's row, or a session not on the board
-	key   string // the row as shown, its dialog's too: a key acts only on the row its selection was made on
+	sig   string // the row as shown, its dialog's too: a key acts only on the row its selection was made on
 }
 
 // needLists are the lists NEEDS YOU and the roll-ups read: this boss's own, then its bosses' (a read that failed
@@ -79,7 +80,7 @@ func (m Model) needRows() []needRow {
 				n.Text, n.Options = statusText(t, needsYouSection), t.options()
 			}
 		}
-		n.key = strings.Join([]string{strconv.Itoa(int(r.Kind)), r.Session, r.Boss, strconv.Itoa(r.ID), n.Text,
+		n.sig = strings.Join([]string{strconv.Itoa(int(r.Kind)), r.Session, r.Boss, strconv.Itoa(r.ID), n.Text,
 			strings.Join(n.Options, "\x01"), dialog}, "\x00")
 		out = append(out, n)
 	}
@@ -115,7 +116,7 @@ func (m Model) enterNeeds() Model {
 		m.msg = info("Nothing needs you")
 		return m
 	}
-	m.needMode, m.needIdx, m.needKey = true, 0, rows[0].key
+	m.needMode, m.needIdx, m.needKey, m.needDone = true, 0, rows[0].sig, ""
 	return m
 }
 
@@ -131,18 +132,19 @@ func (m *Model) fixNeeds() {
 		m.needMode = false
 		return
 	}
-	if i := slices.IndexFunc(rows, func(r needRow) bool { return r.key == m.needKey }); i >= 0 {
+	if i := slices.IndexFunc(rows, func(r needRow) bool { return r.sig == m.needKey }); i >= 0 {
 		m.needIdx = i
 		return
 	}
 	m.needIdx = min(m.needIdx, len(rows)-1)
-	if i := slices.IndexFunc(rows, func(r needRow) bool { return r.key == m.needDone }); i >= 0 {
+	if i := slices.IndexFunc(rows, func(r needRow) bool { return r.sig == m.needDone }); i >= 0 {
 		// Still shown: wait for it to go
 		m.needIdx = i
 		return
 	}
+	m.needDone = ""
 	if m.needKey == "" {
-		m.needKey = rows[m.needIdx].key
+		m.needKey = rows[m.needIdx].sig
 	}
 }
 
@@ -164,7 +166,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			dir = -1
 		}
 		m.needIdx = ((i+dir)%len(rows) + len(rows)) % len(rows)
-		m.needKey = rows[m.needIdx].key
+		m.needKey = rows[m.needIdx].sig
 	case "esc", "n":
 		m.needMode = false
 	case "ctrl+c":
@@ -172,8 +174,13 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g", "enter":
 		return m, m.switchTo(r.Session)
 	case "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if r.key != m.needKey {
-			m.needIdx, m.needKey = i, r.key
+		if r.sig == m.needDone {
+			m.needKey, m.needDone = r.sig, ""
+			m.msg = info("⏳ " + r.label + " answered: press again to answer it anew")
+			return m, nil
+		}
+		if r.sig != m.needKey {
+			m.needIdx, m.needKey = i, r.sig
 			m.msg = alert("⚠ " + r.label + "'s item changed: nothing sent, check it and press again")
 			return m, nil
 		}
@@ -191,9 +198,20 @@ func (m Model) replyNeed(r needRow) (tea.Model, tea.Cmd) {
 		m.msg = info("m replies to a dialog or question on the board; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
-	m.open(m.snap.tiles[r.tile])
-	m.box.block, m.needKey, m.needDone = r.Kind == sidebar.NeedDialog, "", r.key
+	t := m.snap.tiles[r.tile]
+	if r.Kind == sidebar.NeedDialog {
+		m.openPicker(t)
+	} else {
+		m.open(t)
+	}
 	return m, nil
+}
+
+// openPicker opens the reply box on t's dialog for NEEDS YOU: bare, a draft kept for t staying kept.
+func (m *Model) openPicker(t tile) {
+	m.selected = t.sess.Name
+	m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1, block: true}
+	m.syncPick()
 }
 
 // answerNeed answers r with its option n (k the key): a list ask through dev todo answer, a question as a typed
@@ -210,8 +228,16 @@ func (m Model) answerNeed(r needRow, n int, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.msg = info("⏳ answering " + m.answering + "…: pick again once it's done")
 		return m, nil
 	}
-	// Answered, the row goes or changes: the cursor takes the one shown next (fixNeeds)
-	m.needKey, m.needDone = "", r.key
+	next, cmd := m.sendNeed(r, n, k)
+	if cmd != nil {
+		// Answered, the row goes or changes: the cursor takes the one shown next (fixNeeds)
+		next.needKey, next.needDone = "", r.sig
+	}
+	return next, cmd
+}
+
+// sendNeed sends r's option n (k the key) as its kind is answered; no command when nothing went out.
+func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 	switch r.Kind {
 	case sidebar.NeedListAsk:
 		m.answering = r.Boss
@@ -224,15 +250,17 @@ func (m Model) answerNeed(r needRow, n int, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return answeredMsg{session: r.Boss, msg: info(cmp.Or(out, "Answered "+r.Boss)), took: true}
 		}
 	case sidebar.NeedAsk:
-		return m.sendOption(m.snap.tiles[r.tile], n)
+		next, cmd := m.sendOption(m.snap.tiles[r.tile], n)
+		return next.(Model), cmd
 	}
 	t := m.snap.tiles[r.tile]
-	m.open(t)
-	m.box.block = true
-	return m.typePick(k, t.pick)
+	m.openPicker(t)
+	next, cmd := m.typePick(k, t.pick)
+	return next.(Model), cmd
 }
 
-// needBlock is NEEDS YOU at the top of the pane, in at most half the gh rows: its header, then each row (its
+// needBlock is NEEDS YOU at the top of the pane, in about half the gh rows (more for a long selected row; none under
+// 6): its header, then each row (its
 // mark, label and text, the selected one's text wrapped) with its options under it, scrolled to keep the selected
 // row, "+N more" for the rest; at is each line's row, -1 for none.
 func (m Model) needBlock(gh int) (lines []string, at []int) {

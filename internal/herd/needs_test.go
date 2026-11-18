@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -194,7 +195,7 @@ func TestNeedsAnswerList(t *testing.T) {
 	if cmd == nil || m.answering != "boss-noc" {
 		t.Fatalf("2 on the list ask: answering %q", m.answering)
 	}
-	if again, cmd := keys(m, "1"); cmd != nil || !strings.Contains(again.msg.text, "nothing sent") {
+	if again, cmd := keys(m, "1"); cmd != nil || !strings.Contains(again.msg.text, "answered: press again") {
 		t.Errorf("a second answer while one is out: %q", again.msg.text)
 	}
 	next, _ := m.Update(cmd())
@@ -207,7 +208,7 @@ func TestNeedsAnswerList(t *testing.T) {
 	// While the answered row is still shown, keys wait; once it goes, the cursor takes the row now under it, and
 	// its keys act at once
 	next, _ = m.Update(refreshMsg{snap: needsSnap(t, dialogScreen), inputs: m.inputs})
-	if m, cmd := keys(next.(Model), "1"); cmd != nil || !strings.Contains(m.msg.text, "nothing sent") {
+	if m, cmd := keys(next.(Model), "1"); cmd != nil || !strings.Contains(m.msg.text, "answered: press again") {
 		t.Errorf("answered row still shown: msg %q", m.msg.text)
 	}
 	s := needsSnap(t, dialogScreen)
@@ -382,7 +383,7 @@ func TestNeedsMultiSelect(t *testing.T) {
 	if cmd == nil || !m.box.block {
 		t.Fatalf("2: no toggle sent, block %v", m.box.block)
 	}
-	next, _ := m.Update(cmd())
+	next, _ := m.Update(answeredMsg{session: "noc-triage", msg: info("Answered noc-triage"), took: true})
 	if m = next.(Model); m.box.session != "noc-triage" {
 		t.Fatalf("after a toggle: box %q, want its picker kept", m.box.session)
 	}
@@ -428,5 +429,115 @@ func TestRefreshNeedsFocus(t *testing.T) {
 	}
 	if !slices.Contains(ran, "set-option -pu -t %2 "+sidebar.OptNeedsFocus) {
 		t.Errorf("ran %q: want the request cleared", ran)
+	}
+}
+
+// selectKind focuses the block on its first row of kind k.
+func selectKind(t *testing.T, m Model, k sidebar.NeedKind) Model {
+	t.Helper()
+	m, _ = keys(m, "n")
+	for range m.needRows() {
+		if m.needRows()[m.needIdx].Kind == k {
+			return m
+		}
+		m, _ = keys(m, "j")
+	}
+	t.Fatalf("no row of kind %d", k)
+	return m
+}
+
+// 1-9 on a question sends that option's text as the reply, to its session.
+func TestNeedsAskSendsOption(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m = selectKind(t, m, sidebar.NeedAsk)
+	m, cmd := keys(m, "2")
+	if cmd == nil || len(m.history) == 0 || m.history[len(m.history)-1] != "Skip" {
+		t.Errorf("2: history %q, want Skip sent", m.history)
+	}
+}
+
+// Rows that changed under the cursor refuse the key: a question asked anew on the same session, a list item
+// renumbered with the same id.
+func TestNeedsRowChangedInPlace(t *testing.T) {
+	var answered []listAnswer
+	m := selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
+	s := needsSnap(t, dialogScreen)
+	s.tiles[index(s.tiles, "boss-dev")].tail = desktop.Tail{Lines: []string{"Merged.", "Reply **Ship** to release, or **Hold** to wait."}}
+	next, _ := m.Update(refreshMsg{snap: s, inputs: m.inputs})
+	if m, cmd := keys(next.(Model), "1"); cmd != nil || !strings.Contains(m.msg.text, "changed: nothing sent") {
+		t.Errorf("question asked anew: cmd %v msg %q", cmd != nil, m.msg.text)
+	}
+
+	m = selectKind(t, needsBoard(t, &answered), sidebar.NeedListAsk)
+	s = needsSnap(t, dialogScreen)
+	s.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Rollback now?", Options: []string{"Now", "Later"}}}}}}
+	next, _ = m.Update(refreshMsg{snap: s, inputs: m.inputs})
+	if m, cmd := keys(next.(Model), "1"); cmd != nil || len(answered) != 0 || !strings.Contains(m.msg.text, "changed: nothing sent") {
+		t.Errorf("same id, new text: cmd %v msg %q", cmd != nil, m.msg.text)
+	}
+}
+
+// A dialog row with nothing on the board to answer it through (no tile, or no dialog on screen) numbers no options
+// and sends nothing; nor does another tile answer for it.
+func TestNeedsDialogNotAnswerable(t *testing.T) {
+	var answered []listAnswer
+	for _, name := range []string{"no pick", "no tile"} {
+		m := needsBoard(t, &answered)
+		i := index(m.snap.tiles, "noc-triage")
+		switch name {
+		case "no pick":
+			m.snap.tiles[i].pick = nil
+		case "no tile":
+			m.snap.tiles = slices.Delete(m.snap.tiles, i, i+1)
+		}
+		var ran []string
+		m.c = tmux.NewFake(func(args []string) (string, error) { ran = append(ran, strings.Join(args, " ")); return "", nil })
+		m = selectKind(t, m, sidebar.NeedDialog)
+		for _, k := range []string{"1", "m"} {
+			if got, cmd := keys(m, k); cmd != nil || got.box.session != "" || len(ran) != 0 {
+				t.Errorf("%s, %s: cmd %v box %q ran %q", name, k, cmd != nil, got.box.session, ran)
+			}
+		}
+		if strings.Contains(strings.Join(plain(m.render()), "\n"), "1 Yes") {
+			t.Errorf("%s: options numbered:\n%s", name, strings.Join(plain(m.render()), "\n"))
+		}
+	}
+}
+
+// A list answer that fails leaves its row taking keys again at once.
+func TestNeedsAnswerFails(t *testing.T) {
+	var answered []listAnswer
+	m := selectKind(t, needsBoard(t, &answered), sidebar.NeedListAsk)
+	m.answerList = func(string, int, string, string) (string, error) { return "", errors.New("timed out") }
+	m, cmd := keys(m, "1")
+	next, _ := m.Update(cmd())
+	if m = next.(Model); !strings.Contains(m.msg.text, "timed out") {
+		t.Fatalf("msg %q", m.msg.text)
+	}
+	if _, cmd := keys(m, "1"); cmd == nil {
+		t.Error("the row didn't take keys again")
+	}
+}
+
+// Answering a dialog from the block keeps a reply typed to its worker; a click on a card leaves the block.
+func TestNeedsKeepsDraftAndClickLeaves(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	draft := replyBox{session: "noc-triage", pane: "%8", hist: -1}
+	draft.ed.set("half a reply")
+	m.drafts = map[string]replyBox{"noc-triage": draft}
+	m.c, _ = dialogClient(dialogScreen, "❯ \n")
+	m, cmd := keys(m, "n", "1")
+	next, _ := m.Update(cmd())
+	if m = next.(Model); m.drafts["noc-triage"].ed.String() != "half a reply" || m.box.session != "" {
+		t.Errorf("drafts %+v box %q", m.drafts, m.box.session)
+	}
+	m, _ = keys(m, "n")
+	lines := plain(m.render())
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "boss-dev  needs you") })
+	next, _ = m.Update(tea.MouseMsg{X: 20, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if m = next.(Model); m.needMode || m.selected != "boss-dev" {
+		t.Errorf("click on a card: mode %v selected %q", m.needMode, m.selected)
 	}
 }

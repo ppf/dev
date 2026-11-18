@@ -64,9 +64,6 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	for _, h := range f.needs {
-		if _, board, ok := m.boardNeeds(); ok && ms.Y == h.line {
-			return m.gotoBoard(board)
-		}
 		if rows := m.needRows(); ms.Y == h.line && h.idx < len(rows) {
 			// A second click on an open row with nothing to answer goes on, like a second ⏎
 			row := rows[h.idx]

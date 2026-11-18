@@ -26,7 +26,7 @@ func (m Model) panelItems() []todo.Shown {
 }
 
 // todoRows is the to do block above the cards: the boss's own list (panelItems), in at most half the gh rows above
-// the bottom rows (header in any): header (TO DO n ── updated <age>), up to todoShown items, an answered ask's with
+// the bottom rows (header in any): header (TO DO n, those still open on others, ── updated <age>), up to todoShown items, an answered ask's with
 // its answer's row, "+N more"; header only while folded (t); none if empty, unreadable (NEEDS YOU says why) or no
 // rows.
 func (m Model) todoRows(gh int) []string {
@@ -134,8 +134,8 @@ type ownedItem struct {
 	owner *owner
 }
 
-// todoOrder is the items as the block lists them: the user's own first, then those on a worker that needs the
-// user, then on a worker that's gone, then the rest, each group in the list's order.
+// todoOrder is the items as the block lists them: those on no one (ticked: open ones are NEEDS YOU's) first, then
+// on a worker that needs the user, then on a worker that's gone, then the rest, each group in the list's order.
 func (m Model) todoOrder(items []todo.Shown) []ownedItem {
 	rank := func(it ownedItem) int {
 		switch o := it.owner; {

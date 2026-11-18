@@ -38,6 +38,7 @@ type NeedList struct {
 	Items []NeedItem `json:"items"`
 }
 
+// NeedItem is a list item as dev todo --all --json prints it.
 type NeedItem struct {
 	ID      int      `json:"id"`
 	Text    string   `json:"text"`
@@ -79,7 +80,7 @@ type NeedRow struct {
 	Boss    string   // the boss whose list it is; "" for a session's row
 	ID      int      // the list item's number
 	Text    string   // the item's text, what the dialog or the question asks, or why the list wasn't read
-	Options []string // an ask's answers; a dialog's choices, shown only
+	Options []string // a list ask's answers; a dialog's choices (the sidebar only shows them; a board answers them)
 	Session string   // where ⏎ goes: the session, or the list's boss
 }
 
@@ -170,18 +171,44 @@ func (m Model) readNeeds(chain bool) tea.Cmd {
 	}
 }
 
-// boardNeeds is NEEDS YOU while a boss is on the server, where its board shows the rows: how many across the boards
-// (Boards), and the board ⏎ goes to, the first with any; ok=false without a boss.
-func (m Model) boardNeeds() (n int, board string, ok bool) {
+// needBoard is the sidebar's row standing for the boards' rows: ⏎ goes to the first board with any.
+const needBoard = NeedUnread + 1
+
+// needRows are the lines of NEEDS YOU: with a boss on the server, a row for what its boards show (Boards), then what
+// no board shows (a session under no boss, a list whose boss is gone); else every row.
+func (m Model) needRows() []NeedRow {
+	all := NeedRows(m.snap.sessions, m.needs, "")
 	boards := Boards(m.snap.sessions)
-	for _, b := range boards {
-		k := len(NeedRows(m.snap.sessions, m.needs, b))
-		if k > 0 && board == "" {
-			board = b
-		}
-		n += k
+	if len(boards) == 0 {
+		return all
 	}
-	return n, board, len(boards) > 0
+	shown := map[string]bool{}
+	board := NeedRow{Kind: needBoard}
+	for _, b := range boards {
+		rows := NeedRows(m.snap.sessions, m.needs, b)
+		if len(rows) > 0 && board.Session == "" {
+			board.Session = b
+		}
+		board.ID += len(rows)
+		for _, r := range rows {
+			shown[r.key()] = true
+		}
+	}
+	var out []NeedRow
+	if board.ID > 0 {
+		board.Text = fmt.Sprintf("%d on the board", board.ID)
+		out = append(out, board)
+	}
+	return append(out, slices.DeleteFunc(all, func(r NeedRow) bool { return shown[r.key()] })...)
+}
+
+// needCount is how many rows NEEDS YOU stands for: the boards' each.
+func needCount(rows []NeedRow) int {
+	n := len(rows)
+	if len(rows) > 0 && rows[0].Kind == needBoard {
+		n += rows[0].ID - 1
+	}
+	return n
 }
 
 // gotoBoard leaves NEEDS YOU for board's NEEDS YOU.
@@ -208,25 +235,14 @@ func focusBoard(c *tmux.Client, client, board string, from Origin) error {
 	if pane == "" {
 		return fmt.Errorf("%s has no board", board)
 	}
-	if _, err := c.Run("set-option", "-p", "-t", pane, OptNeedsFocus, "1"); err != nil {
-		return err
-	}
 	if board != from.Session {
 		if err := switchTo(c, client, board, from); err != nil {
 			return err
 		}
 	}
-	_, err = c.Run("select-window", "-t", pane, ";", "select-pane", "-t", pane)
+	_, err = c.Run("set-option", "-p", "-t", pane, OptNeedsFocus, "1", ";", "select-window", "-t", pane, ";", "select-pane", "-t", pane)
 	resetKeyTable(c, client)
 	return err
-}
-
-// needRows are the lines of NEEDS YOU while no boss is on the server (with one, its board shows them: boardNeeds).
-func (m Model) needRows() []NeedRow {
-	if len(Boards(m.snap.sessions)) > 0 {
-		return nil
-	}
-	return NeedRows(m.snap.sessions, m.needs, "")
 }
 
 // NeedRows are the rows of NEEDS YOU from sessions in Order and the bosses' lists, sorted by kind (NeedKind), in
@@ -297,8 +313,8 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 	return rows
 }
 
-// Boards are the bosses whose boards show NEEDS YOU for the sessions under them: a manager, and each boss in no
-// manager's group.
+// Boards are the bosses whose boards show NEEDS YOU for the sessions under them: a manager, and each top-level boss
+// (Depth 0) in no manager's group.
 func Boards(sessions []Session) []string {
 	var out []string
 	for _, s := range sessions {
@@ -332,10 +348,6 @@ func (m *Model) fixNeeds() {
 	if !m.needMode {
 		return
 	}
-	if n, _, ok := m.boardNeeds(); ok {
-		m.needMode = n > 0 && m.snap.focused && m.snap.height >= needsMinHeight
-		return
-	}
 	rows := m.needRows()
 	if len(rows) == 0 || !m.snap.focused || m.snap.height < needsMinHeight {
 		m.needMode, m.needOpen = false, false
@@ -351,19 +363,9 @@ func (m *Model) fixNeeds() {
 	m.needKey, m.needOpen = rows[m.needIdx].key(), false
 }
 
-// handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session, 1-9 answers an open ask, esc/q leaves.
+// handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session (the boards' row to its board), 1-9 answers an
+// open ask, esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if _, board, ok := m.boardNeeds(); ok {
-		switch k.String() {
-		case "enter":
-			return m.gotoBoard(board)
-		case "esc", "q":
-			m.needMode = false
-		case "ctrl+c":
-			return m, tea.Quit
-		}
-		return m, nil
-	}
 	rows := m.needRows()
 	if m.needIdx >= len(rows) || rows[m.needIdx].key() != m.needKey {
 		m.needMode, m.needOpen = false, false
@@ -407,6 +409,8 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) openNeed(row NeedRow) (tea.Model, tea.Cmd) {
 	switch {
+	case row.Kind == needBoard:
+		return m.gotoBoard(row.Session)
 	case row.Kind == NeedListAsk:
 		m.needOpen = !m.needOpen
 		return m, nil
@@ -427,13 +431,6 @@ func (m Model) openNeed(row NeedRow) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) enterNeeds() Model {
-	if n, _, ok := m.boardNeeds(); ok {
-		m.needMode, m.needOpen = n > 0 && m.snap.height >= needsMinHeight, false
-		if !m.needMode {
-			showMessage(m.c, m.client(), "Nothing needs you")
-		}
-		return m
-	}
 	if rows := m.needRows(); len(rows) > 0 && m.snap.height >= needsMinHeight {
 		m.needMode, m.needOpen, m.needIdx, m.needKey = true, false, 0, rows[0].key()
 	} else {
@@ -458,22 +455,20 @@ func needsBudget(h int) int { return max(5, h/2) }
 type needHit struct{ line, idx int }
 
 func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
-	if n, _, ok := m.boardNeeds(); ok {
-		if n == 0 || h < needsMinHeight {
-			return nil, nil
-		}
-		line := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", n) + reset
+	rows := m.needRows()
+	if len(rows) == 0 || h < needsMinHeight {
+		return nil, nil
+	}
+	if len(rows) == 1 && rows[0].Kind == needBoard {
+		// All on the boards: one line pointing there
+		line := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", rows[0].ID) + reset
 		if m.needsErr != nil {
 			line += muted + " (stale)" + reset
 		}
 		line = truncate(line+faint+"  → board"+reset, w)
 		return []string{cardLine(line, ansi.StringWidth(line), w, m.needMode), ""}, []needHit{{line: 0}}
 	}
-	rows := m.needRows()
-	if len(rows) == 0 || h < needsMinHeight {
-		return nil, nil
-	}
-	head := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", len(rows)) + reset
+	head := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", needCount(rows)) + reset
 	if m.needsErr != nil {
 		head += muted + " (stale)" + reset
 	}
@@ -534,6 +529,8 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 		mark = gold + bold + "?" + reset
 	case NeedUnread:
 		mark = gold + "⚠" + reset
+	case needBoard:
+		mark = faint + "→" + reset
 	}
 	vis := 1 + ansi.StringWidth(project) + 2 + 1 + 1
 	text := truncate(r.Text, max(1, w-vis-1))
@@ -543,6 +540,9 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 
 // label is the row's project column: a session's name, else the list owner's project.
 func (r NeedRow) label() string {
+	if r.Kind == needBoard {
+		return "board"
+	}
 	if r.Kind == NeedDialog || r.Kind == NeedAsk {
 		return r.Session
 	}
@@ -577,9 +577,6 @@ func (m Model) openLines(r NeedRow, w int) []string {
 }
 
 func (m Model) needsHint() string {
-	if _, _, ok := m.boardNeeds(); ok {
-		return " " + faint + "⏎ board · esc leave" + reset
-	}
 	rows := m.needRows()
 	if m.needIdx >= len(rows) {
 		return ""
@@ -588,6 +585,8 @@ func (m Model) needsHint() string {
 	ask := row.Kind == NeedListAsk
 	var hint string
 	switch {
+	case row.Kind == needBoard:
+		hint = "⏎ board · esc leave"
 	case m.needOpen && ask:
 		hint = "1-9 answer · esc back"
 	case m.needOpen:

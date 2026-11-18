@@ -104,7 +104,7 @@ func (m *Model) syncPick() {
 		// A capture mid-redraw may miss the dialog: free text being typed stays
 		b.sent = ""
 		if b.block && !b.other {
-			m.box = replyBox{}
+			m.blur()
 		}
 		return
 	}
@@ -149,8 +149,9 @@ func (m Model) waiting(p *pick) bool {
 }
 
 // handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
-// here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n), v show more of its screen or less again, f
-// fold or unfold it, t fold or open the to do block, ctrl+c quit.
+// here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n; a deeper session's boss
+// closes it), v show more of its screen or less again, f fold or unfold it, t fold or open the to do block, n focus
+// NEEDS YOU (its keys: handleNeedKey), ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -228,17 +229,17 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click on a row of NEEDS YOU selects it there; on a card's ▸/▾ folds or unfolds it; on one of its dialog's options picks it
-// (Submit goes on), as its key does; on Open switches to the worker, on Message… opens the reply box for it,
-// on its PR opens it, on × asks to close it; elsewhere on a card it selects it, for the keys. A deeper session's
-// card only folds, opens, opens its PR or selects: a click elsewhere on it says where it is answered.
+// handleMouse: a left click on a row of NEEDS YOU selects it there; on a card it leaves NEEDS YOU: on its ▸/▾ folds
+// or unfolds it; on one of its dialog's options picks it (Submit goes on), as its key does; on Open switches to the
+// worker, on Message… opens the reply box for it, on its PR opens it, on × asks to close it; elsewhere on it selects
+// it, for the keys. A deeper session's card has no Message… or ×: its boss closes it.
 func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
 	if _, at := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
 		if i := at[ms.Y]; i >= 0 && m.box.session == "" {
-			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].key, message{}, ""
+			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].sig, message{}, ""
 		}
 		return m, nil
 	}
@@ -246,6 +247,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	m.needMode = false
 	t := m.snap.tiles[h.tile]
 	// A click is no y to a kill asked before it
 	m.msg, m.confirm = message{}, ""

@@ -628,13 +628,14 @@ func TestBoards(t *testing.T) {
 	}
 }
 
-// With a boss on the server NEEDS YOU is one line, its count the boards' blocks' (a session under no boss isn't
-// on one); n focuses it, ⏎ goes to the first board with any and asks it to focus its block; a click does too.
+// With a boss on the server NEEDS YOU is one line, its count the boards' blocks'; n focuses it, ⏎ goes to the first
+// board with any and asks it to focus its block; a click does too.
 func TestNeedsBoardLine(t *testing.T) {
 	var calls []answerCall
 	m := boardModel(&calls)
-	if n, board, ok := m.boardNeeds(); n != 3 || board != "manager" || !ok || m.needRows() != nil {
-		t.Fatalf("boardNeeds = %d %q %v", n, board, ok)
+	m.snap.sessions[5].Deciding = false
+	if r := m.needRows(); len(r) != 1 || r[0].Kind != needBoard || r[0].ID != 3 || r[0].Session != "manager" {
+		t.Fatalf("rows = %+v", r)
 	}
 	f := m.render()
 	if got := strings.TrimRight(ansi.Strip(f.lines[0]), " "); got != " NEEDS YOU 3  → board" || f.header != 2 {
@@ -650,7 +651,6 @@ func TestNeedsBoardLine(t *testing.T) {
 	})
 	want := []string{
 		"list-panes -s -t =manager: -F #{pane_id}\t#{@dev_boss_pane}",
-		"set-option -p -t %11 @dev_needs_focus 1",
 	}
 	m, _ = key(m, "n")
 	if !m.needMode || !strings.Contains(m.needsHint(), "⏎ board") {
@@ -661,8 +661,8 @@ func TestNeedsBoardLine(t *testing.T) {
 		t.Fatalf("⏎: mode %v", m.needMode)
 	}
 	cmd()
-	if len(ran) < 4 || !slices.Equal(ran[:2], want) || !slices.ContainsFunc(ran, func(c string) bool { return strings.HasPrefix(c, "switch-client") && strings.Contains(c, "=manager:") }) ||
-		!slices.Contains(ran, "select-window -t %11 ; select-pane -t %11") {
+	if len(ran) < 3 || !slices.Equal(ran[:1], want) || !slices.ContainsFunc(ran, func(c string) bool { return strings.HasPrefix(c, "switch-client") && strings.Contains(c, "=manager:") }) ||
+		!slices.Contains(ran, "set-option -p -t %11 @dev_needs_focus 1 ; select-window -t %11 ; select-pane -t %11") {
 		t.Errorf("ran %q", ran)
 	}
 	ran = nil
@@ -672,11 +672,19 @@ func TestNeedsBoardLine(t *testing.T) {
 	}
 	_ = next
 	cmd()
-	if len(ran) < 2 || !slices.Equal(ran[:2], want) {
+	if len(ran) < 2 || !slices.Equal(ran[:1], want) {
 		t.Errorf("click ran %q", ran)
 	}
-	// Nothing on any board: no line
-	m.needs, m.snap.sessions[2].Deciding = nil, false
+	// A session under no boss shows here, under the boards' row
+	m.snap.sessions[5].Deciding = true
+	f = m.render()
+	for i, want := range []string{" NEEDS YOU 4", "", " board  → 3 on the board", " vitay  ● vitay"} {
+		if got := strings.TrimRight(ansi.Strip(f.lines[i]), " "); !strings.HasPrefix(got, want) {
+			t.Errorf("line %d = %q, want %q", i, got, want)
+		}
+	}
+	// Nothing on any board nor off them: no section
+	m.needs, m.snap.sessions[2].Deciding, m.snap.sessions[5].Deciding = nil, false, false
 	if f := m.render(); f.header != 0 {
 		t.Errorf("no rows: header %d", f.header)
 	}
