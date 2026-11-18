@@ -134,7 +134,7 @@ for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sl
 
 > To wait for a known time, run `dev agent wait-until <HH:MM|+90m> "<why>"` (at most 4h away) and end your turn: dev wakes you then. No background `sleep` for it.
 
-A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it.
+A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it (its own background task finishing doesn't).
 <!-- /boss-core:wait -->
 
 ## Read results

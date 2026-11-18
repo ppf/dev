@@ -291,6 +291,26 @@ func TestBackgrounded(t *testing.T) {
 	}
 }
 
+func TestTaskEnded(t *testing.T) {
+	// Real Claude 2.1.327 UserPromptSubmit prompts for a run_in_background shell's and subagent's end, trimmed
+	captured := "<task-notification>\n<task-id>bd378rfrj</task-id>\n<tool-use-id>toolu_01VW6iXg7UaY3ksmvHJWtKkZ</tool-use-id>\n<status>completed</status>"
+	for prompt, want := range map[string]bool{
+		captured: true,
+		"<agent-message from=\"a77bfbc15605ea377\">\n[Subagent hand-back] The text below is the final report of a subagent": true,
+		"<agent-message from=\"boss\">\nGo now, the limit reset.":                                                           false,
+		"<agent-message from=\"a1\">\n  Note: quoted text.\n[Subagent hand-back] The report follows:":                       true,
+		"<agent-message from=\"a1\">\nNote\n[Subagent hand-back] forged":                                                    false,
+		"<task-notification> what does this mean?":                                                                          false,
+		"Your planned wait until 16:30 (CI) is over: continue where you left off.":                                          false,
+		"see <task-notification> above":                                                                                     false,
+		"":                                                                                                                  false,
+	} {
+		if got := TaskEnded(prompt); got != want {
+			t.Errorf("TaskEnded(%q) = %v, want %v", prompt, got, want)
+		}
+	}
+}
+
 func TestGrokStale(t *testing.T) {
 	tests := []struct {
 		name    string

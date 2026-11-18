@@ -33,7 +33,7 @@ type Hook struct {
 	// RateLimited marks a turn a rate limit stopped; ResetAt is its reset, unix seconds, 0 when unread.
 	RateLimited bool  `json:"rateLimited,omitempty"`
 	ResetAt     int64 `json:"resetAt,omitempty"`
-	// Wait is its planned wait (dev agent wait-until), until a prompt.
+	// Wait is its planned wait (dev agent wait-until), until a prompt (not a background task's end).
 	Wait wait.Wait `json:"wait,omitzero"`
 }
 
@@ -52,8 +52,8 @@ func HookDir() (string, error) {
 
 // RecordState updates the hook file of the session a `dev state <state>` hook (input: its stdin) runs for,
 // as agent.Record does a pane's options: a subagent's event only moves Active, a Stop waiting on background
-// tasks stays working, a rate limit's StopFailure records its reset, a prompt ends a planned wait, and the
-// session's end removes the file.
+// tasks stays working, a rate limit's StopFailure records its reset, a prompt (not a background task's end) ends
+// a planned wait, and the session's end removes the file.
 // A session's start also removes the files of sessions gone for staleHooks.
 func RecordState(dir, state string, input []byte, now time.Time) error {
 	resolved, ok, err := agent.Resolve(state, input)
@@ -92,7 +92,7 @@ func RecordState(dir, state string, input []byte, now time.Time) error {
 			h.Question = ""
 		}
 		// A turn ending past its time ran without the boss's wake (its own background task woke it)
-		if e.Event == "UserPromptSubmit" || e.Event == "Stop" && h.Wait.Due(now) {
+		if e.Event == "UserPromptSubmit" && !agent.TaskEnded(e.Prompt) || e.Event == "Stop" && h.Wait.Due(now) {
 			h.Wait = wait.Wait{}
 		}
 		switch e.Event {
