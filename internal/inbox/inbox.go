@@ -89,7 +89,7 @@ func (n Note) Summary() string {
 const (
 	maxText  = 200
 	maxNotes = 20
-	// askLines is how many of a last message's non-blank lines may hold its question: the question and its options.
+	// askLines is how many of a last message's non-blank lines may hold its question: the question and its options, or list items asking questions.
 	askLines = 5
 )
 
@@ -164,10 +164,12 @@ var option = regexp.MustCompile(`^\s*([-*•]|\d+[.)]|[A-Za-z][.)])\s`)
 // IsOption reports a list item line, as a question's options are.
 func IsOption(l string) bool { return option.MatchString(l) }
 
-// OptionText is option line l without its list marker.
-func OptionText(l string) string { return strings.TrimSpace(l[len(option.FindString(l)):]) }
+// optionText is option line l without its list marker.
+func optionText(l string) string { return strings.TrimSpace(l[len(option.FindString(l)):]) }
 
-// question is the question msg ends on (see QuestionAt) and its options after it; "" when none.
+// question is the question msg ends on (see QuestionAt) and its options after it; "" when none. List items that
+// ask questions themselves (questions) come as its options, each cut after its recommendation, so a note cut to
+// length keeps the first.
 func question(msg string) (ask, options string) {
 	var lines []string
 	for l := range strings.Lines(msg) {
@@ -179,24 +181,117 @@ func question(msg string) (ask, options string) {
 	if i < 0 {
 		return "", ""
 	}
-	return lines[i], strings.Join(lines[i+1:], "")
+	if !questions(lines[i:]) {
+		return lines[i], strings.Join(lines[i+1:], "")
+	}
+	asks := slices.Clone(lines[i:])
+	for k, l := range asks {
+		if m := askItem.FindStringIndex(l); m != nil {
+			asks[k] = l[:m[1]]
+		}
+	}
+	return asks[0], strings.Join(asks[1:], " ")
 }
 
-// QuestionAt is where among a message's non-blank lines is the question it ends on: its last line ending in
-// "?" (markdown emphasis aside), not a heading, among its last askLines lines and followed only by list
-// items, its options; -1 when none.
+// askItem is a list item asking a question mid-line, then recommending an answer in bold: "- Post it? I recommend
+// **Yes**."; the match ends with the recommendation.
+var askItem = regexp.MustCompile(`^\s*(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s.*\?\s[^?]*?\bI(?:'d)? (?:recommend|suggest)\s+\*\*[^*]+\*\*\.?`)
+
+// questions reports a question (QuestionAt) and the lines under it that are list items asking questions themselves
+// (askItem): it is the first of them, its lead-in ends in ":", or all the lines under it are such items.
+func questions(asked []string) bool {
+	return askItem.MatchString(asked[0]) || strings.HasSuffix(strings.TrimSpace(asked[0]), ":") ||
+		len(asked) > 1 && !slices.ContainsFunc(asked[1:], func(l string) bool { return !askItem.MatchString(l) })
+}
+
+var (
+	// replyAsk starts a sentence telling the user how to reply: "Reply **Done**", "Answer **yes** or **no**"
+	replyAsk = regexp.MustCompile(`(?:^|[.!?]\s+)(Reply|Answer)(?:\s+(?:with|either))?\s+`)
+	// sentenceEnd ends the reply's sentence: its options are in it
+	sentenceEnd = regexp.MustCompile(`[.!?](?:\s|$)`)
+	// replyWords is a reply's options as words between slashes, all its sentence says: "Done / Skip", "go/no-go"
+	replyWords = regexp.MustCompile(`^[\w-]+(?:\s*/\s*[\w-]+)+$`)
+	// replyWord is a reply's option in bold, after its verb, "or", a comma or a slash
+	replyWord = regexp.MustCompile(`(?:^|\bor\s+|,\s*|/\s*)\*\*([^*]{1,24})\*\*`)
+)
+
+// replyOptions are the options line l names in a sentence telling the user how to reply: "Reply **Done** once
+// it's connected, or **Skip** to leave it." offers Done and Skip, "Reply yes/no." yes and no. An Answer sentence
+// needs two bold options ("Answer **yes** or **no**"); nil when none does.
+func replyOptions(l string) []string {
+	for _, m := range replyAsk.FindAllStringSubmatchIndex(l, -1) {
+		rest := l[m[1]:]
+		if end := sentenceEnd.FindStringIndex(rest); end != nil {
+			rest = rest[:end[0]]
+		}
+		reply := l[m[2]:m[3]] == "Reply"
+		if w := replyWords.FindString(strings.TrimSpace(rest)); w != "" && reply {
+			return strings.Fields(strings.ReplaceAll(w, "/", " "))
+		}
+		var opts []string
+		for {
+			o := replyWord.FindStringSubmatchIndex(rest)
+			if o == nil || (o[0] != 0 && len(opts) == 0) {
+				break
+			}
+			opts = append(opts, rest[o[2]:o[3]])
+			rest = rest[o[1]:]
+		}
+		if len(opts) > 1 || len(opts) == 1 && reply {
+			return opts
+		}
+	}
+	return nil
+}
+
+// QuestionAt is where among a message's non-blank lines is the question it ends on, among its last askLines
+// lines; -1 when none. It is the last line ending in "?" (markdown emphasis aside), not a heading, followed only
+// by list items, its options; or the last line, telling how to reply with the options it names (replyOptions);
+// or list items that are all questions (askItem), from their lead-in ending in ":" when they have one, else from
+// the first of them, or of the last askLines lines when they run past those.
 func QuestionAt(lines []string) int {
+	asking := true // every list item below asks a question
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-askLines; i-- {
 		l := strings.TrimSpace(lines[i])
-		if strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#") {
+		switch {
+		case strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#"):
 			return i
-		}
-		if !option.MatchString(l) {
+		case i == len(lines)-1 && len(replyOptions(l)) > 0:
+			return i
+		case option.MatchString(l):
+			asking = asking && askItem.MatchString(l)
+		case asking && i < len(lines)-1 && strings.HasSuffix(l, ":"):
+			return i
+		case asking && i < len(lines)-1:
+			return i + 1
+		default:
 			return -1
 		}
 	}
+	if asking && len(lines) > 0 {
+		return max(0, len(lines)-askLines)
+	}
 	return -1
 }
+
+// Options are what the question at asked[0] offers, without bold or code marks: the options its line names when
+// it is alone, telling how to reply (replyOptions), else the list items after it; none when those items are
+// questions themselves (questions).
+func Options(asked []string) []string {
+	if len(asked) == 1 {
+		return replyOptions(asked[0])
+	}
+	if questions(asked) {
+		return nil
+	}
+	var opts []string
+	for _, l := range asked[1:] {
+		opts = append(opts, unmark.Replace(optionText(l)))
+	}
+	return opts
+}
+
+var unmark = strings.NewReplacer("**", "", "`", "")
 
 // Span is d in whole minutes: "17m", "1h", "1h 5m".
 func Span(d time.Duration) string {

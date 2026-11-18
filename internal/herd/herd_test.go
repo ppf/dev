@@ -467,6 +467,57 @@ func TestAskOptionKeys(t *testing.T) {
 	}
 }
 
+// 1-9 on an asks card whose turn ended telling how to reply send the options its line names; on one ending on
+// list items that are questions they send nothing: those take a typed reply (m).
+func TestAskReplyOptionKeys(t *testing.T) {
+	var pasted []string
+	m := twoTiles()
+	m.width = 60
+	m.c = tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-panes":
+			return tmux.FormatRow("b", "1", "%6", "/p", "t", "claude", "idle", "claude", "", "", "", "$2", "", "", "", "", "", "", "", "", "", ""), nil
+		case "display-message":
+			return tmux.FormatRow("claude", "idle", "claude", "3", "", "", "", ""), nil
+		case "load-buffer":
+			b, err := os.ReadFile(args[len(args)-1])
+			pasted = append(pasted, string(b))
+			return "", err
+		}
+		return "", nil
+	})
+	press := func(m Model, k string) (Model, tea.Cmd) {
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+		return next.(Model), cmd
+	}
+	m.snap.tiles[1] = tile{sess: sidebar.Session{Name: "b", Agent: "Claude", State: agent.Idle}, pane: "%6",
+		note: "asks: Reply **Done** once it's connected, or **Skip** to leave the lw check for later.",
+		tail: desktop.Tail{Lines: []string{"**Step 2 of 4: connect the VPN.** It still times out.",
+			"Reply **Done** once it's connected, or **Skip** to leave the lw check for later."}}}
+	if got := strings.TrimSpace(ansi.Strip(m.bottom()[0])); !strings.HasPrefix(got, "1-9 answer") {
+		t.Errorf("reply card hint %q", got)
+	}
+	if _, cmd := press(m, "2"); cmd == nil {
+		t.Fatal("2 sent nothing")
+	} else if cmd(); !slices.Equal(pasted, []string{"Skip"}) {
+		t.Errorf("2 pasted %q", pasted)
+	}
+	m.snap.tiles[1].note = "asks: - Post it? I recommend **Yes**. - Ping Carl? I recommend **Yes**."
+	m.snap.tiles[1].tail.Lines = []string{"Two questions:", "- Post it? I recommend **Yes**.", "- Ping Carl? I recommend **Yes**. He plans to."}
+	if got := m.snap.tiles[1].section(); got != needsYouSection {
+		t.Errorf("questions card in %v, want needs you", got)
+	}
+	if got := strings.TrimSpace(ansi.Strip(m.bottom()[0])); strings.HasPrefix(got, "1-9") {
+		t.Errorf("questions card hint %q, want no 1-9", got)
+	}
+	if m, cmd := press(m, "1"); cmd != nil || !strings.Contains(m.msg.text, "(m to reply)") {
+		t.Errorf("1 on the questions card: cmd %v, msg %q", cmd != nil, m.msg.text)
+	}
+	if got := statusText(m.snap.tiles[1], needsYouSection); !strings.HasPrefix(got, "Two questions: - Post it?") {
+		t.Errorf("questions card status %q", got)
+	}
+}
+
 func TestReplyPasteAndQuit(t *testing.T) {
 	m := twoTiles()
 	m.snap.tiles[1].pane = "%6"

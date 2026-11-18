@@ -103,6 +103,9 @@ func TestBossUnderBoss(t *testing.T) {
 		state(app, "working", `{"hook_event_name":"UserPromptSubmit"}`)
 		state(app, "idle", `{"hook_event_name":"Stop","last_assistant_message":"Merge it?\n- yes\n- no"}`)
 	}
+	// A question without a "?": an instruction to reply naming its options
+	state(app, "working", `{"hook_event_name":"UserPromptSubmit"}`)
+	state(app, "idle", `{"hook_event_name":"Stop","last_assistant_message":"The VPN is down.\n\nReply **Done** once it's connected, or **Skip** to leave it."}`)
 	state(app, "working", `{"hook_event_name":"UserPromptSubmit"}`)
 	state(app, "waiting", `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`)
 	// Its list: items for the user, and one on its worker
@@ -115,6 +118,7 @@ func TestBossUnderBoss(t *testing.T) {
 	got := take()
 	for _, want := range []string{
 		"- boss-app asks: Merge it? - yes - no",
+		"- boss-app asks: Reply **Done** once it's connected, or **Skip** to leave it.",
 		"- boss-app needs a decision: Claude needs your permission to use Bash",
 		"- boss-app waits on you: #1 Pick a name",
 		"- boss-app waits on you: #3 Merge #148? (options: Merge (Recommended) / Wait)",
