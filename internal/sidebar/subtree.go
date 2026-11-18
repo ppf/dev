@@ -128,9 +128,7 @@ func (r *Rollup) add(s Session, lists map[string]ListCount, own bool) {
 	case rank == RankWaiting:
 		r.Waiting++
 	}
-	if HealthNote(NoteKind(s.Note)) {
-		r.Warn = true
-	}
+	r.Warn = r.Warn || HealthNote(NoteKind(s.Note))
 	if s.HasCost {
 		r.CostUSD, r.HasCost = r.CostUSD+s.CostUSD, true
 	}
