@@ -157,9 +157,9 @@ func TestRefreshViaDialogGone(t *testing.T) {
 	}
 }
 
-// bossAsks keeps the bosses asked for, each with its open items on no one, a list not read with its error, and
-// leaves out one with none.
-func TestBossAsks(t *testing.T) {
+// bossLists keeps the bosses asked for, each with its open items (on no one or on others), a list not read with its
+// error, and leaves out one with none.
+func TestBossLists(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var read []string
 	c := tmux.NewFake(func(args []string) (string, error) {
@@ -198,12 +198,13 @@ func TestBossAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 	read = nil
-	got, err := bossAsks(c, []string{"boss-a", "boss-b", "boss-bad"}, now)
+	got, err := bossLists(c, []string{"boss-a", "boss-b", "boss-bad"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Boss != "boss-a" || len(got[0].Items) != 1 || got[0].Items[0].Text != "Merge?" || got[1].Boss != "boss-bad" || got[1].Err == nil {
-		t.Errorf("bossAsks = %+v, want boss-a's ask and boss-bad's error", got)
+	if len(got) != 3 || got[0].Boss != "boss-a" || len(got[0].Items) != 2 || got[0].Items[0].Text != "Merge?" || got[0].Items[1].Text != "on w1" ||
+		got[1].Boss != "boss-b" || len(got[1].Items) != 1 || got[2].Boss != "boss-bad" || got[2].Err == nil {
+		t.Errorf("bossLists = %+v, want boss-a's open items, boss-b's and boss-bad's error", got)
 	}
 	if slices.Contains(read, "boss-x") {
 		t.Errorf("read %q: boss-x isn't asked for", read)

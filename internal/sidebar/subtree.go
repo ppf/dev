@@ -56,16 +56,19 @@ func (s Session) Rank() Rank {
 	return RankIdle
 }
 
-// ListCount is what a boss's to do list adds to the roll-ups: its open items on no one, asks (with options) apart.
+// ListCount is what a boss's to do list adds to the roll-ups: its open items on no one, asks (with options) apart,
+// and those on someone else.
 type ListCount struct {
-	Asks, Plain int
-	Unread      bool // the list wasn't read
+	Asks, Plain, On int
+	Unread          bool // the list wasn't read
 }
 
-// Add counts an item when it's open and on no one.
+// Add counts an item when it's open.
 func (c *ListCount) Add(done bool, on string, options int) {
 	switch {
-	case done || on != "":
+	case done:
+	case on != "":
+		c.On++
 	case options > 0:
 		c.Asks++
 	default:
@@ -80,6 +83,7 @@ type Rollup struct {
 	Working   int  // sessions under it working
 	Waiting   int  // sessions under it in a planned wait or rate-limit resume
 	ToDo      int  // plain items on its and its bosses' lists
+	OnOthers  int  // open items on a worker or a person on its and its bosses' lists
 	Under     int  // bosses and sessions with an agent under it: a session with no agent isn't a worker, as the board counts
 	Bosses    int  // a manager's: the bosses in its group, at its Depth (Order)
 	Warn      bool // a failed, stuck or high-context note, its own too, or a list not read
@@ -150,6 +154,7 @@ func (r *Rollup) add(s Session, lists map[string]ListCount, own bool) {
 	l := lists[s.Name]
 	r.Questions += l.Asks
 	r.ToDo += l.Plain
+	r.OnOthers += l.On
 	if l.Asks > 0 {
 		r.Rank = RankNeedsYou
 	}
@@ -157,7 +162,7 @@ func (r *Rollup) add(s Session, lists map[string]ListCount, own bool) {
 }
 
 // Parts is the roll-up as its line's parts: the state, then the counts, strongest first, each only when non-zero;
-// a working or waiting state is said by its count when it has one. "· N to do" comes last.
+// a working or waiting state is said by its count when it has one. "· N to do · N on others" come last.
 func (r Rollup) Parts() []string {
 	var ps []string
 	count := func(n int, what string) {
@@ -194,6 +199,7 @@ func (r Rollup) Parts() []string {
 		count(r.Waiting, "waiting")
 	}
 	count(r.ToDo, "to do")
+	count(r.OnOthers, "on others")
 	return ps
 }
 
