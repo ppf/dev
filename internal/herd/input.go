@@ -230,7 +230,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click on a row of NEEDS YOU selects it there; on a card it leaves NEEDS YOU: on its ▸/▾ folds
+// handleMouse: a left click on a row of NEEDS YOU selects it there, on one of its options answers it, as its key does; on a card it leaves NEEDS YOU: on its ▸/▾ folds
 // or unfolds it; on one of its dialog's options picks it (Submit goes on), as its key does; on Open switches to the
 // worker, on Message… opens the reply box for it, on its PR opens it, on × asks to close it; elsewhere on it selects
 // it, for the keys. A deeper session's card has no Message… or ×: its boss closes it.
@@ -238,9 +238,14 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	if _, at := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
+	if _, at, spans := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
 		if i := at[ms.Y]; i >= 0 && m.box.session == "" {
 			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].sig, message{}, ""
+			for _, sp := range spans[ms.Y] {
+				if ms.X >= sp.x0 && ms.X < sp.x1 {
+					return m.handleNeedKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune('1' + sp.n)}})
+				}
+			}
 		}
 		return m, nil
 	}

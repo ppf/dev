@@ -749,7 +749,8 @@ func TestNeedsOpenLongOption(t *testing.T) {
 	var calls []answerCall
 	r := NeedRow{Kind: NeedListAsk, Project: "dev", Text: "Pick?", Options: []string{"Keep the grouping, add the items under their boss", "Wait"}, Session: "boss-dev"}
 	var got []string
-	for _, l := range needsModel(&calls).openLines(r, 30) {
+	lines, _ := needsModel(&calls).openLines(r, 30)
+	for _, l := range lines {
 		if ansi.StringWidth(l) > 30 {
 			t.Errorf("%q is wider than 30", l)
 		}
@@ -790,7 +791,8 @@ func TestNeedLineStaleAge(t *testing.T) {
 	if line := ansi.Strip(m.needLine(rows[0], 22, false)); strings.Contains(line, "18h") {
 		t.Errorf("narrow line = %q", line)
 	}
-	if open := ansi.Strip(strings.Join(m.openLines(rows[0], 40), "\n")); strings.Contains(open, "18h") {
+	openAsk, _ := m.openLines(rows[0], 40)
+	if open := ansi.Strip(strings.Join(openAsk, "\n")); strings.Contains(open, "18h") {
 		t.Errorf("open ask marked:\n%s", open)
 	}
 	m.needs[0].Error = "list not read: bad JSON"
@@ -800,5 +802,33 @@ func TestNeedLineStaleAge(t *testing.T) {
 	m.needs[0].Error, m.needs[0].Stale = "", false
 	if line := ansi.Strip(m.needLine(m.needRows()[0], 40, false)); strings.Contains(line, "18h") {
 		t.Errorf("fresh list marked: %q", line)
+	}
+}
+
+// A click on an open ask's option answers it as its key does; one on a closed ask's row only opens it.
+func TestNeedsMouseOption(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	press := func(m Model, y int) (Model, tea.Cmd) {
+		next, cmd := m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 8, Y: y})
+		return next.(Model), cmd
+	}
+	m, _ = press(m, m.render().needs[0].line)
+	var y int
+	for _, h := range m.render().needs {
+		if h.opt == 2 {
+			y = h.line
+		}
+	}
+	if y == 0 {
+		t.Fatalf("no target for option 2: %v", m.render().needs)
+	}
+	m, cmd := press(m, y)
+	if cmd == nil || !m.answering {
+		t.Fatalf("click on option 2: cmd %v answering %v", cmd, m.answering)
+	}
+	cmd()
+	if len(calls) != 1 || calls[0].option != "Wait" {
+		t.Errorf("answered %+v, want Wait", calls)
 	}
 }

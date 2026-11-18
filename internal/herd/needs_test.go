@@ -210,7 +210,8 @@ func TestNeedsStaleAge(t *testing.T) {
 		}
 		r.Text = strings.Repeat("a long question ", 8)
 		marked := 0
-		for _, l := range m.needLines(r, 12, 80, true) {
+		rowLines, _ := m.needLines(r, 12, 80, true)
+		for _, l := range rowLines {
 			if ansi.StringWidth(l) > 80 {
 				t.Errorf("%d wide: %q", ansi.StringWidth(l), l)
 			}
@@ -605,7 +606,7 @@ func TestNeedsBlockFits(t *testing.T) {
 		if got := m.render(); len(got) != h {
 			t.Errorf("height %d: %d lines", h, len(got))
 		}
-		if lines, _ := m.needBlock(h - 1); len(lines) > h-1 {
+		if lines, _, _ := m.needBlock(h - 1); len(lines) > h-1 {
 			t.Errorf("height %d: block of %d lines", h, len(lines))
 		}
 	}
@@ -718,5 +719,112 @@ func TestNeedsLongOptions(t *testing.T) {
 	m, _ = keys(m, "esc")
 	if strings.Contains(strings.Join(plain(m.render()), "\n"), "Drop it") {
 		t.Error("unselected row shows all options")
+	}
+}
+
+func click(m Model, x, y int) (Model, tea.Cmd) {
+	next, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	return next.(Model), cmd
+}
+
+// A click on an option of a list ask answers it, its row selected or not; one on a row's text only selects it.
+func TestNeedsClickOption(t *testing.T) {
+	for _, selected := range []bool{false, true} {
+		var answered []listAnswer
+		m := needsBoard(t, &answered)
+		if selected {
+			m = selectKind(t, m, sidebar.NeedListAsk)
+		}
+		lines := plain(m.render())
+		y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Release now?") })
+		x := strings.Index(lines[y+1], "2 Later")
+		if x < 0 {
+			t.Fatalf("selected %v: no option 2 on %q", selected, lines[y+1])
+		}
+		_, cmd := click(m, x+3, y)
+		if cmd != nil {
+			t.Errorf("selected %v: a click on the text answered", selected)
+		}
+		next, cmd := click(m, x+3, y+1)
+		if cmd == nil {
+			t.Fatalf("selected %v: the click sent nothing", selected)
+		}
+		next.Update(cmd())
+		if len(answered) != 1 || answered[0].option != "Later" {
+			t.Errorf("selected %v: answered %+v, want Later", selected, answered)
+		}
+	}
+}
+
+// A click on a row without answerable options or on a dialog's text answers nothing.
+func TestNeedsClickNoAnswer(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	lines := plain(m.render())
+	for _, text := range []string{"allow Ba", "Call Vince"} {
+		y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, text) })
+		if y < 0 {
+			t.Fatalf("no row with %q", text)
+		}
+		if _, cmd := click(m, strings.Index(lines[y], text), y); cmd != nil {
+			t.Errorf("click on %q answered", text)
+		}
+	}
+}
+
+// A selected row's options wrapped one per line are targets on each of their lines.
+func TestNeedsClickWrappedOption(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.width = 20
+	m = selectKind(t, m, sidebar.NeedListAsk)
+	lines := plain(m.render())
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "2 Later") })
+	if y < 0 || strings.Contains(lines[y], "1 Now") {
+		t.Fatalf("options not wrapped:\n%s", strings.Join(lines, "\n"))
+	}
+	_, cmd := click(m, 8, y)
+	if cmd == nil {
+		t.Fatal("the click sent nothing")
+	}
+	cmd()
+	if len(answered) != 1 || answered[0].option != "Later" {
+		t.Errorf("answered %+v, want Later", answered)
+	}
+}
+
+// Only options 1-9 are click targets: a tenth would send a key that is no digit.
+func TestNeedsClickTenthOption(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	opts := make([]string, 10)
+	for i := range opts {
+		opts[i] = "o" + strconv.Itoa(i)
+	}
+	m.snap.todo.Items[0].Options = opts
+	m = selectKind(t, m, sidebar.NeedListAsk)
+	m.width = 100
+	_, at, spans := m.needBlock(m.height - len(m.bottom()))
+	for y := range at {
+		for _, sp := range spans[y] {
+			if sp.n > 8 {
+				t.Errorf("option %d is a click target", sp.n+1)
+			}
+		}
+	}
+}
+
+// The ellipsis of a truncated options line is no target.
+func TestNeedsClickTruncatedOptions(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.width = 14
+	lines := plain(m.render())
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "1 Now") })
+	if y < 0 {
+		t.Fatalf("no options line:\n%s", strings.Join(lines, "\n"))
+	}
+	if _, cmd := click(m, 13, y); cmd != nil {
+		t.Errorf("click on the ellipsis answered: %q", lines[y])
 	}
 }
