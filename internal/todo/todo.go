@@ -504,7 +504,7 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 			if err != nil {
 				return fmt.Errorf("the user's pick %q: %w", picked, err)
 			}
-			if !strings.EqualFold(want, answer) {
+			if want != answer {
 				return fmt.Errorf("the user picked %q, not %q", picked, answer)
 			}
 		}

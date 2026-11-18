@@ -400,11 +400,14 @@ func TestPickFor(t *testing.T) {
 		want     string
 	}{
 		{"its item", pick("dev #7: Merge #148? (CI green)", "Merge"), "Merge #148?", ""},
+		{"boss name", pick("boss-dev #7: Merge #148?", "Merge"), "Merge #148?", ""},
 		{"no --question", pick("dev #7: Merge #148?", "Merge"), "", "needs --question"},
 		{"several questions", pick("", ""), "Merge #148?", "wasn't one question"},
 		{"another item number", pick("dev #6: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"another boss", pick("terminal #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"another text", pick("dev #7: Ship?", "Ship"), "Merge #148?", "not boss-dev #7"},
+		{"number prefix", pick("dev #70: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
+		{"project suffix", pick("api-dev #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"left open", pick("dev #7: Merge #148?", "leave it open"), "Merge #148?", "the item stays open"},
 	} {
 		err := pickFor(tt.pick, "boss-dev", 7, tt.question)

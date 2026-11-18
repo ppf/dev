@@ -132,7 +132,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`right before each and skip an item answered or gone meanwhile. The question starts "<project> #<n>: <item text word ` +
 	`for word>", then its context; the options are the item's, its recommended one first with ` +
 	`" (Recommended)" (an item with one option gets "Leave it open" beside it; one with more than 4 shows the first 4 and ` +
-	`lists the rest by number in the question, for the user to type as Other). Relay each pick before the next question ` +
+	`lists the rest's labels in the question, for the user to type as Other). Relay each pick before the next question ` +
 	`with ` + "`dev todo answer <boss> <n> \"<picked option or the user's words>\" --question \"<item text>\" --via manager`" + `: ` +
 	`dev takes your AskUserQuestion pick (one question, naming that item, the option picked) once, or the user's latest ` +
 	`message here when it clearly answers that item, as their answer. A skipped or dismissed question, or "Leave it open", leaves the item open: don't ask it again this turn; ` +

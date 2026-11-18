@@ -663,6 +663,13 @@ func TestAnswerPick(t *testing.T) {
 	if it, err := s.AnswerPick(id, "", "1", "merge (recommended)", 0, now); err != nil || it.Answer != "Merge" {
 		t.Errorf("AnswerPick = %+v, %v", it, err)
 	}
+	id, err = s.Add(Item{Text: "Branch?", Options: []string{"main"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(id, "", "release/abc", "Release/ABC", 0, now); err == nil {
+		t.Error("free text with another case: answered, want refused")
+	}
 }
 
 func TestAnswerBefore(t *testing.T) {

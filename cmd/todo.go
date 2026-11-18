@@ -352,13 +352,14 @@ func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 // question, or that left it open.
 func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
 	asked := strings.ToLower(pick.Question)
+	item := fmt.Sprintf(" #%d: ", id)
+	named := strings.HasPrefix(asked, strings.ToLower(boss)+item) || strings.HasPrefix(asked, strings.ToLower(strings.TrimPrefix(boss, "boss-"))+item)
 	switch {
 	case question == "":
 		return errors.New("--via manager from a pick needs --question with the item's text")
 	case pick.Question == "":
 		return errors.New("--via manager: the user's pick wasn't one question: ask one item per question")
-	case !strings.Contains(asked, strings.ToLower(question)) || !strings.Contains(asked, fmt.Sprintf("#%d", id)) ||
-		!strings.Contains(asked, strings.ToLower(strings.TrimPrefix(boss, "boss-"))):
+	case !named || !strings.Contains(asked, strings.ToLower(question)):
 		return fmt.Errorf("--via manager: the user's pick was for %q, not %s #%d %q", pick.Question, boss, id, question)
 	case strings.EqualFold(pick.Answer, leaveOpen):
 		return fmt.Errorf("--via manager: the user picked %q: the item stays open", leaveOpen)
