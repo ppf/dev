@@ -236,18 +236,45 @@ func TestRollLineManagerPlainOnly(t *testing.T) {
 	}
 }
 
-// A workerless boss with plain items only keeps a red "N need you" first, without the idle its row already says; what is cut is the tail.
+// A workerless boss with plain items only keeps a red "N need you", without the idle or "no workers" its rows already say.
 func TestRollLineWorkerlessPlainOnly(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
 	for _, width := range []int{20, 36, 40} {
 		got, _ := rollLine(r, width)
-		if !strings.HasPrefix(got, red+"1 need you"+reset) || !strings.HasPrefix(ansi.Strip(got), "1 need you · no w") {
+		if !strings.HasPrefix(got, red+"1 need you"+reset) || ansi.Strip(got) != "1 need you" {
 			t.Errorf("width %d: %q", width, got)
 		}
 		if strings.Contains(strings.Split(ansi.Strip(got), " · ")[0], "…") {
 			t.Errorf("width %d: need you cut: %q", width, ansi.Strip(got))
 		}
+	}
+}
+
+// A workerless boss: "no workers" never shares the line with a need you, the cost or "on others".
+func TestRollLineNoWorkersLast(t *testing.T) {
+	boss := Session{Name: "b", ID: "$1", Boss: true, State: agent.Idle, HasCost: true, CostUSD: 28.47}
+	for _, tc := range []struct {
+		name string
+		list ListCount
+	}{
+		{"to do", ListCount{Plain: 6, On: 5}},
+		{"ask open", ListCount{Asks: 6, On: 5}},
+	} {
+		r := Subtree([]Session{boss}, map[string]ListCount{"b": tc.list})["b"]
+		// rollLine gets the pane width less 5: the sidebar at 36 and 40 columns
+		for pane, want := range map[int]string{36: "6 need you · $28.47", 40: "6 need you · $28.47 · 5 on others"} {
+			got, _ := rollLine(r, pane-5)
+			if ansi.Strip(got) != want {
+				t.Errorf("%s, %d columns: %q, want %q", tc.name, pane, ansi.Strip(got), want)
+			}
+		}
+	}
+	// Nothing else on the line: "no workers" fills it
+	alone := Subtree([]Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}, nil)["b"]
+	alone.ClosedUSD = 1
+	if got, _ := rollLine(alone, 35); ansi.Strip(got) != "no workers" {
+		t.Errorf("alone = %q", ansi.Strip(got))
 	}
 }
 
@@ -411,7 +438,7 @@ func TestRollLineLeavesOutOwnState(t *testing.T) {
 		// A held wait is not on the row above: it stays
 		{"resuming boss", []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle, Resume: true}, worker(agent.Idle)}, "waiting · 7 need you · 6 on others"},
 		{"idle boss, idle worker", []Session{boss(agent.Idle), worker(agent.Idle)}, "7 need you · 6 on others"},
-		{"idle boss, no workers", []Session{boss(agent.Idle)}, "7 need you · no workers · 6 on others"},
+		{"idle boss, no workers", []Session{boss(agent.Idle)}, "7 need you · 6 on others"},
 		{"idle boss, working worker", []Session{boss(agent.Idle), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
 		{"working boss, working worker", []Session{boss(agent.Working), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
 	} {
