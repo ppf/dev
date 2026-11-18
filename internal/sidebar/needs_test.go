@@ -689,3 +689,36 @@ func TestNeedsBoardLine(t *testing.T) {
 		t.Errorf("no rows: header %d", f.header)
 	}
 }
+
+// An open ask wraps a long option under its number instead of cutting it.
+func TestNeedsOpenLongOption(t *testing.T) {
+	var calls []answerCall
+	r := NeedRow{Kind: NeedListAsk, Project: "dev", Text: "Pick?", Options: []string{"Keep the grouping, add the items under their boss", "Wait"}, Session: "boss-dev"}
+	var got []string
+	for _, l := range needsModel(&calls).openLines(r, 30) {
+		if ansi.StringWidth(l) > 30 {
+			t.Errorf("%q is wider than 30", l)
+		}
+		got = append(got, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	text := strings.Join(got, "\n")
+	for _, want := range []string{"1 Keep the grouping, add", "the items under their", "boss", "2 Wait"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q missing:\n%s", want, text)
+		}
+	}
+}
+
+// An open ask with long wrapped options is cut to the pane, so NEEDS YOU's header stays on screen.
+func TestNeedsOpenLongOptionsFitPane(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	long := strings.Repeat("a long option ", 6)
+	m.needs[0].Items[0].Options = []string{long, long, long, long}
+	m.snap.height = 12
+	m.needMode, m.needOpen, m.needIdx, m.needKey = true, true, 0, m.needRows()[0].key()
+	lines, _ := m.renderNeeds(40, 12)
+	if len(lines) > 12 || !strings.Contains(ansi.Strip(lines[0]), "NEEDS YOU") {
+		t.Errorf("%d lines, first %q", len(lines), lines[0])
+	}
+}
