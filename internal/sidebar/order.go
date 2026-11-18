@@ -32,7 +32,8 @@ func Group(name, project string) string {
 
 // Order returns sessions sorted by (Group, Name) in byte order, each worker a coordinator started
 // (StartedBy) moved right after it, into its group, one Depth deeper: the sidebar's rows,
-// @sidebar_session_order, dev goto's numbers and the kill replacement all use it.
+// @sidebar_session_order, dev goto's numbers and the kill replacement all use it. A manager (a root boss
+// that started bosses) keeps its bosses in their own groups at its Depth, all sharing its Root.
 func Order(sessions []Session) []Session {
 	sorted := slices.Clone(sessions)
 	slices.SortStableFunc(sorted, func(a, b Session) int {
@@ -58,27 +59,48 @@ func Order(sessions []Session) []Session {
 	}
 	out := make([]Session, 0, len(sorted))
 	placed := map[string]bool{}
-	var place func(s Session, depth int, group string)
-	place = func(s Session, depth int, group string) {
+	var place func(s Session, depth int, group, root string)
+	place = func(s Session, depth int, group, root string) {
 		if s.ID != "" {
 			if placed[s.ID] {
 				return
 			}
 			placed[s.ID] = true
 		}
-		s.Depth, s.Project, s.Group = depth, s.Group, group
+		s.Depth, s.Project, s.Group, s.Root = depth, s.Group, group, root
+		kids := children[s.ID]
+		managing := depth == 0 && root == "" && s.Boss && slices.ContainsFunc(kids, func(c Session) bool { return c.Boss })
+		if managing {
+			root = s.Name
+			s.Root = root
+		}
 		out = append(out, s)
-		for _, c := range children[s.ID] {
-			place(c, depth+1, group)
+		if !managing {
+			for _, c := range kids {
+				place(c, depth+1, group, root)
+			}
+			return
+		}
+		// A manager's own workers come before its bosses, so no boss's roll-up counts them; each boss
+		// keeps its own group, at the manager's depth
+		for _, c := range kids {
+			if !c.Boss {
+				place(c, depth+1, group, root)
+			}
+		}
+		for _, c := range kids {
+			if c.Boss {
+				place(c, depth, c.Group, root)
+			}
 		}
 	}
 	for _, s := range roots {
-		place(s, 0, s.Group)
+		place(s, 0, s.Group, "")
 	}
 	// Only a cycle of starters leaves sessions unplaced: list them flat rather than drop them
 	for _, s := range sorted {
 		if s.ID != "" && !placed[s.ID] {
-			place(s, 0, s.Group)
+			place(s, 0, s.Group, "")
 		}
 	}
 	return out
