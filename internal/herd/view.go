@@ -131,7 +131,7 @@ func (m Model) bottom() []string {
 			hint = "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
 		}
 	}
-	if len(m.needRows()) > 0 {
+	if len(m.needRows()) > 0 && !m.tooShort() {
 		hint += "  n needs"
 	}
 	return []string{sidebar.HintRow(pages+todo+hint, w)}
