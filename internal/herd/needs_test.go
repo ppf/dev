@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -180,6 +181,56 @@ func TestNeedsRender(t *testing.T) {
 	}
 	if hint := lines[len(lines)-1]; !strings.Contains(hint, "1-9 answer  m reply  g/⏎ go  esc cards") {
 		t.Errorf("hint = %q", hint)
+	}
+}
+
+// A row of a stale list wears its list's age at the right edge, faint; a fresh list's rows and narrow panes show none.
+func TestNeedsStaleAge(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.asks = slices.Clone(managerAsks)
+	i := slices.IndexFunc(m.snap.asks, func(l todo.BossList) bool { return l.Boss == "boss-noc" })
+	m.snap.asks[i].Stale, m.snap.asks[i].Updated = true, -(18*time.Hour+19*time.Minute).Milliseconds()/1000
+	all := strings.Join(plain(m.render()), "\n")
+	for _, want := range []string{"Release now?", "18h 19m"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("%q missing:\n%s", want, all)
+		}
+	}
+	if n := strings.Count(all, "18h 19m"); n != 2 {
+		t.Errorf("%d marks, want one per boss-noc row (2):\n%s", n, all)
+	}
+	if lines := plain(m.render()); strings.Contains(lines[2], "18h") || strings.Contains(lines[4], "18h") {
+		t.Errorf("dialog or other boss's row marked:\n%s", strings.Join(lines[:6], "\n"))
+	}
+	long := m.needRows()
+	for _, r := range long {
+		if r.Kind != sidebar.NeedPlain && r.Kind != sidebar.NeedListAsk || r.Boss != "boss-noc" {
+			continue
+		}
+		r.Text = strings.Repeat("a long question ", 8)
+		marked := 0
+		for _, l := range m.needLines(r, 12, 80, true) {
+			if ansi.StringWidth(l) > 80 {
+				t.Errorf("%d wide: %q", ansi.StringWidth(l), l)
+			}
+			if strings.Contains(ansi.Strip(l), "18h 19m") {
+				marked++
+			}
+		}
+		if marked != 1 {
+			t.Errorf("%d marks on a selected wrapped row, want 1", marked)
+		}
+		break
+	}
+	for i, l := range m.render() {
+		if w := ansi.StringWidth(l); w > 80 {
+			t.Errorf("line %d is %d wide", i, w)
+		}
+	}
+	m.width = 30
+	if strings.Contains(strings.Join(plain(m.render()), "\n"), "18h 19m") {
+		t.Error("mark kept where the text has no room")
 	}
 }
 

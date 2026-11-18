@@ -3,6 +3,8 @@
 package integration
 
 import (
+	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -198,4 +200,38 @@ func TestHerdReplyBlur(t *testing.T) {
 	if screen := d.T("capture-pane", "-p", "-t", previews); strings.Contains(screen, "esc cancel") {
 		t.Errorf("❌ focus back reopened the box:\n%s", screen)
 	}
+}
+
+// A boss's to do item sits in NEEDS YOU unmarked while its list is fresh; once the list is stale (no change
+// for hours) the row wears the list's age at its right edge.
+func TestHerdNeedsStaleAge(t *testing.T) {
+	d, _, coord, previews := herdServer(t, "")
+	cmd := exec.Command(devBin, "todo", "add", "Call Vince")
+	cmd.Env = d.scriptEnv("TMUX_PANE=" + coord)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("❌ todo add: %v %s", err, out)
+	}
+	waitPane(t, d, previews, "the fresh item, unmarked", func(s string) bool {
+		return strings.Contains(s, "NEEDS YOU 1") && strings.Contains(s, "Call Vince") && !strings.Contains(s, "18h")
+	})
+	t.Logf("fresh:\n%s", d.T("capture-pane", "-p", "-t", previews))
+	files, _ := filepath.Glob(filepath.Join(d.tmp, "state", "dev", "todo", "*.json"))
+	if len(files) != 1 {
+		t.Fatalf("❌ list files = %v, want one", files)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list map[string]any
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	list["updated"] = time.Now().Add(-18 * time.Hour).Unix()
+	b, _ := json.Marshal(list)
+	writeFile(t, files[0], string(b))
+	waitPane(t, d, previews, "the stale item, marked", func(s string) bool {
+		return strings.Contains(s, "Call Vince") && strings.Contains(s, "18h")
+	})
+	t.Logf("stale:\n%s", d.T("capture-pane", "-p", "-t", previews))
 }
