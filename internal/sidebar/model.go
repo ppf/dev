@@ -96,9 +96,11 @@ type Model struct {
 	needsErr    error
 	needsLoad   func() ([]NeedList, error)
 	needsAnswer func(boss string, id int, question, option string) (string, error)
+	needsDone   func(boss string, id int, text string) (string, error)
 	// The cursor is local: @sidebar_selected_session only names sessions. needKey keeps it on its row across reads.
-	answering          bool  // an answer is running: a second key would send another
-	answerErr          error // the last answer's failure, kept on the bottom row until the next key: a flash can be missed
+	answering          bool   // an answer is running: a second key would send another
+	ticked             string // the key of the row d ticked: it takes no second d until a read shows it gone
+	answerErr          error  // the last answer's failure, kept on the bottom row until the next key: a flash can be missed
 	needMode, needOpen bool
 	needIdx            int
 	needKey            string
@@ -133,7 +135,7 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
@@ -159,6 +161,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.needs = msg.lists
 		}
 		m.fixNeeds()
+		if m.ticked != "" && !slices.ContainsFunc(m.needRows(), func(r NeedRow) bool { return r.key() == m.ticked }) {
+			m.ticked = ""
+		}
 		if !msg.chain {
 			return m, nil
 		}
@@ -166,6 +171,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case answeredMsg:
 		m.answering, m.answerErr = false, msg.err
 		if msg.err != nil {
+			m.ticked = ""
 			showMessage(m.c, msg.client, "❌ "+msg.err.Error())
 		} else {
 			showMessage(m.c, msg.client, "✅ "+msg.out)

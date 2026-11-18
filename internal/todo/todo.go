@@ -427,6 +427,26 @@ func (s Store) Done(ids []int, now time.Time) error {
 	})
 }
 
+// DoneText ticks the user's own open item id, only while it still reads text, as item numbers restart once a list
+// empties and a boss may rewrite its list under a board's row.
+func (s Store) DoneText(id int, text string, now time.Time) error {
+	return s.update(now, func(f *file) error {
+		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
+		switch {
+		case i < 0:
+			return fmt.Errorf("no open item %d", id)
+		case f.Items[i].Text != text:
+			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, f.Items[i].Text, text)
+		case f.Items[i].On != "":
+			return fmt.Errorf("item %d is on %s, not the user's to tick", id, f.Items[i].On)
+		case len(f.Items[i].Options) > 0:
+			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
+		}
+		f.Items[i].Done = now.Unix()
+		return nil
+	})
+}
+
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
 const MaxOptions = 9
 

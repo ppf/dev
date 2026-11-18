@@ -733,3 +733,26 @@ func TestAll(t *testing.T) {
 		t.Errorf("All = %q, want %q", got, want)
 	}
 }
+
+// DoneText ticks only the user's own item that still reads the text a board showed.
+func TestDoneText(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b", On: "Marek"}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DoneText(1, "other", now); err == nil || !strings.Contains(err.Error(), "look at the list again") {
+		t.Errorf("another text: %v", err)
+	}
+	if err := s.DoneText(2, "b", now); err == nil || !strings.Contains(err.Error(), "on Marek") {
+		t.Errorf("an item on someone: %v", err)
+	}
+	if err := s.DoneText(9, "a", now); err == nil || err.Error() != "no open item 9" {
+		t.Errorf("no item: %v", err)
+	}
+	if err := s.DoneText(1, "a", now); err != nil {
+		t.Errorf("the item as shown: %v", err)
+	}
+}

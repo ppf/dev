@@ -162,7 +162,7 @@ func TestNeedsRender(t *testing.T) {
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ☐ noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
 		"noc-triage  via boss-noc  Bash prompt · in the block ↑", "n needs"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
@@ -581,6 +581,49 @@ func TestNeedsShortPaneAndFailures(t *testing.T) {
 	next, _ = m.Update(answeredMsg{session: "other", msg: alert("❌ other: boom")})
 	if m = next.(Model); m.needDone == "" {
 		t.Error("another session's failure dropped the answered row")
+	}
+}
+
+// d ticks a plain item through dev todo done, never an ask; a failure shows and the row takes keys again.
+func TestNeedsTick(t *testing.T) {
+	var answered []listAnswer
+	m := selectKind(t, needsBoard(t, &answered), sidebar.NeedPlain)
+	row := m.needRows()[m.needIdx]
+	if hint := strings.Join(plain(m.render()), "\n"); !strings.Contains(hint, "d tick (stays till ticked)") {
+		t.Errorf("hint missing:\n%s", hint)
+	}
+	var ticked [][2]any
+	m.tickList = func(boss string, id int, text string) (string, error) {
+		ticked = append(ticked, [2]any{boss, id})
+		return "done " + strconv.Itoa(id), nil
+	}
+	m, cmd := keys(m, "d")
+	if cmd == nil || m.answering != row.Boss {
+		t.Fatalf("d on a plain item: answering %q", m.answering)
+	}
+	next, _ := m.Update(cmd())
+	if m = next.(Model); m.answering != "" || !strings.Contains(m.msg.text, "done") || !slices.Equal(ticked, [][2]any{{row.Boss, row.ID}}) {
+		t.Errorf("after: answering %q msg %q ticked %v", m.answering, m.msg.text, ticked)
+	}
+	if again, cmd := keys(m, "d"); cmd != nil || !strings.Contains(again.msg.text, "answered: press again") {
+		t.Errorf("the ticked row still shown took d: %q", again.msg.text)
+	}
+
+	ask := selectKind(t, needsBoard(t, &answered), sidebar.NeedListAsk)
+	ask.tickList = func(string, int, string) (string, error) { t.Error("d ticked an ask"); return "", nil }
+	if ask, cmd := keys(ask, "d"); cmd != nil || !strings.Contains(ask.msg.text, "plain item") {
+		t.Errorf("d on an ask: cmd %v msg %q", cmd != nil, ask.msg.text)
+	}
+
+	fail := selectKind(t, needsBoard(t, &answered), sidebar.NeedPlain)
+	fail.tickList = func(string, int, string) (string, error) { return "", errors.New("timed out") }
+	fail, cmd = keys(fail, "d")
+	next, _ = fail.Update(cmd())
+	if fail = next.(Model); !fail.msg.alert || !strings.Contains(fail.msg.text, "timed out") {
+		t.Fatalf("msg %q", fail.msg.text)
+	}
+	if _, cmd := keys(fail, "d"); cmd == nil {
+		t.Error("the row didn't take keys again")
 	}
 }
 

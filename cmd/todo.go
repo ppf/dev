@@ -330,7 +330,8 @@ func managerPrompt(c *tmux.Client) (*inbox.Prompt, error) {
 }
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
-	return &cobra.Command{
+	var text string
+	cmd := &cobra.Command{
 		Use:   "done <n>...",
 		Short: "Tick items by number: they show ticked for a few seconds, then leave",
 		Args:  cobra.MinimumNArgs(1),
@@ -345,17 +346,27 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			}
 			slices.Sort(ids)
 			ids = slices.Compact(ids)
+			if text != "" && len(ids) != 1 {
+				return errors.New("--text ticks one item")
+			}
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 			now := time.Now()
-			if err := s.Done(ids, now); err != nil {
+			if text != "" {
+				err = s.DoneText(ids[0], text, now)
+			} else {
+				err = s.Done(ids, now)
+			}
+			if err != nil {
 				return err
 			}
 			return printCount(cmd.OutOrStdout(), s, "done "+strings.Join(args, " ")+" · ", now)
 		},
 	}
+	cmd.Flags().StringVar(&text, "text", "", "the item's text: refuse when item n reads otherwise or is on someone else (a board's tick)")
+	return cmd
 }
 
 func newTodoClearCmd(boss *string) *cobra.Command {

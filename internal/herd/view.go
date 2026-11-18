@@ -101,6 +101,9 @@ func (m Model) bottom() []string {
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
 	if m.needMode {
+		if rows := m.needRows(); m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain {
+			return []string{sidebar.HintRow("j/k move  d tick (stays till ticked)  g/⏎ go  esc cards", w)}
+		}
 		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply  g/⏎ go  esc cards", w)}
 	}
 	pages := ""
