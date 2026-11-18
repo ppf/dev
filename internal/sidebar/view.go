@@ -64,7 +64,7 @@ func (m Model) render() frame {
 		f.lines = append(f.lines, " "+muted+"No sessions"+reset)
 	}
 	unwrapped := len(needs) + listLines(m.snap.sessions)
-	rolls := rollups(m.snap.sessions)
+	rolls := Subtree(m.snap.sessions, needCounts(m.needs))
 	for i, s := range m.snap.sessions {
 		if h, ok := headFor(m.snap.sessions, i); ok {
 			if h.gap {
@@ -174,8 +174,8 @@ func (m Model) render() frame {
 		for _, l := range wrapped {
 			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
 		}
-		if r := rolls[i]; r != nil {
-			text, tw := r.line(maxMeta - iw)
+		if r := rolls[s.Name]; hasRollLine(r) {
+			text, tw := rollLine(r, maxMeta-iw)
 			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
 		}
 	}
@@ -196,7 +196,7 @@ func (m Model) render() frame {
 // listLines is how many lines render draws for sessions when no title wraps.
 func listLines(sessions []Session) int {
 	n := 2
-	rolls := rollups(sessions)
+	rolls := Subtree(sessions, nil)
 	for i := range sessions {
 		if h, ok := headFor(sessions, i); ok {
 			n++
@@ -205,7 +205,7 @@ func listLines(sessions []Session) int {
 			}
 		}
 		n += 2
-		if rolls[i] != nil {
+		if hasRollLine(rolls[sessions[i].Name]) {
 			n++
 		}
 	}
@@ -366,67 +366,13 @@ func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
 }
 
-// rollup is a boss's third line: how many of its workers need a decision or work, and what the boss and
-// all its workers cost. A manager's counts its bosses apart from its workers.
-type rollup struct {
-	waiting, working, workers, bosses int
-	cost                              float64
-	hasCost                           bool
-}
+// hasRollLine reports a boss row with a third line: a boss with sessions under it.
+func hasRollLine(r *Rollup) bool { return r != nil && r.Under > 0 }
 
-// rollups returns, per index of sessions (display order), the roll-up of a boss with workers or a manager
-// with sessions; nil for any other row. Order keeps a boss's workers, nested ones included, right after it
-// at a greater Depth, and a manager's group, bosses included, right after it under the same Root.
-func rollups(sessions []Session) []*rollup {
-	out := make([]*rollup, len(sessions))
-	for i, s := range sessions {
-		if !s.Boss {
-			continue
-		}
-		isManager := s.Root != "" && s.Root == s.Name
-		var members []Session
-		for _, w := range sessions[i+1:] {
-			inGroup := w.Depth > s.Depth
-			if isManager {
-				inGroup = w.Root == s.Root
-			}
-			if !inGroup {
-				break
-			}
-			members = append(members, w)
-		}
-		if len(members) == 0 {
-			continue
-		}
-		r := &rollup{}
-		r.addCost(s)
-		for _, w := range members {
-			if isManager && w.Boss && w.Depth == s.Depth {
-				r.bosses++
-			} else {
-				r.workers++
-			}
-			switch {
-			case w.Deciding:
-				r.waiting++
-			case w.State == agent.Working:
-				r.working++
-			}
-			r.addCost(w)
-		}
-		out[i] = r
-	}
-	return out
-}
-
-func (r *rollup) addCost(s Session) {
-	if s.HasCost {
-		r.cost, r.hasCost = r.cost+s.CostUSD, true
-	}
-}
-
-// line is the roll-up in width columns and its display width: the cost goes before the counts do.
-func (r *rollup) line(width int) (string, int) {
+// rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
+// red "N need you" when it needs you, then its counts (a manager's bosses · workers first), ⚠ and what it and
+// everything under it cost; the cost goes before the counts do.
+func rollLine(r *Rollup, width int) (string, int) {
 	var plain, styled string
 	add := func(colour, text string) {
 		if plain != "" {
@@ -437,27 +383,40 @@ func (r *rollup) line(width int) (string, int) {
 		styled += colour + text + reset
 	}
 	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
-	if r.waiting > 0 {
-		add(red, fmt.Sprintf("%d need you", r.waiting))
+	parts := r.Parts()
+	if r.Rank == RankNeedsYou {
+		// "needs you · 2 questions" as "2 need you", to fit a sidebar's width
+		parts = append([]string{fmt.Sprintf("%d need you", r.Questions)}, parts[2:]...)
 	}
-	if r.bosses > 0 {
-		add(muted, plural(r.bosses, "boss", "bosses"))
-		if r.workers > 0 {
-			add(muted, plural(r.workers, "worker", "workers"))
+	lead := len(parts)
+	if r.Bosses > 0 {
+		// A manager's: its bosses and workers after the state, then the other counts only whole
+		lead = 1
+	}
+	for i, p := range parts[:lead] {
+		colour := muted
+		if i == 0 && r.Rank == RankNeedsYou {
+			colour = red
 		}
-		if r.working > 0 && fits(fmt.Sprintf("%d working", r.working)) {
-			add(muted, fmt.Sprintf("%d working", r.working))
-		}
-	} else {
-		if r.working > 0 {
-			add(muted, fmt.Sprintf("%d working", r.working))
-		}
-		if plain == "" {
-			add(muted, fmt.Sprintf("%d idle", r.workers))
+		add(colour, p)
+		if i == 0 && r.Warn {
+			// By the state, where the cut never takes it
+			plain, styled = plain+" ⚠", styled+" "+gold+"⚠"+reset
 		}
 	}
-	if r.hasCost {
-		if cost := FormatCost(r.cost); fits(cost) {
+	if r.Bosses > 0 {
+		add(muted, plural(r.Bosses, "boss", "bosses"))
+		if w := r.Under - r.Bosses; w > 0 {
+			add(muted, plural(w, "worker", "workers"))
+		}
+		for _, p := range parts[lead:] {
+			if fits(p) {
+				add(muted, p)
+			}
+		}
+	}
+	if r.HasCost {
+		if cost := FormatCost(r.CostUSD); fits(cost) {
 			add(muted, cost)
 		}
 	}

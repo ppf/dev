@@ -135,22 +135,22 @@ func (m Model) hitAt(x, y int) (hit, bool) {
 	return hit{}, false
 }
 
-// folded reports whether t's card shows as one row: never under Needs you, else the user's choice, else an
-// idle card without a warning is.
+// folded reports whether t's card shows as one row: never while it needs the user itself, else the user's
+// choice, else a boss's card (its row says its subtree) or an idle card without a warning is.
 func (t tile) folded(folds map[string]bool) bool {
-	if t.section() == needsYouSection {
+	if t.own() == needsYouSection {
 		return false
 	}
 	if f, ok := folds[t.sess.Name]; ok {
 		return f
 	}
-	return t.section() == restingSection && len(warnings(t)) == 0
+	return t.roll != nil || t.section() == restingSection && len(warnings(t)) == 0
 }
 
-// fold flips t's card between one row and open, for as long as its session is listed; a Needs you card stays
-// open.
+// fold flips t's card between one row and open, for as long as its session is listed; a card needing the user
+// itself stays open.
 func (m *Model) fold(t tile) {
-	if t.section() == needsYouSection {
+	if t.own() == needsYouSection {
 		return
 	}
 	if m.folds == nil {
@@ -234,13 +234,18 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 			rowHits(r.hits)
 			rows = append(rows, line(in+r.text))
 		}
-	case sec == needsYouSection:
+	case sec == needsYouSection && (t.roll == nil || t.own() == needsYouSection):
 		status := statusText(t, sec)
 		// Its options show on screen, under it
 		if _, ask, _ := reply(t); len(optionRows(t, iw-len(in))) > 0 {
 			status = strings.Join(strings.Fields(ask), " ")
 		}
 		text(sidebar.Red+bold, status)
+		if t.roll != nil {
+			rows = append(rows, line(in+rollText(*t.roll)))
+		}
+	case t.roll != nil:
+		rows = append(rows, line(in+rollText(*t.roll)))
 	default:
 		text(sidebar.Muted, m.statusText(t, sec))
 	}
@@ -264,8 +269,14 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	for _, l := range lines {
 		text(rule, l)
 	}
+	if t.roll != nil && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) && !t.asks() {
+		text(rule, t.note)
+	}
 	for _, n := range warnings(t) {
 		text(sidebar.Gold, "⚠ "+n)
+	}
+	if t.roll != nil && t.roll.Warn && len(warnings(t)) == 0 {
+		text(sidebar.Gold, "⚠ in its subtree: a failed, stuck or high-context note, or a list not read")
 	}
 	if len(shown) > 0 {
 		rows = append(rows, line(in+rule+"┄ screen "+strings.Repeat("┄", max(0, iw-len(in)-10))+reset))
@@ -426,7 +437,9 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		left += "  " + sidebar.Muted + "via " + t.via + reset
 	}
 	if folded {
-		if s := m.statusText(t, sec); s != "" {
+		if t.roll != nil && !t.deciding {
+			left += "  " + rollText(*t.roll)
+		} else if s := m.statusText(t, sec); s != "" {
 			left += "  " + sidebar.Muted + s + reset
 		}
 		if pr := t.sess.PR; pr.Number != 0 {
@@ -439,7 +452,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 				left += sidebar.Muted + "?" + reset
 			}
 		}
-		if len(warnings(t)) > 0 {
+		if len(warnings(t)) > 0 || t.roll != nil && t.roll.Warn {
 			left += " " + sidebar.Gold + "⚠" + reset
 		}
 	}
@@ -469,6 +482,16 @@ func (m Model) statusText(t tile, sec section) string {
 		return t.sess.Wait.Text(m.clk.Now())
 	}
 	return statusText(t, sec)
+}
+
+// rollText is a boss card's status, its subtree's roll-up, in its section's colour but a trailing "N to do" muted.
+func rollText(r sidebar.Rollup) string {
+	ps := r.Parts()
+	todo := ""
+	if r.ToDo > 0 && len(ps) > 1 {
+		todo, ps = sidebar.Muted+" · "+ps[len(ps)-1]+reset, ps[:len(ps)-1]
+	}
+	return sectionColours[r.Rank] + strings.Join(ps, " · ") + reset + todo
 }
 
 // statusText is what a card says about its worker, leaving out what its section says: the dialog it waits on
@@ -601,9 +624,9 @@ func said(t tile) []string {
 	lines := slices.DeleteFunc(slices.Clone(read), tableRow)
 	// Its dialog or status says the question, but for a dialog without a title or tool, or one neither its
 	// screen nor its hook told
-	asked := t.section() == needsYouSection && (t.pick != nil && (t.pick.d.title != "" || t.pick.tool != "") ||
+	asked := t.own() == needsYouSection && (t.pick != nil && (t.pick.d.title != "" || t.pick.tool != "") ||
 		t.pick == nil && (t.question.Tool != "" || !t.deciding))
-	if len(read) == 0 && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) && !asked {
+	if len(read) == 0 && t.note != "" && !healthNotes[noteKind(t.note)] && !staleNote(t) && !asked && t.roll == nil {
 		if _, text, ok := strings.Cut(t.note, ": "); ok {
 			lines = []string{text}
 		}

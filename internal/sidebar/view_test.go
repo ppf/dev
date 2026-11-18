@@ -634,11 +634,11 @@ func TestViewBossRollupVariants(t *testing.T) {
 	}
 	idle = append(idle, Session{Name: "r", Group: "g", ID: "$3", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting"})
 	idle[1].State = "idle"
-	if got, want := line(40, idle), "    2 idle"; got != want { // an idle reminder (waiting, not deciding) is idle
+	if got, want := line(40, idle), "    idle"; got != want { // an idle reminder (waiting, not deciding) is idle
 		t.Errorf("all idle = %q, want %q", got, want)
 	}
-	if f := newRollupFrame(idle); !strings.Contains(f.lines[f.header+5], muted+"2 idle") {
-		t.Error("idle count not muted")
+	if f := newRollupFrame(idle); !strings.Contains(f.lines[f.header+5], muted+"idle") {
+		t.Error("idle not muted")
 	}
 	if got, want := line(27, rollupSessions()), "    1 need you · 2 working"; got != want {
 		t.Errorf("cost cut before counts = %q, want %q", got, want)
@@ -724,7 +724,7 @@ func TestViewManagerGroup(t *testing.T) {
 		"├─ dev ──────────────────────────────",
 		"│ ● boss-dev                        ×",
 		"│   idle",
-		"│   1 idle",
+		"│   idle",
 		"│ └ ● dev-w1                        ×",
 		"│     idle",
 		"├─ noc ──────────────────────────────",
@@ -762,12 +762,12 @@ func TestViewNoManagerNoRail(t *testing.T) {
 }
 
 func TestManagerRollupText(t *testing.T) {
-	r := &rollup{waiting: 1, working: 3, bosses: 1, workers: 6, cost: 12.5, hasCost: true}
+	r := &Rollup{Rank: RankNeedsYou, Questions: 1, Working: 3, Bosses: 1, Under: 7, CostUSD: 12.5, HasCost: true}
 	for width, want := range map[int]string{
 		60: "1 need you · 1 boss · 6 workers · 3 working · $12.50",
 		35: "1 need you · 1 boss · 6 workers",
 	} {
-		if got, _ := r.line(width); ansi.Strip(got) != want {
+		if got, _ := rollLine(r, width); ansi.Strip(got) != want {
 			t.Errorf("width %d: %q, want %q", width, ansi.Strip(got), want)
 		}
 	}
@@ -784,12 +784,12 @@ func TestViewManagerBossSameGroup(t *testing.T) {
 	if i < 0 || got[i+1] != "│ ○ b                               ×" {
 		t.Errorf("boss divider missing:\n%s", strings.Join(got, "\n"))
 	}
-	if r := rollups(Order([]Session{
+	if r := Subtree(Order([]Session{
 		{Name: "m", Group: "dev", ID: "$1", Boss: true},
 		{Name: "b", Group: "dev", ID: "$3", Boss: true, StartedBy: "m"},
-	})); r[0] == nil || r[0].bosses != 1 {
-		t.Errorf("rollup = %+v", r[0])
-	} else if got, _ := r[0].line(40); strings.Contains(ansi.Strip(got), "worker") {
+	}), nil)["m"]; r == nil || r.Bosses != 1 {
+		t.Errorf("rollup = %+v", r)
+	} else if got, _ := rollLine(r, 40); strings.Contains(ansi.Strip(got), "worker") {
 		t.Errorf("zero workers shown: %q", ansi.Strip(got))
 	}
 }

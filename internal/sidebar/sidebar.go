@@ -61,6 +61,8 @@ type Session struct {
 	CostUSD  float64   // the cost in USD whatever @dev_cost says: the boss roll-up's total
 	HasCost  bool      // CostUSD is known
 	Wait     wait.Wait // its planned wait (dev agent wait-until); zero when none
+	Resume   bool      // a rate limit stopped it and dev resumes it (@dev_resume_at)
+	Note     string    // its latest boss inbox note (@dev_boss_note), "<kind>: <text>"
 
 	ID        string // tmux session id ($N)
 	Boss      bool   // a dev boss session (OptHerd)
