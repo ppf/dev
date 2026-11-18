@@ -2543,7 +2543,8 @@ const ASKS: Ran = {
 const AGENTS: Ran = {
   exitCode: 0,
   stdout: JSON.stringify([
-    { session: 'boss-dev', project: 'dev', state: 'working', boss: true, model: 'opus', effort: 'medium', cost_usd: 3.8 },
+    { session: 'boss-dev', project: 'dev', state: 'working', boss: true, model: 'opus', effort: 'medium', cost_usd: 3.8, cost_total_usd: 9.5, cost_closed_usd: 5.7 },
+    { session: 'boss-ops', project: 'ops', state: 'idle', boss: true, cost_usd: 1, cost_error: 'spent: bad ledger' },
     { session: 'terminal-fix', project: 'terminal', state: 'waiting', deciding: true },
     { session: 'terminal-idle', project: 'terminal', state: 'waiting' },
   ]),
@@ -2571,10 +2572,11 @@ test('the all-projects blocks: asks with option buttons, answered ones struck, a
   expect(needs).not.toContain('terminal-idle')
   expect((await ui.findAll({ type: 'Button' })).map(b => b.props.label).filter(l => typeof l === 'string' && /Merge|Wait/.test(l))).toEqual(['★ Merge', 'Wait'])
   const bosses = readEl((await ui.find({ key: 'fleet:bosses' })) as El).join(' ')
-  expect(bosses).toContain('BOSSES 1')
+  expect(bosses).toContain('BOSSES 2')
+  expect(bosses).toContain('⚠ cost not read')
   expect(bosses).toContain('boss-dev')
   expect(bosses).toContain('1 on your list')
-  expect(bosses).toContain('$3.80')
+  expect(bosses).toContain('$9.50 · $5.70 closed')
   expect(bosses).toContain('opus·medium')
   const messages = readEl((await ui.find({ key: 'fleet:messages' })) as El).join(' ')
   expect(messages).toContain('MESSAGES 1 open')

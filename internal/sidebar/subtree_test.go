@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/spent"
+	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/wait"
 )
 
@@ -274,5 +278,92 @@ func TestRollLineOnOthers(t *testing.T) {
 	}
 	if got := strings.Join(r.Parts(), " · "); got != "1 working · 1 to do · 3 on others" {
 		t.Errorf("parts = %q", got)
+	}
+}
+
+// A boss's cost adds what ended under it, its own ledger and its bosses', but not a conversation live again
+// (resumed), whose cost its pane shows.
+func TestSubtreeSpent(t *testing.T) {
+	ss := []Session{
+		{Name: "m", ID: "$1", Boss: true, Root: "m", CostUSD: 1, HasCost: true, Conversation: "cm"},
+		{Name: "b", ID: "$2", Boss: true, StartedBy: "m", Root: "m", Depth: 1, CostUSD: 2, HasCost: true, Conversation: "cb"},
+		{Name: "w", ID: "$3", StartedBy: "b", Root: "m", Depth: 2, Agent: "Claude", CostUSD: 4, HasCost: true, Conversation: "resumed"},
+	}
+	Spend(ss, map[string]spent.Ledger{"$1": {"closed-boss": 16}, "$2": {"closed": 8, "resumed": 3}})
+	rolls := Subtree(ss, nil)
+	if r := rolls["b"]; r.CostUSD != 14 || r.ClosedUSD != 8 || !r.HasCost {
+		t.Errorf("boss: cost %v, closed %v, has %v; want 14, 8, true", r.CostUSD, r.ClosedUSD, r.HasCost)
+	}
+	if r := rolls["m"]; r.CostUSD != 31 || r.ClosedUSD != 24 {
+		t.Errorf("manager: cost %v, closed %v; want 31, 24", r.CostUSD, r.ClosedUSD)
+	}
+	// Nothing live, only what closed: the total still shows
+	only := []Session{{Name: "b", ID: "$1", Boss: true}}
+	Spend(only, map[string]spent.Ledger{"$1": {"c": 2.5}})
+	if r := Subtree(only, nil)["b"]; r.CostUSD != 2.5 || !r.HasCost || !hasRollLine(r) {
+		t.Errorf("closed only: cost %v, has %v", r.CostUSD, r.HasCost)
+	}
+}
+
+// The cost goes before "N on others", so a 40-column sidebar shows it; "N on others" is dropped first.
+func TestRollLineCostBeforeOnOthers(t *testing.T) {
+	ss := []Session{
+		{Name: "b", ID: "$1", Boss: true, State: agent.Idle, CostUSD: 6.4, HasCost: true},
+		{Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Working, CostUSD: 27.82, HasCost: true},
+	}
+	Spend(ss, map[string]spent.Ledger{"$1": {"c": 20.71}})
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1, On: 2}})["b"]
+	for width, want := range map[int]string{
+		60: "1 working · 1 need you · $54.93 · 2 on others",
+		35: "1 working · 1 need you · $54.93",
+		25: "1 working · 1 need you",
+	} {
+		if got, _ := rollLine(r, width); ansi.Strip(got) != want {
+			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
+		}
+	}
+}
+
+// The sidebar reads each session's ledger and its agent pane's conversation: the boss's roll-up adds what closed,
+// not a conversation live again; an unreadable ledger is a ⚠ and the total leaves it out.
+func TestSubtreeSpentFromPanes(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	ended := func(conversation string, usd string) {
+		t.Helper()
+		c := tmux.NewFake(func([]string) (string, error) {
+			return tmux.FormatRow("/s", "$1", "100", "1", "", usd, conversation), nil
+		})
+		if err := spent.Ended(c, "%1", conversation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ended("closed", "8")
+	ended("resumed", "3")
+	boss := paneRow{Session: "boss", SessionID: "$1", Window: 1, ID: "%1", Command: "claude", StateCmd: "claude", State: agent.Idle,
+		Herd: "1", Cost: "2", Socket: "/s", Created: "100", Conversation: "c-boss"}
+	w := paneRow{Session: "w", SessionID: "$2", Window: 1, ID: "%2", Command: "claude", StateCmd: "claude", State: agent.Working,
+		StartedBy: "boss", Cost: "4", Socket: "/s", Created: "200", Conversation: "resumed"}
+	rows := []paneRow{{Session: "boss", SessionID: "$1", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Width: 40, Height: 30, Herd: "1", Socket: "/s", Created: "100"}, boss, w}
+	snap := func() *Rollup {
+		t.Helper()
+		s, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(string, string, string, string, string) PR { return PR{} })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Subtree(s.sessions, nil)["boss"]
+	}
+	if r := snap(); r.CostUSD != 14 || r.ClosedUSD != 8 || r.Warn {
+		t.Errorf("cost %v, closed %v, warn %v; want 14, 8, false", r.CostUSD, r.ClosedUSD, r.Warn)
+	}
+	ledgers, _ := filepath.Glob(filepath.Join(state, "dev", "spent", "*.json"))
+	if len(ledgers) != 1 {
+		t.Fatalf("ledgers %v", ledgers)
+	}
+	if err := os.WriteFile(ledgers[0], []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := snap(); r.HasCost || !r.Warn || !strings.Contains(r.CostErr, ledgers[0]) || !hasRollLine(r) {
+		t.Errorf("unreadable: has cost %v, warn %v, err %q", r.HasCost, r.Warn, r.CostErr)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/spent"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -37,9 +39,20 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 		Transcript      string `tmux:"@agent_transcript"`
 		EndedID         string `tmux:"@agent_ended_session"`
 		EndedTranscript string `tmux:"@agent_ended_transcript"`
+		Cost            string `tmux:"@agent_cost"`
+		Socket          string `tmux:"socket_path"`
+		SessionID       string `tmux:"session_id"`
+		Created         string `tmux:"session_created"`
+		StartedBy       string `tmux:"@dev_started_by"`
 	}](c, "list-panes", "-s", "-t", tmux.SessionTarget(session))
 	if err != nil {
 		return "", err
+	}
+	live := spent.Ledger{}
+	for _, p := range panes {
+		if cost, ok := agent.ParseCost(p.Cost); ok && p.ID != "" {
+			live[p.ID] = cost
+		}
 	}
 	e.Session, e.At = session, time.Now()
 	var endedID, endedTranscript string
@@ -64,7 +77,16 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 	if dir, err = config.NewDir(filepath.Join(dir, "archive"), strings.ReplaceAll(session, "/", "_")); err != nil {
 		return "", err
 	}
-	return dir, writeRecord(dir, e)
+	if err := writeRecord(dir, e); err != nil || len(panes) == 0 {
+		return dir, err
+	}
+	// Last, so a close that fails before keeps its ledger; one this fails still closes, its record saying so
+	p := panes[0]
+	if err := spent.Closing(c, p.Socket, p.SessionID, p.Created, p.StartedBy, live); err != nil {
+		e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its cost isn't kept: " + err.Error()
+		return dir, writeRecord(dir, e)
+	}
+	return dir, nil
 }
 
 // MarkRemoved records in dir's record that the session's worktree was removed.

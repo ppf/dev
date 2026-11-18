@@ -236,10 +236,10 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		}
 		text(sidebar.Red+bold, status)
 		if t.roll != nil {
-			rows = append(rows, line(in+rollText(*t.roll)))
+			rows = append(rows, line(in+rollFit(*t.roll, iw-len(in))))
 		}
 	case t.roll != nil:
-		rows = append(rows, line(in+rollText(*t.roll)))
+		rows = append(rows, line(in+rollFit(*t.roll, iw-len(in))))
 	default:
 		text(sidebar.Muted, m.statusText(t, sec))
 	}
@@ -421,7 +421,7 @@ func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 
 // headRow is a card's first row, w columns: its fold arrow, state dot and name, then at the right its time in
 // its state. Folded, the status, PR and a ⚠ for a warning follow the name and the model comes before the time; a
-// roll-up's "N on others" goes first when the row is too narrow.
+// roll-up drops parts whole when the row is too narrow (rollFit).
 func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	arrow := "▾"
 	if folded {
@@ -462,15 +462,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 			badges += " " + sidebar.Gold + "⚠" + reset
 		}
 		if t.roll != nil && !t.deciding {
-			// Too narrow: drop counts whole, "N on others" first
-			r := *t.roll
-			for _, drop := range []*int{&r.OnOthers, &r.ToDo, &r.Waiting, &r.Working} {
-				if ansi.StringWidth(" "+left+status+badges) <= room || *drop == 0 {
-					continue
-				}
-				*drop = 0
-				status = "  " + rollText(r)
-			}
+			status = "  " + rollFit(*t.roll, room-ansi.StringWidth(" "+left+badges)-2)
 		}
 		left += status + badges
 	}
@@ -511,17 +503,40 @@ func (m Model) statusText(t tile, sec section) string {
 	return statusText(t, sec)
 }
 
-// rollText is a boss card's status, its subtree's roll-up, in its section's colour but a trailing "N to do" and
-// "N on others" muted.
+// rollText is a boss card's status, its subtree's roll-up, in its section's colour but a trailing "N to do",
+// "N on others" and its cost, "$54.93 · $20.71 closed", muted.
 func rollText(r sidebar.Rollup) string {
 	ps := r.Parts()
 	n := min(len(ps)-1, min(r.ToDo, 1)+min(r.OnOthers, 1))
 	head, tail := ps[:len(ps)-n], ps[len(ps)-n:]
+	if r.HasCost {
+		tail = append(tail, sidebar.FormatCost(r.CostUSD))
+		if r.ClosedUSD > 0 {
+			tail = append(tail, sidebar.FormatCost(r.ClosedUSD)+" closed")
+		}
+	}
 	out := sectionColours[r.Rank] + strings.Join(head, " · ") + reset
 	if len(tail) > 0 {
 		out += sidebar.Muted + " · " + strings.Join(tail, " · ") + reset
 	}
 	return out
+}
+
+// rollFit is rollText dropping whole parts until it fits w columns: the closed cost, "N on others", the total, then
+// "N to do", waiting and working; the caller cuts what still doesn't fit.
+func rollFit(r sidebar.Rollup, w int) string {
+	text := rollText(r)
+	for _, drop := range []func(){
+		func() { r.ClosedUSD = 0 }, func() { r.OnOthers = 0 }, func() { r.HasCost = false },
+		func() { r.ToDo = 0 }, func() { r.Waiting = 0 }, func() { r.Working = 0 },
+	} {
+		if ansi.StringWidth(text) <= w {
+			break
+		}
+		drop()
+		text = rollText(r)
+	}
+	return text
 }
 
 // statusText is what a card says about its worker, leaving out what its section says: the dialog it waits on

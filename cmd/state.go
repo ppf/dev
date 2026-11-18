@@ -17,6 +17,7 @@ import (
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/notify"
+	"github.com/ppf/dev/internal/spent"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -137,6 +138,12 @@ func newStateCmd() *cobra.Command {
 				}
 				if busy {
 					state = agent.Working
+				}
+			}
+			if state == agent.Clear && !codex && !grok {
+				// Before Record unsets the cost: the boss's total keeps the ended conversation's
+				if err := spent.Ended(c, pane, session.ID); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: cost: "+err.Error())
 				}
 			}
 			recErr := agent.Record(c, pane, state, session, hook)

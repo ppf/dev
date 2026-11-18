@@ -17,6 +17,11 @@ const readJson = async (run: Run, argv: string[]): Promise<unknown> => {
 }
 
 const isArray = (v: unknown): v is any[] => Array.isArray(v)
+const num = (v: unknown, field: string): number | undefined => {
+  if (v === undefined) return undefined
+  if (typeof v !== 'number') throw new Error(`dev agent list --json printed a ${field} this mod does not read`)
+  return v
+}
 
 /** Every tmux boss's items waiting on the person (not `--on` anyone), from `dev todo --all --json`, and each list it couldn't read into `errors`; throws on output it does not read. */
 export async function readAsks(run: Run, bin: string, errors: string[] = []): Promise<FleetItem[]> {
@@ -41,7 +46,7 @@ export async function readAgents(run: Run, bin: string): Promise<FleetAgent[]> {
     if (typeof a?.session !== 'string') throw new Error('dev agent list --json printed an agent this mod does not read')
     const isBoss = a.boss === true
     if (!isBoss && a.deciding !== true) return []
-    return [{ session: a.session, project: String(a.project ?? ''), isBoss, state: String(a.state ?? ''), model: String(a.model ?? ''), effort: String(a.effort ?? ''), cost: typeof a.cost_usd === 'number' ? a.cost_usd : undefined }]
+    return [{ session: a.session, project: String(a.project ?? ''), isBoss, state: String(a.state ?? ''), model: String(a.model ?? ''), effort: String(a.effort ?? ''), cost: num(a.cost_total_usd, 'cost_total_usd') ?? num(a.cost_usd, 'cost_usd'), closed: num(a.cost_closed_usd, 'cost_closed_usd'), costError: typeof a.cost_error === 'string' ? a.cost_error : undefined }]
   })
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ppf/dev/internal/spent"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/wait"
 )
@@ -77,6 +78,40 @@ type Session struct {
 	StartedBy string // @dev_started_by: see Starter
 	Depth     int    // how deep Order nested it under the session that started it
 	Root      string // the manager (its name) whose group the row is in, the manager's own row included; "" outside one
+
+	Conversation string  // the agent pane's Claude conversation (@agent_session); "" when none
+	SpentUSD     float64 // what ended under it (its spent ledger), see Spend
+	SpentErr     string  // why its ledger couldn't be read: its boss's total misses it
+}
+
+// LoadSpent sets each session's SpentUSD and SpentErr from its ledger on socket (spent.Read), created holding each
+// session id's creation time.
+func LoadSpent(sessions []Session, socket string, created map[string]string) error {
+	ledgers, errs, err := spent.Read(socket, created)
+	if err != nil {
+		return err
+	}
+	for i, s := range sessions {
+		if err := errs[s.ID]; err != nil {
+			sessions[i].SpentErr = err.Error()
+		}
+	}
+	Spend(sessions, ledgers)
+	return nil
+}
+
+// Spend sets each session's SpentUSD from its ledger by session id, leaving out the conversations whose cost a pane
+// in sessions shows again: Claude's --resume brings it back.
+func Spend(sessions []Session, ledgers map[string]spent.Ledger) {
+	live := map[string]bool{}
+	for _, s := range sessions {
+		if s.Conversation != "" && s.HasCost {
+			live[s.Conversation] = true
+		}
+	}
+	for i, s := range sessions {
+		sessions[i].SpentUSD = ledgers[s.ID].Closed(live)
+	}
 }
 
 // Client is an attached client as list-clients reports it.

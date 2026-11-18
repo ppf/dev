@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -89,6 +90,11 @@ type Rollup struct {
 	Warn      bool // a failed, stuck or high-context note, its own too, or a list not read
 	CostUSD   float64
 	HasCost   bool
+
+	// ClosedUSD is the part of CostUSD that ended under it: the SpentUSD of it and the sessions under it
+	ClosedUSD float64
+	// CostErr is a SpentErr of it or a session under it: CostUSD misses that ledger, and Warn is set
+	CostErr string
 }
 
 // Subtree is each boss's Rollup by name, from sessions in Order (a boss's sessions follow it at a greater Depth,
@@ -111,6 +117,16 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 				r.Under++
 			}
 			r.add(u, lists, false)
+			r.ClosedUSD += u.SpentUSD
+			r.CostErr = cmp.Or(r.CostErr, u.SpentErr)
+		}
+		r.ClosedUSD += s.SpentUSD
+		if r.ClosedUSD > 0 {
+			r.CostUSD, r.HasCost = r.CostUSD+r.ClosedUSD, true
+		}
+		// A total missing a ledger would read as whole: none shows, ⚠ says why
+		if r.CostErr = cmp.Or(s.SpentErr, r.CostErr); r.CostErr != "" {
+			r.Warn, r.HasCost = true, false
 		}
 		out[s.Name] = r
 	}
