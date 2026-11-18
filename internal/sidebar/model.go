@@ -53,6 +53,8 @@ type paneRow struct {
 	PRGen       string `tmux:"@dev_pr_gen"`
 	WaitUntil   string `tmux:"@dev_wait_until"`
 	WaitReason  string `tmux:"@dev_wait_reason"`
+	ResumeAt    string `tmux:"@dev_resume_at"`
+	Note        string `tmux:"@dev_boss_note"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -284,6 +286,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				sess.Question = rs[i].Question
 			}
 			sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
+			sess.Resume, sess.Note = rs[i].ResumeAt != "", rs[i].Note
 			sess.Branch = branch(a.Pane.Path)
 			// Before Order moves a worker into its starter's group
 			sess.Named = sess.Branch != "" && name == SessionName(sess.Group, sess.Branch)

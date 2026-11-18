@@ -24,11 +24,20 @@ const (
 	restingSection
 )
 
-// section is where t's card goes, the first that holds: needs you while a dialog waits on the user; waiting
-// while its planned wait (dev agent wait-until) holds; working while its agent works; needs you when its turn
-// ended on a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself
-// decides); waiting when the newest marker in its last reply is WAITING; else resting.
+// section is where t's card goes: a boss's by its whole subtree (sidebar.Subtree's ranks are the sections),
+// unless its own dialog waits on the user; else its own.
 func (t tile) section() section {
+	if t.roll != nil && !t.deciding {
+		return section(t.roll.Rank)
+	}
+	return t.own()
+}
+
+// own is t's own section, the first that holds: needs you while a dialog waits on the user; waiting while its
+// planned wait (dev agent wait-until) holds; working while its agent works; needs you when its turn ended on
+// a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself decides);
+// waiting when the newest marker in its last reply is WAITING; else resting.
+func (t tile) own() section {
 	switch {
 	case t.deciding:
 		return needsYouSection
@@ -46,7 +55,7 @@ func (t tile) section() section {
 }
 
 // asks reports a Needs you card for the question t's turn ended on in its reply, not a dialog.
-func (t tile) asks() bool { return !t.deciding && t.section() == needsYouSection }
+func (t tile) asks() bool { return !t.deciding && t.own() == needsYouSection }
 
 // options are the options an asks card's reply read under its question, without list markers; 1-9 send one.
 func (t tile) options() []string {

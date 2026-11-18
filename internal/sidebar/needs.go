@@ -45,6 +45,19 @@ type needItem struct {
 	Options []string `json:"options"`
 }
 
+// needCounts are the lists' counts for the roll-ups (Subtree), by boss.
+func needCounts(needs []needList) map[string]ListCount {
+	out := map[string]ListCount{}
+	for _, l := range needs {
+		c := ListCount{Unread: l.Error != ""}
+		for _, it := range l.Items {
+			c.Add(it.Done, it.On, len(it.Options))
+		}
+		out[l.Boss] = c
+	}
+	return out
+}
+
 // needRow is one line of NEEDS YOU: a list item waiting on the user, or a session waiting on a dialog.
 type needRow struct {
 	project string // the label: the list owner's project, or a dialog's session name

@@ -141,9 +141,9 @@ func TestRefreshViaDialogGone(t *testing.T) {
 	rule := strings.Repeat("─", 40)
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, dialogScreen} {
 		state := "waiting"
 		c := tmux.NewFake(func(args []string) (string, error) {

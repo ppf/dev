@@ -596,7 +596,7 @@ func TestViewBossRollup(t *testing.T) {
 	want := []string{
 		"  ● boss                            ×",
 		"    idle · $1.00 · t",
-		"    1 need you · 2 working · $4.00",
+		"    needs you · 1 question · 2 working",
 		"  └ ● w1                            ×",
 		"      waiting · $2.50",
 		"  └ ● w2                            ×",
@@ -609,7 +609,7 @@ func TestViewBossRollup(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("rows =\n%q\nwant\n%q", got, want)
 	}
-	if !strings.Contains(f.lines[off+5], red+"1 need you") {
+	if !strings.Contains(f.lines[off+5], red+"needs you") {
 		t.Errorf("need-you colour: %q", f.lines[off+5])
 	}
 	wantRows := []rowStart{{off + 3, "boss"}, {off + 6, "w1"}, {off + 8, "w2"}, {off + 10, "w3"}, {off + 12, "solo"}}
@@ -634,16 +634,19 @@ func TestViewBossRollupVariants(t *testing.T) {
 	}
 	idle = append(idle, Session{Name: "r", Group: "g", ID: "$3", StartedBy: "boss", Depth: 1, Agent: "Claude", State: "waiting"})
 	idle[1].State = "idle"
-	if got, want := line(40, idle), "    2 idle"; got != want { // an idle reminder (waiting, not deciding) is idle
+	if got, want := line(40, idle), "    idle"; got != want { // an idle reminder (waiting, not deciding) is idle
 		t.Errorf("all idle = %q, want %q", got, want)
 	}
-	if f := newRollupFrame(idle); !strings.Contains(f.lines[f.header+5], muted+"2 idle") {
-		t.Error("idle count not muted")
+	if f := newRollupFrame(idle); !strings.Contains(f.lines[f.header+5], muted+"idle") {
+		t.Error("idle not muted")
 	}
-	if got, want := line(27, rollupSessions()), "    1 need you · 2 working"; got != want {
+	if got, want := line(47, rollupSessions()), "    needs you · 1 question · 2 working · $4.00"; got != want {
+		t.Errorf("with cost = %q, want %q", got, want)
+	}
+	if got, want := line(46, rollupSessions()), "    needs you · 1 question · 2 working"; got != want {
 		t.Errorf("cost cut before counts = %q, want %q", got, want)
 	}
-	if got, want := line(18, rollupSessions()), "    1 need you ·…"; got != want {
+	if got, want := line(18, rollupSessions()), "    needs you · …"; got != want {
 		t.Errorf("counts cut = %q, want %q", got, want)
 	}
 	// @dev_cost off hides line 2's cost (Cost "") but not the roll-up's total
@@ -651,7 +654,7 @@ func TestViewBossRollupVariants(t *testing.T) {
 	for i := range hidden {
 		hidden[i].Cost = ""
 	}
-	if got, want := line(40, hidden), "    1 need you · 2 working · $4.00"; got != want {
+	if got, want := line(47, hidden), "    needs you · 1 question · 2 working · $4.00"; got != want {
 		t.Errorf("cost hidden = %q, want %q", got, want)
 	}
 	// Selected: full-width selection background on the roll-up line

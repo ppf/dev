@@ -60,40 +60,43 @@ type row struct {
 	Effort       string `tmux:"@dev_effort"`
 	WaitUntil    string `tmux:"@dev_wait_until"`
 	WaitReason   string `tmux:"@dev_wait_reason"`
+	ResumeAt     string `tmux:"@dev_resume_at"`
 }
 
 // tile is one worker session's preview.
 type tile struct {
 	sess     sidebar.Session
-	pane     string         // the agent pane
-	deciding bool           // the agent waits on the user's decision, see agent.Deciding
-	question agent.Question // @agent_question, what its dialog asks
-	body     []string       // the pane's last screen lines; nil when not captured this tick
-	pick     *pick          // the dialog a deciding agent shows; nil when none or not captured
-	note     string         // its latest boss inbox note (inbox.OptNote)
-	since    time.Time      // when its state began (@agent_since); zero when unknown
-	context  string         // @agent_context, its context window's use in whole percent; "" when unknown
-	model    string         // @dev_model, the --model its Claude started with; "" when none was passed
-	effort   string         // @dev_effort, the --effort its Claude started with
-	tail     desktop.Tail   // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
-	tailErr  error          // why its transcript could not be read
-	ci       ci             // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
-	via      string         // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, never answered here; "" for this boss's own
+	pane     string          // the agent pane
+	deciding bool            // the agent waits on the user's decision, see agent.Deciding
+	question agent.Question  // @agent_question, what its dialog asks
+	body     []string        // the pane's last screen lines; nil when not captured this tick
+	pick     *pick           // the dialog a deciding agent shows; nil when none or not captured
+	note     string          // its latest boss inbox note (inbox.OptNote)
+	since    time.Time       // when its state began (@agent_since); zero when unknown
+	context  string          // @agent_context, its context window's use in whole percent; "" when unknown
+	model    string          // @dev_model, the --model its Claude started with; "" when none was passed
+	effort   string          // @dev_effort, the --effort its Claude started with
+	tail     desktop.Tail    // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
+	tailErr  error           // why its transcript could not be read
+	ci       ci              // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
+	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, never answered here; "" for this boss's own
+	roll     *sidebar.Rollup // a boss's whole subtree (sidebar.Subtree), which places its card; nil for a worker or a deeper session
 }
 
 // snapshot is what one refresh saw.
 type snapshot struct {
 	tiles   []tile
-	started map[string]bool // sessions this boss started, an agent in them or not, by name
-	bosses  []string        // the bosses under this one, at any depth, by name
-	asks    []todo.BossList // their lists' items waiting on the user, by boss; none without items or an error
-	asksErr error           // why their lists could not be read
-	self    string          // own session's id
-	name    string          // own session's name
-	visible bool            // a client shows own window
-	focused bool            // own pane is its window's active pane
-	zoomed  bool            // own window is zoomed
-	client  string          // tty of the client viewing own session; "" lets tmux pick
+	started map[string]bool   // sessions this boss started, an agent in them or not, by name
+	bosses  []string          // the bosses under this one, at any depth, by name
+	asks    []todo.BossList   // their lists' items waiting on the user, by boss; none without items or an error
+	asksErr error             // why their lists could not be read
+	all     []sidebar.Session // every session on the server in sidebar.Order, for the bosses' roll-ups
+	self    string            // own session's id
+	name    string            // own session's name
+	visible bool              // a client shows own window
+	focused bool              // own pane is its window's active pane
+	zoomed  bool              // own window is zoomed
+	client  string            // tty of the client viewing own session; "" lets tmux pick
 	todo    todo.List
 	todoErr error          // why the to do list could not be read
 	threads []inbox.Thread // own open message threads (openThreads)
@@ -351,6 +354,7 @@ func (m Model) refresh() tea.Cmd {
 		if len(snap.bosses) > 0 {
 			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, m.clk.Now())
 		}
+		snap.rollUp()
 		msgs := m.msgs
 		if msgs == nil && m.findMsgs {
 			if _, socket, err := inbox.Viewer(m.c, m.pane); err != nil {
@@ -492,9 +496,6 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		if rs[0].Herd != "" && (mine || deep) {
 			s.bosses = append(s.bosses, name)
 		}
-		if !mine && !deep {
-			continue
-		}
 		if mine {
 			if s.started == nil {
 				s.started = map[string]bool{}
@@ -507,10 +508,19 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 				Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost}
 		}
 		a, ok := agent.Detect(ps, rs[0].Sidebar)
-		if !ok {
+		// As the sidebar reads it (its buildSnapshot), so the roll-ups agree
+		full := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "", StartedBy: rs[0].StartedBy}
+		var r row
+		if ok {
+			r = rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
+			full.Agent, full.State, full.CostUSD, full.HasCost = a.Label, a.State, a.Cost, a.CostOK
+			full.Deciding, full.Note, full.Resume = agent.Deciding(a.State, r.WaitingFor), r.Note, r.ResumeAt != ""
+			full.Wait = wait.FromOptions(r.WaitUntil, r.WaitReason)
+		}
+		s.all = append(s.all, full)
+		if !ok || !mine && !deep {
 			continue
 		}
-		r := rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
 		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort, via: via}
 		t.sess = sidebar.Session{State: a.State, Wait: wait.FromOptions(r.WaitUntil, r.WaitReason)}
 		t.question, _ = agent.ParseQuestion(r.Question)
@@ -547,8 +557,32 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		t.sess = sess
 		s.tiles = append(s.tiles, t)
 	}
+	s.all = sidebar.Order(s.all)
 	sortBySection(s.tiles)
 	return s, nil
+}
+
+// rollUp places each of this boss's own boss cards by its whole subtree (sidebar.Subtree), its bosses' lists
+// as read, then sorts the cards by section again.
+func (s *snapshot) rollUp() {
+	lists := map[string]sidebar.ListCount{}
+	for _, l := range s.asks {
+		c := sidebar.ListCount{Unread: l.Err != nil}
+		for _, it := range l.Items {
+			c.Add(it.Done, it.On, len(it.Options))
+		}
+		lists[l.Boss] = c
+	}
+	rolls := sidebar.Subtree(s.all, lists)
+	for i, t := range s.tiles {
+		if t.via == "" {
+			s.tiles[i].roll = rolls[t.sess.Name]
+		}
+	}
+	// This boss's own cards before its bosses' sessions within a section, as buildSnapshot lists them
+	slices.SortStableFunc(s.tiles, func(a, b tile) int {
+		return cmp.Or(cmp.Compare(a.section(), b.section()), cmp.Compare(min(len(a.via), 1), min(len(b.via), 1)))
+	})
 }
 
 // descendants are the sessions the bosses under this boss (id, name) started, bosses at any depth, each with the
