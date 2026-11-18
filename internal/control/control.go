@@ -47,6 +47,11 @@ type Agent struct {
 	Path    string `json:"path"`
 	// CostUSD is the session's estimated cost (`dev statusline`); omitted when unknown.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
+	// CostTotalUSD is a boss's cost with everything under it, closed sessions included, CostClosedUSD the closed
+	// part; omitted for non-bosses, when unknown or nothing closed, and when CostError says why a ledger couldn't be read.
+	CostTotalUSD  *float64 `json:"cost_total_usd,omitempty"`
+	CostClosedUSD *float64 `json:"cost_closed_usd,omitempty"`
+	CostError     string   `json:"cost_error,omitempty"`
 	// StartedBy is the session whose coordinator started this one with `dev agent start`; "" otherwise.
 	StartedBy string `json:"started_by,omitempty"`
 	// Boss marks a `dev boss` coordinator session.
@@ -126,6 +131,10 @@ type row struct {
 	Question   string `tmux:"@agent_question"`
 	WaitUntil  string `tmux:"@dev_wait_until"`
 	WaitReason string `tmux:"@dev_wait_reason"`
+	// The key of its spent ledger, and the pane's conversation
+	Socket       string `tmux:"socket_path"`
+	Created      string `tmux:"session_created"`
+	Conversation string `tmux:"@agent_session"`
 }
 
 // List returns every session's agent, in tmux's session order; sessions without one are left out.
@@ -181,11 +190,19 @@ func list(c *tmux.Client) ([]Agent, error) {
 		})
 	}
 	agents := []Agent{}
+	// As the sidebar reads them, for the bosses' totals
+	sessions := make([]sidebar.Session, 0, len(first))
+	created, socket := map[string]string{}, ""
 	for _, r := range first {
+		s := sidebar.Session{Name: r.Session, Group: sidebar.Group(r.Session, r.Project), ID: r.SessionID, Boss: r.Herd != "", StartedBy: r.StartedBy}
+		created[r.SessionID], socket = r.Created, r.Socket
 		a, ok := agent.Detect(panes[r.Session], r.Sidebar)
 		if !ok {
+			sessions = append(sessions, s)
 			continue
 		}
+		s.Agent, s.State, s.CostUSD, s.HasCost, s.Conversation = a.Label, a.State, a.Cost, a.CostOK, byID[a.Pane.ID].Conversation
+		sessions = append(sessions, s)
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
 			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
@@ -202,6 +219,22 @@ func list(c *tmux.Client) ([]Agent, error) {
 			ag.Wait = &w
 		}
 		agents = append(agents, ag)
+	}
+	if err := sidebar.LoadSpent(sessions, socket, created); err != nil {
+		return nil, err
+	}
+	rolls := sidebar.Subtree(sidebar.Order(sessions), nil)
+	for i, a := range agents {
+		switch r := rolls[a.Session]; {
+		case r == nil:
+		case r.CostErr != "":
+			agents[i].CostError = r.CostErr
+		case r.HasCost:
+			agents[i].CostTotalUSD = &r.CostUSD
+			if r.ClosedUSD > 0 {
+				agents[i].CostClosedUSD = &r.ClosedUSD
+			}
+		}
 	}
 	return agents, nil
 }

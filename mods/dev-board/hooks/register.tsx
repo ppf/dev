@@ -1544,9 +1544,11 @@ export const register: Register = on => {
                     </Text>
                   </Text>
                 </Box>
-                {a.cost !== undefined && (
+                {a.costError !== undefined ? (
+                  <Text size={SIZE.meta} color={TONE.caution}>⚠ cost not read</Text>
+                ) : a.cost !== undefined && (
                   <Text size={SIZE.meta} color={TONE.muted} tabular>
-                    {cost(a.cost)}
+                    {a.closed ? `${cost(a.cost)} · ${cost(a.closed)} closed` : cost(a.cost)}
                   </Text>
                 )}
               </Box>,

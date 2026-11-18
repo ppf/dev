@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/spent"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -24,7 +26,7 @@ func fakeClock() Clock {
 }
 
 func paneRow(session, pane, command, state, stateCmd, project, sidebar string) string {
-	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "", "", "", "", "")
+	return tmux.FormatRow(session, "1", pane, "/nonexistent/"+session, "title", command, state, stateCmd, "", project, sidebar, "$"+session, "", "", "", "", "", "", "", "", "", "", "", "", "")
 }
 
 func TestList(t *testing.T) {
@@ -97,7 +99,7 @@ func TestListQuestions(t *testing.T) {
 		`{"question":"Add e2e?","header":"Tests","options":[{"label":"yes","description":""},{"label":"no (Recommended)","description":""}],"multiSelect":true}]}`
 	line := func(session, pane, cmd, state, waitingFor, question string) string {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", cmd, state, cmd, "", "", "%0", "$"+session, "", "", "", "", "", "",
-			waitingFor, question, "", "")
+			waitingFor, question, "", "", "", "", "")
 	}
 	out := line("asks", "%0", "dev", "", "", "") + line("asks", "%1", "claude", "waiting", "permission_prompt", ask) +
 		line("answered", "%2", "claude", "working", "", ask) + line("idle", "%3", "claude", "waiting", "idle_prompt", ask) +
@@ -605,7 +607,7 @@ func TestListStartedByAndHerd(t *testing.T) {
 	model, effort := map[string]string{"fix-login": "sonnet", "herd": "opus"}, map[string]string{"fix-login": "medium", "mine-too": "low"}
 	line := func(session, id, pane, startedBy, herd string) string {
 		return tmux.FormatRow(session, "1", pane, "/p/"+session, "t", "claude", "idle", "claude", "", "", "", id, startedBy, herd, "", outside[session],
-			model[session], effort[session], "", "", "", "")
+			model[session], effort[session], "", "", "", "", "", "", "")
 	}
 	out := line("herd", "$1", "%1", "", "1") + line("fix-login", "$2", "%2", "$1", "") + line("mine-too", "$3", "%3", "$1", "") +
 		line("user", "$4", "%4", "", "") + line("orphan", "$5", "%5", "$9", "") +
@@ -681,13 +683,56 @@ func TestBossPane(t *testing.T) {
 }
 
 func TestListCostOff(t *testing.T) {
-	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "", "", "", "", "")
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "1.5", "", "", "$app", "", "", "off", "", "", "", "", "", "", "", "", "", "")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || !got[0].HideCost || got[0].CostUSD == nil || *got[0].CostUSD != 1.5 {
 		t.Errorf("List = %+v, want HideCost with cost_usd 1.5 kept", got)
+	}
+}
+
+// A boss carries its total with what closed under it (cost_total_usd, cost_closed_usd) beside its own cost_usd; a
+// worker carries neither; an unreadable ledger gives cost_error in place of a total that would miss it.
+func TestListCostTotal(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ended := tmux.NewFake(func([]string) (string, error) { return tmux.FormatRow("/s", "$1", "100", "1", "", "8", "closed"), nil })
+	if err := spent.Ended(ended, "%1", "closed"); err != nil {
+		t.Fatal(err)
+	}
+	rows := tmux.FormatRow("boss", "1", "%1", "/nonexistent/boss", "t", "claude", "idle", "claude", "2", "", "", "$1", "", "1", "", "", "", "", "", "", "", "", "/s", "100", "c-boss") +
+		tmux.FormatRow("w", "1", "%2", "/nonexistent/w", "t", "claude", "idle", "claude", "4", "", "", "$2", "boss", "", "", "", "", "", "", "", "", "", "/s", "200", "c-w")
+	list := func() string {
+		t.Helper()
+		got, err := list(tmux.NewFake(func([]string) (string, error) { return rows, nil }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	out := list()
+	for _, want := range []string{`"session":"boss","pane":"%1"`, `"cost_usd":2,"cost_total_usd":14,"cost_closed_usd":8`, `"session":"w"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("list --json = %s, want %s", out, want)
+		}
+	}
+	if w := out[strings.Index(out, `"session":"w"`):]; strings.Contains(w, "cost_total_usd") || !strings.Contains(w, `"cost_usd":4`) {
+		t.Errorf("worker: %s", w)
+	}
+	paths, _ := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "spent", "*.json"))
+	if len(paths) != 1 {
+		t.Fatalf("ledgers %v", paths)
+	}
+	if err := os.WriteFile(paths[0], []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := list(); strings.Contains(out, "cost_total_usd") || !strings.Contains(out, `"cost_error":"spent: `+paths[0]) {
+		t.Errorf("unreadable ledger: %s", out)
 	}
 }
 
@@ -708,8 +753,8 @@ func TestSendText(t *testing.T) {
 
 // An agent pane's planned wait shows in list and get --json; none leaves "wait" out.
 func TestListWait(t *testing.T) {
-	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "", "", "", "$app", "", "", "", "", "", "", "", "", "1700000000", "Codex limit resets") +
-		tmux.FormatRow("web", "1", "%2", "/nonexistent/web", "t", "claude", "idle", "claude", "", "", "", "$web", "", "", "", "", "", "", "", "", "", "")
+	row := tmux.FormatRow("app", "1", "%1", "/nonexistent/app", "t", "claude", "idle", "claude", "", "", "", "$app", "", "", "", "", "", "", "", "", "1700000000", "Codex limit resets", "", "", "") +
+		tmux.FormatRow("web", "1", "%2", "/nonexistent/web", "t", "claude", "idle", "claude", "", "", "", "$web", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	got, err := List(tmux.NewFake(func([]string) (string, error) { return row, nil }))
 	if err != nil || len(got) != 2 {
 		t.Fatalf("List = %+v, %v", got, err)

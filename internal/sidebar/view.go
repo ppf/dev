@@ -377,14 +377,16 @@ func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
 }
 
-// hasRollLine reports a boss row with a third line: a boss with sessions under it, or questions or to do items on
-// no one.
-func hasRollLine(r *Rollup) bool { return r != nil && (r.Under > 0 || r.Questions > 0 || r.ToDo > 0) }
+// hasRollLine reports a boss row with a third line: a boss with sessions under it, questions or to do items on no
+// one, or a cost of closed sessions (or a ledger not read).
+func hasRollLine(r *Rollup) bool {
+	return r != nil && (r.Under > 0 || r.Questions > 0 || r.ToDo > 0 || r.ClosedUSD > 0 || r.CostErr != "")
+}
 
-// rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state,
-// red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a manager's
-// bosses · workers first), "N on others" last and only whole, ⚠ and what it and everything under it cost; the cost
-// goes before the counts do.
+// rollLine is a boss's roll-up (Subtree) as its third line in width columns and its display width: the state
+// with its ⚠, red "N need you" (asks, dialogs and its to do items, as NEEDS YOU counts them), then its counts (a
+// manager's bosses · workers first), what it and everything under it cost, closed sessions included, and "N on others"
+// last and only whole; the cost goes before the counts do, "N on others" before the cost.
 func rollLine(r *Rollup, width int) (string, int) {
 	var plain, styled string
 	add := func(colour, text string) {
@@ -444,8 +446,12 @@ func rollLine(r *Rollup, width int) (string, int) {
 			add(muted, plural(w, "worker", "workers"))
 		}
 	}
+	rest, others := parts[lead:], ""
+	if r.OnOthers > 0 {
+		rest, others = rest[:len(rest)-1], rest[len(rest)-1]
+	}
 	dropped := false
-	for _, p := range parts[lead:] {
+	for _, p := range rest {
 		if fits(p) {
 			add(muted, p)
 		} else {
@@ -456,6 +462,9 @@ func rollLine(r *Rollup, width int) (string, int) {
 		if cost := FormatCost(r.CostUSD); fits(cost) {
 			add(muted, cost)
 		}
+	}
+	if others != "" && fits(others) {
+		add(muted, others)
 	}
 	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
 }

@@ -510,7 +510,7 @@ func TestNeedsClick(t *testing.T) {
 // The refresh reads the sidebar's request off its own pane and clears it.
 func TestRefreshNeedsFocus(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "1")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "1", "", "", "")
 	var ran []string
 	c := tmux.NewFake(func(args []string) (string, error) {
 		ran = append(ran, strings.Join(args, " "))

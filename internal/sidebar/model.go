@@ -55,6 +55,10 @@ type paneRow struct {
 	WaitReason  string `tmux:"@dev_wait_reason"`
 	ResumeAt    string `tmux:"@dev_resume_at"`
 	Note        string `tmux:"@dev_boss_note"`
+	// The key of its spent ledger, and the agent pane's conversation
+	Socket       string `tmux:"socket_path"`
+	Created      string `tmux:"session_created"`
+	Conversation string `tmux:"@agent_session"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -271,6 +275,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 	}
 	_, viewed := activeClient(clients, s.current)
 	sessions := make([]Session, 0, len(names))
+	created, socket := map[string]string{}, ""
 	for _, name := range names {
 		rs := panes[name]
 		ps := make([]agent.Pane, len(rs))
@@ -280,6 +285,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 		// Session options: every row of the session carries the same @project and @sidebar_pane
 		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
 			StartedBy: rs[0].StartedBy}
+		created[rs[0].SessionID], socket = rs[0].Created, rs[0].Socket
 		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
 			sess.Agent, sess.State, sess.Title = a.Label, a.State, PaneTitle(a.Label, a.Pane.Title, name, host)
 			sess.CostUSD, sess.HasCost = a.Cost, a.CostOK
@@ -287,6 +293,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 				sess.Cost = FormatCost(a.Cost)
 			}
 			i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
+			sess.Conversation = rs[i].Conversation
 			sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
 			if sess.Deciding {
 				sess.Question = rs[i].Question
@@ -301,6 +308,9 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 			}
 		}
 		sessions = append(sessions, sess)
+	}
+	if err := LoadSpent(sessions, socket, created); err != nil {
+		return snapshot{}, err
 	}
 	s.sessions = Order(sessions)
 	return s, nil

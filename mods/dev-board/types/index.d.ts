@@ -82,7 +82,7 @@ export type TodoItem = { id: number; text: string; on?: string; session?: { id: 
 export type FleetItem = { boss: string; id: number; text: string; done: boolean; options: string[]; answer?: string }
 
 /** A tmux boss (`isBoss`), or a worker waiting on a prompt, from `dev agent list --json`. */
-export type FleetAgent = { session: string; project: string; isBoss: boolean; state: string; model: string; effort: string; cost?: number }
+export type FleetAgent = { session: string; project: string; isBoss: boolean; state: string; model: string; effort: string; cost?: number; closed?: number; costError?: string }
 
 /** An open message thread between bosses (`dev agent messages --json`), oldest message first; `at` unix seconds. */
 export type FleetThread = { id: string; messages: { id: string; from: string; to: string; text: string; at: number }[] }

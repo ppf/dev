@@ -26,7 +26,7 @@ func namedTmux(t *testing.T, name, todoHerd string) *tmux.Client {
 	return tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow(name, "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", ""), nil
+			return tmux.FormatRow(name, "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
 			if args[len(args)-1] == "#{@dev_boss_pane}" {
 				return map[string]string{"%1": "coordinator\n", "%2": "previews\n"}[args[3]], nil

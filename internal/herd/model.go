@@ -62,6 +62,10 @@ type row struct {
 	WaitReason   string `tmux:"@dev_wait_reason"`
 	ResumeAt     string `tmux:"@dev_resume_at"`
 	NeedsFocus   string `tmux:"@dev_needs_focus"`
+	// The key of its spent ledger, and the agent pane's conversation
+	Socket       string `tmux:"socket_path"`
+	Created      string `tmux:"session_created"`
+	Conversation string `tmux:"@agent_session"`
 }
 
 // tile is one worker session's preview.
@@ -524,6 +528,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	c, _ := sidebar.ActiveClient(clients, s.name)
 	s.client = c.TTY
 	var sessions, deeper []sidebar.Session
+	created, socket := map[string]string{}, ""
 	meta := map[string]tile{}
 	under := descendants(names, panes, s.self, s.name)
 	for _, name := range names {
@@ -547,10 +552,12 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		a, ok := agent.Detect(ps, rs[0].Sidebar)
 		// As the sidebar reads it (its buildSnapshot), so the roll-ups agree
 		full := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "", StartedBy: rs[0].StartedBy}
+		created[rs[0].SessionID], socket = rs[0].Created, rs[0].Socket
 		var r row
 		if ok {
 			r = rs[slices.IndexFunc(rs, func(r row) bool { return r.ID == a.Pane.ID })]
 			full.Agent, full.State, full.CostUSD, full.HasCost = a.Label, a.State, a.Cost, a.CostOK
+			full.Conversation = r.Conversation
 			full.Deciding, full.Note, full.Resume = agent.Deciding(a.State, r.WaitingFor), r.Note, r.ResumeAt != ""
 			full.Question = r.Question
 			full.Wait = wait.FromOptions(r.WaitUntil, r.WaitReason)
@@ -594,6 +601,9 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		t := meta[sess.Name]
 		t.sess = sess
 		s.tiles = append(s.tiles, t)
+	}
+	if err := sidebar.LoadSpent(s.all, socket, created); err != nil {
+		return snapshot{}, err
 	}
 	s.all = sidebar.Order(s.all)
 	sortBySection(s.tiles)

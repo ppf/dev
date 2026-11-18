@@ -303,3 +303,46 @@ func TestBossCardCountsDropWhole(t *testing.T) {
 		}
 	}
 }
+
+// A boss card's roll-up ends in its cost, muted, with what closed under it beside the total; narrow, the closed
+// part goes first, then "N on others", then the total, each whole.
+func TestRollTextCost(t *testing.T) {
+	r := sidebar.Rollup{Rank: sidebar.RankWorking, Working: 1, OnOthers: 2, CostUSD: 54.93, ClosedUSD: 20.71, HasCost: true}
+	if got, want := rollText(r), sidebar.Gold+"1 working"+reset+sidebar.Muted+" · 2 on others · $54.93 · $20.71 closed"+reset; got != want {
+		t.Errorf("rollText = %q, want %q", got, want)
+	}
+	for w, want := range map[int]string{
+		60: "1 working · 2 on others · $54.93 · $20.71 closed",
+		25: "1 working · $54.93",
+		12: "1 working",
+	} {
+		if got := ansi.Strip(rollFit(r, w)); got != want {
+			t.Errorf("%d columns: %q, want %q", w, got, want)
+		}
+	}
+	if got := ansi.Strip(rollFit(r, 34)); got != "1 working · 2 on others · $54.93" {
+		t.Errorf("34 columns: %q", got)
+	}
+	r.ClosedUSD = 0
+	if got := ansi.Strip(rollText(r)); got != "1 working · 2 on others · $54.93" {
+		t.Errorf("nothing closed: %q", got)
+	}
+}
+
+// A folded boss card narrows by whole parts, the closed cost first, then "N on others", then the total; its PR
+// badge stays.
+func TestBossCardCostNarrow(t *testing.T) {
+	m := board4()
+	tl := tile{sess: sidebar.Session{Name: "boss-orbit", Agent: "Claude", State: agent.Idle, PR: sidebar.PR{Number: 87, State: "open"}},
+		roll: &sidebar.Rollup{Rank: sidebar.RankWorking, Working: 2, OnOthers: 3, CostUSD: 54.93, ClosedUSD: 20.71, HasCost: true}}
+	for w, want := range map[int]string{
+		100: "▸ ● boss-orbit 2 working · 3 on others · $54.93 · $20.71 closed ○ #87",
+		70:  "▸ ● boss-orbit 2 working · 3 on others · $54.93 ○ #87",
+		50:  "▸ ● boss-orbit 2 working · $54.93 ○ #87",
+		40:  "▸ ● boss-orbit 2 working ○ #87",
+	} {
+		if got := strings.Join(strings.Fields(ansi.Strip(m.headRow(tl, tl.section(), true, w))), " "); got != want {
+			t.Errorf("%d columns: %q, want %q", w, got, want)
+		}
+	}
+}
