@@ -358,3 +358,13 @@ func TestCloseWorktreeDashNames(t *testing.T) {
 		t.Errorf("args = %q, want %q", got, want)
 	}
 }
+
+func TestVersionFlag(t *testing.T) {
+	out, _, err := execute(t, "", "--version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != buildVersion()+"\n" || strings.TrimSpace(out) == "" {
+		t.Fatalf("--version = %q, want %q", out, buildVersion()+"\n")
+	}
+}
