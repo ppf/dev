@@ -65,20 +65,12 @@ func (m Model) render() frame {
 	}
 	unwrapped := len(needs) + listLines(m.snap.sessions)
 	rolls := rollups(m.snap.sessions)
-	prevGroup := ""
 	for i, s := range m.snap.sessions {
-		if s.Group != prevGroup {
-			if prevGroup != "" {
+		if h, ok := headFor(m.snap.sessions, i); ok {
+			if h.gap {
 				f.lines = append(f.lines, "")
 			}
-			label := truncate(s.Group, w-6)
-			// printf '%*s' pads a negative width to its absolute value, so a cut label gets one dash
-			n := w - 7 - ansi.StringWidth(label)
-			if n < 0 {
-				n = -n
-			}
-			f.lines = append(f.lines, " "+faint+"─"+reset+" "+muted+label+reset+" "+faint+strings.Repeat("─", n)+reset)
-			prevGroup = s.Group
+			f.lines = append(f.lines, h.line(w))
 		}
 		selected := s.Name == m.selected
 		f.rows = append(f.rows, rowStart{line: len(f.lines), session: s.Name})
@@ -95,9 +87,10 @@ func (m Model) render() frame {
 		if s.Name == m.snap.current {
 			styled = bold + display + reset
 		}
-		line := "  " + statusDot(s.Agent, s.State) + " " + styled
+		lead := s.lead()
+		line := lead + " " + statusDot(s.Agent, s.State) + " " + styled
 		if indent != "" {
-			line = "  " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
+			line = lead + " " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
 		}
 		vis := 4 + iw + ansi.StringWidth(display)
 		if s.Branch != "" && !s.Named {
@@ -177,13 +170,13 @@ func (m Model) render() frame {
 		}
 		body = truncate(body, avail)
 		meta += colour + body + reset
-		f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
+		f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+meta, vis+ansi.StringWidth(body), w, selected))
 		for _, l := range wrapped {
-			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
+			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+colour+l+reset, 4+iw+ansi.StringWidth(l), w, selected))
 		}
 		if r := rolls[i]; r != nil {
 			text, tw := r.line(maxMeta - iw)
-			f.lines = append(f.lines, cardLine("    "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
+			f.lines = append(f.lines, cardLine(lead+"   "+strings.Repeat(" ", iw)+text, 4+iw+tw, w, selected))
 		}
 	}
 
@@ -202,14 +195,14 @@ func (m Model) render() frame {
 
 // listLines is how many lines render draws for sessions when no title wraps.
 func listLines(sessions []Session) int {
-	n, prev := 2, ""
+	n := 2
 	rolls := rollups(sessions)
-	for i, s := range sessions {
-		if s.Group != prev {
-			if prev != "" {
+	for i := range sessions {
+		if h, ok := headFor(sessions, i); ok {
+			n++
+			if h.gap {
 				n++
 			}
-			n, prev = n+1, s.Group
 		}
 		n += 2
 		if rolls[i] != nil {
@@ -217,6 +210,69 @@ func listLines(sessions []Session) int {
 		}
 	}
 	return n
+}
+
+// head is a divider line above sessions[i]: a group's, a manager's, or a boss's group inside a manager's.
+type head struct {
+	label string
+	kind  headKind
+	gap   bool // a blank line goes first
+}
+
+type headKind int
+
+const (
+	headGroup   headKind = iota // ─ label ───
+	headManager                 // ┌─ MANAGER ───, opening a manager's group
+	headSub                     // ├─ label ───, a boss's group inside it
+)
+
+// headFor is the divider above sessions[i], if any: a manager's group has one header, then a divider
+// each time its boss's group changes; other rows get one per group, and one right after a manager's group.
+func headFor(sessions []Session, i int) (head, bool) {
+	s := sessions[i]
+	if i == 0 {
+		if s.Root != "" {
+			return head{label: "MANAGER", kind: headManager}, true
+		}
+		return head{label: s.Group}, true
+	}
+	prev := sessions[i-1]
+	switch {
+	case s.Root != prev.Root && s.Root != "":
+		return head{label: "MANAGER", kind: headManager, gap: true}, true
+	case s.Root != "" && s.Root == prev.Root:
+		// Each boss opens its own, even in the manager's group
+		return head{label: s.Group, kind: headSub}, s.Group != prev.Group || s.Depth == 0
+	case s.Group != prev.Group || prev.Root != "":
+		return head{label: s.Group, gap: true}, true
+	}
+	return head{}, false
+}
+
+func (h head) line(width int) string {
+	start, colour := " "+faint+"─"+reset, muted
+	switch h.kind {
+	case headManager:
+		start, colour = faint+"┌─"+reset, gold+bold
+	case headSub:
+		start = faint + "├─" + reset
+	}
+	label := truncate(h.label, width-6)
+	// printf '%*s' pads a negative width to its absolute value, so a cut label gets one dash
+	n := width - 7 - ansi.StringWidth(label)
+	if n < 0 {
+		n = -n
+	}
+	return start + " " + colour + label + reset + " " + faint + strings.Repeat("─", n) + reset
+}
+
+// lead is a row's first column: a faint rail inside a manager's group, else a space.
+func (s Session) lead() string {
+	if s.Root == "" {
+		return " "
+	}
+	return faint + "│" + reset
 }
 
 // bottomRow is the last line: the refresh error, else the hint while focused on a non-empty list
@@ -311,28 +367,45 @@ func FormatCost(usd float64) string {
 }
 
 // rollup is a boss's third line: how many of its workers need a decision or work, and what the boss and
-// all its workers cost.
+// all its workers cost. A manager's counts its bosses apart from its workers.
 type rollup struct {
-	waiting, working, workers int
-	cost                      float64
-	hasCost                   bool
+	waiting, working, workers, bosses int
+	cost                              float64
+	hasCost                           bool
 }
 
-// rollups returns, per index of sessions (display order), the roll-up of a boss with workers; nil for any
-// other row. Order keeps a boss's workers, nested ones included, right after it at a greater Depth.
+// rollups returns, per index of sessions (display order), the roll-up of a boss with workers or a manager
+// with sessions; nil for any other row. Order keeps a boss's workers, nested ones included, right after it
+// at a greater Depth, and a manager's group, bosses included, right after it under the same Root.
 func rollups(sessions []Session) []*rollup {
 	out := make([]*rollup, len(sessions))
 	for i, s := range sessions {
-		if !s.Boss || i+1 >= len(sessions) || sessions[i+1].Depth <= s.Depth {
+		if !s.Boss {
+			continue
+		}
+		isManager := s.Root != "" && s.Root == s.Name
+		var members []Session
+		for _, w := range sessions[i+1:] {
+			inGroup := w.Depth > s.Depth
+			if isManager {
+				inGroup = w.Root == s.Root
+			}
+			if !inGroup {
+				break
+			}
+			members = append(members, w)
+		}
+		if len(members) == 0 {
 			continue
 		}
 		r := &rollup{}
 		r.addCost(s)
-		for _, w := range sessions[i+1:] {
-			if w.Depth <= s.Depth {
-				break
+		for _, w := range members {
+			if isManager && w.Boss && w.Depth == s.Depth {
+				r.bosses++
+			} else {
+				r.workers++
 			}
-			r.workers++
 			switch {
 			case w.Deciding:
 				r.waiting++
@@ -363,20 +436,38 @@ func (r *rollup) line(width int) (string, int) {
 		plain += text
 		styled += colour + text + reset
 	}
+	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
 	if r.waiting > 0 {
 		add(red, fmt.Sprintf("%d need you", r.waiting))
 	}
-	if r.working > 0 {
-		add(muted, fmt.Sprintf("%d working", r.working))
-	}
-	if plain == "" {
-		add(muted, fmt.Sprintf("%d idle", r.workers))
+	if r.bosses > 0 {
+		add(muted, plural(r.bosses, "boss", "bosses"))
+		if r.workers > 0 {
+			add(muted, plural(r.workers, "worker", "workers"))
+		}
+		if r.working > 0 && fits(fmt.Sprintf("%d working", r.working)) {
+			add(muted, fmt.Sprintf("%d working", r.working))
+		}
+	} else {
+		if r.working > 0 {
+			add(muted, fmt.Sprintf("%d working", r.working))
+		}
+		if plain == "" {
+			add(muted, fmt.Sprintf("%d idle", r.workers))
+		}
 	}
 	if r.hasCost {
-		cost := FormatCost(r.cost)
-		if ansi.StringWidth(plain+" · "+cost) <= width {
+		if cost := FormatCost(r.cost); fits(cost) {
 			add(muted, cost)
 		}
 	}
 	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
+}
+
+// plural is "1 one" or "n many".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

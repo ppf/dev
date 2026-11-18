@@ -136,3 +136,46 @@ func TestStarter(t *testing.T) {
 		}
 	}
 }
+
+// A manager keeps each boss it started in the boss's own group, at its own depth, workers one deeper;
+// what it didn't start stays outside, and the rows keep the manager, bosses, workers sequence.
+func TestOrderManagerGroups(t *testing.T) {
+	var got []string
+	for _, s := range Order(managerSessions()) {
+		got = append(got, fmt.Sprintf("%s/%s/%d/%s", s.Name, s.Group, s.Depth, s.Root))
+	}
+	want := []string{
+		"manager/manager/0/manager", "m-helper/manager/1/manager",
+		"boss-dev/dev/0/manager", "dev-w1/dev/1/manager",
+		"boss-noc/noc/0/manager", "noc-w1/noc/1/manager", "noc-w1-sub/noc/2/manager",
+		"vitay/vitay/0/",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Order =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A boss that started only workers isn't a manager.
+func TestOrderNoManager(t *testing.T) {
+	for _, s := range Order([]Session{
+		{Name: "boss", Group: "g", ID: "$1", Boss: true},
+		{Name: "w", Group: "g", ID: "$2", StartedBy: "$1"},
+	}) {
+		if s.Root != "" {
+			t.Errorf("%s: Root = %q", s.Name, s.Root)
+		}
+	}
+}
+
+func managerSessions() []Session {
+	return []Session{
+		{Name: "vitay", Group: "vitay", ID: "$9"},
+		{Name: "noc-w1-sub", Group: "noc", ID: "$8", StartedBy: "$7"},
+		{Name: "noc-w1", Group: "noc", ID: "$7", StartedBy: "boss-noc"},
+		{Name: "boss-noc", Group: "noc", ID: "$3", Boss: true, StartedBy: "manager"},
+		{Name: "dev-w1", Group: "dev", ID: "$5", StartedBy: "boss-dev"},
+		{Name: "boss-dev", Group: "dev", ID: "$2", Boss: true, StartedBy: "manager"},
+		{Name: "m-helper", Group: "manager", ID: "$4", StartedBy: "manager"},
+		{Name: "manager", Group: "manager", ID: "$1", Boss: true},
+	}
+}

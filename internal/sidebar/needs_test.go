@@ -465,13 +465,13 @@ func TestNeedsHiddenTakesNoKeys(t *testing.T) {
 	}
 }
 
-// Project is the group before Order regroups it: a worker under a manager keeps its own, and its boss's rows use it.
+// A boss under a manager keeps its own group, and NEEDS YOU rows show that project, not the manager's.
 func TestNeedsLabelIsProject(t *testing.T) {
 	sessions := Order([]Session{
 		{Name: "manager", Group: "manager", ID: "$1", Boss: true},
 		{Name: "boss-nocworx-core", Group: "nocworx-core", ID: "$2", Boss: true, StartedBy: "$1"},
 	})
-	if sessions[1].Group != "manager" || sessions[1].Project != "nocworx-core" {
+	if sessions[1].Group != "nocworx-core" || sessions[1].Project != "nocworx-core" || sessions[1].Root != "manager" {
 		t.Fatalf("order: %+v", sessions[1])
 	}
 	var calls []answerCall

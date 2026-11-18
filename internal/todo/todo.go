@@ -297,6 +297,51 @@ func Workers(c *tmux.Client, pane string) ([]Session, error) {
 	return ws, nil
 }
 
+// BossList is one boss's list, as All reads it; Err is why it couldn't be read.
+type BossList struct {
+	Boss string
+	Err  error
+	List
+}
+
+// All is each dev boss session's list with items on c's server, by session name, only the bosses keep takes (nil
+// takes all); none without a server. A list it can't read comes with its error, the others still read; a boss
+// closed since list-sessions is left out.
+func All(c *tmux.Client, now time.Time, keep func(name string) bool) ([]BossList, error) {
+	type boss struct {
+		Name string `tmux:"session_name"`
+		Herd string `tmux:"@dev_herd"`
+	}
+	sessions, err := tmux.Query[boss](c, "list-sessions")
+	if err != nil && !tmux.IsNoServer(err) {
+		return nil, err
+	}
+	slices.SortFunc(sessions, func(a, b boss) int { return strings.Compare(a.Name, b.Name) })
+	var lists []BossList
+	for _, sess := range sessions {
+		if sess.Herd == "" || keep != nil && !keep(sess.Name) {
+			continue
+		}
+		target := tmux.SessionTarget(sess.Name)
+		s, err := ForPane(c, target)
+		var l List
+		if err == nil {
+			l, err = s.Read(now)
+		}
+		if err != nil {
+			if _, gone := c.Run("has-session", "-t", target); gone != nil {
+				continue
+			}
+			lists = append(lists, BossList{Boss: sess.Name, Err: err, List: List{Items: []Shown{}, Stale: true}})
+			continue
+		}
+		if len(l.Items) > 0 {
+			lists = append(lists, BossList{Boss: sess.Name, List: l})
+		}
+	}
+	return lists, nil
+}
+
 // Read is the list as its boards show it at now; a missing file is an empty list.
 func (s Store) Read(now time.Time) (List, error) {
 	f, err := s.read()
