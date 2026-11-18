@@ -140,6 +140,7 @@ type Model struct {
 	needDone   string                                                             // the answered row's sig: the cursor waits on it until it goes
 	needFor    string                                                             // the session or boss needDone's answer went to
 	answerList func(boss string, id int, question, option string) (string, error) // dev todo answer
+	tickList   func(boss string, id int, text string) (string, error)             // dev todo done
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -189,7 +190,7 @@ func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
 	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true,
-		answerList: sidebar.AnswerNeed}
+		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).

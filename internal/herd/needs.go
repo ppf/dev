@@ -148,9 +148,9 @@ func (m *Model) fixNeeds() {
 	}
 }
 
-// handleNeedKey acts on NEEDS YOU's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, g/⏎
-// go to its session, esc or n back to the cards, ctrl+c quit. An answer key on a row that changed since it was
-// chosen sends nothing.
+// handleNeedKey acts on NEEDS YOU's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick a
+// plain item, g/⏎ go to its session, esc or n back to the cards, ctrl+c quit. An answer key on a row that changed
+// since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if len(rows) == 0 {
@@ -173,7 +173,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "g", "enter":
 		return m, m.switchTo(r.Session)
-	case "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		if r.sig == m.needDone {
 			m.needKey, m.needDone = r.sig, ""
 			m.msg = info("⏳ " + r.label + " answered: press again to answer it anew")
@@ -184,12 +184,42 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.msg = alert("⚠ " + r.label + "'s item changed: nothing sent, check it and press again")
 			return m, nil
 		}
-		if key == "m" || key == "i" {
+		switch key {
+		case "d":
+			return m.tickNeed(r)
+		case "m", "i":
 			return m.replyNeed(r)
 		}
 		return m.answerNeed(r, int(key[0]-'1'), k)
 	}
 	return m, nil
+}
+
+// tickNeed ticks a plain list item through dev todo done; like an answer, its row goes or fails.
+func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
+	if r.Kind != sidebar.NeedPlain {
+		m.msg = info("d ticks a plain item; g/⏎ goes to " + r.Session)
+		return m, nil
+	}
+	if m.answering != "" {
+		m.msg = info("⏳ answering " + m.answering + "…: tick again once it's done")
+		return m, nil
+	}
+	m.answering = r.Boss
+	m.needKey, m.needDone, m.needFor = "", r.sig, r.Boss
+	tick := m.tickList
+	return m, listCmd(r.Boss, "Ticked ", func() (string, error) { return tick(r.Boss, r.ID, r.Text) })
+}
+
+// listCmd runs a dev todo call on boss's list; its output, or done+boss when it prints none, or its failure.
+func listCmd(boss, done string, run func() (string, error)) tea.Cmd {
+	return func() tea.Msg {
+		out, err := run()
+		if err != nil {
+			return answeredMsg{session: boss, msg: alert("❌ " + boss + ": " + err.Error())}
+		}
+		return answeredMsg{session: boss, msg: info(cmp.Or(out, done+boss)), took: true}
+	}
 }
 
 // replyNeed opens the reply box on a dialog's or question's session: its picker, or a typed reply.
@@ -242,13 +272,7 @@ func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 	case sidebar.NeedListAsk:
 		m.answering = r.Boss
 		answer := m.answerList
-		return m, func() tea.Msg {
-			out, err := answer(r.Boss, r.ID, r.Text, r.Options[n])
-			if err != nil {
-				return answeredMsg{session: r.Boss, msg: alert("❌ " + r.Boss + ": " + err.Error())}
-			}
-			return answeredMsg{session: r.Boss, msg: info(cmp.Or(out, "Answered "+r.Boss)), took: true}
-		}
+		return m, listCmd(r.Boss, "Answered ", func() (string, error) { return answer(r.Boss, r.ID, r.Text, r.Options[n]) })
 	case sidebar.NeedAsk:
 		next, cmd := m.sendOption(m.snap.tiles[r.tile], n)
 		return next.(Model), cmd
