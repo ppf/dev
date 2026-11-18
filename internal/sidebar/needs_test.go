@@ -19,16 +19,24 @@ type answerCall struct {
 	option   string
 }
 
-// needsModel has boss-dev (project dev) with two asks, a ticked one and one on a worker, a worker waiting on a dialog, and
-// a recording answer func.
+// needsModel has boss-dev's list (project dev) with two asks, a ticked one and one on a worker, a worker (deciding sets
+// it waiting on a dialog, sorted first), and a recording answer func; boss-dev isn't marked a boss, so the sidebar
+// shows the whole section.
+// deciding is m with its worker waiting on a dialog.
+func deciding(m Model) Model {
+	m.snap.sessions = slices.Clone(m.snap.sessions)
+	m.snap.sessions[1].Deciding = true
+	return m
+}
+
 func needsModel(calls *[]answerCall) Model {
 	return Model{
 		c: tmux.NewFake(func([]string) (string, error) { return "", nil }),
 		snap: snapshot{width: 40, height: 30, current: "boss-dev", focused: true, sessions: []Session{
-			{Name: "boss-dev", Group: "dev", Project: "dev", Boss: true, ID: "$1", Agent: "Claude", State: "idle"},
-			{Name: "w1", Group: "dev", Project: "dev", ID: "$2", StartedBy: "boss-dev", Depth: 1, Agent: "Claude", State: "waiting", Deciding: true},
+			{Name: "boss-dev", Group: "dev", Project: "dev", ID: "$1", Agent: "Claude", State: "idle"},
+			{Name: "w1", Group: "dev", Project: "dev", ID: "$2", StartedBy: "boss-dev", Depth: 1, Agent: "Claude", State: "waiting"},
 		}},
-		needs: []needList{{Boss: "boss-dev", Items: []needItem{
+		needs: []NeedList{{Boss: "boss-dev", Items: []NeedItem{
 			{ID: 1, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}},
 			{ID: 2, Text: "Ticked", Done: true},
 			{ID: 3, Text: "Staging", On: "Marek"},
@@ -57,37 +65,37 @@ func key(m Model, s string) (Model, tea.Cmd) {
 
 func TestNeedsRows(t *testing.T) {
 	var calls []answerCall
-	got := needsModel(&calls).needRows()
-	want := []needRow{
-		{project: "dev", boss: "boss-dev", id: 1, text: "Merge #148?", options: []string{"Merge (Recommended)", "Wait"}, session: "boss-dev"},
-		{project: "dev", boss: "boss-dev", id: 4, text: "Call Vince", session: "boss-dev"},
-		{project: "w1", text: "w1", session: "w1", dialog: true},
+	got := deciding(needsModel(&calls)).needRows()
+	want := []NeedRow{
+		{Kind: NeedDialog, Project: "dev", Who: "w1", Text: "w1", Session: "w1"},
+		{Kind: NeedListAsk, Project: "dev", Who: "boss", Boss: "boss-dev", ID: 1, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}, Session: "boss-dev"},
+		{Kind: NeedPlain, Project: "dev", Who: "boss", Boss: "boss-dev", ID: 4, Text: "Call Vince", Session: "boss-dev"},
 	}
-	if !slices.EqualFunc(got, want, func(a, b needRow) bool {
-		return a.key() == b.key() && a.project == b.project && slices.Equal(a.options, b.options) && a.session == b.session
+	if !slices.EqualFunc(got, want, func(a, b NeedRow) bool {
+		return a.key() == b.key() && a.Project == b.Project && a.Who == b.Who && slices.Equal(a.Options, b.Options) && a.Session == b.Session
 	}) {
 		t.Errorf("rows = %+v\nwant %+v", got, want)
 	}
 	// A list not read is a row saying why, ⏎ going to its boss
-	m := needsModel(&calls)
-	m.needs = append(m.needs, needList{Boss: "boss-web", Error: "list not read: bad JSON"})
-	if r := m.needRows(); len(r) != 4 || !r[2].broken || r[2].text != "list not read: bad JSON" || r[2].session != "boss-web" || !strings.Contains(m.needLine(r[2], 40, false), "⚠") {
+	m := deciding(needsModel(&calls))
+	m.needs = append(m.needs, NeedList{Boss: "boss-web", Error: "list not read: bad JSON"})
+	if r := m.needRows(); len(r) != 4 || r[3].Kind != NeedUnread || r[3].Text != "list not read: bad JSON" || r[3].Session != "boss-web" || !strings.Contains(m.needLine(r[3], 40, false), "⚠") {
 		t.Errorf("rows with a list not read = %+v", r)
 	}
 	// A boss no session carries is shown by its name without "boss-"
 	m = needsModel(&calls)
 	m.snap.sessions = nil
-	if r := m.needRows(); r[0].project != "dev" {
-		t.Errorf("project without a session = %q", r[0].project)
+	if r := m.needRows(); r[0].Project != "dev" {
+		t.Errorf("project without a session = %q", r[0].Project)
 	}
 }
 
 func TestNeedsRender(t *testing.T) {
 	var calls []answerCall
-	m := needsModel(&calls)
+	m := deciding(needsModel(&calls))
 	f := m.render()
 	plain := func(i int) string { return strings.TrimRight(ansi.Strip(f.lines[i]), " ") }
-	for i, want := range []string{" NEEDS YOU 3 · n", "", " dev  ☐ Merge #148?", " dev  ☐ Call Vince", " w1  ● w1", "", " SESSIONS                           +"} {
+	for i, want := range []string{" NEEDS YOU 3 · n", "", " w1  ● w1", " dev  ☐ Merge #148?", " dev  ☐ Call Vince", "", " SESSIONS                           +"} {
 		if got := plain(i); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
@@ -95,10 +103,11 @@ func TestNeedsRender(t *testing.T) {
 	if f.header != 6 || len(f.needs) != 3 || f.needs[1] != (needHit{line: 3, idx: 1}) {
 		t.Errorf("header %d, hits %v", f.header, f.needs)
 	}
-	if !strings.Contains(f.lines[0], red+bold+"NEEDS YOU") || !strings.Contains(f.lines[4], red+"●") {
-		t.Errorf("colours: %q %q", f.lines[0], f.lines[4])
+	if !strings.Contains(f.lines[0], red+bold+"NEEDS YOU") || !strings.Contains(f.lines[2], red+"●") {
+		t.Errorf("colours: %q %q", f.lines[0], f.lines[2])
 	}
 
+	m = needsModel(&calls)
 	m.needMode, m.needOpen, m.needIdx, m.needKey = true, true, 0, m.needRows()[0].key()
 	f = m.render()
 	for i, want := range map[int]string{3: "    1 ★ Merge", 4: "    2 Wait"} {
@@ -106,7 +115,7 @@ func TestNeedsRender(t *testing.T) {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
 	}
-	if !strings.HasPrefix(f.lines[2], selectedBG) || !strings.HasPrefix(f.lines[4], selectedBG) || f.header != 8 {
+	if !strings.HasPrefix(f.lines[2], selectedBG) || !strings.HasPrefix(f.lines[4], selectedBG) || f.header != 7 {
 		t.Errorf("selected ask: %q %q header %d", f.lines[2], f.lines[3], f.header)
 	}
 	for i, l := range f.lines {
@@ -130,11 +139,11 @@ func TestNeedsRenderNothing(t *testing.T) {
 func TestNeedsRenderBudget(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
-	var items []needItem
+	var items []NeedItem
 	for i := 1; i <= 30; i++ {
-		items = append(items, needItem{ID: i, Text: "item"})
+		items = append(items, NeedItem{ID: i, Text: "item"})
 	}
-	m.needs = []needList{{Boss: "boss-dev", Items: items}}
+	m.needs = []NeedList{{Boss: "boss-dev", Items: items}}
 	m.snap.height = 20
 	f := m.render()
 	if f.header > needsBudget(20) || len(f.lines) != 20 {
@@ -209,8 +218,8 @@ func TestNeedsKeysMove(t *testing.T) {
 	}
 	m, _ = key(m, "k")
 	m, _ = key(m, "k")
-	if m.needIdx != 2 {
-		t.Errorf("k wraps: idx %d, want 2", m.needIdx)
+	if m.needIdx != 1 {
+		t.Errorf("k wraps: idx %d, want 1", m.needIdx)
 	}
 }
 
@@ -218,14 +227,13 @@ func TestNeedsKeysMove(t *testing.T) {
 func TestNeedsEnterDialog(t *testing.T) {
 	var calls []answerCall
 	var tmuxCalls []string
-	m := needsModel(&calls)
+	m := deciding(needsModel(&calls))
 	m.c = tmux.NewFake(func(args []string) (string, error) {
 		tmuxCalls = append(tmuxCalls, strings.Join(args, " "))
 		return "", nil
 	})
 	m, _ = key(m, "n")
-	m, _ = key(m, "k")
-	if m.needIdx != 2 {
+	if m.needIdx != 0 || m.needRows()[0].Kind != NeedDialog {
 		t.Fatalf("idx %d", m.needIdx)
 	}
 	if m, _ = key(m, "enter"); !m.needOpen || m.selected != "" {
@@ -247,7 +255,7 @@ func TestNeedsStaleRow(t *testing.T) {
 	m, _ := key(needsModel(&calls), "n")
 	m, _ = key(m, "enter")
 	// The boss's list emptied and #1 is a newer ask
-	next, _ := m.Update(needsMsg{lists: []needList{{Boss: "boss-dev", Items: []needItem{{ID: 1, Text: "Release now?", Options: []string{"Now", "Later"}}}}}})
+	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Release now?", Options: []string{"Now", "Later"}}}}}})
 	m = next.(Model)
 	if m.needOpen {
 		t.Error("options stayed open on a different ask")
@@ -281,7 +289,7 @@ func TestNeedsReadFailure(t *testing.T) {
 	m := needsModel(&calls)
 	next, _ := m.Update(needsMsg{err: errors.New("dev todo --all: boom")})
 	m = next.(Model)
-	if len(m.needs) != 1 || m.needRows()[0].text != "Merge #148?" {
+	if len(m.needs) != 1 || m.needRows()[0].Text != "Merge #148?" {
 		t.Error("a failed read dropped the lists")
 	}
 	if got := ansi.Strip(m.bottomRow()); !strings.Contains(got, "boom") {
@@ -344,7 +352,7 @@ func TestNeedsCursorFollowsRow(t *testing.T) {
 	m, _ := key(needsModel(&calls), "n")
 	m, _ = key(m, "j")
 	want := m.needKey
-	next, _ := m.Update(needsMsg{lists: []needList{{Boss: "boss-dev", Items: []needItem{{ID: 4, Text: "Call Vince"}}}}})
+	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 4, Text: "Call Vince"}}}}})
 	m = next.(Model)
 	if m.needIdx != 0 || m.needKey != want {
 		t.Errorf("idx %d key %q, want 0 and %q", m.needIdx, m.needKey, want)
@@ -354,7 +362,7 @@ func TestNeedsCursorFollowsRow(t *testing.T) {
 func TestNeedsAnswered(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
-	m.needsLoad = func() ([]needList, error) { return nil, nil }
+	m.needsLoad = func() ([]NeedList, error) { return nil, nil }
 	m.needMode, m.needOpen = true, true
 	next, cmd := m.Update(answeredMsg{out: "#1 answered, sent to boss-dev"})
 	m = next.(Model)
@@ -382,7 +390,7 @@ func TestNeedsStaleHeader(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
 	m.needsErr = errors.New("boom")
-	if got := ansi.Strip(m.render().lines[0]); !strings.Contains(got, "NEEDS YOU 3 (stale)") {
+	if got := ansi.Strip(m.render().lines[0]); !strings.Contains(got, "NEEDS YOU 2 (stale)") {
 		t.Errorf("header = %q", got)
 	}
 }
@@ -474,11 +482,8 @@ func TestNeedsLabelIsProject(t *testing.T) {
 	if sessions[1].Group != "nocworx-core" || sessions[1].Project != "nocworx-core" || sessions[1].Root != "manager" {
 		t.Fatalf("order: %+v", sessions[1])
 	}
-	var calls []answerCall
-	m := needsModel(&calls)
-	m.snap.sessions = sessions
-	m.needs = []needList{{Boss: "boss-nocworx-core", Items: []needItem{{ID: 1, Text: "Call"}}}}
-	if r := m.needRows(); len(r) != 1 || r[0].project != "nocworx-core" {
+	lists := []NeedList{{Boss: "boss-nocworx-core", Items: []NeedItem{{ID: 1, Text: "Call"}}}}
+	if r := NeedRows(sessions, lists, "manager"); len(r) != 1 || r[0].Project != "nocworx-core" || r[0].Who != "boss" {
 		t.Errorf("rows = %+v", r)
 	}
 }
@@ -505,7 +510,7 @@ func TestNeedsDialogText(t *testing.T) {
 		{"junk", "w1", nil},
 	} {
 		r := dialogModel(tc.q).needRows()
-		if len(r) != 1 || r[0].text != tc.text || r[0].project != "w1" || !slices.Equal(r[0].options, tc.options) {
+		if len(r) != 1 || r[0].Text != tc.text || r[0].label() != "w1" || !slices.Equal(r[0].Options, tc.options) {
 			t.Errorf("%q → %+v, want text %q options %v", tc.q, r, tc.text, tc.options)
 		}
 	}
@@ -515,7 +520,7 @@ func TestNeedsDialogText(t *testing.T) {
 func TestNeedsExpandPlainAndDialog(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
-	m.needs[0].Items = []needItem{{ID: 4, Text: "Be reachable Tuesday night and Wednesday morning for the rollout"}}
+	m.needs[0].Items = []NeedItem{{ID: 4, Text: "Be reachable Tuesday night and Wednesday morning for the rollout"}}
 	m, _ = key(m, "n")
 	m, _ = key(m, "enter")
 	all := ansi.Strip(strings.Join(m.render().lines, "\n"))
@@ -553,7 +558,7 @@ func TestNeedsExpandPlainAndDialog(t *testing.T) {
 func TestNeedsBrokenRowExpands(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
-	m.needs = []needList{{Boss: "boss-web", Error: "list not read: a long reason that does not fit in one line"}}
+	m.needs = []NeedList{{Boss: "boss-web", Error: "list not read: a long reason that does not fit in one line"}}
 	m.snap.sessions = nil
 	m, _ = key(m, "n")
 	m, cmd := key(m, "enter")
@@ -592,5 +597,87 @@ func TestNeedsMouseOpenAskStaysOpen(t *testing.T) {
 		if cmd != nil || !m.needOpen {
 			t.Fatalf("open %v cmd %v", m.needOpen, cmd)
 		}
+	}
+}
+
+// boardModel is a manager over boss-dev (its worker w1 on a dialog, its list with an ask) and boss-web with
+// nothing under it, plus a boss of its own (boss-solo) whose list waits on the user.
+func boardModel(calls *[]answerCall) Model {
+	m := needsModel(calls)
+	m.snap.current = "vitay"
+	m.snap.sessions = Order([]Session{
+		{Name: "manager", Group: "manager", ID: "$1", Boss: true},
+		{Name: "boss-dev", Group: "dev", ID: "$2", Boss: true, StartedBy: "manager"},
+		{Name: "w1", Group: "dev", ID: "$3", StartedBy: "boss-dev", Agent: "Claude", State: "waiting", Deciding: true},
+		{Name: "boss-web", Group: "web", ID: "$4", Boss: true, StartedBy: "manager"},
+		{Name: "boss-solo", Group: "solo", ID: "$5", Boss: true},
+		{Name: "vitay", Group: "vitay", ID: "$6", Agent: "Claude", State: "waiting", Deciding: true},
+	})
+	m.needs = []NeedList{
+		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Merge?", Options: []string{"Yes", "No"}}}},
+		{Boss: "boss-solo", Items: []NeedItem{{ID: 1, Text: "Call Vince"}}},
+	}
+	return m
+}
+
+// A manager and a boss in no manager's group have boards; a boss under the manager doesn't.
+func TestBoards(t *testing.T) {
+	var calls []answerCall
+	if got := Boards(boardModel(&calls).snap.sessions); !slices.Equal(got, []string{"manager", "boss-solo"}) {
+		t.Errorf("boards %q", got)
+	}
+}
+
+// With a boss on the server NEEDS YOU is one line, its count the boards' blocks' (a session under no boss isn't
+// on one); n focuses it, ⏎ goes to the first board with any and asks it to focus its block; a click does too.
+func TestNeedsBoardLine(t *testing.T) {
+	var calls []answerCall
+	m := boardModel(&calls)
+	if n, board, ok := m.boardNeeds(); n != 3 || board != "manager" || !ok || m.needRows() != nil {
+		t.Fatalf("boardNeeds = %d %q %v", n, board, ok)
+	}
+	f := m.render()
+	if got := strings.TrimRight(ansi.Strip(f.lines[0]), " "); got != " NEEDS YOU 3  → board" || f.header != 2 {
+		t.Errorf("line %q header %d", got, f.header)
+	}
+	var ran []string
+	m.c = tmux.NewFake(func(args []string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		if args[0] == "list-panes" {
+			return "%10\tcoordinator\n%11\tpreviews\n", nil
+		}
+		return "", nil
+	})
+	want := []string{
+		"list-panes -s -t =manager: -F #{pane_id}\t#{@dev_boss_pane}",
+		"set-option -p -t %11 @dev_needs_focus 1",
+	}
+	m, _ = key(m, "n")
+	if !m.needMode || !strings.Contains(m.needsHint(), "⏎ board") {
+		t.Fatalf("n: mode %v hint %q", m.needMode, m.needsHint())
+	}
+	m, cmd := key(m, "enter")
+	if m.needMode || cmd == nil {
+		t.Fatalf("⏎: mode %v", m.needMode)
+	}
+	cmd()
+	if len(ran) < 4 || !slices.Equal(ran[:2], want) || !slices.ContainsFunc(ran, func(c string) bool { return strings.HasPrefix(c, "switch-client") && strings.Contains(c, "=manager:") }) ||
+		!slices.Contains(ran, "select-window -t %11 ; select-pane -t %11") {
+		t.Errorf("ran %q", ran)
+	}
+	ran = nil
+	next, cmd := m.Update(tea.MouseMsg{X: 3, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if cmd == nil {
+		t.Fatal("click: no jump")
+	}
+	_ = next
+	cmd()
+	if len(ran) < 2 || !slices.Equal(ran[:2], want) {
+		t.Errorf("click ran %q", ran)
+	}
+	// Nothing on any board: no line
+	m.needs, m.snap.sessions[2].Deciding = nil, false
+	if f := m.render(); f.header != 0 {
+		t.Errorf("no rows: header %d", f.header)
 	}
 }

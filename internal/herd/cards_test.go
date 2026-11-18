@@ -42,16 +42,12 @@ func board4() Model {
 }
 
 // Each section under its header with its count; the working card selected and open with its title, what its
-// call does, branch, cost and context, PR, last words and screen; an idle card folded to one row.
+// call does, branch, cost and context, PR, last words and screen; an idle card folded to one row, and one whose
+// question NEEDS YOU asks.
 func TestBoardLayout(t *testing.T) {
 	want := []string{
 		" NEEDS YOU 1 ─────────────────────────────────────────────────────────",
-		"┃╭───────────────────────────────────────────────────────────────────╮",
-		"┃│ ▾ ● fix-login                                                  3m │",
-		"┃│    allow Bash: rm -rf build                                       │",
-		"┃│    feature/fix-login-redis                          default model │",
-		"┃│    Open  Message…                                               × │",
-		"┃╰───────────────────────────────────────────────────────────────────╯",
+		"┃ ▸ ● fix-login  Bash prompt · in the block ↑       default model  3m ",
 		" WORKING 1 ───────────────────────────────────────────────────────────",
 		" ╭───────────────────────────────────────────────────────────────────╮",
 		" │ ▾ ● docs-api                                                  12m │",
@@ -98,18 +94,21 @@ func TestBoardLayout(t *testing.T) {
 // Needs you and Waiting cards carry their section's bar, the selected card's box its state's colour, the
 // others' faint; a needs you status is red.
 func TestBoardColours(t *testing.T) {
-	got := board4().board().lines
-	if !strings.HasPrefix(got[1], sidebar.Red+"┃"+reset+rule+"╭") {
-		t.Errorf("needs you: red bar, faint box: %q", got[1])
+	m := board4()
+	got := m.board().lines
+	if !strings.HasPrefix(got[1], sidebar.Red+"┃") || !strings.Contains(got[1], sidebar.Red+"Bash prompt · in the block ↑") {
+		t.Errorf("needs you: red bar and status: %q", got[1])
 	}
-	if !strings.Contains(got[3], sidebar.Red+bold+"allow Bash") {
-		t.Errorf("needs you status not red: %q", got[3])
+	if !strings.HasPrefix(got[3], " "+sidebar.Gold+"╭") {
+		t.Errorf("selected working card not in gold: %q", got[3])
 	}
-	if !strings.HasPrefix(got[8], " "+sidebar.Gold+"╭") {
-		t.Errorf("selected working card not in gold: %q", got[8])
+	if !strings.HasPrefix(got[20], sidebar.Green+"┃") {
+		t.Errorf("waiting: green bar: %q", got[20])
 	}
-	if !strings.HasPrefix(got[25], sidebar.Green+"┃") {
-		t.Errorf("waiting: green bar: %q", got[25])
+	m.folds = map[string]bool{"fix-login": false}
+	got = m.board().lines
+	if !strings.HasPrefix(got[1], sidebar.Red+"┃"+reset+rule+"╭") || !strings.Contains(got[3], sidebar.Red+bold+"allow Bash") {
+		t.Errorf("needs you unfolded: red bar, faint box, red status: %q %q", got[1], got[3])
 	}
 }
 
@@ -122,7 +121,7 @@ func TestBoardNarrow(t *testing.T) {
 			t.Errorf("line %d is %d wide: %q", i, w, ansi.Strip(l))
 		}
 	}
-	if got := ansi.Strip(m.board().lines[12]); !strings.Contains(got, "│    …") || !strings.Contains(got, "-examples $1.20 · 63%") {
+	if got := ansi.Strip(m.board().lines[7]); !strings.Contains(got, "│    …") || !strings.Contains(got, "-examples $1.20 · 63%") {
 		t.Errorf("branch cut at its start: %q", got)
 	}
 }
@@ -177,17 +176,16 @@ func TestFold(t *testing.T) {
 	if m = next.(Model); m.snap.tiles[3].folded(m.folds) || m.box.session != "" {
 		t.Errorf("click on old-spike's arrow: folded %v, box %q", m.snap.tiles[3].folded(m.folds), m.box.session)
 	}
-	m.folds["fix-login"] = true
-	if m.snap.tiles[0].folded(m.folds) {
-		t.Error("a deciding card folded")
+	if !m.snap.tiles[0].folded(m.folds) {
+		t.Error("a deciding card open: NEEDS YOU asks its question")
 	}
-	delete(m.folds, "fix-login")
 	for m.selected != "fix-login" {
 		m = press(m, "k")
 	}
-	if m = press(m, "f"); m.folds["fix-login"] {
-		t.Error("f on a Needs you card stored a fold")
+	if m = press(m, "f"); m.folds["fix-login"] || m.snap.tiles[0].folded(m.folds) {
+		t.Error("f on a Needs you card didn't open it")
 	}
+	delete(m.folds, "fix-login")
 	snap := m.snap
 	snap.tiles = snap.tiles[1:]
 	next, _ = m.Update(refreshMsg{snap: snap, inputs: m.inputs})
@@ -348,7 +346,7 @@ func TestSortBySection(t *testing.T) {
 
 // A turn that ended on a question shows it, red, under Needs you.
 func TestBoardAsks(t *testing.T) {
-	m := Model{width: 60, height: 20, snap: snapshot{tiles: []tile{
+	m := Model{width: 60, height: 20, folds: map[string]bool{"a": false}, snap: snapshot{tiles: []tile{
 		{sess: sidebar.Session{Name: "a", State: agent.Idle}, note: "asks: Merge #68 now?"},
 	}}}
 	got := strings.Join(m.board().lines, "\n")
@@ -372,7 +370,7 @@ func TestQuestionCard(t *testing.T) {
 	ask := agent.Question{Tool: agent.AskUserQuestion, Questions: []agent.Ask{{Question: "Which color should the theme use?", Header: "Color",
 		Options: []agent.Choice{{Label: "Red"}, {Label: "Green"}, {Label: "Blue"}}}}}
 	p := goldenPick(t, "claude-ask-q1", colors)
-	m := Model{width: 70, height: 40, snap: snapshot{tiles: []tile{
+	m := Model{width: 70, height: 40, folds: map[string]bool{"a": false}, snap: snapshot{tiles: []tile{
 		{sess: sidebar.Session{Name: "a", Agent: "Claude", State: agent.Waiting}, deciding: true, question: ask, pick: &p,
 			note: "needs a decision: " + ask.Ask(), body: []string{"❯ pick a theme colour"}},
 	}}}
@@ -463,7 +461,7 @@ func asksTile(t *testing.T) tile {
 func TestAsksCard(t *testing.T) {
 	// At 70 columns a last line is cut short, so its rows stay on screen
 	for _, w := range []int{70, 130} {
-		m := Model{width: w, height: 64, snap: snapshot{tiles: []tile{asksTile(t)}}}
+		m := Model{width: w, height: 64, snap: snapshot{tiles: []tile{asksTile(t)}}, folds: map[string]bool{"count": false}}
 		got := ansi.Strip(strings.Join(m.board().lines, "\n"))
 		if n := strings.Count(got, "Want the same breakdown"); n != 1 {
 			t.Errorf("%d columns: question shown %d times:\n%s", w, n, got)
@@ -523,7 +521,7 @@ func TestAsksCardLongQuestion(t *testing.T) {
 	if got := said(tl); slices.ContainsFunc(got, func(l string) bool { return strings.Contains(l, "CI cache") }) {
 		t.Errorf("said = %q, want the question left to the status", got)
 	}
-	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}, folds: map[string]bool{tl.sess.Name: false}}
 	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
 	if n := strings.Count(got, "Should I also move"); n != 1 || !strings.Contains(got, "│    Should I also move the CI cache") {
 		t.Errorf("question's start shown %d times, want once in the status:\n%s", n, got)
@@ -578,7 +576,7 @@ func TestAsksCardLiveDemos(t *testing.T) {
 		}
 		tl := tile{sess: sidebar.Session{Name: tt.name, Agent: "Claude", State: agent.Idle, Branch: tt.name}, note: note.Summary(), tail: read}
 		tl.body = previewLines(screenGolden(t, tt.golden), tl)
-		m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+		m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}, folds: map[string]bool{tl.sess.Name: false}}
 		got := ansi.Strip(strings.Join(m.board().lines, "\n"))
 		if n := strings.Count(got, tt.start); n != 1 || !strings.Contains(got, "│    "+tt.start) {
 			t.Errorf("%s: question's start shown %d times, want once in the status:\n%s", tt.name, n, got)
@@ -625,7 +623,7 @@ func TestWorkingCardToolRows(t *testing.T) {
 	}
 	tl := tile{sess: sidebar.Session{Name: "busy", Agent: "Claude", State: agent.Working, Branch: "demo-busy"}, tail: read}
 	tl.body = previewLines(screenGolden(t, "claude-working-bash"), tl)
-	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}}
+	m := Model{width: 130, height: 64, snap: snapshot{tiles: []tile{tl}}, folds: map[string]bool{tl.sess.Name: false}}
 	got := ansi.Strip(strings.Join(m.board().lines, "\n"))
 	if !strings.Contains(got, "│    Waiting 100 seconds via Python (run 2 of 4)") {
 		t.Errorf("status not the tool's description:\n%s", got)

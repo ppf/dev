@@ -1,7 +1,6 @@
 package herd
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,55 +83,37 @@ func viaBoard() Model {
 	return m
 }
 
-// A deeper session's card is shown, not answered: no Message… or ×, answer, reply and kill keys say where it is
-// answered, ⏎ still goes to it.
-func TestViaDisplayOnly(t *testing.T) {
+// A deeper session's card folds to a row pointing at NEEDS YOU; it's answered as an own one is (1-9 through its
+// picker), but not closed: no × or Message…, x says where it is closed, ⏎ still goes to it.
+func TestViaCard(t *testing.T) {
 	m := viaBoard()
+	rows, _ := m.card(m.snap.tiles[0], 70)
+	if len(rows) != 1 || !strings.Contains(ansi.Strip(rows[0]), "w-dialog  via boss-a  Bash prompt") {
+		t.Errorf("folded card = %q", ansi.Strip(strings.Join(rows, "\n")))
+	}
+	m.folds = map[string]bool{"w-dialog": false}
 	rows, hits := m.card(m.snap.tiles[0], 70)
-	head, buttons := ansi.Strip(rows[1]), ansi.Strip(rows[len(rows)-2])
-	if !strings.Contains(head, "w-dialog  via boss-a") || strings.Contains(buttons, "Message…") || strings.Contains(buttons, "×") || !strings.Contains(buttons, "Open") {
-		t.Errorf("head %q, buttons %q: want the via tag and Open only", head, buttons)
+	if buttons := ansi.Strip(rows[len(rows)-2]); strings.Contains(buttons, "Message…") || strings.Contains(buttons, "×") || !strings.Contains(buttons, "Open") {
+		t.Errorf("buttons %q: want Open only", buttons)
 	}
 	for _, h := range hits {
 		if h.kind == hitMessage || h.kind == hitClose {
 			t.Errorf("hit %+v on a deeper session's card", h)
 		}
 	}
-	for _, k := range []string{"1", "m", "i", "x"} {
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
-		n := next.(Model)
-		if cmd != nil || n.box.session != "" || n.confirm != "" || !strings.Contains(n.msg.text, "boss-a's: answer it there") {
-			t.Errorf("%s: box %q, confirm %q, msg %q, want only where to answer it", k, n.box.session, n.confirm, n.msg.text)
-		}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if n := next.(Model); cmd != nil || n.confirm != "" || !strings.Contains(n.msg.text, "boss-a's: close it there") {
+		t.Errorf("x: confirm %q, msg %q", n.confirm, n.msg.text)
+	}
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	if n := next.(Model); cmd == nil || n.answering != "w-dialog" {
+		t.Errorf("1: answering %q, want its picker's answer", n.answering)
 	}
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
 		t.Error("⏎: want a switch to the session")
 	}
-	if hint := ansi.Strip(m.bottom()[0]); !strings.Contains(hint, "boss-a's: answered there") || strings.Contains(hint, "x kill") {
+	if hint := ansi.Strip(m.bottom()[0]); !strings.Contains(hint, "boss-a's") || strings.Contains(hint, "x kill") {
 		t.Errorf("hint = %q", hint)
-	}
-}
-
-// A click on a deeper session's dialog option selects it and says where it is answered, without picking it; a
-// reply box open on another card closes, keeping its draft.
-func TestViaClick(t *testing.T) {
-	m := viaBoard()
-	m.open(m.snap.tiles[1])
-	m.box.ed.set("draft for fix-login")
-	b := m.board()
-	i := slices.IndexFunc(b.hits, func(h hit) bool { return h.tile == 0 && h.kind == hitOption })
-	if i < 0 {
-		t.Fatal("no option hit on the deeper session's dialog")
-	}
-	top, _ := m.boardSpan(m.height - len(m.bottom()))
-	h := b.hits[i]
-	next, cmd := m.Update(tea.MouseMsg{X: h.x0, Y: top + h.y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
-	n := next.(Model)
-	if cmd != nil || n.box.session != "" || n.answering != "" || n.selected != "w-dialog" || !strings.Contains(n.msg.text, "boss-a's") {
-		t.Errorf("click: box %q, answering %q, selected %q, msg %q", n.box.session, n.answering, n.selected, n.msg.text)
-	}
-	if d, ok := n.drafts["fix-login"]; !ok || d.ed.String() != "draft for fix-login" {
-		t.Errorf("drafts = %+v, want fix-login's kept", n.drafts)
 	}
 }
 
@@ -141,9 +122,9 @@ func TestRefreshViaDialogGone(t *testing.T) {
 	rule := strings.Repeat("─", 40)
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, dialogScreen} {
 		state := "waiting"
 		c := tmux.NewFake(func(args []string) (string, error) {
@@ -237,62 +218,5 @@ func TestTodoOwnerSkipsVia(t *testing.T) {
 	}
 	if o := m.todoOwner(todo.Shown{ID: 2, Text: "y", On: "fix-login"}); o == nil || o.name != "fix-login" {
 		t.Errorf("owner = %+v, want fix-login", o)
-	}
-}
-
-// The bosses' items waiting on the user show under each boss's header after the own list, an ask with its
-// options; a list not read says why; folded, the headers only, ▸ first.
-func TestAskRows(t *testing.T) {
-	m := withTodo()
-	m.snap.todo = todo.List{}
-	m.snap.asks = []todo.BossList{
-		{Boss: "boss-a", List: todo.List{Items: []todo.Shown{
-			{ID: 7, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}},
-			{ID: 9, Text: "DM David"},
-		}}},
-		{Boss: "boss-b", Err: errors.New("bad")},
-	}
-	checkRows(t, m.todoRows(39), []string{
-		" boss-a · 2 wait on you ──────────────────────────",
-		" 7 ☐ Merge #148?                                  ",
-		"     1 ★ Merge  2 Wait                            ",
-		" 9 ☐ DM David                                     ",
-		" boss-b ⚠ list not read: bad ─────────────────────",
-	}, 50)
-	m.width = 80
-	if h := ansi.Strip(m.todoRows(39)[0]); !strings.HasSuffix(h, " dev todo answer boss-a <n> <option> ") {
-		t.Errorf("wide header %q: want how to answer at the right", h)
-	}
-	m.todoFolded = true
-	if rows := plain(m.todoRows(39)); len(rows) != 2 || !strings.HasPrefix(rows[0], " ▸ boss-a") {
-		t.Errorf("folded: want the headers only:\n%s", strings.Join(rows, "\n"))
-	}
-	// Plain items only: no answer hint
-	m.todoFolded, m.snap.asks = false, m.snap.asks[:1]
-	m.snap.asks[0].Items = m.snap.asks[0].Items[1:]
-	if h := ansi.Strip(m.todoRows(39)[0]); strings.Contains(h, "dev todo answer") {
-		t.Errorf("header %q: no ask to answer", h)
-	}
-}
-
-// A full own list leaves a row for each boss's header, and bosses out of rows are counted, not dropped; asks
-// alone keep the pane open with the t hint.
-func TestAskRowsRoom(t *testing.T) {
-	m := withTodo()
-	m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: 6, Text: "six", Options: []string{"a", "b"}}, todo.Shown{ID: 7, Text: "seven"})
-	ask := func(boss string) todo.BossList {
-		return todo.BossList{Boss: boss, List: todo.List{Items: []todo.Shown{{ID: 1, Text: boss + "'s ask"}}}}
-	}
-	m.snap.asks = []todo.BossList{ask("boss-a"), ask("boss-b"), ask("boss-c"), ask("boss-d"), ask("boss-e")}
-	rows := plain(m.todoRows(16))
-	if len(rows) != 8 || !strings.HasPrefix(rows[len(rows)-2], " boss-c ·") || strings.TrimSpace(rows[len(rows)-1]) != "+2 more bosses wait on you" {
-		t.Errorf("16 rows:\n%s", strings.Join(rows, "\n"))
-	}
-	m.snap = snapshot{asks: m.snap.asks[:1]}
-	m.size, m.focused = collapsed, false
-	m.c = tmux.NewFake(func(args []string) (string, error) { return "200\n", nil })
-	m.fit()
-	if m.size == collapsed || !strings.Contains(ansi.Strip(m.bottom()[0]), "t fold to do") {
-		t.Errorf("asks alone: size %v, hint %q", m.size, ansi.Strip(m.bottom()[0]))
 	}
 }

@@ -29,15 +29,15 @@ func (m Model) View() string {
 	return strings.Join(m.render(), "\n")
 }
 
-// render lays out exactly m.height lines: the to do block, the board under it scrolled to the selected card, the
-// message threads under it, then the bottom rows.
+// render lays out exactly m.height lines: NEEDS YOU and the to do block, the board under them scrolled to the
+// selected card, the message threads under it, then the bottom rows.
 func (m Model) render() []string {
 	w, h := m.width, m.height
 	lines := make([]string, h)
 	bottom := m.bottom()
 	gh := h - len(bottom)
 	copy(lines[gh:], bottom)
-	top := m.todoRows(gh)
+	top := m.topRows(gh)
 	copy(lines, top)
 	msgs := m.msgRows(gh - len(top))
 	copy(lines[gh-len(msgs):], msgs)
@@ -54,10 +54,16 @@ func (m Model) render() []string {
 	return lines
 }
 
-// boardSpan is the row the board starts at, under the to do block, and the rows it gets above the message
-// threads, when gh rows are above the bottom rows.
+// topRows are the rows above the board, in gh rows: NEEDS YOU, then the to do block.
+func (m Model) topRows(gh int) []string {
+	block, _ := m.needBlock(gh)
+	return append(block, m.todoRows(gh-len(block))...)
+}
+
+// boardSpan is the row the board starts at, under NEEDS YOU and the to do block, and the rows it gets above the
+// message threads, when gh rows are above the bottom rows.
 func (m Model) boardSpan(gh int) (top, height int) {
-	top = len(m.todoRows(gh))
+	top = len(m.topRows(gh))
 	return top, gh - top - len(m.msgRows(gh-top))
 }
 
@@ -90,6 +96,9 @@ func (m Model) bottom() []string {
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
+	if m.needMode {
+		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply  g/⏎ go  esc cards", w)}
+	}
 	pages := ""
 	sel := index(tiles, m.selected)
 	if _, bh := m.boardSpan(m.height - 1); len(tiles) > 0 && len(m.board().lines) > bh {
@@ -98,7 +107,7 @@ func (m Model) bottom() []string {
 	}
 	hint := "j/k select  g/⏎ go  m message  v screen  f fold  x kill"
 	todo := ""
-	if len(m.snap.todo.Items) > 0 || len(m.snap.asks) > 0 {
+	if len(m.panelItems()) > 0 {
 		todo = "t fold to do  "
 		if m.todoFolded {
 			todo = "t open to do  "
@@ -108,12 +117,15 @@ func (m Model) bottom() []string {
 		// o only offers what openPR does: the PR, or why its lookup failed
 		switch s := tiles[sel].sess; {
 		case tiles[sel].via != "":
-			hint = "j/k select  g/⏎ go  v screen  · " + tiles[sel].via + "'s: answered there"
+			hint = "j/k select  g/⏎ go  m message  v screen  · " + tiles[sel].via + "'s"
 		case s.State == agent.Waiting || len(tiles[sel].options()) > 0:
 			hint = "1-9 answer  " + hint
 		case s.PR.Number != 0 || s.PR.Err != "":
 			hint = "j/k select  g/⏎ go  m message  v screen  f fold  o PR  x kill"
 		}
+	}
+	if len(m.needRows()) > 0 {
+		hint += "  n needs"
 	}
 	return []string{sidebar.HintRow(pages+todo+hint, w)}
 }

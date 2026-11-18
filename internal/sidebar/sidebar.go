@@ -24,6 +24,14 @@ const (
 // OptHerd marks a dev boss session ("1").
 const OptHerd = "@dev_herd"
 
+// OptBossPane holds a boss pane's role (RolePreviews for its board); OptNeedsFocus on its board asks it to focus
+// NEEDS YOU, which the board does on its next refresh, clearing it.
+const (
+	OptBossPane   = "@dev_boss_pane"
+	RolePreviews  = "previews"
+	OptNeedsFocus = "@dev_needs_focus"
+)
+
 // Starter is the @dev_started_by value dev agent start writes for a worker started from a session: a
 // boss's name, which outlives its session id across a reopen and a tmux restart, else the session id ($N),
 // which every reader still takes, as older versions wrote it for bosses too.

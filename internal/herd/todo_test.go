@@ -19,15 +19,15 @@ import (
 	"github.com/ppf/dev/internal/todo"
 )
 
-// withTodo is board4 at 50 columns with a list of four, one waiting on someone else, one linking its PR,
-// changed 2 minutes ago.
+// withTodo is board4 at 50 columns with a list of four, three waiting on someone else, one ticked linking its
+// PR, changed 2 minutes ago: what the block lists, the user's own items being NEEDS YOU's.
 func withTodo() Model {
 	m := board4()
 	m.width = 50
 	m.snap.todo = todo.List{Updated: m.clk.Now().Add(-2 * time.Minute).Unix(), Items: []todo.Shown{
-		{ID: 1, Text: "Answer Vince in Slack: lw deploy window"},
-		{ID: 3, Text: "Approve Kasia's PR #84"},
-		{ID: 5, Text: "Merge PR #87", Link: "https://github.com/o/r/pull/87"},
+		{ID: 1, Text: "Answer Vince in Slack: lw deploy window", On: "Vince"},
+		{ID: 3, Text: "Approve Kasia's PR #84", On: "Kasia"},
+		{ID: 5, Text: "Merge PR #87", Link: "https://github.com/o/r/pull/87", Done: true},
 		{ID: 4, Text: "Staging access for lw", On: "Marek (Ops)"},
 	}}
 	return m
@@ -54,23 +54,29 @@ func checkRows(t *testing.T, got, want []string, width int) {
 	}
 }
 
-// The block: a header in the section rows' style with the open count, those on others and the age, then one
-// row per item with its number, box, text and at the right who it waits on or its PR.
+// The block: a header in the section rows' style with the open count and the age, then one row per item with its
+// number, box, text and at the right who it waits on or its PR; the user's own open items are NEEDS YOU's.
 func TestTodoBlock(t *testing.T) {
 	m := withTodo()
+	m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: 6, Text: "Call Vince"})
 	checkRows(t, m.todoRows(39), []string{
-		" TO DO 4 · 1 on others ─────────────── updated 2m ",
-		" 1 ☐ Answer Vince in Slack: lw deploy window      ",
-		" 3 ☐ Approve Kasia's PR #84                       ",
-		" 5 ☐ Merge PR #87                           ○ #87 ",
+		" TO DO 3 ───────────────────────────── updated 2m ",
+		" 5 ☑ Merge PR #87                           ○ #87 ",
+		" 1 ◌ Answer Vince in Slack: lw deploy w… on Vince ",
+		" 3 ◌ Approve Kasia's PR #84              on Kasia ",
 		" 4 ◌ Staging access for lw         on Marek (Ops) ",
 	}, 50)
 	rows := m.todoRows(39)
-	if !strings.Contains(rows[0], bold+"TO DO 4") || !strings.Contains(rows[0], sidebar.Muted+"updated 2m") {
+	if !strings.Contains(rows[0], bold+"TO DO 3") || !strings.Contains(rows[0], sidebar.Muted+"updated 2m") {
 		t.Errorf("header: bold title, muted age: %q", rows[0])
 	}
 	if !strings.Contains(rows[4], sidebar.Gold+"on Marek") {
 		t.Errorf("who it waits on in gold: %q", rows[4])
+	}
+	// Only the user's own: none
+	m.snap.todo.Items = []todo.Shown{{ID: 6, Text: "Call Vince"}}
+	if rows := m.todoRows(39); len(rows) != 0 {
+		t.Errorf("rows %q, want none", plain(rows))
 	}
 }
 
@@ -81,14 +87,14 @@ func TestTodoDoneStale(t *testing.T) {
 	m.snap.todo.Stale = true
 	m.snap.todo.Updated = m.clk.Now().Add(-2 * time.Hour).Unix()
 	rows := m.todoRows(39)
-	if got := ansi.Strip(rows[0]); !strings.HasPrefix(got, " TO DO 3 · 1 on others ") || !strings.HasSuffix(got, " updated 2h ") {
+	if got := ansi.Strip(rows[0]); !strings.HasPrefix(got, " TO DO 2 ") || !strings.HasSuffix(got, " updated 2h ") {
 		t.Errorf("header = %q", got)
 	}
 	if !strings.Contains(rows[0], rule+"updated 2h") {
 		t.Errorf("stale age not faint: %q", rows[0])
 	}
-	if !strings.Contains(rows[2], sidebar.Green+"☑") || !strings.Contains(rows[2], strike+"Approve") {
-		t.Errorf("ticked item: green ☑, struck text: %q", rows[2])
+	if i := slices.IndexFunc(rows, func(r string) bool { return strings.Contains(r, "Approve") }); i < 0 || !strings.Contains(rows[i], sidebar.Green+"☑") || !strings.Contains(rows[i], strike+"Approve") {
+		t.Errorf("ticked item: green ☑, struck text: %q", rows)
 	}
 }
 
@@ -96,11 +102,10 @@ func TestTodoDoneStale(t *testing.T) {
 func TestTodoMore(t *testing.T) {
 	m := withTodo()
 	for i := 6; i <= 10; i++ {
-		m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: i, Text: "item " + strconv.Itoa(i)})
+		m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: i, Text: "item " + strconv.Itoa(i), On: "Ola"})
 	}
 	rows := plain(m.todoRows(39))
-	// The user's own items come first, so the one on Marek goes under "+4 more"
-	if len(rows) != 7 || rows[4] != " 6 ☐ item 6"+strings.Repeat(" ", 39) || strings.TrimSpace(rows[6]) != "+4 more" {
+	if len(rows) != 7 || !strings.HasPrefix(rows[5], " 6 ◌ item 6") || strings.TrimSpace(rows[6]) != "+4 more" {
 		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
 	}
 	rows = plain(m.todoRows(8))
@@ -117,10 +122,10 @@ func TestTodoNarrow(t *testing.T) {
 	m := withTodo()
 	m.width = 26
 	checkRows(t, m.todoRows(39), []string{
-		" TO DO 4 · 1 on others ───",
-		" 1 ☐ Answer Vince in Sla… ",
-		" 3 ☐ Approve Kasia's PR … ",
-		" 5 ☐ Merge PR #87   ○ #87 ",
+		" TO DO 3 ───── updated 2m ",
+		" 5 ☑ Merge PR #87   ○ #87 ",
+		" 1 ◌ Answer Vin… on Vince ",
+		" 3 ◌ Approve Ka… on Kasia ",
 		" 4 ◌ Staging ac… on Mare… ",
 	}, 26)
 	m.width = 12
@@ -137,7 +142,7 @@ func TestTodoFold(t *testing.T) {
 	m.height = 30
 	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	m = next.(Model)
-	checkRows(t, m.todoRows(29), []string{" ▸ TO DO 4 · 1 on others ───────────── updated 2m "}, 50)
+	checkRows(t, m.todoRows(29), []string{" ▸ TO DO 3 ─────────────────────────── updated 2m "}, 50)
 	if hint := ansi.Strip(m.bottom()[0]); !strings.Contains(hint, "  t open to do  j/k") {
 		t.Errorf("hint = %q", hint)
 	}
@@ -186,7 +191,7 @@ func TestTodoNoWorkers(t *testing.T) {
 	m.snap.tiles = nil
 	m.height = 12
 	lines := plain(m.render())
-	if !strings.HasPrefix(lines[0], " TO DO 4") || !strings.HasPrefix(lines[5], " No worker sessions yet") {
+	if !strings.HasPrefix(lines[0], " TO DO 3") || !strings.HasPrefix(lines[5], " No worker sessions yet") {
 		t.Errorf("render:\n%s", strings.Join(lines, "\n"))
 	}
 	var ran []string
@@ -229,7 +234,7 @@ func TestRefreshTodo(t *testing.T) {
 	c := tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("herd", "$1", "1", "0", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""), nil
+			return tmux.FormatRow("herd", "$1", "1", "0", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
 			if strings.Contains(args[len(args)-1], "@dev_herd") {
 				looked++
@@ -359,8 +364,8 @@ func TestTodoWorkers(t *testing.T) {
 	}
 }
 
-// The block lists the user's own items first, then those on a worker that needs the user, then on a session
-// that's gone, then the rest in the list's order; five of them, then +N more.
+// The block lists those on a worker that needs the user first, then on a session that's gone, then the rest in
+// the list's order (the user's own are NEEDS YOU's); five of them, then +N more.
 func TestTodoWorkerOrder(t *testing.T) {
 	m := withWorkers()
 	var got []int
@@ -371,7 +376,7 @@ func TestTodoWorkerOrder(t *testing.T) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
 	rows := plain(m.todoRows(39))
-	if len(rows) != 7 || !strings.HasPrefix(rows[3], " 4 ◌ Fix login") || !strings.HasPrefix(rows[4], " 3 ◌ Rework") || strings.TrimSpace(rows[6]) != "+4 more" {
+	if len(rows) != 7 || !strings.HasPrefix(rows[1], " 4 ◌ Fix login") || !strings.HasPrefix(rows[2], " 3 ◌ Rework") || strings.TrimSpace(rows[6]) != "+2 more" {
 		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
 	}
 }
@@ -392,8 +397,7 @@ func TestTodoWorkerNarrow(t *testing.T) {
 	}
 }
 
-// An open ask shows its options under it, ★ on the recommended one; an answered item what was answered. The
-// options' row counts against the block's rows.
+// An answered item shows what was answered; an open ask is NEEDS YOU's.
 func TestTodoAsk(t *testing.T) {
 	m := withTodo()
 	m.snap.todo.Items = []todo.Shown{
@@ -402,29 +406,11 @@ func TestTodoAsk(t *testing.T) {
 		{ID: 1, Text: "Answer Vince"},
 	}
 	checkRows(t, m.todoRows(39), []string{
-		" TO DO 2 ───────────────────────────── updated 2m ",
-		" 2 ☐ Merge #148 boss picker?                      ",
-		"     1 ★ Merge  2 Wait for review                 ",
+		" TO DO 0 ───────────────────────────── updated 2m ",
 		" 3 ☑ Orders API: v3 when?                         ",
 		"     answered: After release                      ",
-		" 1 ☐ Answer Vince                                 ",
 	}, 50)
-	if rows := m.todoRows(39); !strings.Contains(rows[2], sidebar.Gold+"★") || !strings.Contains(rows[4], sidebar.Green+"answered") {
-		t.Errorf("★ gold, answered green:\n%q\n%q", rows[2], rows[4])
+	if rows := m.todoRows(39); !strings.Contains(rows[2], sidebar.Green+"answered") {
+		t.Errorf("answered green: %q", rows[2])
 	}
-	// 8 rows: 3 for the block, header aside, so the ask and its options, then "+2 more"
-	rows := m.todoRows(8)
-	checkRows(t, rows[:3], []string{
-		" TO DO 2 ───────────────────────────── updated 2m ",
-		" 2 ☐ Merge #148 boss picker?                      ",
-		"     1 ★ Merge  2 Wait for review                 ",
-	}, 50)
-	if len(rows) != 4 || strings.TrimSpace(ansi.Strip(rows[3])) != "+2 more" {
-		t.Errorf("8 rows: want the ask, its options, +2 more:\n%s", strings.Join(plain(rows), "\n"))
-	}
-	m.width = 20
-	checkRows(t, m.todoRows(39)[1:3], []string{
-		" 2 ☐ Merge #148 bo… ",
-		"     1 ★ Merge  2 … ",
-	}, 20)
 }

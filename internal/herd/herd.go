@@ -38,12 +38,12 @@ const (
 )
 
 // OptPane is the pane option holding a boss pane's role, which the resurrect save records.
-const OptPane = "@dev_boss_pane"
+const OptPane = sidebar.OptBossPane
 
 // Roles of a boss's panes (OptPane).
 const (
 	RoleCoordinator = "coordinator"
-	RolePreviews    = "previews"
+	RolePreviews    = sidebar.RolePreviews
 )
 
 // coordinatorPrompt is appended to the coordinator's system prompt, so its input box starts empty.

@@ -309,7 +309,7 @@ func ansiStrip(lines []string) []string {
 
 // The reply box's card is framed in its state's accent, as the selected card is, and so is the box's frame.
 func TestBoundTile(t *testing.T) {
-	m := Model{width: 61, height: 30, selected: "a", snap: snapshot{tiles: []tile{
+	m := Model{width: 61, height: 30, selected: "a", folds: map[string]bool{"b": false}, snap: snapshot{tiles: []tile{
 		{sess: sidebar.Session{Name: "b", Agent: "Claude", State: "waiting"}, deciding: true, body: []string{"\x1b[31mred\x1b[0m"}},
 		{sess: sidebar.Session{Name: "c", Agent: "Claude", State: "working"}, body: []string{"x"}},
 		{sess: sidebar.Session{Name: "a", Agent: "Claude", State: "idle"}, note: "failed: boom", body: []string{"\x1b[32mgreen\x1b[0m"}},
@@ -349,8 +349,8 @@ func TestRefreshPick(t *testing.T) {
 		switch args[0] {
 		case "list-panes":
 			r := tmux.FormatRow
-			return r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-				r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", q.String(), "", "", "", "", "", "", "", "", "", ""), nil
+			return r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+				r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", q.String(), "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "list-clients":
 			return tmux.FormatRow("/dev/ttys1", "herd", "5"), nil
 		}
@@ -456,6 +456,8 @@ func TestCardAnswerClicks(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
 	m.box = replyBox{}
 	c, sent := screens(t, "claude-ask-q1", "")
+	// Open, for their chips: NEEDS YOU asks their questions
+	m.folds = map[string]bool{"a": false, "b": false}
 	m.c = c
 	x, y := cellOf(t, m, "2 Green")
 	m, cmd := clickAt(m, x+2, y)
@@ -491,6 +493,7 @@ func TestCardAnswerClicks(t *testing.T) {
 
 	m = pickerModel(t, "claude-ask-q1", colors)
 	m.box.ed.set("half")
+	m.folds = map[string]bool{"a": false}
 	x, y = cellOf(t, m, "3 Blue")
 	if m, cmd = clickAt(m, x+1, y); cmd != nil || !strings.Contains(m.msg.text, "typed reply") || m.box.ed.String() != "half" {
 		t.Errorf("click over a draft: msg %q draft %q", m.msg.text, m.box.ed.String())
@@ -739,6 +742,8 @@ func TestCardClicksAcrossCards(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
 	m.height = 40
 	b := goldenPick(t, "claude-permission-bash", agent.Question{})
+	// Open, for their chips: NEEDS YOU asks their questions
+	m.folds = map[string]bool{"a": false, "b": false}
 	m.snap.tiles[1].deciding, m.snap.tiles[1].pick, m.snap.tiles[1].pane = true, &b, "%6"
 	m.snap.tiles[1].sess.State = agent.Waiting
 	sortBySection(m.snap.tiles)
@@ -775,6 +780,8 @@ func TestCardClicksAcrossCards(t *testing.T) {
 func TestCardDialogCursor(t *testing.T) {
 	m := pickerModel(t, "claude-ask-multi-other-typed", agent.Question{})
 	m.box = replyBox{}
+	// Open, for their chips: NEEDS YOU asks their questions
+	m.folds = map[string]bool{"a": false, "b": false}
 	if x, y := cellOf(t, m, "[3 ☑ a fish]"); x == 0 || y == 0 {
 		t.Error("the dialog's cursor isn't bracketed")
 	}
@@ -849,8 +856,8 @@ func TestRefreshAsking(t *testing.T) {
 				switch args[0] {
 				case "list-panes":
 					r := tmux.FormatRow
-					return r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-						r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "", "", "", "", "$1", "", "", "", "", q.String(), "", "", "", "", "", "", "", "", "", ""), nil
+					return r("herd", "$1", "1", "1", "1", "%1", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+						r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "", "", "", "", "$1", "", "", "", "", q.String(), "", "", "", "", "", "", "", "", "", "", ""), nil
 				case "list-clients":
 					return tmux.FormatRow("/dev/ttys1", "herd", "5"), nil
 				}
