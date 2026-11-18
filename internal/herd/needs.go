@@ -307,11 +307,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 		head += rule + " · n" + reset
 	}
 	lines, at, spans = []string{padRow(head, w), padRow("", w)}, []int{-1, -1}, make([][]optSpan, 2)
-	labelW := 0
-	for _, r := range rows {
-		labelW = max(labelW, ansi.StringWidth(r.label))
-	}
-	labelW = min(labelW, 20, max(4, w*2/5))
+	labelW := labelWidth(rows, w)
 	cur := -1
 	if m.needMode {
 		cur = min(m.needIdx, len(rows)-1)
@@ -355,6 +351,22 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 		lines, at, spans = append(lines, padRow(sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w), w)), append(at, -1), append(spans, nil)
 	}
 	return append(lines, padRow("", w)), append(at, -1), append(spans, nil)
+}
+
+// labelWidth is the rows' label column: the longest label, cut at 20 unless two labels would cut alike (hiding
+// which worker an answer goes to), and at 2/5 of the pane.
+func labelWidth(rows []needRow, w int) int {
+	labelW, capW := 0, 20
+	cuts := map[string]string{}
+	for _, r := range rows {
+		labelW = max(labelW, ansi.StringWidth(r.label))
+		cut := ansi.Truncate(r.label, 20, "…")
+		if full, ok := cuts[cut]; ok && full != r.label {
+			capW = w
+		}
+		cuts[cut] = r.label
+	}
+	return min(labelW, capW, max(4, w*2/5))
 }
 
 // minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.

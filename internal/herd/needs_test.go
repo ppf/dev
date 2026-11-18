@@ -138,6 +138,20 @@ func TestNeedsLabelCap(t *testing.T) {
 	}
 }
 
+// Two labels that cut alike at 20 keep their full width, up to 2/5 of the pane.
+func TestNeedsLabelCollision(t *testing.T) {
+	rows := []needRow{{label: "kite › billing-export-us"}, {label: "kite › billing-export-eu"}, {label: "noc"}}
+	if got := labelWidth(rows, 60); got != 24 {
+		t.Errorf("colliding = %d, want 24", got)
+	}
+	if got := labelWidth(rows[1:], 60); got != 20 {
+		t.Errorf("one long = %d, want 20", got)
+	}
+	if got := labelWidth([]needRow{rows[0], rows[0]}, 60); got != 20 {
+		t.Errorf("same label twice = %d, want 20", got)
+	}
+}
+
 // A worker named <project>-boss keeps "project › boss": only a boss session's rows are labelled by project.
 func TestNeedsWorkerNamedBoss(t *testing.T) {
 	m := needsBoard(t, new([]listAnswer))
