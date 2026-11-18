@@ -430,10 +430,10 @@ func TestReminder(t *testing.T) {
 	l := List{Items: []Shown{{ID: 1, Text: "a"}, {ID: 2, Text: "b", Done: true}, {ID: 3, Text: "c", On: "Marek", Until: time.Date(2026, 11, 16, 10, 0, 0, 0, time.Local).Unix()}}}
 	want := "[dev todo] Your open to do list:\n1. a\n3. c (on Marek) (until 2026-11-16 10:00)\n" +
 		`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + whoLine
-	if got := l.Reminder(time.Now()); got != want {
+	if got := l.Reminder(nil, time.Now()); got != want {
 		t.Errorf("Reminder = %q, want %q", got, want)
 	}
-	if got := (List{Items: []Shown{{ID: 2, Text: "b", Done: true}}}).Reminder(time.Now()); got != "" {
+	if got := (List{Items: []Shown{{ID: 2, Text: "b", Done: true}}}).Reminder(nil, time.Now()); got != "" {
 		t.Errorf("all done: %q, want none", got)
 	}
 }
@@ -444,12 +444,12 @@ func TestStartReminder(t *testing.T) {
 	for i := 1; i <= startShown+3; i++ {
 		l.Items = append(l.Items, Shown{ID: i, Text: "t" + strconv.Itoa(i), Done: i == 1})
 	}
-	got := l.StartReminder(true, "2h ago", time.Now())
+	got := l.StartReminder(true, "2h ago", nil, time.Now())
 	if !strings.HasPrefix(got, "[dev todo] Your open to do list (kept from your last boss session, updated 2h ago):\n2. t2\n") ||
 		!strings.Contains(got, "\n21. t21\n+2 more: dev todo\nCheck each still holds") || strings.Contains(got, "t22") {
 		t.Errorf("StartReminder = %q", got)
 	}
-	if got := (List{Items: []Shown{{ID: 1, Text: "a", Done: true}}}).StartReminder(false, "now", time.Now()); got != "" {
+	if got := (List{Items: []Shown{{ID: 1, Text: "a", Done: true}}}).StartReminder(false, "now", nil, time.Now()); got != "" {
 		t.Errorf("all done: %q, want none", got)
 	}
 }
@@ -541,7 +541,7 @@ func TestMarkGone(t *testing.T) {
 	if got := []bool{l.Items[0].Gone, l.Items[1].Gone, l.Items[2].Gone, l.Items[3].Gone}; !slices.Equal(got, []bool{false, false, true, false}) {
 		t.Errorf("gone = %v, want only the open item on old", got)
 	}
-	if got := l.Reminder(time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola)\n2. b (on live)\n") {
+	if got := l.Reminder(nil, time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola)\n2. b (on live)\n") {
 		t.Errorf("Reminder = %q", got)
 	}
 }

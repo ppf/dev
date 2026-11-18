@@ -208,20 +208,21 @@ func TestReminderFlagged(t *testing.T) {
 		{ID: 2, Text: "PR #412 open", On: "reviewers", Check: &sidebar.Check{Kind: sidebar.CheckApproved, PR: 412, Since: now.Add(-2 * time.Hour).Unix()}},
 		{ID: 3, Text: "Rework rounding", On: "fix", Gone: true},
 	}}
-	got := l.Reminder(now)
+	got := l.Reminder(nil, now)
 	want := "[dev todo] Your open to do list:\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):" +
 		"\n2. PR #412 open (on reviewers) ⚠ PR #412 approved 2h ago\n3. Rework rounding (on fix, session gone)\nThe rest:\n1. Review the copy\n"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("Reminder =\n%s\nwant it to start\n%s", got, want)
 	}
-	if got := (List{Items: []Shown{{ID: 1, Text: "a"}}}).Reminder(now); strings.Contains(got, "Re-check") || strings.Contains(got, "The rest") {
+	if got := (List{Items: []Shown{{ID: 1, Text: "a"}}}).Reminder(nil, now); strings.Contains(got, "Re-check") || strings.Contains(got, "The rest") {
 		t.Errorf("nothing flagged: %q", got)
 	}
 }
 
 // With closed, All adds the lists with open items of the bosses closed on the server, by name, each open item checked
-// as boss closed unless its PR moved; a list under a session id, another server's, an older dev's without its name and
-// a closed boss's emptied list stay out.
+// as boss closed unless its PR moved; an older dev's list without its name is its file's boss; a list under a session
+// id, another server's, an older dev's whose file another socket may have written or with a hashed name, and a closed
+// boss's emptied list stay out.
 func TestAllClosed(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	sessions := []string{"boss-live", "boss-kite", "boss-done", "boss-hash+x", "manager", "boss-bad", "boss-plain"}
@@ -277,14 +278,27 @@ func TestAllClosed(t *testing.T) {
 	if err := os.WriteFile(bad.path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// An older dev's list stored no name: whose it is can't be told, so it stays out
-	kite, _ := ForPane(c, tmux.SessionTarget("boss-kite"))
-	data, err := os.ReadFile(kite.path)
-	if err != nil {
-		t.Fatal(err)
+	// Older dev's lists stored no name: their file's key names their boss, when it can only be a boss of this server
+	unnamed := func(name string) {
+		s, _ := ForPane(c, tmux.SessionTarget(name))
+		data, err := os.ReadFile(s.path)
+		if err != nil {
+			s, _ = open("/tmp/tmux-1/default-" + name)
+			s.boss = name
+			if _, err := s.Add(Item{Text: name + "'s"}, now); err != nil {
+				t.Fatal(err)
+			}
+			data, err = os.ReadFile(s.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(s.path, []byte(strings.Replace(string(data), `,"boss":"`+name+`"`, "", 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(kite.path, []byte(strings.Replace(string(data), `,"boss":"boss-kite"`, "", 1)), 0o600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"boss-kite", "boss-hash+x", "boss-x-boss-y", "boss-x-manager", "boss-x-_7-1700000000"} {
+		unnamed(name)
 	}
 	// boss-plain's session is open, though no boss any more
 	sessions = []string{"boss-live", "boss-plain"}
@@ -308,7 +322,7 @@ func TestAllClosed(t *testing.T) {
 		}
 		got = append(got, row)
 	}
-	want := []string{"boss-live", "boss-bad closed", "boss-hash+x closed boss closed", "manager closed boss closed"}
+	want := []string{"boss-live", "boss-bad closed", "boss-kite closed boss closed", "manager closed boss closed"}
 	if !slices.Equal(got, want) {
 		t.Errorf("All = %q, want %q", got, want)
 	}
@@ -442,7 +456,7 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 		}
 		l.Items = append(l.Items, it)
 	}
-	got := l.StartReminder(false, "now", now)
+	got := l.StartReminder(false, "now", nil, now)
 	if !strings.Contains(got, "\n2. item 2 ⚠ boss closed\nThe rest:\n3. item 3\n") || !strings.Contains(got, "\n+2 more: dev todo") {
 		t.Errorf("StartReminder =\n%s", got)
 	}
@@ -451,7 +465,7 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 		l.Items = append(l.Items, Shown{ID: i, Text: "x", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}})
 	}
 	l.Items = append(l.Items, Shown{ID: 99, Text: "rest"})
-	if got := l.StartReminder(false, "now", now); strings.Contains(got, "The rest:") {
+	if got := l.StartReminder(false, "now", nil, now); strings.Contains(got, "The rest:") {
 		t.Errorf("The rest: over no item:\n%s", got)
 	}
 }

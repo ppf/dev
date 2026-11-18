@@ -431,3 +431,33 @@ func TestTodoLineCheck(t *testing.T) {
 		t.Errorf("line = %q, want %q", got, want)
 	}
 }
+
+// add --done-on needs a GitHub PR link; dev todo check ticks the item once its PR is so, and a desktop boss's next
+// reminder tells it once.
+func TestTodoDoneOn(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	url := "https://github.com/acme/orbit/pull/415"
+	for _, args := range [][]string{{"todo", "add", "x", "--done-on", "merged"}, {"todo", "add", "x", "--link", url, "--done-on", "deployed"}} {
+		if _, _, err := execute(t, "", args...); err == nil {
+			t.Errorf("dev %s: want an error", strings.Join(args, " "))
+		}
+	}
+	run(t, "", "todo", "add", "Second review of #415", "--on", "Ana", "--link", url, "--done-on", "approved")
+	run(t, "", "todo", "add", "Keep")
+	if got := run(t, "", "todo"); got != "2\t☐\tKeep\n1\t◌\tSecond review of #415\ton Ana\t"+url+"\tdone on approved\n" {
+		t.Errorf("list = %q", got)
+	}
+	viewPR = func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN", Review: "APPROVED"}, nil }
+	if got := run(t, "", "todo", "check"); !strings.Contains(got, "1\t☑\tSecond review of #415") {
+		t.Errorf("check = %q, want #1 ticked", got)
+	}
+	event := `{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"<side-sessions-event>W finished</side-sessions-event>"}`
+	want := `#1 \"Second review of #415\" ticked by itself: PR #415 approved (--done-on approved)`
+	if got := run(t, event, "state", "working"); !strings.Contains(got, want) {
+		t.Errorf("reminder = %s, want %s", got, want)
+	}
+	if got := run(t, event, "state", "working"); strings.Contains(got, "ticked by itself") {
+		t.Errorf("second reminder = %s, want the tick told once", got)
+	}
+}
