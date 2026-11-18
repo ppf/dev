@@ -231,16 +231,16 @@ func TestRollLineManagerPlainOnly(t *testing.T) {
 	}
 }
 
-// A workerless boss with plain items only keeps a red "N need you" at sidebar widths; what is cut is the tail.
+// A workerless boss with plain items only keeps a red "N need you" first, without the idle its row already says; what is cut is the tail.
 func TestRollLineWorkerlessPlainOnly(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
 	for _, width := range []int{20, 36, 40} {
 		got, _ := rollLine(r, width)
-		if !strings.Contains(got, red+"1 need you"+reset) || !strings.HasPrefix(ansi.Strip(got), "idle · 1 need you") {
+		if !strings.HasPrefix(got, red+"1 need you"+reset) || !strings.HasPrefix(ansi.Strip(got), "1 need you · no w") {
 			t.Errorf("width %d: %q", width, got)
 		}
-		if strings.Contains(ansi.Strip(got), "…") {
+		if strings.Contains(strings.Split(ansi.Strip(got), " · ")[0], "…") {
 			t.Errorf("width %d: need you cut: %q", width, ansi.Strip(got))
 		}
 	}

@@ -461,10 +461,16 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		if len(warnings(t)) > 0 || t.roll != nil && t.roll.Warn {
 			badges += " " + sidebar.Gold + "⚠" + reset
 		}
-		if t.roll != nil && !t.deciding && t.roll.OnOthers > 0 && ansi.StringWidth(" "+left+status+badges) > room {
+		if t.roll != nil && !t.deciding {
+			// Too narrow: drop counts whole, "N on others" first
 			r := *t.roll
-			r.OnOthers = 0
-			status = "  " + rollText(r)
+			for _, drop := range []*int{&r.OnOthers, &r.ToDo, &r.Waiting, &r.Working} {
+				if ansi.StringWidth(" "+left+status+badges) <= room || *drop == 0 {
+					continue
+				}
+				*drop = 0
+				status = "  " + rollText(r)
+			}
 		}
 		left += status + badges
 	}

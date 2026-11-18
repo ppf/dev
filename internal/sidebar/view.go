@@ -400,13 +400,18 @@ func rollLine(r *Rollup, width int) (string, int) {
 	// Plain items count in "need you", as NEEDS YOU counts them
 	parts = slices.DeleteFunc(parts, func(p string) bool { return strings.HasSuffix(p, " to do") })
 	need := r.Questions + r.ToDo
-	lead := 0   // the parts before a manager's bosses and workers
-	needAt := 0 // index of the "need you" part that sits by the state, red
+	lead := 0          // the parts before a manager's bosses and workers
+	needAt := 0        // index of the "need you" part that sits by the state, red
+	needFirst := false // "need you" leads, the state left to the row above
 	switch {
 	case r.Rank == RankNeedsYou:
 		// "needs you · 2 questions" as "2 need you", to fit a sidebar's width
 		parts = append([]string{fmt.Sprintf("%d need you", need)}, parts[2:]...)
 		lead = 1
+	case need > 0 && r.Under == 0 && r.Rank == RankIdle:
+		// A workerless boss's row above already says idle: "1 need you · no workers"
+		parts = slices.Insert(parts[1:], 0, fmt.Sprintf("%d need you", need))
+		lead, needFirst = 1, true
 	case need > 0:
 		// The count stays by the state, where the width never cuts it
 		parts = slices.Insert(parts, 1, fmt.Sprintf("%d need you", need))
@@ -424,7 +429,7 @@ func rollLine(r *Rollup, width int) (string, int) {
 	}
 	for i, p := range parts[:lead] {
 		colour := muted
-		if i == 0 && r.Rank == RankNeedsYou || i == needAt && needAt > 0 {
+		if i == 0 && (r.Rank == RankNeedsYou || needFirst) || i == needAt && needAt > 0 {
 			colour = red
 		}
 		add(colour, p)
