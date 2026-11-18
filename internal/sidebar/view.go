@@ -406,6 +406,10 @@ func rollLine(r *Rollup, width int) (string, int) {
 	parts := r.Parts()
 	// Plain items count in "need you", as NEEDS YOU counts them
 	parts = slices.DeleteFunc(parts, func(p string) bool { return strings.HasSuffix(p, " to do") })
+	// "no workers" ranks last: the rows under the boss already show it, so it only fills an otherwise empty line
+	n := len(parts)
+	parts = slices.DeleteFunc(parts, func(p string) bool { return p == "no workers" })
+	noWorkers := len(parts) < n
 	need := r.Questions + r.ToDo
 	lead := 0          // the parts before a manager's bosses and workers
 	needAt := 0        // index of the "need you" part that sits by the state, red
@@ -489,6 +493,9 @@ func rollLine(r *Rollup, width int) (string, int) {
 	}
 	if plain == "" && stateDropped {
 		// Nothing else fits: the state rather than an empty line
+		if noWorkers {
+			state = "no workers"
+		}
 		add(muted, state)
 	}
 	return truncate(styled, width), min(ansi.StringWidth(plain), max(width, 0))
