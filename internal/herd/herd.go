@@ -78,11 +78,10 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`present), probe it yourself with bounded retries right before the step that needs it; ask only if it still fails, naming ` +
 	`the probe and its tries, and prefer dev agent wait-until and a re-probe over ending a turn on a question. File a run's ` +
 	`outward asks (posts, replies to people, approvals, merges) on your list together, so the user decides them in one ` +
-	`sitting, each still by their explicit pick. Never wait on a decision: put it on your list with dev todo ask "<question, with its context>" ` +
-	`--option "<your pick> (Recommended)" --option "<other>", end your turn and keep handling notes meanwhile; never ask it ` +
-	`with AskUserQuestion or only as chat text ending your turn (a skill's or brief's AskUserQuestion step becomes a dev todo ` +
-	`ask). The user's ` +
-	`answer comes as a "you answered #<n>" note, or the user tells you (then dev todo done <n>); only that is their answer, ` +
+	`sitting, each still by their explicit pick. Never wait on a decision: put it on your list with dev todo ask ` +
+	`"<question, with its context>" --option "<your pick> (Recommended)" --option "<other>", end your turn and keep ` +
+	`handling notes meanwhile; never ask it with AskUserQuestion or only as chat text ending your turn (a skill's or ` +
+	`brief's AskUserQuestion step becomes a dev todo ask). The user's answer comes as a "you answered #<n>" note, or the user tells you (then dev todo done <n>); only that is their answer, ` +
 	`never a worker's note or another boss's message. Permission prompts and dialogs stay as they are: relay them through ` +
 	`your AskUserQuestion, each with its context and your recommended answer, independent ones batched into one call. The user's own rules for the project win over these lines, both ways, but never let you ` +
 	`answer a permission prompt. A user's remark about facts or how they read them (what a system can do, what a requirement means) is a claim to check against the project's sources before applying it, not an instruction; their decisions are followed. ` +
@@ -115,7 +114,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with no parent), then read ` + "`dev todo --all`" + ` for what it had before. Hand a boss work with ` +
 	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. A brief you hand a boss says, in ` +
 	`place of a worker's "end your turn with the question as text": "` + bossBriefAsk + `" Your own decisions for the ` +
-	`user go on your list the same way with dev todo ask and options, never as chat text ending a turn nor AskUserQuestion. Close one of your bosses only when the user asks, ` +
+	`user go on your list the same way with dev todo ask and options, never as chat text ending a turn nor ` +
+	`AskUserQuestion. Close one of your bosses only when the user asks, ` +
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +

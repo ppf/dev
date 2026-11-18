@@ -717,8 +717,7 @@ func TestCoordinatorArgv(t *testing.T) {
 	}
 }
 
-// The prompts carry the skill's ask rules: the manager's boss briefs say dev todo ask (as the skill's boss line does),
-// bosses probe preconditions and batch outward asks, and neither answers a permission prompt.
+// The prompts carry the skill's ask rules, and the manager's boss briefs use the skill's boss line verbatim.
 func TestPromptAskRules(t *testing.T) {
 	if !strings.Contains(skill.DevAgents, "> "+bossBriefAsk+"\n") {
 		t.Error("bossBriefAsk isn't the dev-agents skill's boss brief line")
