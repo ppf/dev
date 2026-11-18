@@ -198,7 +198,7 @@ func TestBossAsks(t *testing.T) {
 		t.Fatal(err)
 	}
 	read = nil
-	got, err := bossAsks(c, []string{"boss-a", "boss-b", "boss-bad"}, now)
+	got, err := bossAsks(c, []string{"boss-a", "boss-b", "boss-bad"}, false, now)
 	if err != nil {
 		t.Fatal(err)
 	}

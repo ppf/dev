@@ -44,7 +44,7 @@ func (m Model) todoRows(gh int) []string {
 	all := m.todoOrder(items)
 	shown := 0
 	for i, it := range all[:min(todoShown, len(all))] {
-		item := []string{todoItem(it.Shown, it.owner, w)}
+		item := []string{todoItem(it.Shown, it.owner, w, m.clk.Now())}
 		if r := todoOptions(it.Shown, w); r != "" {
 			item = append(item, r)
 		}
@@ -160,11 +160,12 @@ func (m Model) todoOrder(items []todo.Shown) []ownedItem {
 	return out
 }
 
-// todoItem is one item's row: its number, ☐ (◌ waiting on someone else, ☑ ticked, struck through), its text
+// todoItem is one item's row at now: its number, ☐ (◌ waiting on someone else, ☑ ticked, struck through), its text
 // cut with …, and at the right who does it: a worker's dot in its section's colour, name and section, or ✕ and
-// session gone, in two fifths of the row (more for the state in a narrow pane), cutting the name first; else the
-// person, else its PR's number (↗ for another link), cut to a third of the row.
-func todoItem(it todo.Shown, o *owner, w int) string {
+// session gone, then ⚠ why to re-check the item (its check); or a person and its check, else the person and its PR's
+// number; in two fifths of the row (more for the state in a narrow pane), cutting the name first; else the person,
+// else its PR's number (↗ for another link), cut to a third of the row.
+func todoItem(it todo.Shown, o *owner, w int, now time.Time) string {
 	box, text := "☐", ""
 	switch {
 	case it.Done:
@@ -172,7 +173,17 @@ func todoItem(it todo.Shown, o *owner, w int) string {
 	case it.On != "":
 		box, text = sidebar.Muted+"◌"+reset, sidebar.Muted
 	}
-	right := ""
+	// A name with its state, past two fifths if need be; a pane too narrow for that cuts the state too
+	cell := func(mark, name, state string) string {
+		cell := min(max(w*2/5, ansi.StringWidth(mark+state)+3), max(1, w-6))
+		room := max(1, cell-ansi.StringWidth(mark+state)-2)
+		return " " + ansi.Truncate(mark+ansi.Truncate(name, room, "…")+reset+state, max(1, cell-2), "…") + reset + " "
+	}
+	checked := ""
+	if it.Check != nil {
+		checked = sidebar.Muted + " · " + reset + it.Check.Tone().Colour() + "⚠ " + it.Check.Short(now) + reset
+	}
+	right, sized := "", true
 	switch {
 	case o != nil:
 		what := strings.ToLower(sectionNames[o.sec])
@@ -184,18 +195,19 @@ func todoItem(it todo.Shown, o *owner, w int) string {
 		if o.gone {
 			mark, name, state = sidebar.Red+"✕ ", sidebar.Red+o.name, sidebar.Red+" · session gone"+reset
 		}
-		// Room for the state and a cut name, past two fifths if need be; a pane too narrow for that cuts the state too
-		cell := min(max(w*2/5, ansi.StringWidth(mark+state)+3), max(1, w-6))
-		room := max(1, cell-ansi.StringWidth(mark+state)-2)
-		right = " " + ansi.Truncate(mark+ansi.Truncate(name, room, "…")+reset+state, max(1, cell-2), "…") + reset + " "
+		right = cell(mark, name, state+checked)
+	case it.On != "" && it.Check != nil:
+		right = cell("", sidebar.Muted+it.On+reset, checked)
+	case it.On != "" && it.PR() != 0:
+		right = cell("", sidebar.Gold+"on "+it.On+reset, sidebar.Muted+" · "+reset+sidebar.Green+"#"+strconv.Itoa(it.PR())+reset)
 	case it.On != "":
-		right = sidebar.Gold + "on " + it.On + reset
+		right, sized = sidebar.Gold+"on "+it.On+reset, false
 	case it.PR() != 0:
-		right = sidebar.Green + "○ #" + strconv.Itoa(it.PR()) + reset
+		right, sized = sidebar.Green+"○ #"+strconv.Itoa(it.PR())+reset, false
 	case it.Link != "":
-		right = sidebar.Muted + "↗" + reset
+		right, sized = sidebar.Muted+"↗"+reset, false
 	}
-	if right != "" && o == nil {
+	if right != "" && !sized {
 		right = " " + ansi.Truncate(right, max(1, w/3), "…") + reset + " "
 	}
 	left := " " + rule + strconv.Itoa(it.ID) + reset + " " + box + " " + text + it.Text + reset

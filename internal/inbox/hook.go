@@ -118,13 +118,14 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	l, err := s.Read(time.Now())
+	now := time.Now()
+	l, err := s.Read(now)
 	if err != nil {
 		return "", err
 	}
 	// The list still goes out: what it says of each item holds without the workers
 	err = l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, pane) })
-	return l.Reminder(), err
+	return l.Reminder(now), err
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list; "" otherwise.
@@ -163,7 +164,7 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), source s
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	text := l.StartReminder(source == "startup", age)
+	text := l.StartReminder(source == "startup", age, now)
 	if text == "" {
 		return "", nil
 	}

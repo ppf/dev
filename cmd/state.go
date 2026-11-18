@@ -199,14 +199,15 @@ func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	l, err := s.Read(time.Now())
+	now := time.Now()
+	l, err := s.Read(now)
 	if err != nil {
 		return "", err
 	}
 	if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(id, stderr) }); err != nil {
 		return "", err
 	}
-	if text := l.Reminder(); text != "" {
+	if text := l.Reminder(now); text != "" {
 		return inbox.PromptContext(text)
 	}
 	return "", nil

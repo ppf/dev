@@ -19,7 +19,6 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/tmux"
-	"github.com/ppf/dev/internal/wait"
 )
 
 // Each read runs dev todo --all, once per sidebar.
@@ -39,7 +38,11 @@ type NeedList struct {
 	Items   []NeedItem `json:"items"`
 	Updated int64      `json:"updated"` // the list's last change, unix seconds
 	Stale   bool       `json:"stale"`   // unchanged for long: its items may be out of date
+	Closed  bool       `json:"closed"`  // its boss session is gone: a manager's NEEDS YOU shows it
 }
+
+// Manager is the session of the manager over the bosses (inbox.Manager).
+const Manager = "manager"
 
 // NeedItem is a list item as dev todo --all --json prints it.
 type NeedItem struct {
@@ -48,6 +51,8 @@ type NeedItem struct {
 	On      string   `json:"on"`
 	Done    bool     `json:"done"`
 	Options []string `json:"options"`
+	Added   int64    `json:"added"` // when it was added or last replaced, unix seconds; 0 for an older dev's
+	Check   *Check   `json:"check"` // why it may be out of date
 }
 
 // NeedCounts are the lists' counts for the roll-ups (Subtree), by boss.
@@ -85,18 +90,51 @@ type NeedRow struct {
 	Text    string   // the item's text, what the dialog or the question asks, or why the list wasn't read
 	Options []string // a list ask's answers; a dialog's choices (the sidebar only shows them; a board answers them)
 	Session string   // where ⏎ goes: the session, or the list's boss
-	Updated int64    // a stale list's last change, unix seconds; 0 for a fresh list's row and the others
+	Updated int64    // a stale list's item's last change (its list's, for an older dev's item), unix seconds; 0 for the others
+	Check   *Check   // why the list item may be out of date
+	Closed  bool     // the list's boss session is closed: its row can't be answered, ticked or gone to
+}
+
+// ClosedHint is what a key on a closed boss's row says instead of acting.
+func (r NeedRow) ClosedHint() string {
+	return r.Boss + " is closed: dev boss " + r.Project + " reopens it with its list"
 }
 
 // MinTextAfterAge is the text width a row keeps beside its age mark; with less the mark is left off.
 const MinTextAfterAge = 12
 
-// Age is how long ago the row's stale list last changed ("18h 19m"); "" for any other row.
+// Age is the row's mark at its right edge: its item's check (Check.Short), else how long ago the item of a stale list
+// last changed ("18h 19m"); "" for any other row. Tone is its colour.
 func (r NeedRow) Age(now time.Time) string {
+	if r.Check != nil {
+		return r.Check.Short(now)
+	}
 	if d := now.Sub(time.Unix(r.Updated, 0)); r.Updated != 0 && d > 0 {
-		return wait.Span(d)
+		return AgeSpan(d)
 	}
 	return ""
+}
+
+// Tone is how the row's Age stands out: its check's, else ToneFaint.
+func (r NeedRow) Tone() Tone {
+	if r.Check == nil {
+		return ToneFaint
+	}
+	return r.Check.Tone()
+}
+
+// Tone is a mark's colour, which each view maps to its own.
+type Tone int
+
+const (
+	ToneFaint Tone = iota
+	ToneFlag
+	ToneAlert
+)
+
+// Colour is the tone's escape: faint, gold or red.
+func (t Tone) Colour() string {
+	return [...]string{faint, gold, red}[t]
 }
 
 // key identifies the row across reads: a list's numbers restart once it empties, so the text is part of it.
@@ -307,26 +345,27 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 		rows = append(rows, row)
 	}
 	for _, l := range lists {
-		if root != "" && !owners[l.Boss] {
+		// A closed boss is under no board: the manager's shows its list
+		if root != "" && !owners[l.Boss] && !(l.Closed && root == Manager) {
 			continue
 		}
 		project, ok := project[l.Boss]
 		if !ok {
 			project = strings.TrimPrefix(l.Boss, "boss-")
 		}
-		row := NeedRow{Project: project, Who: "boss", Boss: l.Boss, Session: l.Boss}
+		row := NeedRow{Project: project, Who: "boss", Boss: l.Boss, Session: l.Boss, Closed: l.Closed}
 		if l.Error != "" {
 			row.Kind, row.Text = NeedUnread, l.Error
 			rows = append(rows, row)
-		}
-		if l.Stale {
-			row.Updated = l.Updated
 		}
 		for _, it := range l.Items {
 			if it.Done || it.On != "" {
 				continue
 			}
-			row.Kind, row.ID, row.Text, row.Options = NeedPlain, it.ID, it.Text, it.Options
+			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
+			if l.Stale {
+				row.Updated = cmp.Or(it.Added, l.Updated)
+			}
 			if len(it.Options) > 0 {
 				row.Kind = NeedListAsk
 			}
@@ -396,6 +435,11 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := rows[m.needIdx]
+	switch s := k.String(); {
+	case row.Closed && (s == "enter" || s == "d" || len(s) == 1 && s >= "1" && s <= "9"):
+		showMessage(m.c, m.client(), row.ClosedHint())
+		return m, nil
+	}
 	switch s := k.String(); s {
 	case "j", "down", "k", "up":
 		dir := 1
@@ -590,7 +634,7 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 	width := vis + ansi.StringWidth(text)
 	if age != "" {
 		pad := room - ansi.StringWidth(text) + 1
-		line += strings.Repeat(" ", pad) + faint + age + reset
+		line += strings.Repeat(" ", pad) + r.Tone().Colour() + age + reset
 		width += pad + len(age)
 	}
 	return cardLine(line, width, w, selected)

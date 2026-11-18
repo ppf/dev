@@ -385,8 +385,8 @@ func (m Model) refresh() tea.Cmd {
 		if store != nil {
 			snap.todo, snap.todoErr = store.Read(m.clk.Now())
 		}
-		if len(snap.bosses) > 0 {
-			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, m.clk.Now())
+		if manager := snap.name == inbox.Manager; len(snap.bosses) > 0 || manager {
+			snap.asks, snap.asksErr = bossAsks(m.c, snap.bosses, manager, m.clk.Now())
 		}
 		// Before the captures, which skip folded cards; again after them
 		snap.rollUp()
@@ -649,10 +649,10 @@ func descendants(names []string, panes map[string][]row, id, name string) map[st
 	return out
 }
 
-// bossAsks are the items waiting on the user (open, on no one) on the lists of bosses, by boss; a list not read
-// comes with its error.
-func bossAsks(c *tmux.Client, bosses []string, now time.Time) ([]todo.BossList, error) {
-	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) })
+// bossAsks are the items waiting on the user (open, on no one) on the lists of bosses, by boss, then with closed those
+// of the bosses closed on the server; a list not read comes with its error.
+func bossAsks(c *tmux.Client, bosses []string, closed bool, now time.Time) ([]todo.BossList, error) {
+	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) }, closed)
 	if err != nil {
 		return nil, err
 	}

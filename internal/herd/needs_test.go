@@ -923,3 +923,31 @@ func TestNeedsClickTruncatedOptions(t *testing.T) {
 		t.Errorf("click on the ellipsis answered: %q", lines[y])
 	}
 }
+
+// A closed boss's list on the manager's board: its rows labelled by project, boss closed in red at the right edge.
+func TestNeedsClosedBoss(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.asks = append(slices.Clone(managerAsks), todo.BossList{Boss: "boss-kite", Closed: true, List: todo.List{Items: []todo.Shown{
+		{ID: 3, Text: "Ask Mara for the API key", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}}}}})
+	var row needRow
+	for _, r := range m.needRows() {
+		if r.Boss == "boss-kite" {
+			row = r
+		}
+	}
+	if row.label != "kite" {
+		t.Fatalf("closed boss's row = %+v, want label kite", row)
+	}
+	lines, _ := m.needLines(row, 12, 80, false)
+	if !strings.Contains(lines[0], sidebar.Red+"boss closed") {
+		t.Errorf("line %q, want boss closed in red", lines[0])
+	}
+	// Its keys say how to reopen it, none acts
+	m.needMode, m.needIdx, m.needKey = true, slices.IndexFunc(m.needRows(), func(r needRow) bool { return r.Boss == "boss-kite" }), row.sig
+	for _, k := range []string{"d", "enter", "1"} {
+		if got, cmd := keys(m, k); cmd != nil || !strings.Contains(got.msg.text, "boss-kite is closed: dev boss kite reopens it") {
+			t.Errorf("%s: cmd %v, msg %q", k, cmd != nil, got.msg.text)
+		}
+	}
+}

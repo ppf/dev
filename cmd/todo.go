@@ -17,6 +17,7 @@ import (
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -62,15 +63,15 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 				return err
 			}
 			for _, it := range l.Items {
-				fmt.Fprintln(out, todoLine(it))
+				fmt.Fprintln(out, todoLine(it, time.Now()))
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask), updated (unix seconds), stale; with --all an array of them, each with its boss, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, check {kind, pr, since} when it may be out of date), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
 	return cmd
 }
 
@@ -156,6 +157,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
+				baseline(s, cmd.ErrOrStderr())
 				return printCount(cmd.OutOrStdout(), s, "replaced "+strconv.Itoa(replaces)+" · ", now)
 			}
 			id, err := s.Add(it, now)
@@ -165,6 +167,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.On == "" || it.On == todo.Me {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
+			baseline(s, cmd.ErrOrStderr())
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
@@ -216,6 +219,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 				return err
 			}
 			waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
+			baseline(s, cmd.ErrOrStderr())
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
@@ -410,6 +414,63 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 	return cmd
 }
 
+func newTodoCheckCmd(boss *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "check",
+		Short: "Look up now the PRs the open items link to, then print the list with why to re-check each item",
+		Long: `Look up now, with gh, the PR each open item links to (--link), then print the list as dev todo does, each item
+to re-check marked ⚠ with why: its PR merged or closed; approved, changes requested, checks green or failing since the
+item was added or replaced (its first lookup after that); its PR's lookups failing for 20 minutes; unchanged for 2 days
+or more (not an ask, nor a dated item before its --until). An item on a worker session gone says so (session gone).
+A dev boss's previews look its items' PRs up by themselves: every 15 seconds two of those not looked up for 10 minutes;
+a desktop app boss runs this. A lookup that failed prints on stderr; the list still prints.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			var lookups []error
+			if err := s.Lookup(time.Now(), 0, 0, func(url string) (sidebar.PRView, error) {
+				p, err := viewPR(url)
+				if err != nil {
+					lookups = append(lookups, err)
+				}
+				return p, err
+			}); err != nil {
+				return err
+			}
+			for _, err := range lookups {
+				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo check: "+err.Error())
+			}
+			now := time.Now()
+			l, err := s.Read(now)
+			if err != nil {
+				return err
+			}
+			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(*boss, cmd.ErrOrStderr()) }); err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			for _, it := range l.Items {
+				fmt.Fprintln(out, todoLine(it, now))
+			}
+			return nil
+		},
+	}
+}
+
+// viewPR looks a to do item's PR up; tests replace it.
+var viewPR = sidebar.ViewPR
+
+// baseline looks up the PR of an item just added or replaced, so what its PR does from now on is what its check
+// compares; a failure is only reported, as the item is on the list and the previews look it up again.
+func baseline(s todo.Store, stderr io.Writer) {
+	if err := s.Lookup(time.Now(), todo.LookupTTL, 0, viewPR); err != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: its PR not looked up: "+err.Error())
+	}
+}
+
 func newTodoClearCmd(boss *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear",
@@ -431,25 +492,27 @@ func newTodoClearCmd(boss *string) *cobra.Command {
 
 // bossList is one boss's list, for dev todo --all; Error is what couldn't be read (a list not read: stale, no items).
 type bossList struct {
-	Boss  string `json:"boss"`
-	Error string `json:"error,omitempty"`
+	Boss   string `json:"boss"`
+	Error  string `json:"error,omitempty"`
+	Closed bool   `json:"closed,omitempty"`
 	todo.List
 }
 
 // printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
-	all, err := todo.All(c, time.Now(), nil)
+	now := time.Now()
+	all, err := todo.All(c, now, nil, true)
 	if err != nil {
 		return err
 	}
 	lists := []bossList{}
 	for _, l := range all {
-		bl := bossList{Boss: l.Boss, List: l.List}
+		bl := bossList{Boss: l.Boss, Closed: l.Closed, List: l.List}
 		switch {
 		case l.Err != nil:
 			bl.Error = "list not read: " + l.Err.Error()
-		case !asJSON:
+		case !asJSON && !l.Closed:
 			// The items still print: what each says holds without the workers
 			target := tmux.SessionTarget(l.Boss)
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, target) }); err != nil {
@@ -470,7 +533,7 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
 		}
 		for _, it := range bl.Items {
-			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it))
+			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it, now))
 		}
 	}
 	return nil
@@ -617,8 +680,9 @@ func printCount(out io.Writer, s todo.Store, prefix string, now time.Time) error
 	return err
 }
 
-// todoLine is an item as text: number, ☐ (◌ waiting on someone, ☑ ticked), text, who it waits on, link.
-func todoLine(it todo.Shown) string {
+// todoLine is an item as text at now: number, ☐ (◌ waiting on someone, ☑ ticked), text, who it waits on, link, why
+// to re-check it.
+func todoLine(it todo.Shown, now time.Time) string {
 	box := "☐"
 	switch {
 	case it.Done:
@@ -644,6 +708,9 @@ func todoLine(it todo.Shown) string {
 		parts = append(parts, "answered: "+it.Answer)
 	case len(it.Options) > 0:
 		parts = append(parts, "options: "+strings.Join(it.Options, " · "))
+	}
+	if it.Check != nil {
+		parts = append(parts, "⚠ "+it.Check.Long(now))
 	}
 	return strings.Join(parts, "\t")
 }

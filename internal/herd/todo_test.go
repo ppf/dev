@@ -326,7 +326,7 @@ func TestTodoDoneWorker(t *testing.T) {
 	if o := m.todoOwner(it); o != nil {
 		t.Errorf("owner = %+v, want none for a ticked item", o)
 	}
-	if row := ansi.Strip(todoItem(it, nil, 70)); strings.Contains(row, "gone") || !strings.Contains(row, "on companion-1000-feed") {
+	if row := ansi.Strip(todoItem(it, nil, 70, time.Now())); strings.Contains(row, "gone") || !strings.Contains(row, "on companion-1000-feed") {
 		t.Errorf("row = %q", row)
 	}
 }
@@ -337,7 +337,7 @@ func TestTodoWorkers(t *testing.T) {
 	m := withWorkers()
 	var rows []string
 	for _, it := range m.snap.todo.Items {
-		rows = append(rows, todoItem(it, m.todoOwner(it), 70))
+		rows = append(rows, todoItem(it, m.todoOwner(it), 70, time.Now()))
 	}
 	checkRows(t, rows, []string{
 		" 1 ☐ Answer Vince                                                     ",
@@ -385,12 +385,12 @@ func TestTodoWorkerOrder(t *testing.T) {
 // than overflow the row.
 func TestTodoWorkerNarrow(t *testing.T) {
 	m := withWorkers()
-	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40)); !strings.HasSuffix(row, " · asking ") {
+	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40, time.Now())); !strings.HasSuffix(row, " · asking ") {
 		t.Errorf("40 columns: %q, want the state whole", row)
 	}
 	for _, w := range []int{12, 20, 30, 40} {
 		for _, it := range m.snap.todo.Items {
-			if got := ansi.StringWidth(todoItem(it, m.todoOwner(it), w)); got != w {
+			if got := ansi.StringWidth(todoItem(it, m.todoOwner(it), w, time.Now())); got != w {
 				t.Errorf("item %d at %d columns is %d wide", it.ID, w, got)
 			}
 		}
@@ -412,5 +412,42 @@ func TestTodoAsk(t *testing.T) {
 	}, 50)
 	if rows := m.todoRows(39); !strings.Contains(rows[2], sidebar.Green+"answered") {
 		t.Errorf("answered green: %q", rows[2])
+	}
+}
+
+// An item on a person shows the person and its PR's number; once its PR moved, the person and ⚠ why, the name cut
+// first so the check keeps its age.
+func TestTodoItemCheck(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	it := todo.Shown{ID: 2, Text: "PR #412 open, CI pending", On: "reviewers", Link: "https://github.com/acme/orbit/pull/412"}
+	if row := ansi.Strip(todoItem(it, nil, 84, now)); !strings.HasSuffix(strings.TrimRight(row, " "), "on reviewers · #412") {
+		t.Errorf("row = %q", row)
+	}
+	it.Check = &sidebar.Check{Kind: sidebar.CheckApproved, PR: 412, Since: now.Add(-2 * time.Hour).Unix()}
+	row := todoItem(it, nil, 84, now)
+	if !strings.HasSuffix(strings.TrimRight(ansi.Strip(row), " "), "reviewers · ⚠ #412 approved 2h") || !strings.Contains(row, sidebar.Gold+"⚠ #412") {
+		t.Errorf("row = %q", ansi.Strip(row))
+	}
+	it.On = "the platform reviewers group"
+	for _, w := range []int{84, 50} {
+		row := ansi.Strip(todoItem(it, nil, w, now))
+		if !strings.Contains(row, "⚠ #412 approved 2h") || ansi.StringWidth(row) != w {
+			t.Errorf("width %d: row = %q", w, row)
+		}
+	}
+}
+
+// A worker's item shows its check after the worker's state; a long person's name is cut before the PR's number.
+func TestTodoItemWorkerCheck(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	it := todo.Shown{ID: 3, Text: "Rework rounding", On: "fix", Link: "https://github.com/acme/orbit/pull/7",
+		Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 7, Since: now.Add(-time.Hour).Unix()}}
+	row := ansi.Strip(todoItem(it, &owner{name: "fix", sec: restingSection}, 84, now))
+	if !strings.Contains(row, "fix · idle · ⚠ #7 merged 1h") {
+		t.Errorf("row = %q", row)
+	}
+	it = todo.Shown{ID: 2, Text: "Review", On: "the platform reviewers group of the payments team", Link: "https://github.com/acme/orbit/pull/412"}
+	if row := ansi.Strip(todoItem(it, nil, 84, now)); !strings.HasSuffix(strings.TrimRight(row, " "), "· #412") || ansi.StringWidth(row) != 84 {
+		t.Errorf("row = %q", row)
 	}
 }

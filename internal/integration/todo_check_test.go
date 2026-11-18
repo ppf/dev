@@ -1,0 +1,63 @@
+//go:build integration
+
+package integration
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// dev todo check looks up a linked item's PR with gh (stubbed) and marks the item once its PR moved since its first
+// lookup; once the boss session is closed, dev todo --all still lists its list, marked boss closed.
+func TestTodoCheck(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	url := "https://github.com/acme/orbit/pull/412"
+	view := filepath.Join(tmp, "view.json")
+	stubs := writeStubs(t, filepath.Join(tmp, "stubs"), `case "$*" in
+"pr view `+url+` --json state,mergedAt,closedAt,reviewDecision,statusCheckRollup") cat "`+view+`" ;;
+*) exit 1 ;;
+esac`, "gh")
+	pr := func(review string) {
+		t.Helper()
+		writeFile(t, view, `{"state":"OPEN","mergedAt":null,"closedAt":null,"reviewDecision":"`+review+`","statusCheckRollup":[]}`)
+	}
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	s.T("new-session", "-d", "-s", "other", "exec sleep 600")
+	s.T("new-session", "-d", "-s", "boss-orbit", "bash", script, "", filepath.Join(tmp, "boss.log"))
+	s.T("set-option", "-t", "=boss-orbit:", "@dev_herd", "1")
+	pane := s.T("display", "-t", "=boss-orbit:", "-p", "#{pane_id}")
+	dev := func(env []string, argv ...string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, argv...)
+		cmd.Env = s.scriptEnv(append(env, "PATH="+stubs+":"+os.Getenv("PATH"))...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("❌ dev %s: %v\n%s", strings.Join(argv, " "), err, out)
+		}
+		return string(out)
+	}
+	boss := []string{"TMUX_PANE=" + pane}
+	dev(boss, "todo", "add", "PR #412 open, CI pending", "--on", "reviewers", "--link", url)
+	dev(boss, "todo", "add", "Ask Mara for the API key")
+
+	pr("REVIEW_REQUIRED")
+	if out := dev(boss, "todo", "check"); strings.Contains(out, "⚠") {
+		t.Errorf("❌ first check marks:\n%s", out)
+	}
+	pr("APPROVED")
+	out := dev(boss, "todo", "check")
+	check(t, "check after approval", out, "2\t☐\tAsk Mara for the API key\n1\t◌\tPR #412 open, CI pending\ton reviewers\t"+url+"\t⚠ PR #412 approved 0m ago\n")
+
+	s.T("kill-session", "-t", "=boss-orbit")
+	out = dev([]string{"TMUX_PANE="}, "todo", "--all")
+	check(t, "--all after close", out, "boss-orbit\t2\t☐\tAsk Mara for the API key\t⚠ boss closed\n"+
+		"boss-orbit\t1\t◌\tPR #412 open, CI pending\ton reviewers\t"+url+"\t⚠ PR #412 approved 0m ago\n")
+	if out := dev([]string{"TMUX_PANE="}, "todo", "--all", "--json"); !strings.Contains(strings.Join(strings.Fields(out), ""), `"boss":"boss-orbit","closed":true`) {
+		t.Errorf("❌ --all --json lacks the closed list:\n%s", out)
+	}
+}
