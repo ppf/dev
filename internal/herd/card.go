@@ -18,10 +18,10 @@ import (
 type section int
 
 const (
-	needsYouSection section = iota
-	workingSection
-	waitingSection
-	restingSection
+	needsYouSection = section(sidebar.RankNeedsYou)
+	workingSection  = section(sidebar.RankWorking)
+	waitingSection  = section(sidebar.RankWaiting)
+	restingSection  = section(sidebar.RankIdle)
 )
 
 // section is where t's card goes: a boss's by its whole subtree (sidebar.Subtree's ranks are the sections),

@@ -385,7 +385,7 @@ func rollLine(r *Rollup, width int) (string, int) {
 	fits := func(text string) bool { return ansi.StringWidth(plain+" · "+text) <= width }
 	parts := r.Parts()
 	if r.Rank == RankNeedsYou {
-		// "needs you · 2 questions" in a sidebar's width
+		// "needs you · 2 questions" as "2 need you", to fit a sidebar's width
 		parts = append([]string{fmt.Sprintf("%d need you", r.Questions)}, parts[2:]...)
 	}
 	lead := len(parts)

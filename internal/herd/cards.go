@@ -273,7 +273,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		text(sidebar.Gold, "⚠ "+n)
 	}
 	if t.roll != nil && t.roll.Warn && len(warnings(t)) == 0 {
-		text(sidebar.Gold, "⚠ under it: a failed, stuck or high-context note, or a list not read")
+		text(sidebar.Gold, "⚠ in its subtree: a failed, stuck or high-context note, or a list not read")
 	}
 	if len(shown) > 0 {
 		rows = append(rows, line(in+rule+"┄ screen "+strings.Repeat("┄", max(0, iw-len(in)-10))+reset))

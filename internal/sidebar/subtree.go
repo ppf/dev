@@ -9,6 +9,7 @@ import (
 
 // Note kinds as inbox writes them in @dev_boss_note, "<kind>: <text>" (inbox imports this package; herd's tests pin them).
 const (
+	NoteFinished = "finished"
 	NoteAsks     = "asks"
 	NoteDecision = "needs a decision"
 	NoteFailed   = "failed"
@@ -73,7 +74,7 @@ func (c *ListCount) Add(done bool, on string, options int) {
 // Rollup is a boss's whole subtree: the strongest Rank across it and every session under it, and its counts.
 type Rollup struct {
 	Rank      Rank
-	Idle      string // the idle state's word: its own note's kind ("finished"), else "idle"
+	Idle      string // the idle state's word: "finished" when its own last turn did, else "idle"
 	Questions int    // dialogs and asks notes, its own too, and asks on its and its bosses' lists
 	Working   int    // sessions under it working
 	Waiting   int    // sessions under it in a planned wait or rate-limit resume
@@ -96,8 +97,8 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 		}
 		manager := s.Root != "" && s.Root == s.Name
 		r := &Rollup{Rank: RankIdle, Idle: "idle"}
-		if k := NoteKind(s.Note); s.Note != "" && !HealthNote(k) && k != NoteDecision && k != NoteAsks {
-			r.Idle = k
+		if NoteKind(s.Note) == NoteFinished {
+			r.Idle = NoteFinished
 		}
 		r.add(s, lists, true)
 		for _, u := range sessions[i+1:] {

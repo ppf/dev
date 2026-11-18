@@ -16,7 +16,7 @@ import (
 
 // sidebar keeps its own copy of the note kinds, as inbox imports it.
 func TestNoteKindsPinned(t *testing.T) {
-	if sidebar.NoteAsks != inbox.Asks || sidebar.NoteDecision != inbox.Decision {
+	if sidebar.NoteAsks != inbox.Asks || sidebar.NoteFinished != inbox.Finished || sidebar.NoteDecision != inbox.Decision {
 		t.Error("sidebar's asks or decision kind differs from inbox's")
 	}
 	for _, k := range []string{inbox.Finished, inbox.Failed, inbox.Decision, inbox.Asks, inbox.Stuck, inbox.Context, inbox.WaitsOnYou} {
@@ -152,5 +152,42 @@ func TestPlainBossBoardUnchanged(t *testing.T) {
 	}
 	if !maps.Equal(before, after) || after["noc-triage"] != needsYouSection || after["noc-pr"] != workingSection {
 		t.Errorf("sections %v, then %v", before, after)
+	}
+}
+
+// A dialog the capture found answered (No or Esc fire no hook) leaves its boss's roll-up too.
+func TestRollUpCaptureWins(t *testing.T) {
+	s, err := buildSnapshot(managerRows(), nil, "%1", "", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := index(s.tiles, "noc-triage")
+	s.tiles[i].deciding, s.tiles[i].sess.State = false, agent.Idle
+	s.rollUp()
+	if noc := s.tiles[index(s.tiles, "boss-noc")]; noc.section() != workingSection || noc.roll.Text() != "1 working" {
+		t.Errorf("boss-noc: section %d, %q", noc.section(), noc.roll.Text())
+	}
+}
+
+// A rate-limited worker waits; a stuck one flags its boss's card ⚠, folded and open.
+func TestBossCardWaitingAndWarn(t *testing.T) {
+	rows := managerRows()
+	rows[2].State, rows[2].ResumeAt = agent.Idle, "1700000000"
+	rows[3].Note = inbox.Note{Kind: inbox.Stuck, Text: "20m"}.Summary()
+	s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rollUp()
+	m := board4()
+	m.snap = s
+	dev := s.tiles[index(s.tiles, "boss-dev")]
+	if row := ansi.Strip(m.headRow(dev, dev.section(), true, 120)); !strings.Contains(row, "boss-dev  1 working · 1 waiting ⚠") {
+		t.Errorf("folded row = %q", row)
+	}
+	m.folds = map[string]bool{"boss-dev": false}
+	rows2, _ := m.card(dev, 100)
+	if body := ansi.Strip(strings.Join(rows2, "\n")); !strings.Contains(body, "⚠ in its subtree") {
+		t.Errorf("open card:\n%s", body)
 	}
 }

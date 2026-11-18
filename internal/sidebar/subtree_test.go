@@ -1,15 +1,18 @@
 package sidebar
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/wait"
 )
 
 // subtreeSessions is a manager over three bosses, in Order: boss-noc's own turn ended, one worker on a dialog,
-// two working; boss-dev idle over five working; boss-mag with nothing under it.
+// two working, one idle; boss-dev idle over five working; boss-mag with nothing under it.
 func subtreeSessions() []Session {
 	w := func(name, by, state string, depth int) Session {
 		return Session{Name: name, ID: "$" + name, StartedBy: by, Depth: depth, Agent: "Claude", State: state}
@@ -32,7 +35,7 @@ func subtreeSessions() []Session {
 	}
 }
 
-// The mockup's boss rows: the state first, then the counts, strongest first, only when non-zero.
+// Boss rows: the state first, then the counts, strongest first, only when non-zero.
 func TestSubtreeText(t *testing.T) {
 	lists := map[string]ListCount{"boss-noc": {Asks: 1, Plain: 1}, "boss-dev": {Plain: 1}}
 	rolls := Subtree(subtreeSessions(), lists)
@@ -115,5 +118,45 @@ func TestListCountAdd(t *testing.T) {
 	c.Add(false, "w1", 0)
 	if c != (ListCount{Asks: 1, Plain: 1}) {
 		t.Errorf("count = %+v", c)
+	}
+}
+
+// The sidebar reads a worker's note and rate-limit resume off its agent pane into its boss's roll-up line.
+func TestSubtreeFromPanes(t *testing.T) {
+	agentRow := func(session, id, pane, by, state string) paneRow {
+		return paneRow{Session: session, SessionID: id, Window: 1, ID: pane, Command: "claude", StateCmd: "claude", State: state, StartedBy: by}
+	}
+	boss := agentRow("boss", "$1", "%1", "", agent.Idle)
+	boss.Herd = "1"
+	limited, stuck := agentRow("w1", "$2", "%2", "boss", agent.Idle), agentRow("w2", "$3", "%3", "boss", agent.Working)
+	limited.ResumeAt, stuck.Note = "1700000000", "stuck: 20m"
+	rows := []paneRow{{Session: "boss", SessionID: "$1", Window: 1, ID: "%0", Command: "dev", Sidebar: "%0", Width: 40, Height: 30, Herd: "1"}, boss, limited, stuck}
+	s, err := buildSnapshot(rows, nil, "%0", "host", func(string) string { return "" }, func(string, string, string, string, string) PR { return PR{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Subtree(s.sessions, needCounts([]needList{{Boss: "boss", Items: []needItem{{ID: 1, Text: "DM"}}}}))["boss"]
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working · 1 waiting · 1 to do · ⚠" {
+		t.Errorf("roll-up line = %q", ansi.Strip(got))
+	}
+}
+
+// needCounts counts open items on no one, asks apart; a list not read is unread.
+func TestNeedCounts(t *testing.T) {
+	got := needCounts([]needList{
+		{Boss: "a", Items: []needItem{{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3, Done: true}, {ID: 4, On: "w"}}},
+		{Boss: "b", Error: "bad json"},
+	})
+	if got["a"] != (ListCount{Asks: 1, Plain: 1}) || got["b"] != (ListCount{Unread: true}) {
+		t.Errorf("counts = %+v", got)
+	}
+}
+
+// A list's ask alone makes a boss need you: "1 need you" in red on the sidebar.
+func TestRollLineListAsk(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Idle}}
+	got, _ := rollLine(Subtree(ss, map[string]ListCount{"b": {Asks: 1}})["b"], 40)
+	if !strings.HasPrefix(got, red+"1 need you") {
+		t.Errorf("line = %q", got)
 	}
 }
