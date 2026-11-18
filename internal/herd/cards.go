@@ -612,7 +612,7 @@ func said(t tile) []string {
 }
 
 // reply is the last lines of t's newest reply without backticks, bold or a turn-end marker line; on an asks
-// card it stops at the question: ask is the question, asked it and its options; or ask is the first option
+// card it stops at the question: ask is the question, asked it and the lines under it (its options, or more questions); or ask is the first option
 // (asked nil) when the question is above the lines read.
 func reply(t tile) (lines []string, ask string, asked []string) {
 	strip := strings.NewReplacer("**", "", "`", "")
