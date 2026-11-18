@@ -89,9 +89,15 @@ func (m Model) render() frame {
 			styled = bold + display + reset
 		}
 		lead := s.lead()
-		line := lead + " " + statusDot(s.Agent, s.State) + " " + styled
+		// An idle session whose note asks a question reads as a dialog does: red dot, "asks"
+		asks := s.State != agent.Waiting && s.Rank() == RankNeedsYou
+		dotState := s.State
+		if asks {
+			dotState = agent.Waiting
+		}
+		line := lead + " " + statusDot(s.Agent, dotState) + " " + styled
 		if indent != "" {
-			line = lead + " " + faint + indent + reset + statusDot(s.Agent, s.State) + " " + styled
+			line = lead + " " + faint + indent + reset + statusDot(s.Agent, dotState) + " " + styled
 		}
 		vis := 4 + iw + ansi.StringWidth(display)
 		if s.Branch != "" && !s.Named {
@@ -122,6 +128,10 @@ func (m Model) render() frame {
 				body = s.Wait.Text(time.Now())
 			case s.Wait.Held() && !s.Deciding:
 				body += " · " + s.Wait.Text(time.Now())
+			case asks && s.Agent == "Claude":
+				body = "asks"
+			case asks:
+				body += " · asks"
 			case s.State == "":
 			case s.Agent == "Claude":
 				// Claude is the default agent: its name is left out of the line
@@ -131,7 +141,7 @@ func (m Model) render() frame {
 			}
 			cost, title = s.Cost, s.Title
 		}
-		if s.State == agent.Waiting {
+		if s.State == agent.Waiting || asks {
 			colour = red
 		}
 		// The second line starts under the name, past the indent
