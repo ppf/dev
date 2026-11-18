@@ -694,3 +694,102 @@ func TestViewPlannedWait(t *testing.T) {
 		}
 	}
 }
+
+func managerFrame(width, height int, ss []Session) (frame, []string) {
+	f := Model{snap: snapshot{width: width, height: height, current: "x", sessions: Order(ss)}}.render()
+	var plain []string
+	for _, l := range f.lines[f.header:] {
+		plain = append(plain, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	return f, plain
+}
+
+func TestViewManagerGroup(t *testing.T) {
+	ss := managerSessions()
+	for i := range ss {
+		ss[i].Agent, ss[i].State = "Claude", "idle"
+	}
+	ss[1].State, ss[1].Deciding = "waiting", true // noc-w1-sub
+	ss[2].State = "working"                       // noc-w1
+	f, got := managerFrame(40, 40, ss)
+	want := []string{
+		" SESSIONS                           +",
+		"",
+		"┌─ MANAGER ──────────────────────────",
+		"│ ● manager                         ×",
+		"│   idle",
+		"│   1 need you · 2 bosses · 4 workers",
+		"│ └ ● m-helper                      ×",
+		"│     idle",
+		"├─ dev ──────────────────────────────",
+		"│ ● boss-dev                        ×",
+		"│   idle",
+		"│   1 idle",
+		"│ └ ● dev-w1                        ×",
+		"│     idle",
+		"├─ noc ──────────────────────────────",
+		"│ ● boss-noc                        ×",
+		"│   idle",
+		"│   1 need you · 1 working",
+		"│ └ ● noc-w1                        ×",
+		"│     working",
+		"│   └ ● noc-w1-sub                  ×",
+		"│       waiting",
+		"",
+		" ─ vitay ────────────────────────────",
+		"  ● vitay                           ×",
+		"    idle",
+	}
+	if len(got) < len(want) || !slices.Equal(got[:len(want)], want) {
+		t.Errorf("layout =\n%s\nwant\n%s", strings.Join(got[:len(want)], "\n"), strings.Join(want, "\n"))
+	}
+	if n := listLines(Order(ss)); n != len(want) {
+		t.Errorf("listLines = %d, render drew %d", n, len(want))
+	}
+	if !strings.HasPrefix(f.lines[f.header+2], faint+"┌─") {
+		t.Errorf("header colour: %q", f.lines[f.header+2])
+	}
+}
+
+// Without a manager nothing about the layout changes: no rail, no header, one divider per group.
+func TestViewNoManagerNoRail(t *testing.T) {
+	_, got := managerFrame(40, 20, rollupSessions())
+	for _, l := range got {
+		if strings.ContainsAny(l, "│┌├") {
+			t.Errorf("manager chrome without a manager: %q", l)
+		}
+	}
+}
+
+func TestManagerRollupText(t *testing.T) {
+	r := &rollup{waiting: 1, working: 3, bosses: 1, workers: 6, cost: 12.5, hasCost: true}
+	for width, want := range map[int]string{
+		60: "1 need you · 1 boss · 6 workers · 3 working · $12.50",
+		35: "1 need you · 1 boss · 6 workers",
+	} {
+		if got, _ := r.line(width); ansi.Strip(got) != want {
+			t.Errorf("width %d: %q, want %q", width, ansi.Strip(got), want)
+		}
+	}
+}
+
+// A boss in the manager's own group still gets its divider, and a manager of bosses only counts no workers.
+func TestViewManagerBossSameGroup(t *testing.T) {
+	_, got := managerFrame(40, 20, []Session{
+		{Name: "m", Group: "dev", ID: "$1", Boss: true},
+		{Name: "mw", Group: "dev", ID: "$2", StartedBy: "$1"},
+		{Name: "b", Group: "dev", ID: "$3", Boss: true, StartedBy: "m"},
+	})
+	i := slices.Index(got, "├─ dev ──────────────────────────────")
+	if i < 0 || got[i+1] != "│ ○ b                               ×" {
+		t.Errorf("boss divider missing:\n%s", strings.Join(got, "\n"))
+	}
+	if r := rollups(Order([]Session{
+		{Name: "m", Group: "dev", ID: "$1", Boss: true},
+		{Name: "b", Group: "dev", ID: "$3", Boss: true, StartedBy: "m"},
+	})); r[0] == nil || r[0].bosses != 1 {
+		t.Errorf("rollup = %+v", r[0])
+	} else if got, _ := r[0].line(40); strings.Contains(ansi.Strip(got), "worker") {
+		t.Errorf("zero workers shown: %q", ansi.Strip(got))
+	}
+}
