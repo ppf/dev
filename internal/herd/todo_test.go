@@ -406,7 +406,7 @@ func TestTodoAsk(t *testing.T) {
 		{ID: 1, Text: "Answer Vince"},
 	}
 	checkRows(t, m.todoRows(39), []string{
-		" TO DO 0 ───────────────────────────── updated 2m ",
+		" TO DO ─────────────────────────────── updated 2m ",
 		" 3 ☑ Orders API: v3 when?                         ",
 		"     answered: After release                      ",
 	}, 50)

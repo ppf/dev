@@ -138,6 +138,7 @@ type Model struct {
 	needIdx    int                                                                // the selected row, clamped to the rows at each use
 	needKey    string                                                             // the selected row's sig when chosen: keys act only while it's the same; "" after an answer
 	needDone   string                                                             // the answered row's sig: the cursor waits on it until it goes
+	needFor    string                                                             // the session or boss needDone's answer went to
 	answerList func(boss string, id int, question, option string) (string, error) // dev todo answer
 }
 
@@ -303,6 +304,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 	case actionMsg:
 		m.msg = msg.msg
+		if msg.msg.alert && m.needDone != "" {
+			// A reply from NEEDS YOU not sent: its row takes keys again
+			m.needKey, m.needDone = m.needDone, ""
+		}
 		return m, nil
 	case answeredMsg:
 		m.msg, m.answering = msg.msg, ""
@@ -313,7 +318,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case !msg.took && msg.session == m.box.session:
 			m.box.sent = ""
 		}
-		if !msg.took && m.needDone != "" {
+		if !msg.took && m.needDone != "" && msg.session == m.needFor {
 			// Not answered: its row takes keys again
 			m.needKey, m.needDone = m.needDone, ""
 		}

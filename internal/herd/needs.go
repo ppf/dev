@@ -194,7 +194,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // replyNeed opens the reply box on a dialog's or question's session: its picker, or a typed reply.
 func (m Model) replyNeed(r needRow) (tea.Model, tea.Cmd) {
-	if r.Kind != sidebar.NeedDialog && r.Kind != sidebar.NeedAsk || r.tile < 0 {
+	if r.Kind != sidebar.NeedDialog && r.Kind != sidebar.NeedAsk || !m.answerable(r) {
 		m.msg = info("m replies to a dialog or question on the board; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
@@ -231,7 +231,7 @@ func (m Model) answerNeed(r needRow, n int, k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	next, cmd := m.sendNeed(r, n, k)
 	if cmd != nil {
 		// Answered, the row goes or changes: the cursor takes the one shown next (fixNeeds)
-		next.needKey, next.needDone = "", r.sig
+		next.needKey, next.needDone, next.needFor = "", r.sig, cmp.Or(r.Boss, r.Session)
 	}
 	return next, cmd
 }
@@ -265,7 +265,7 @@ func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 // row, "+N more" for the rest; at is each line's row, -1 for none.
 func (m Model) needBlock(gh int) (lines []string, at []int) {
 	rows := m.needRows()
-	if len(rows) == 0 || gh < 6 {
+	if len(rows) == 0 || gh < minBlockRows {
 		return nil, nil
 	}
 	w := m.width
@@ -322,6 +322,9 @@ func (m Model) needBlock(gh int) (lines []string, at []int) {
 	}
 	return append(lines, padRow("", w)), append(at, -1)
 }
+
+// minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.
+const minBlockRows = 6
 
 // needLines are row r's lines, w columns: its mark (● dialog, ? question, ☐ list item, ⚠ list not read), its
 // label padded to labelW, its text (wrapped when selected, else cut), then its options numbered when 1-9 answer

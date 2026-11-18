@@ -71,7 +71,11 @@ func (m Model) todoHeader(l todo.List, w int) string {
 	if m.todoFolded {
 		left = " " + rule + "▸" + reset
 	}
-	left += " " + bold + "TO DO " + strconv.Itoa(on) + reset + " "
+	left += " " + bold + "TO DO"
+	if on > 0 {
+		left += " " + strconv.Itoa(on)
+	}
+	left += reset + " "
 	age := "updated " + span(m.clk.Now().Sub(time.Unix(l.Updated, 0)))
 	ageColour := sidebar.Muted
 	if l.Stale {

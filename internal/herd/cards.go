@@ -195,7 +195,7 @@ func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 		return sidebar.SelectedBG + strings.ReplaceAll(row, reset, reset+sidebar.SelectedBG) + reset
 	}
 	// The arrow, a cell wider each side so it's easy to hit; the reply box answering it opens it, for its dialog
-	if t.folded(m.folds) && (m.box.session != t.sess.Name || m.activePick() == nil) {
+	if t.folded(m.folds) && (m.box.session != t.sess.Name || m.activePick() == nil) && (t.own() != needsYouSection || m.blockShown()) {
 		return []string{gutter + band(m.headRow(t, sec, true, w-1))}, []hit{{y: 0, x0: 1, x1: 4, kind: hitFold}}
 	}
 	hits = append(hits, hit{y: 1, x0: 2, x1: 5, kind: hitFold})
@@ -463,6 +463,9 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	left = ansi.Truncate(" "+left, room, "…")
 	return left + strings.Repeat(" ", max(1, w-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 }
+
+// blockShown reports a pane tall enough for NEEDS YOU (needBlock), which then asks what folded cards point at.
+func (m Model) blockShown() bool { return m.height-1 >= minBlockRows }
 
 // blockStatus is a folded card's status while NEEDS YOU asks its question: what it is, and where.
 func blockStatus(t tile) string {

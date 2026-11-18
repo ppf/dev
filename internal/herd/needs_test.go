@@ -558,3 +558,27 @@ func TestNeedsBlockFits(t *testing.T) {
 		}
 	}
 }
+
+// A pane too short for the block opens the cards it would ask for; a failed reply or another session's failed
+// answer leave the cursor as they should.
+func TestNeedsShortPaneAndFailures(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.height = 6
+	if rows, _ := m.card(m.snap.tiles[index(m.snap.tiles, "noc-triage")], 80); len(rows) == 1 {
+		t.Error("short pane: the dialog's card folded with no block to show it")
+	}
+	m = selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
+	sig := m.needRows()[m.needIdx].sig
+	m, _ = keys(m, "1")
+	next, _ := m.Update(actionMsg{alert("❌ boss-dev: its agent is gone, reply not sent")})
+	if m = next.(Model); m.needKey != sig || m.needDone != "" {
+		t.Errorf("failed reply: key %q done %q", m.needKey, m.needDone)
+	}
+	m = selectKind(t, needsBoard(t, &answered), sidebar.NeedListAsk)
+	m, _ = keys(m, "1")
+	next, _ = m.Update(answeredMsg{session: "other", msg: alert("❌ other: boom")})
+	if m = next.(Model); m.needDone == "" {
+		t.Error("another session's failure dropped the answered row")
+	}
+}

@@ -101,11 +101,12 @@ func (m *Model) syncPick() {
 	b := &m.box
 	t, ok := m.bound()
 	if !ok || t.pick == nil {
-		// A capture mid-redraw may miss the dialog: free text being typed stays
-		b.sent = ""
-		if b.block && !b.other {
+		// A capture mid-redraw may miss the dialog: free text being typed stays; NEEDS YOU's picker closes once
+		// its answer's dialog is gone
+		if b.block && b.sent != "" && !b.other {
 			m.blur()
 		}
+		b.sent = ""
 		return
 	}
 	p := t.pick
