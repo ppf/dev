@@ -95,7 +95,7 @@ func TestNeedsRender(t *testing.T) {
 	m := deciding(needsModel(&calls))
 	f := m.render()
 	plain := func(i int) string { return strings.TrimRight(ansi.Strip(f.lines[i]), " ") }
-	for i, want := range []string{" NEEDS YOU 3 · n", "", " w1  ● w1", " dev  ☐ Merge #148?", " dev  ☐ Call Vince", "", " SESSIONS                           +"} {
+	for i, want := range []string{" NEEDS YOU 3 · n", "", " w1  ● w1", " dev  ? Merge #148?", " dev  ☐ Call Vince", "", " SESSIONS                           +"} {
 		if got := plain(i); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
