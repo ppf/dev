@@ -55,8 +55,8 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 }
 
 // needRows are this board's NEEDS YOU rows: what waits on the user under it, labelled "project › who" on a
-// manager's board, "who" on a boss's and "to do" for its own list; a dialog or question on the board says what its
-// card does, with its options.
+// manager's board ("project" for a boss), "who" on a boss's and "to do" for its own list; a dialog or question on
+// the board says what its card does, with its options.
 func (m Model) needRows() []needRow {
 	s := m.snap
 	manager := slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == s.name && a.Root == s.name })
@@ -66,6 +66,8 @@ func (m Model) needRows() []needRow {
 		switch {
 		case r.Boss == s.name:
 			n.label = "to do"
+		case manager && slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == r.Session && a.Boss }):
+			n.label = r.Project
 		case manager:
 			n.label = r.Project + " › " + r.Who
 		}
@@ -113,11 +115,18 @@ func (m Model) answerable(r needRow) bool {
 	return false
 }
 
+// tooShort reports a pane known to be too short for NEEDS YOU; before the first size message the height is unknown.
+func (m Model) tooShort() bool { return m.height > 0 && !m.blockShown() }
+
 // enterNeeds focuses NEEDS YOU on its first row.
 func (m Model) enterNeeds() Model {
 	rows := m.needRows()
-	if len(rows) == 0 {
+	switch {
+	case len(rows) == 0:
 		m.msg = info("Nothing needs you")
+		return m
+	case m.tooShort():
+		m.msg = info("Pane too short for NEEDS YOU")
 		return m
 	}
 	m.needMode, m.needIdx, m.needKey, m.needDone = true, 0, rows[0].sig, ""
@@ -132,6 +141,10 @@ func (m *Model) fixNeeds() {
 		return
 	}
 	rows := m.needRows()
+	if m.tooShort() {
+		m.needMode, m.msg = false, info("Pane too short for NEEDS YOU: keys act on the cards")
+		return
+	}
 	if len(rows) == 0 {
 		m.needMode = false
 		return
@@ -305,11 +318,7 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 		head += rule + " · n" + reset
 	}
 	lines, at, spans = []string{padRow(head, w), padRow("", w)}, []int{-1, -1}, make([][]optSpan, 2)
-	labelW := 0
-	for _, r := range rows {
-		labelW = max(labelW, ansi.StringWidth(r.label))
-	}
-	labelW = min(labelW, 36, max(4, w*2/5))
+	labelW := labelWidth(rows, w)
 	cur := -1
 	if m.needMode {
 		cur = min(m.needIdx, len(rows)-1)
@@ -353,6 +362,33 @@ func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 		lines, at, spans = append(lines, padRow(sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w), w)), append(at, -1), append(spans, nil)
 	}
 	return append(lines, padRow("", w)), append(at, -1), append(spans, nil)
+}
+
+// labelWidth is the rows' label column: the longest label, cut at 20, or wider until no two labels cut alike
+// (hiding which worker an answer goes to), and at 2/5 of the pane.
+func labelWidth(rows []needRow, w int) int {
+	labelW := 0
+	for _, r := range rows {
+		labelW = max(labelW, ansi.StringWidth(r.label))
+	}
+	limit, capW := min(labelW, max(4, w*2/5)), 20
+	for capW < limit && cutsAlike(rows, capW) {
+		capW++
+	}
+	return min(limit, capW)
+}
+
+// cutsAlike says two different labels read the same cut at w.
+func cutsAlike(rows []needRow, w int) bool {
+	cuts := map[string]string{}
+	for _, r := range rows {
+		cut := ansi.Truncate(r.label, w, "…")
+		if full, ok := cuts[cut]; ok && full != r.label {
+			return true
+		}
+		cuts[cut] = r.label
+	}
+	return false
 }
 
 // minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.

@@ -107,10 +107,10 @@ func TestNeedsRows(t *testing.T) {
 	}
 	if w := []want{
 		{sidebar.NeedDialog, "noc › triage", "allow Bash: rm -rf build", []string{"Yes", "No"}},
-		{sidebar.NeedAsk, "dev › boss", vpnAskPlain, []string{"Done", "Skip"}},
-		{sidebar.NeedListAsk, "noc › boss", "Release now?", []string{"Now", "Later"}},
+		{sidebar.NeedAsk, "dev", vpnAskPlain, []string{"Done", "Skip"}},
+		{sidebar.NeedListAsk, "noc", "Release now?", []string{"Now", "Later"}},
 		{sidebar.NeedPlain, "to do", "Call Vince", nil},
-		{sidebar.NeedPlain, "noc › boss", "DM David", nil},
+		{sidebar.NeedPlain, "noc", "DM David", nil},
 	}; !slices.EqualFunc(got, w, func(a, b want) bool {
 		return a.kind == b.kind && a.label == b.label && a.text == b.text && slices.Equal(a.options, b.options)
 	}) {
@@ -124,6 +124,53 @@ func TestNeedsRows(t *testing.T) {
 }
 
 const vpnAskPlain = "Reply Done once it's connected, or Skip to leave the lw check for later."
+
+// A long worker's label ends in … at 20 columns, the text after it.
+func TestNeedsLabelCap(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	i := slices.IndexFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == "noc-triage" })
+	if i < 0 {
+		t.Fatal("no noc-triage")
+	}
+	m.snap.all[i].Name = "noc-triage-for-the-weekly-report"
+	if got, want := strings.TrimRight(plain(m.render())[2], " "), " ● noc › triage-for-th…  Bash: echo hi"; got != want {
+		t.Errorf("line 2 = %q, want %q", got, want)
+	}
+}
+
+// Labels that cut alike at 20 widen the column only until they read apart, up to 2/5 of the pane.
+func TestNeedsLabelCollision(t *testing.T) {
+	rows := []needRow{{label: "kite › billing-export-us"}, {label: "kite › billing-export-eu"}, {label: "noc"}}
+	if got := labelWidth(rows, 60); got != 24 {
+		t.Errorf("colliding = %d, want 24", got)
+	}
+	long := append([]needRow{{label: "kite › a-very-long-worker-name-for-the-report"}}, rows...)
+	if got := labelWidth(long, 160); got != 24 {
+		t.Errorf("colliding beside a long label = %d, want 24", got)
+	}
+	if got := labelWidth(rows, 50); got != 20 {
+		t.Errorf("narrow pane = %d, want 20", got)
+	}
+	if got := labelWidth(rows[1:], 60); got != 20 {
+		t.Errorf("one long = %d, want 20", got)
+	}
+	if got := labelWidth([]needRow{rows[0], rows[0]}, 60); got != 20 {
+		t.Errorf("same label twice = %d, want 20", got)
+	}
+}
+
+// A worker named <project>-boss keeps "project › boss": only a boss session's rows are labelled by project.
+func TestNeedsWorkerNamedBoss(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	i := slices.IndexFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == "noc-triage" })
+	if i < 0 {
+		t.Fatal("no noc-triage")
+	}
+	m.snap.all[i].Name = "noc-boss"
+	if got := m.needRows()[0].label; got != "noc › boss" {
+		t.Errorf("label = %q, want %q", got, "noc › boss")
+	}
+}
 
 // A boss's own board scopes the block to its workers and list, labelled by who, its own question left out.
 func TestNeedsBossBoard(t *testing.T) {
@@ -156,14 +203,14 @@ func TestNeedsRender(t *testing.T) {
 		"",
 		" ● noc › triage  allow Bash: rm -rf build",
 		"     1 Yes   2 No",
-		" ? dev › boss    Reply Done once it's connected, or Skip to leave the lw check…",
+		" ? dev           Reply Done once it's connected, or Skip to leave the lw check…",
 	} {
 		if got := strings.TrimRight(lines[i], " "); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc › boss    Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc           Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
 		"noc-triage  via boss-noc  Bash prompt · in the block ↑", "n needs"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
@@ -621,10 +668,27 @@ func TestNeedsShortPaneAndFailures(t *testing.T) {
 	if rows, _ := m.card(m.snap.tiles[index(m.snap.tiles, "noc-triage")], 80); len(rows) == 1 {
 		t.Error("short pane: the dialog's card folded with no block to show it")
 	}
+	// A mode left on in a pane that then shrinks drops: no block hint, and n won't enter it
+	tall := selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
+	next, _ := tall.Update(tea.WindowSizeMsg{Width: 80, Height: 6})
+	tall = next.(Model)
+	if tall.msg.text == "" {
+		t.Error("short pane: the mode dropped with no word")
+	}
+	if hint := strings.Join(plain(tall.render()), "\n"); tall.needMode || strings.Contains(hint, "j/k move") || strings.Contains(hint, "n needs") {
+		t.Errorf("short pane: mode %v hint:\n%s", tall.needMode, hint)
+	}
+	if tall = tall.enterNeeds(); tall.needMode {
+		t.Error("short pane: n entered the hidden block")
+	}
+	tall.height = minBlockRows + 1
+	if tall = tall.enterNeeds(); !tall.needMode {
+		t.Error("shortest pane showing the block: n refused")
+	}
 	m = selectKind(t, needsBoard(t, &answered), sidebar.NeedAsk)
 	sig := m.needRows()[m.needIdx].sig
 	m, _ = keys(m, "1")
-	next, _ := m.Update(actionMsg{alert("❌ boss-dev: its agent is gone, reply not sent")})
+	next, _ = m.Update(actionMsg{alert("❌ boss-dev: its agent is gone, reply not sent")})
 	if m = next.(Model); m.needKey != sig || m.needDone != "" {
 		t.Errorf("failed reply: key %q done %q", m.needKey, m.needDone)
 	}

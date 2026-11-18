@@ -23,6 +23,7 @@ type bossEvent struct {
 	StopActive bool   `json:"stop_hook_active"`
 	Prompt     string `json:"prompt"`
 	Source     string `json:"source"`
+	Tool       string `json:"tool_name"`
 }
 
 // BossHook hands pending notes to a coordinator through its own Claude hooks: on Stop it blocks the stop
@@ -33,7 +34,7 @@ type bossEvent struct {
 // Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
 // list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
 // notes still out. On SessionStart it gives the coordinator its open list (startList). Any pane but a
-// coordinator's is left alone.
+// coordinator's is left alone. A PostToolUse of the coordinator's AskUserQuestion keeps the user's pick (Box.Picked).
 func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool, err error) {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil {
@@ -50,6 +51,18 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 		}
 		out, err = startList(c, pane, e.Source)
 		return out, false, err
+	}
+	if e.Name == "PostToolUse" && e.Tool == agent.AskUserQuestion {
+		picks := agent.HookPick(input)
+		if len(picks) == 0 {
+			return "", false, nil
+		}
+		// Only the manager relays a pick (dev todo answer --via manager)
+		b, ok, err := Coordinator(c, pane)
+		if !ok || err != nil || b.Name != Manager {
+			return "", false, err
+		}
+		return "", false, b.Box.Picked(picks, time.Now())
 	}
 	if e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
 		return "", false, nil

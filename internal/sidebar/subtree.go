@@ -76,14 +76,13 @@ func (c *ListCount) Add(done bool, on string, options int) {
 // Rollup is a boss's whole subtree: the strongest Rank across it and every session under it, and its counts.
 type Rollup struct {
 	Rank      Rank
-	Idle      string // the idle state's word: "finished" when its own last turn did, else "idle"
-	Questions int    // dialogs and asks notes, its own too, and asks on its and its bosses' lists
-	Working   int    // sessions under it working
-	Waiting   int    // sessions under it in a planned wait or rate-limit resume
-	ToDo      int    // plain items on its and its bosses' lists
-	Under     int    // sessions under it
-	Bosses    int    // a manager's: the bosses in its group, at its Depth (Order)
-	Warn      bool   // a failed, stuck or high-context note, its own too, or a list not read
+	Questions int  // dialogs and asks notes, its own too, and asks on its and its bosses' lists
+	Working   int  // sessions under it working
+	Waiting   int  // sessions under it in a planned wait or rate-limit resume
+	ToDo      int  // plain items on its and its bosses' lists
+	Under     int  // bosses and sessions with an agent under it: a session with no agent isn't a worker, as the board counts
+	Bosses    int  // a manager's: the bosses in its group, at its Depth (Order)
+	Warn      bool // a failed, stuck or high-context note, its own too, or a list not read
 	CostUSD   float64
 	HasCost   bool
 }
@@ -98,16 +97,15 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 			continue
 		}
 		manager := s.Root != "" && s.Root == s.Name
-		r := &Rollup{Rank: RankIdle, Idle: "idle"}
-		if NoteKind(s.Note) == NoteFinished {
-			r.Idle = NoteFinished
-		}
+		r := &Rollup{Rank: RankIdle}
 		r.add(s, lists, true)
 		for _, u := range under(sessions, i) {
-			if manager && u.Boss && u.Depth == s.Depth {
-				r.Bosses++
+			if u.Agent != "" || u.Boss {
+				if manager && u.Boss && u.Depth == s.Depth {
+					r.Bosses++
+				}
+				r.Under++
 			}
-			r.Under++
 			r.add(u, lists, false)
 		}
 		out[s.Name] = r
@@ -184,9 +182,9 @@ func (r Rollup) Parts() []string {
 			ps = append(ps, "waiting")
 		}
 	default:
-		ps = append(ps, r.Idle)
+		ps = append(ps, "idle")
 		if r.Under == 0 {
-			ps = append(ps, "nothing under it")
+			ps = append(ps, "no workers")
 		}
 	}
 	if r.Rank <= RankWorking {

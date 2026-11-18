@@ -12,7 +12,7 @@ import (
 )
 
 // subtreeSessions is a manager over three bosses, in Order: boss-noc's own turn ended, one worker on a dialog,
-// two working, one idle; boss-dev idle over five working; boss-mag with nothing under it.
+// two working, one idle; boss-dev idle over five working; boss-mag with no workers.
 func subtreeSessions() []Session {
 	w := func(name, by, state string, depth int) Session {
 		return Session{Name: name, ID: "$" + name, StartedBy: by, Depth: depth, Agent: "Claude", State: state}
@@ -42,7 +42,7 @@ func TestSubtreeText(t *testing.T) {
 	for name, want := range map[string]string{
 		"boss-noc": "needs you · 2 questions · 2 working · 1 to do",
 		"boss-dev": "5 working · 1 to do",
-		"boss-mag": "finished · nothing under it",
+		"boss-mag": "idle · no workers",
 		"manager":  "needs you · 2 questions · 7 working · 2 to do",
 	} {
 		if got := rolls[name].Text(); got != want {
@@ -94,6 +94,41 @@ func TestSubtreeEdges(t *testing.T) {
 	}
 }
 
+// A session with no agent yet isn't a worker: Under and a manager's counts agree with the board.
+func TestSubtreeSkipsNoAgent(t *testing.T) {
+	ss := subtreeSessions()
+	noAgent := Session{Name: "pending", ID: "$pending", StartedBy: "boss-dev", Depth: 2, State: agent.Idle}
+	i := 0
+	for ; ss[i].Name != "d5"; i++ {
+	}
+	ss = append(ss[:i+1], append([]Session{noAgent}, ss[i+1:]...)...)
+	for j := range ss {
+		ss[j].Root = "manager"
+	}
+	rolls := Subtree(ss, nil)
+	if r := rolls["boss-dev"]; r.Under != 5 {
+		t.Errorf("boss-dev Under = %d, want 5", r.Under)
+	}
+	if r := rolls["manager"]; r.Under != 12 {
+		t.Errorf("manager Under = %d, want 12", r.Under)
+	}
+	ss = []Session{
+		{Name: "m", ID: "$1", Boss: true, Root: "m", Agent: "Claude", State: agent.Idle},
+		{Name: "b", ID: "$2", Boss: true, Root: "m", State: agent.Idle},
+		{Name: "w", ID: "$3", Root: "m", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle},
+	}
+	for i := range ss[1:] {
+		ss[i+1].Depth = 0
+	}
+	if r := Subtree(ss, nil)["m"]; r.Under != 2 || r.Bosses != 1 {
+		t.Errorf("manager with a no-agent boss: Under %d Bosses %d, want 2 and 1", r.Under, r.Bosses)
+	}
+	only := []Session{{Name: "b", ID: "$b", Boss: true, Agent: "Claude", State: agent.Idle}, {Name: "w", ID: "$w", StartedBy: "b", Depth: 1}}
+	if r := Subtree(only, nil)["b"]; r.Under != 0 || hasRollLine(r) || r.Text() != "idle · no workers" {
+		t.Errorf("only no-agent under = %+v %q", r, r.Text())
+	}
+}
+
 // A boss under a boss: its sessions and its list count at each ancestor, once.
 func TestSubtreeGrandchild(t *testing.T) {
 	ss := Order([]Session{
@@ -137,7 +172,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM"}}}}))["boss"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 waiting · 1 need you" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 need you · 1 waiting" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }
@@ -164,7 +199,7 @@ func TestRollLineListAsk(t *testing.T) {
 
 // A roll line's "N need you" is what NEEDS YOU counts for the subtree: asks and the user's own plain items, no "to do".
 func TestRollLineMatchesNeedsYou(t *testing.T) {
-	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Idle}}
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
 		{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3}, {ID: 4, On: "w"},
 	}}
@@ -192,5 +227,37 @@ func TestRollLineManagerPlainOnly(t *testing.T) {
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["m"]
 	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "idle · 2 need you") {
 		t.Errorf("line = %q", ansi.Strip(got))
+	}
+}
+
+// A workerless boss with plain items only keeps a red "N need you" at sidebar widths; what is cut is the tail.
+func TestRollLineWorkerlessPlainOnly(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
+	for _, width := range []int{20, 36, 40} {
+		got, _ := rollLine(r, width)
+		if !strings.Contains(got, red+"1 need you"+reset) || !strings.HasPrefix(ansi.Strip(got), "idle · 1 need you") {
+			t.Errorf("width %d: %q", width, got)
+		}
+		if strings.Contains(ansi.Strip(got), "…") {
+			t.Errorf("width %d: need you cut: %q", width, ansi.Strip(got))
+		}
+	}
+}
+
+// Worker counts stay muted next to the red "need you", and the cost goes before they do.
+func TestRollLineCountsMutedCostLast(t *testing.T) {
+	ss := []Session{
+		{Name: "b", ID: "$1", Boss: true, State: agent.Idle},
+		{Name: "w1", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Working, CostUSD: 4, HasCost: true},
+		{Name: "w2", ID: "$3", StartedBy: "b", Depth: 1, State: agent.Waiting},
+	}
+	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
+	got, _ := rollLine(r, 60)
+	if strings.Contains(got, red+"1 working") || strings.Contains(got, red+"1 waiting") || !strings.Contains(got, red+"1 need you") {
+		t.Errorf("colours: %q", got)
+	}
+	if got, _ := rollLine(r, 28); strings.Contains(ansi.Strip(got), "$") {
+		t.Errorf("cost shown over a dropped count: %q", ansi.Strip(got))
 	}
 }

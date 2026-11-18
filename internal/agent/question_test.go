@@ -112,3 +112,26 @@ func TestQuestionAsk(t *testing.T) {
 		t.Error("blank question shown")
 	}
 }
+
+// The user's pick reads from AskUserQuestion's PostToolUse (the golden), each question with its answer; a dialog
+// dismissed (no answers) or another tool or event is none.
+func TestHookPick(t *testing.T) {
+	input, err := os.ReadFile("testdata/claude-posttooluse-ask.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Pick{{"Which color?", "purple"}, {"Which extras?", "Tests, ci"}}
+	if got := HookPick(input); !reflect.DeepEqual(got, want) || got[0].String() != "Which color? picked purple" {
+		t.Errorf("golden: %+v, want %+v", got, want)
+	}
+	for _, in := range []string{
+		`{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Q?"}]}}`,
+		`{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Q?"}],"answers":{"Q?":" "}}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Q?"}],"answers":{"Q?":"A"}}}`,
+		`{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"questions":[{"question":"Q?"}],"answers":{"Q?":"A"}}}`,
+	} {
+		if got := HookPick([]byte(in)); got != nil {
+			t.Errorf("%s: %+v, want none", in, got)
+		}
+	}
+}

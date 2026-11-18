@@ -23,7 +23,7 @@ const screenRows = 5
 
 // sectionNames and sectionColours label the sections, in their order.
 var (
-	sectionNames   = [...]string{"NEEDS YOU", "WORKING", "WAITING", "IDLE"}
+	sectionNames   = [...]string{"ASKING", "WORKING", "WAITING", "IDLE"}
 	sectionColours = [...]string{sidebar.Red, sidebar.Gold, sidebar.Green, sidebar.Muted}
 )
 
@@ -174,7 +174,7 @@ func sectionRow(s section, n, w int) string {
 
 // card is t's rows, each w columns wide, and what clicks on them do (rows counted from the card's first): one
 // row when folded, else a box: its name and time, title, status or the dialog it waits on, branch and cost,
-// PR, what it last said, its notes, its screen, then its buttons. A Needs you or Waiting card has a bar in its
+// PR, what it last said, its notes, its screen, then its buttons. A Asking or Waiting card has a bar in its
 // section's colour on its left; the selected card's box is in its state's colour.
 func (m Model) card(t tile, w int) (rows []string, hits []hit) {
 	sec := t.section()
@@ -374,7 +374,7 @@ func optionLabel(p *pick, o option) string {
 }
 
 // buttons is a card's last row, w columns: Open, Message… and its PR, × at the right, and what clicks on
-// them do. Open leads on a Needs you or Waiting card that shows no dialog; else they recede.
+// them do. Open leads on an Asking or Waiting card that shows no dialog; else they recede.
 func (m Model) buttons(t tile, sec section, w int) (string, []hit) {
 	type button struct {
 		label string
@@ -457,7 +457,7 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 		right = sidebar.Muted + span(m.clk.Now().Sub(t.since)) + reset + " "
 	}
 	if mt := modelText(t); folded && mt != "" {
-		right = modelColour(t) + mt + reset + "  " + right
+		right = sidebar.Muted + mt + reset + "  " + right
 	}
 	room := max(1, w-ansi.StringWidth(right)-1)
 	left = ansi.Truncate(" "+left, room, "…")
@@ -549,24 +549,13 @@ func staleNote(t tile) bool {
 	return !t.deciding && noteKind(t.note) == inbox.Decision
 }
 
-// modelText is a Claude worker's model and effort as "opus·medium", "default model" when no --model was passed,
-// "" for Codex and Grok, which take no flags.
+// modelText is a Claude worker's model and effort as "opus·medium", "" when no --model was passed and for Codex
+// and Grok, which take no flags.
 func modelText(t tile) string {
-	if t.sess.Agent != "Claude" {
+	if t.sess.Agent != "Claude" || t.model == "" {
 		return ""
 	}
-	if t.model == "" {
-		return "default model"
-	}
 	return strings.Join(slices.DeleteFunc([]string{t.model, t.effort}, func(s string) bool { return s == "" }), "·")
-}
-
-// modelColour is gold for a worker on the default model, else muted.
-func modelColour(t tile) string {
-	if t.model == "" {
-		return sidebar.Gold
-	}
-	return sidebar.Muted
 }
 
 // metaRow is the branch, cut at its start so its end shows, and at the right the model, cost and context use, w columns.
@@ -588,7 +577,7 @@ func metaRow(t tile, w int) string {
 			sep = 2
 		}
 		if ansi.StringWidth(mt)+sep+rw <= w-1 {
-			r = modelColour(t) + mt + reset + strings.Repeat(" ", sep) + r
+			r = sidebar.Muted + mt + reset + strings.Repeat(" ", sep) + r
 			rw += ansi.StringWidth(mt) + sep
 		}
 	}
@@ -630,7 +619,7 @@ const lastSaid = 2
 
 // said is the last lines of t's newest reply, without its markdown's backticks and bold, a turn-end marker
 // line (the status says it), table rows or rules, or the question an asks card's status says and its
-// options; with no reply read, its note when that isn't a warning, nor the question a Needs you card's
+// options; with no reply read, its note when that isn't a warning, nor the question an Asking card's
 // status already shows.
 func said(t tile) []string {
 	read, _, _ := reply(t)

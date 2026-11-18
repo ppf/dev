@@ -28,7 +28,7 @@ func TestNoteKindsPinned(t *testing.T) {
 }
 
 // managerRows is a manager over boss-dev (idle, its two workers working) and boss-noc (its turn ended, one
-// worker on a permission dialog, one working), and boss-mag with nothing under it.
+// worker on a permission dialog, one working), and boss-mag with no workers.
 func managerRows() []row {
 	r := func(name, id, by, state string) row {
 		return row{Session: name, SessionID: id, ID: "%" + id[1:], Window: 1, Command: "claude", State: state, StateCmd: "claude", StartedBy: by}
@@ -77,7 +77,7 @@ func TestBossCardsRollUp(t *testing.T) {
 	for name, want := range map[string]string{
 		"boss-noc": "▸ ● boss-noc needs you · 2 questions · 1 working · 1 to do",
 		"boss-dev": "▸ ● boss-dev 2 working",
-		"boss-mag": "▸ ● boss-mag finished · nothing under it",
+		"boss-mag": "▸ ● boss-mag idle · no workers",
 	} {
 		if !strings.HasPrefix(got[name], want) {
 			t.Errorf("%s row = %q, want %q", name, got[name], want)

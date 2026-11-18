@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/wait"
 )
@@ -244,6 +245,9 @@ func replyOptions(l string) []string {
 	return nil
 }
 
+// quoted is a line quoting someone else's question, not asking one: a blockquote or a "Your question:" style label.
+var quoted = regexp.MustCompile(`(?i)^(?:>|[*_]*(?:your question|question|q|you asked)[*_]*\s*:)`)
+
 // QuestionAt is where among a message's non-blank lines is the question it ends on, among its last askLines
 // lines; -1 when none. It is the last line ending in "?" (markdown emphasis aside), not a heading, followed only
 // by list items, its options; or the last line, telling how to reply with the options it names (replyOptions);
@@ -254,6 +258,11 @@ func QuestionAt(lines []string) int {
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-askLines; i-- {
 		l := strings.TrimSpace(lines[i])
 		switch {
+		case quoted.MatchString(l):
+			if asking && i < len(lines)-1 {
+				return i + 1
+			}
+			return -1
 		case strings.HasSuffix(strings.TrimRight(l, "*_"), "?") && !strings.HasPrefix(l, "#"):
 			return i
 		case i == len(lines)-1 && len(replyOptions(l)) > 0:
@@ -373,6 +382,12 @@ type state struct {
 type Prompt struct {
 	Text string `json:"text"`
 	At   int64  `json:"at"`
+	// Pick: the user's AskUserQuestion pick (Picked), good for one relayed answer; Spent once one was (Claim).
+	// Question and Answer are its one question and answer, empty for a pick of several.
+	Pick     bool   `json:"pick,omitempty"`
+	Question string `json:"question,omitempty"`
+	Answer   string `json:"answer,omitempty"`
+	Spent    bool   `json:"spent,omitempty"`
 }
 
 // flight is a batch sent over Claude's messaging socket at At (unix seconds).
@@ -625,6 +640,58 @@ func (b Box) Arrived(prompt string, now time.Time) error {
 		}
 		return nil
 	})
+}
+
+// Picked keeps picks, the user's in the coordinator's AskUserQuestion (agent.HookPick), as their latest prompt.
+func (b Box) Picked(picks []agent.Pick, now time.Time) error {
+	var words []string
+	for _, p := range picks {
+		if p.Answer != "" {
+			words = append(words, p.String())
+		}
+	}
+	p := &Prompt{Text: clip(strings.Join(words, "; ")), At: now.Unix(), Pick: true}
+	if len(picks) == 1 {
+		p.Question, p.Answer = picks[0].Question, picks[0].Answer
+	}
+	return b.update(func(s *state) error {
+		s.Prompt = p
+		return nil
+	})
+}
+
+// Claim spends p, the pick an answer is relayed from: refused once spent or when the user said something since.
+func (b Box) Claim(p Prompt) error {
+	return b.update(func(s *state) error {
+		switch {
+		case !s.Prompt.is(p):
+			return errors.New("the user said something since: look again")
+		case s.Prompt.Spent:
+			return errors.New("the user's latest pick answered an item already: ask them this one")
+		}
+		s.Prompt.Spent = true
+		return nil
+	})
+}
+
+// Unclaim gives back p, claimed for an answer that was refused, unless the user said something since.
+func (b Box) Unclaim(p Prompt) error {
+	return b.update(func(s *state) error {
+		if s.Prompt.is(p) {
+			s.Prompt.Spent = false
+		}
+		return nil
+	})
+}
+
+// is reports p the same prompt as q, spent or not.
+func (p *Prompt) is(q Prompt) bool {
+	if p == nil {
+		return false
+	}
+	now := *p
+	now.Spent = q.Spent
+	return now == q
 }
 
 // ForgetPrompt drops the user's latest prompt (Arrived), for a new conversation.
