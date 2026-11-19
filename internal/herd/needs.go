@@ -122,7 +122,7 @@ func (m Model) listRows() []needRow {
 			}
 		}
 		n.sig = strings.Join([]string{strconv.Itoa(int(r.Kind)), r.Session, r.Boss, strconv.Itoa(r.ID), n.Text,
-			strings.Join(n.Options, "\x01"), dialog}, "\x00")
+			strings.Join(n.Options, "\x01"), strings.Join(r.Context, "\x01"), dialog}, "\x00")
 		out = append(out, n)
 	}
 	return out

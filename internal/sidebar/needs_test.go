@@ -339,23 +339,23 @@ func TestNeedsMouse(t *testing.T) {
 	}
 }
 
-// A list ask's option shows its label only; a dialog's choice keeps a " | " in it.
+// A list item's option shows its label only; a session's choice keeps a " | " in it.
 func TestOptionLabel(t *testing.T) {
 	for _, tt := range []struct {
-		kind    NeedKind
+		list    bool
 		in, out string
 		rec     bool
 	}{
-		{NeedListAsk, "Merge (Recommended)", "Merge", true},
-		{NeedListAsk, "Wait", "Wait", false},
-		{NeedListAsk, "A (recommended) ", "A", true},
-		{NeedListAsk, "(Recommended)", "", true},
-		{NeedListAsk, "Merge | CI green (Recommended)", "Merge", true},
-		{NeedListAsk, "Merge (Recommended) | CI green", "Merge", true},
-		{NeedDialog, "Run | staging (Recommended)", "Run | staging", true},
+		{true, "Merge (Recommended)", "Merge", true},
+		{true, "Wait", "Wait", false},
+		{true, "A (recommended) ", "A", true},
+		{true, "(Recommended)", "", true},
+		{true, "Merge | CI green (Recommended)", "Merge", true},
+		{true, "Merge (Recommended) | CI green", "Merge", true},
+		{false, "Run | staging (Recommended)", "Run | staging", true},
 	} {
-		if got, rec := optionLabel(tt.kind, tt.in); got != tt.out || rec != tt.rec {
-			t.Errorf("optionLabel(%d, %q) = %q %v, want %q %v", tt.kind, tt.in, got, rec, tt.out, tt.rec)
+		if got, rec := optionLabel(tt.list, tt.in); got != tt.out || rec != tt.rec {
+			t.Errorf("optionLabel(%v, %q) = %q %v, want %q %v", tt.list, tt.in, got, rec, tt.out, tt.rec)
 		}
 	}
 }

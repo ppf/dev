@@ -148,7 +148,7 @@ function dropStalePicks() {
   for (const [k, p] of Object.entries(state.picks)) {
     const i = k.lastIndexOf('/'), boss = k.slice(0, i), x = find(boss, Number(k.slice(i + 1)));
     if (!x && unread(boss)) continue;
-    if (x && x.it.text === p.question && x.it.added === p.added && (!p.option || x.it.options?.some(o => option(o).label === p.option))) continue;
+    if (x && x.it.text === p.question && x.it.added === p.added && (!p.option || x.it.options?.some(o => o === p.option || option(o).label === p.option))) continue;
     delete state.picks[k];
     if (x && (p.option || p.text.trim())) state.errors[k] = 'The question changed since you picked: pick again.';
   }
@@ -304,10 +304,13 @@ function answerForm(list, it) {
     }
     sendBtn.disabled = !state.reachable || state.pending[k] || (!p.option && !p.text.trim());
   };
+  const labels = it.options.map(raw => option(raw).label);
   const opts = el('ul', { class: 'cells', role: 'radiogroup', 'aria-label': 'Options' }, it.options.map(raw => {
     const o = option(raw);
-    const b = el('button', { class: 'option', type: 'button', role: 'radio', 'data-label': o.label, onclick: () => {
-      p.option = p.option === o.label ? '' : o.label;
+    // The label is the answer; an older ask whose options share it sends the option whole, to tell them apart
+    const value = labels.filter(l => l === o.label).length > 1 ? raw : o.label;
+    const b = el('button', { class: 'option', type: 'button', role: 'radio', 'data-label': value, onclick: () => {
+      p.option = p.option === value ? '' : value;
       p.text = '';
       own.value = '';
       sync();
@@ -339,7 +342,7 @@ function item(boss, id) {
   // A desktop app boss's list is read here, never answered or ticked: the Mac refuses it.
   const desktop = list.boss.startsWith('local_');
   if (desktop) {
-    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(o => el('li', null, option(o).label))));
+    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(o => { const c = option(o); return el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label); })));
     out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
   }
   else if (it.status === 'decide' && it.options?.length) out.push(...answerForm(list, it));

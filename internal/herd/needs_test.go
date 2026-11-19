@@ -838,11 +838,7 @@ func TestNeedsClickOption(t *testing.T) {
 		}
 		lines := plain(m.render())
 		y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Release now?") })
-		// Selected, each option has its own line
 		at := y + 1
-		if selected {
-			at = y + 2
-		}
 		x := strings.Index(lines[at], "2 Later")
 		if x < 0 {
 			t.Fatalf("selected %v: no option 2 on %q", selected, lines[at])
@@ -1028,6 +1024,9 @@ func TestNeedsClickOptionUnderContext(t *testing.T) {
 	if _, cmd := click(m, strings.Index(lines[ctx], "main"), ctx); cmd != nil {
 		t.Error("a click on a context line answered")
 	}
+	if _, cmd := click(m, 70, later); cmd != nil {
+		t.Error("a click right of an option's text answered")
+	}
 	next, cmd := click(m, strings.Index(lines[later], "Later"), later)
 	if cmd == nil {
 		t.Fatal("the click on 2 Later sent nothing")
@@ -1035,5 +1034,23 @@ func TestNeedsClickOptionUnderContext(t *testing.T) {
 	next.Update(cmd())
 	if len(answered) != 1 || answered[0].option != "Later | after Friday" {
 		t.Errorf("answered %+v, want Later | after Friday", answered)
+	}
+}
+
+// On a pane too short for an expanded ask's context and options, its context goes and its options stay.
+func TestNeedsAskContextShortPane(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Release now?",
+		Options: []string{"Now | CI green (Recommended)", "Later | after Friday"}, Context: []string{"one", "two", "three", "four", "five", "six"}}}}}}
+	m.snap.rollUp()
+	m.height = 14
+	screen := strings.Join(plain(selectKind(t, m, sidebar.NeedListAsk).render()), "\n")
+	if !strings.Contains(screen, "2 Later") || strings.Contains(screen, "- one") {
+		t.Errorf("short pane:\n%s", screen)
+	}
+	m.height = 40
+	if screen := strings.Join(plain(selectKind(t, m, sidebar.NeedListAsk).render()), "\n"); !strings.Contains(screen, "- six") || !strings.Contains(screen, "2 Later") {
+		t.Errorf("tall pane:\n%s", screen)
 	}
 }

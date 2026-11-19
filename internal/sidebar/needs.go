@@ -633,10 +633,10 @@ func cutRecommended(s string) (string, bool) {
 	return s, false
 }
 
-// optionLabel is option o of row kind k as shown: a list ask's label only (SplitOption), another's choice without its
+// optionLabel is option o as shown: a list item's label only (SplitOption), a session's choice without its
 // " (Recommended)"; rec reports it had one.
-func optionLabel(k NeedKind, o string) (label string, rec bool) {
-	if k == NeedListAsk {
+func optionLabel(listItem bool, o string) (label string, rec bool) {
+	if listItem {
 		label, _, rec = SplitOption(o)
 		return label, rec
 	}
@@ -779,9 +779,17 @@ func (m Model) openLines(r NeedRow, w int) (lines []string, opts []int) {
 		}
 	}
 	opts = make([]int, len(lines))
+	labels := make([]string, len(r.Options))
+	for i, o := range r.Options {
+		labels[i], _ = optionLabel(r.Boss != "", o)
+	}
 	for i, o := range r.Options {
 		n := 0
-		label, rec := optionLabel(r.Kind, o)
+		label, rec := optionLabel(r.Boss != "", o)
+		if strings.Count("\x00"+strings.Join(labels, "\x00")+"\x00", "\x00"+label+"\x00") > 1 {
+			// An older ask's options sharing a label: shown whole, to tell them apart
+			label, _ = cutRecommended(o)
+		}
 		if rec {
 			label = gold + "★ " + reset + label
 		}

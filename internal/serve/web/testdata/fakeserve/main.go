@@ -145,7 +145,7 @@ func (s *server) answer(req request, it map[string]any) (int, string) {
 	}
 	answer := strings.TrimSpace(req.Text)
 	if req.Option != "" {
-		if !slices.ContainsFunc(it["options"].([]any), func(o any) bool { return todo.Split(o.(string)).Label == req.Option }) {
+		if !slices.ContainsFunc(it["options"].([]any), func(o any) bool { return o == req.Option || todo.Split(o.(string)).Label == req.Option }) {
 			return 400, fmt.Sprintf("item %d has no option %q", req.ID, req.Option)
 		}
 		answer = req.Option
