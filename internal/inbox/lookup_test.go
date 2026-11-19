@@ -1,7 +1,9 @@
 package inbox
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,11 +36,86 @@ func TestLookupList(t *testing.T) {
 	viewPR = func(string) (sidebar.PRView, error) { calls++; return sidebar.PRView{State: "OPEN"}, nil }
 	t.Cleanup(func() { viewPR = old })
 	for i, want := range []int{2, 3, 3} {
-		if err := lookupList(c, "%1", now); err != nil {
-			t.Fatal(err)
+		if manager, err := lookupList(c, "%1", now); err != nil || manager {
+			t.Fatalf("watch %d: manager %v, %v", i+1, manager, err)
 		}
 		if calls != want {
 			t.Errorf("watch %d: %d lookups, want %d", i+1, calls, want)
+		}
+	}
+}
+
+// The manager's watch also looks up the closed bosses' lists, at most listLookups across them, so a merged PR shows
+// as its check; a boss's doesn't.
+func TestLookupClosed(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	live := []string{"boss-a", "boss-b", sidebar.Manager}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			var out string
+			for _, n := range live {
+				out += tmux.FormatRow(n, "1")
+			}
+			return out, nil
+		case "display-message":
+			name := strings.Trim(args[3], "=:")
+			if args[3] == "%1" {
+				name = sidebar.Manager
+			}
+			return tmux.FormatRow("/tmp/tmux-1/default", name, "1", "$1", "1700000000"), nil
+		}
+		return "", nil
+	})
+	now := time.Unix(1_800_000_000, 0)
+	url := func(n int) string { return "https://github.com/acme/orbit/pull/" + strconv.Itoa(n) }
+	// boss-a's one lookup leaves boss-b one of the budget
+	for _, l := range []struct {
+		boss string
+		prs  []int
+	}{{"boss-a", []int{1}}, {"boss-b", []int{2, 3, 4}}} {
+		s, err := todo.ForPane(c, tmux.SessionTarget(l.boss))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range l.prs {
+			if _, err := s.Add(todo.Item{Text: "PR", Link: url(n)}, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	live = []string{sidebar.Manager}
+	var seen []string
+	old := viewPR
+	viewPR = func(u string) (sidebar.PRView, error) {
+		seen = append(seen, u)
+		return sidebar.PRView{State: "MERGED", Ended: now}, nil
+	}
+	t.Cleanup(func() { viewPR = old })
+	for i, want := range []int{2, 4, 4} {
+		manager, err := lookupList(c, "%1", now)
+		if err != nil || !manager {
+			t.Fatalf("watch %d: manager %v, %v", i+1, manager, err)
+		}
+		if err := lookupClosed(c, now); err != nil {
+			t.Fatal(err)
+		}
+		if len(seen) != want {
+			t.Errorf("watch %d: %d lookups, want %d", i+1, len(seen), want)
+		}
+		if i == 0 && !slices.Equal(seen, []string{url(1), url(2)}) {
+			t.Errorf("first watch looked up %q, want boss-a's #1 and boss-b's #2", seen)
+		}
+	}
+	lists, err := todo.Closed(c, now)
+	if err != nil || len(lists) != 2 {
+		t.Fatalf("closed lists: %d, %v", len(lists), err)
+	}
+	for _, l := range lists {
+		for _, it := range l.Items {
+			if it.Check == nil || it.Check.Kind != sidebar.CheckMerged {
+				t.Errorf("%s #%d: check %+v, want merged", l.Boss, it.ID, it.Check)
+			}
 		}
 	}
 }

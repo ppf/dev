@@ -137,6 +137,9 @@ var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is it
 // Store is one boss's list file; boss is its session's name when known.
 type Store struct{ path, boss string }
 
+// Boss is the name of the boss session whose list it is, when known.
+func (s Store) Boss() string { return s.boss }
+
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 // open is the store named key under $XDG_STATE_HOME/dev/todo.
@@ -311,11 +314,13 @@ func Workers(c *tmux.Client, pane string) ([]Session, error) {
 	return ws, nil
 }
 
-// BossList is one boss's list, as All reads it; Err is why it couldn't be read; Closed that its boss session is gone.
+// BossList is one boss's list, as All reads it; Err is why it couldn't be read; Closed that its boss session is gone,
+// Store then its file, to look its PRs up or tick it by.
 type BossList struct {
 	Boss   string
 	Err    error
 	Closed bool
+	Store  Store
 	List
 }
 
@@ -412,8 +417,9 @@ func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList
 		if (name != sidebar.Manager && !strings.HasPrefix(name, "boss-")) || sessionKey(name) != key {
 			continue
 		}
+		s.boss = name
 		if err != nil {
-			out = append(out, BossList{Boss: name, Err: err, Closed: true, List: List{Items: []Shown{}, Stale: true}})
+			out = append(out, BossList{Boss: name, Err: err, Closed: true, Store: s, List: List{Items: []Shown{}, Stale: true}})
 			continue
 		}
 		if n, _ := l.Open(); n == 0 {
@@ -424,7 +430,7 @@ func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList
 				l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
 			}
 		}
-		out = append(out, BossList{Boss: name, Closed: true, List: l})
+		out = append(out, BossList{Boss: name, Closed: true, Store: s, List: l})
 	}
 	slices.SortFunc(out, func(a, b BossList) int { return strings.Compare(a.Boss, b.Boss) })
 	return out, nil

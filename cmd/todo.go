@@ -70,7 +70,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
-	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id")
+	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
 	return cmd
 }
@@ -395,7 +395,7 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			if text != "" && len(ids) != 1 {
 				return errors.New("--text ticks one item")
 			}
-			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			s, _, err := listStore(*boss, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -422,16 +422,17 @@ func newTodoCheckCmd(boss *string) *cobra.Command {
 		Long: `Look up now, with gh, the PR each open item links to (--link), then print the list as dev todo does, each item
 to re-check marked ⚠ with why: its PR merged or closed; approved, changes requested, checks green or failing since the
 item was added or replaced (its first lookup after that); its PR's lookups failing for 20 minutes; unchanged for 2 days
-or more (not an ask, nor a dated item before its --until). An item on a worker session gone says so (session gone).
+or more (not an ask, nor a dated item before its --until). An item on a worker session gone says so (session gone),
+not on a closed boss's list, which --boss checks too.
 An item added with --done-on ticks by itself once a lookup finds its PR in that state.
-A dev boss's previews look its items' PRs up by themselves: every 15 seconds two of those not looked up for 10 minutes;
-then, with its inbox on, they tell the boss in it, once per item and reason, of each PR move, worker gone, and of each item unchanged
+A dev boss's previews look its items' PRs up by themselves (the manager's, the closed bosses' lists' too): every 15
+seconds two of those not looked up for 10 minutes; then, with its inbox on, they tell the boss in it, once per item and reason, of each PR move, worker gone, and of each item unchanged
 for 2 days (again after 2 more without --replaces), and of each item ticked by --done-on; an --until tick, and on a
 desktop app boss every tick, is in the boss's next reminder. A desktop app boss runs this. A lookup that failed prints
 on stderr; the list still prints.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			s, closed, err := listStore(*boss, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -453,8 +454,10 @@ on stderr; the list still prints.`,
 			if err != nil {
 				return err
 			}
-			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(*boss, cmd.ErrOrStderr()) }); err != nil {
-				return err
+			if !closed {
+				if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(*boss, cmd.ErrOrStderr()) }); err != nil {
+					return err
+				}
 			}
 			out := cmd.OutOrStdout()
 			for _, it := range l.Items {
@@ -588,6 +591,23 @@ func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 		return todo.ForPane(tmux.New(), pane)
 	}
 	return desktopTodo(id, adopt && boss == "", stderr)
+}
+
+// listStore is todoStore, else, for a --boss closed on this server with open items, its list by its file: closed
+// reports it; one not read adds its error. Any other --boss keeps todoStore's error, a live session that is no boss too.
+func listStore(boss string, stderr io.Writer) (s todo.Store, closed bool, err error) {
+	s, err = todoStore(boss, true, stderr)
+	if err == nil || boss == "" || strings.HasPrefix(boss, "local_") {
+		return s, false, err
+	}
+	gone, ok, cerr := todo.ClosedStore(tmux.New(), boss, time.Now())
+	switch {
+	case cerr != nil:
+		return s, false, errors.Join(err, cerr)
+	case !ok:
+		return s, false, err
+	}
+	return gone, true, nil
 }
 
 // todoBoss is the boss session whose list it is: --boss's, else the one it runs in; a pane in a tmux one, else

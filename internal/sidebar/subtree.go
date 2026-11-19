@@ -62,6 +62,7 @@ func (s Session) Rank() Rank {
 type ListCount struct {
 	Asks, Plain, On int
 	Unread          bool // the list wasn't read
+	Closed          bool // its boss session is gone: the manager's roll-up counts it, as its NEEDS YOU shows it
 }
 
 // Add counts an item when it's open.
@@ -120,6 +121,13 @@ func Subtree(sessions []Session, lists map[string]ListCount) map[string]*Rollup 
 			r.ClosedUSD += u.SpentUSD
 			r.CostErr = cmp.Or(r.CostErr, u.SpentErr)
 		}
+		if s.Name == Manager {
+			for _, l := range lists {
+				if l.Closed {
+					r.addList(l)
+				}
+			}
+		}
 		r.ClosedUSD += s.SpentUSD
 		if r.ClosedUSD > 0 {
 			r.CostUSD, r.HasCost = r.CostUSD+r.ClosedUSD, true
@@ -167,7 +175,11 @@ func (r *Rollup) add(s Session, lists map[string]ListCount, own bool) {
 	if !s.Boss {
 		return
 	}
-	l := lists[s.Name]
+	r.addList(lists[s.Name])
+}
+
+// addList counts a boss's list l into r.
+func (r *Rollup) addList(l ListCount) {
 	r.Questions += l.Asks
 	r.ToDo += l.Plain
 	r.OnOthers += l.On

@@ -472,3 +472,25 @@ func TestRollLineNarrowKeepsSomething(t *testing.T) {
 		t.Errorf("nothing fits = %q", ansi.Strip(got))
 	}
 }
+
+// The manager's roll-up counts its closed bosses' lists, as its NEEDS YOU lists them; no other boss's does.
+func TestSubtreeClosedLists(t *testing.T) {
+	sessions := subtreeSessions()
+	needs := []NeedList{
+		{Boss: "boss-noc", Items: []NeedItem{{ID: 1, Text: "a", Options: []string{"Yes"}}, {ID: 2, Text: "b"}}},
+		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "c"}}},
+		{Boss: "boss-old", Closed: true, Items: []NeedItem{{ID: 1, Text: "d"}, {ID: 2, Text: "e"}, {ID: 3, Text: "f", On: "Ana"},
+			{ID: 4, Text: "g", Options: []string{"Yes"}}, {ID: 5, Text: "h", Done: true}}},
+	}
+	rolls := Subtree(sessions, NeedCounts(needs))
+	if got, want := rolls[Manager].Text(), "needs you · 3 questions · 7 working · 4 to do · 1 on others"; got != want {
+		t.Errorf("manager = %q, want %q", got, want)
+	}
+	if got, want := rolls["boss-dev"].Text(), "5 working · 1 to do"; got != want {
+		t.Errorf("boss-dev = %q, want %q", got, want)
+	}
+	r := rolls[Manager]
+	if rows := NeedRows(sessions, needs, Manager); len(rows) != r.Questions+r.ToDo {
+		t.Errorf("NEEDS YOU %d rows, roll-up %d need you", len(rows), r.Questions+r.ToDo)
+	}
+}

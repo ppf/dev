@@ -197,7 +197,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "g", "enter", "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if r.Closed {
+		if r.Closed && key != "d" {
 			m.msg = info(r.ClosedHint())
 			return m, nil
 		}
