@@ -59,7 +59,7 @@ func Default(addrs []net.Addr, route func() (netip.Addr, error)) (netip.AddrPort
 		}
 	}
 	ip, err := route()
-	if err == nil && ip.Is4() && ip.IsPrivate() {
+	if err == nil && ip.Is4() && ip.IsPrivate() && onLAN(addrs, ip) {
 		return netip.AddrPortFrom(ip, DefaultPort), LAN, nil
 	}
 	none := fmt.Errorf("no tailnet or private LAN address on this Mac: pass --addr <ip:port>, as 127.0.0.1:%d", DefaultPort)
@@ -67,6 +67,20 @@ func Default(addrs []net.Addr, route func() (netip.Addr, error)) (netip.AddrPort
 		return netip.AddrPort{}, 0, errors.Join(none, err)
 	}
 	return netip.AddrPort{}, 0, none
+}
+
+// onLAN is whether ip is on an interface among addrs with a subnet, not a point-to-point /32: a full-tunnel VPN's
+// address takes the default route, and a phone on the Wi-Fi can't reach it.
+func onLAN(addrs []net.Addr, ip netip.Addr) bool {
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok {
+			ones, bits := n.Mask.Size()
+			if a, ok := netip.AddrFromSlice(n.IP); ok && a.Unmap() == ip && ones < bits {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DefaultRoute is the local address of the default route's interface: a UDP "connect" picks it and sends nothing.
