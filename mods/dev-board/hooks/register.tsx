@@ -17,6 +17,8 @@ const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
 // The desktop pane's tokens: five colors (theme keys, so light and dark follow the theme), two sizes, two weights, four spacing steps;
 // besides them only BAR_TRACK's grey and the icons' white. The terminal and the phones keep their own looks
+// The manager's tmux session: it takes a closed boss's starts
+const MANAGER = 'manager'
 const TONE = { text: 'text', muted: 'subtle', ok: 'success', caution: 'warning', danger: 'error' } as const
 // A tone in an SVG icon, which can't name a theme key: each about 4.2:1 on the light (#FFFFFF) and the dark (#181818) pane
 const TONE_HEX = { ok: '#278D43', caution: '#A27300', danger: '#E33C41', muted: '#7B7B7B' } as const
@@ -252,11 +254,13 @@ const statusRank = (it: TodoItem) => {
 /** A status's color; an unknown one muted. */
 const statusColor = (status: string) => (Object.hasOwn(STATUS_COLORS, status) ? STATUS_COLORS[status] : TONE.muted)
 
-/** An all-projects item's status words: a late start or whom a start went to over the bare status. */
-const fleetStatusText = (it: FleetItem, status: string) => {
+/** An all-projects item's status words at nowMs: a late start, or whom a start went to and how long ago, over the bare status. */
+const fleetStatusText = (it: FleetItem, nowMs: number) => {
   if (it.startLate) return 'start not picked up'
-  if (status === 'starting' && it.statusOn !== undefined) return `sent to ${it.statusOn}`
-  return status
+  if (it.status === 'starting' && it.statusOn !== undefined) {
+    return it.startedAt === undefined ? `sent to ${it.statusOn}` : `sent to ${it.statusOn} · ${Math.max(0, Math.floor((nowMs / 1000 - it.startedAt) / 60))}m`
+  }
+  return it.status
 }
 
 /** The to do items as the board lists them: by status in STATUSES' order, each status in dev's order. */
@@ -888,7 +892,8 @@ export const register: Register = on => {
       try {
         const ran = await $.process.run(startArgv(DEV_BIN, it), { timeoutMs: 15_000 })
         why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} todo start exited ${ran.exitCode}`
-        said = ran.stdout.trim()
+        // A boss mid-turn gets it queued: dev says so on stderr
+        said = [ran.stdout.trim(), ran.exitCode === 0 ? ran.stderr.trim() : ''].filter(Boolean).join(' ')
       } catch (err) {
         why = errorText(err)
       } finally {
@@ -1501,7 +1506,7 @@ export const register: Register = on => {
                 {!it.done && it.status !== undefined && (
                   <Box flexShrink={0}>
                     <Text size={SIZE.meta} color={it.startLate ? TONE.danger : statusColor(it.status)}>
-                      {fleetStatusText(it, it.status)}
+                      {fleetStatusText(it, nowMs)}
                     </Text>
                   </Box>
                 )}
@@ -1522,7 +1527,7 @@ export const register: Register = on => {
                         ))}
                       </Box>,
                     ]
-                  : it.status === 'yours' || it.startLate
+                  : it.status === 'yours' || it.startLate || (it.status === 'boss closed' && f.agents.some(a => a.session === MANAGER))
                     ? [
                         <Box key={`${key}:actions`} flexDirection="row" columnGap={SPACE.inline}>
                           <Button key={`${key}:start`} label="Start" onPress={() => void startAsk(it)} />

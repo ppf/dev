@@ -2518,7 +2518,7 @@ const ASKS: Ran = {
       boss: 'boss-api',
       items: [
         { id: 7, text: 'Rotate the API key', done: false, status: 'yours' },
-        { id: 8, text: 'Ship the fix', done: false, status: 'starting', status_on: 'boss-api', started: { at: 0, to: 'boss-api' } },
+        { id: 8, text: 'Ship the fix', done: false, status: 'starting', status_on: 'boss-api', started: { at: -180, to: 'boss-api' } },
         { id: 9, text: 'Book the room', done: false, status: 'starting', status_on: 'manager', started: { at: 0, to: 'manager' }, start_late: true },
       ],
     },
@@ -2599,7 +2599,7 @@ test('Start on a yours item (and a late start) runs dev todo start from the boar
   await clock.advance(10_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
-  expect(needs).toContain('api  Ship the fix sent to boss-api')
+  expect(needs).toContain('api  Ship the fix sent to boss-api · 3m')
   expect(needs).toContain('api  Book the room start not picked up')
   expect(await ui.find({ key: 'fleet:ask:boss-api:8:start' })).toBeUndefined()
   expect(await ui.find({ key: 'fleet:ask:boss-dev:3:start' })).toBeUndefined()
@@ -2609,7 +2609,19 @@ test('Start on a yours item (and a late start) runs dev todo start from the boar
   expect(otherRuns.filter(r => r.argv[2] === 'start').map(r => r.argv)).toEqual([['dev', 'todo', 'start', '--from-board', '--question', 'Rotate the API key', '--', 'boss-api', '7']])
   started = { exitCode: 1, stdout: '', stderr: 'item 7: already sent to boss-api 0m ago' }
   await ui.press({ key: 'fleet:ask:boss-api:7:start' })
-  expect(toasts).toEqual(['api: #7 sent to boss-api', 'api not started: item 7: already sent to boss-api 0m ago'])
+  started = { exitCode: 0, stdout: '#9 sent to manager\n', stderr: "⚠ dev todo: #9 queued in manager's inbox, delivered when it next rests: busy\n" }
+  await ui.press({ key: 'fleet:ask:boss-api:9:start' })
+  expect(toasts).toEqual(['api: #7 sent to boss-api', 'api not started: item 7: already sent to boss-api 0m ago',
+    "api: #9 sent to manager ⚠ dev todo: #9 queued in manager's inbox, delivered when it next rests: busy"])
+  await ui.unmount()
+})
+
+test('a closed boss’s plain item has Start while the manager runs', async ($, on) => {
+  const withManager: Ran = { ...AGENTS, stdout: JSON.stringify([...JSON.parse(AGENTS.stdout), { session: 'manager', project: '', state: 'idle', boss: true }]) }
+  const { clock } = await start($, on, ok(WORKERS), { asks: ASKS, agents: withManager })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ key: 'fleet:ask:boss-shop:6:start' })).toBeDefined()
   await ui.unmount()
 })
 
