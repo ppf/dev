@@ -378,6 +378,10 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 		return with(with(r.Status, who), "⚠ "+r.Check.Short(now)), statusColours[r.Status]
 	case r.Kind == sidebar.NeedOn || r.Status == sidebar.StatusBossClosed:
 		return with(r.Status, who), statusColours[r.Status]
+	case r.Status == sidebar.StatusStarting && r.StartLate:
+		return "start not picked up", sidebar.Red
+	case r.Status == sidebar.StatusStarting:
+		return with("sent to "+r.StatusOn, wait.Span(now.Sub(time.Unix(r.StartedAt, 0)))), statusColours[r.Status]
 	case r.Until != 0 && r.Age(now) == "":
 		return "till " + wait.Clock(time.Unix(r.Until, 0), now), sidebar.Muted
 	}
@@ -512,18 +516,25 @@ func (m Model) optionLines(r needRow, w int, selected bool, lines []string, span
 // action is a word on an expanded row that does what its key does.
 type action struct{ word, key, hint string }
 
-// actions are what the selected row offers: Tick the user's item, Reply to a question, Go to the session or the
-// list's boss; a closed boss's row only Tick, then how to reopen it.
+// actions are what the selected row offers: Start and Tick the user's item, Reply to a question, Go to the session or
+// the list's boss; a closed boss's row only Tick, and Start while the manager runs, then how to reopen it.
 func (m Model) actions(r needRow) (out []action, note string) {
 	tick := action{"Tick", "d", "d tick"}
+	start := action{"Start", "s", "s start"}
 	if r.Closed {
 		if r.Kind == sidebar.NeedPlain {
+			if r.Status != sidebar.StatusStarting && m.managerRuns() {
+				out = append(out, start)
+			}
 			out = append(out, tick)
 		}
 		return out, r.ClosedHint()
 	}
 	switch r.Kind {
 	case sidebar.NeedPlain:
+		if r.Status == sidebar.StatusYours {
+			out = append(out, start)
+		}
 		out = append(out, tick)
 	case sidebar.NeedDialog, sidebar.NeedAsk:
 		if m.answerable(r) {

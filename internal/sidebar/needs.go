@@ -58,10 +58,16 @@ type NeedItem struct {
 	// someone whose workers weren't read
 	Status   string `json:"status"`
 	StatusOn string `json:"status_on"`
+	// Started is when the user asked to start it (dev todo start), unix seconds; StartLate once no one took it up in time
+	Started   *struct{ At int64 } `json:"started"`
+	StartLate bool                `json:"start_late"`
 }
 
-// Own reports an open item that is the user's: one with a status that names no one.
-func (it NeedItem) Own() bool { return it.Status != "" && it.StatusOn == "" }
+// Own reports an open item that is the user's: one with a status that names no one, or starting (naming whom the
+// start went to).
+func (it NeedItem) Own() bool {
+	return it.Status != "" && (it.StatusOn == "" || it.Status == StatusStarting)
+}
 
 // NeedCounts are the lists' counts for the roll-ups (Subtree), by boss.
 func NeedCounts(needs []NeedList) map[string]ListCount {
@@ -107,6 +113,9 @@ type NeedRow struct {
 	// Status is the list item's (Statuses), none for a session's; StatusOn the worker or person it names
 	Status   string
 	StatusOn string
+	// StartedAt is when the user asked to start the list item, unix seconds (0: not asked); StartLate once no one took it up
+	StartedAt int64
+	StartLate bool
 }
 
 // Tally is what TO DO's rows count, as its header, the sidebar's and the roll lines (Rollup) say it: the sessions
@@ -257,6 +266,12 @@ func loadNeeds() ([]NeedList, error) {
 func AnswerNeed(boss string, id int, question, option string) (string, error) {
 	out, warning, err := runTodo(answerTimeout, "answer", "--question="+question, "--", boss, strconv.Itoa(id), option)
 	// A note queued for a boss that isn't resting says so on stderr
+	return strings.TrimSpace(out + " " + warning), err
+}
+
+// StartNeed asks for item id of boss's list to be started, as dev todo start does, only while it still reads text.
+func StartNeed(boss string, id int, text string) (string, error) {
+	out, warning, err := runTodo(answerTimeout, "start", "--from-board", "--question="+text, "--", boss, strconv.Itoa(id))
 	return strings.TrimSpace(out + " " + warning), err
 }
 
@@ -429,6 +444,10 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 			}
 			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
 			row.Until, row.On, row.Status, row.StatusOn = it.Until, it.On, it.Status, it.StatusOn
+			row.StartedAt, row.StartLate = 0, it.StartLate
+			if it.Started != nil {
+				row.StartedAt = it.Started.At
+			}
 			if l.Stale {
 				row.Updated = cmp.Or(it.Added, l.Updated)
 			}
