@@ -88,7 +88,7 @@ func TestServeBoard(t *testing.T) {
 // startServe runs dev serve on a loopback port of s, as the user, and is the URL it prints.
 func startServe(t *testing.T, s *server, env ...string) string {
 	t.Helper()
-	srv := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0")
+	srv := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0", "--awake=false")
 	srv.Env = s.scriptEnv(env...)
 	var stderr strings.Builder
 	srv.Stderr = &stderr
