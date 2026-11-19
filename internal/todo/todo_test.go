@@ -778,4 +778,13 @@ func TestDoneText(t *testing.T) {
 	if err := s.DoneText(1, "a", now); err != nil {
 		t.Errorf("the item as shown: %v", err)
 	}
+	if err := s.DoneText(9, "a", now); !errors.As(err, new(Refused)) {
+		t.Errorf("a refusal isn't Refused: %v", err)
+	}
+	if err := os.WriteFile(s.path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DoneText(1, "a", now); err == nil || errors.As(err, new(Refused)) {
+		t.Errorf("an unreadable list is Refused: %v", err)
+	}
 }

@@ -282,32 +282,18 @@ answer must be the option picked.`,
 				}
 				before = said.At
 			}
-			// Before ticking: an answer it can't send stays open
-			b, err := inbox.Recipient(c, name)
-			if err != nil {
-				return err
-			}
-			pane, err := control.BossPane(c, name)
-			if err != nil {
-				return err
-			}
-			s, err := todo.ForPane(c, pane)
-			if err != nil {
-				return err
-			}
-			var picked string
+			var claim func() (string, func() error, error)
 			if said != nil && said.Pick {
-				// Right before ticking: a pick answers one item, also with two answers relayed at once
-				if err := manager.Box.Claim(*said); err != nil {
-					return fmt.Errorf("--via manager: %w", err)
+				// A pick answers one item, also with two answers relayed at once
+				claim = func() (string, func() error, error) {
+					if err := manager.Box.Claim(*said); err != nil {
+						return "", nil, fmt.Errorf("--via manager: %w", err)
+					}
+					return said.Answer, func() error { return manager.Box.Unclaim(*said) }, nil
 				}
-				picked = said.Answer
 			}
-			it, err := s.AnswerPick(id, question, args[2], picked, before, time.Now())
+			it, b, err := answerTick(c, name, id, question, args[2], before, claim)
 			if err != nil {
-				if said != nil && said.Pick {
-					err = errors.Join(err, manager.Box.Unclaim(*said))
-				}
 				return err
 			}
 			note := inbox.Answer(it.ID, it.Text, it.Answer)

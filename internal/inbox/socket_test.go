@@ -219,6 +219,14 @@ func TestAnswerVia(t *testing.T) {
 	}
 }
 
+// An answer from the phone page says so, and stays a "you answered" note for its item.
+func TestAnswerPage(t *testing.T) {
+	n := AnswerPage(4, "Merge #148?", "Merge")
+	if got := n.String(); got != `you answered #4 "Merge #148?" on the phone page: Merge` || n.Key != Answer(4, "", "").Key {
+		t.Errorf("AnswerPage = %q, key %q", got, n.Key)
+	}
+}
+
 // A long prompt keeps both ends, where an answer may be; a new conversation forgets it.
 func TestPromptClipForget(t *testing.T) {
 	long := "merge 148 " + strings.Repeat("x ", 300) + "wait on the API one"
