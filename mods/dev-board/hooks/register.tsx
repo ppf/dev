@@ -3,7 +3,7 @@ import type { EngineInterface, Register, SessionMessage } from 'claude-code'
 
 import type { Ask, Board, BossLine, Checks, Delivered, Fleet, FleetAgent, FleetItem, FleetThread, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
 import { registerAsk } from './ask'
-import { answerArgv, cost, projectOf, readFleet } from './fleet'
+import { answerArgv, cost, projectOf, readFleet, startArgv } from './fleet'
 import { listenForReplies, registerReply, writeReply } from './reply'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
@@ -17,6 +17,8 @@ const NEEDS_YOU = 'needs you'
 const BOSS_PROMPT = "dev-board: /board opened — load the dev-board:boss skill and act as boss for this session's workers."
 // The desktop pane's tokens: five colors (theme keys, so light and dark follow the theme), two sizes, two weights, four spacing steps;
 // besides them only BAR_TRACK's grey and the icons' white. The terminal and the phones keep their own looks
+// The manager's tmux session: it takes a closed boss's starts
+const MANAGER = 'manager'
 const TONE = { text: 'text', muted: 'subtle', ok: 'success', caution: 'warning', danger: 'error' } as const
 // A tone in an SVG icon, which can't name a theme key: each about 4.2:1 on the light (#FFFFFF) and the dark (#181818) pane
 const TONE_HEX = { ok: '#278D43', caution: '#A27300', danger: '#E33C41', muted: '#7B7B7B' } as const
@@ -251,6 +253,15 @@ const statusRank = (it: TodoItem) => {
 
 /** A status's color; an unknown one muted. */
 const statusColor = (status: string) => (Object.hasOwn(STATUS_COLORS, status) ? STATUS_COLORS[status] : TONE.muted)
+
+/** An all-projects item's status words at nowMs: a late start, or whom a start went to and how long ago, over the bare status. */
+const fleetStatusText = (it: FleetItem, nowMs: number) => {
+  if (it.startLate) return 'start not picked up'
+  if (it.status === 'starting' && it.statusOn !== undefined) {
+    return it.startedAt === undefined ? `sent to ${it.statusOn}` : `sent to ${it.statusOn} · ${Math.max(0, Math.floor((nowMs / 1000 - it.startedAt) / 60))}m`
+  }
+  return it.status
+}
 
 /** The to do items as the board lists them: by status in STATUSES' order, each status in dev's order. */
 const todoOrder = (items: TodoItem[]) => items.map((it, i) => ({ it, i })).sort((x, y) => statusRank(x.it) - statusRank(y.it) || x.i - y.i).map(x => x.it)
@@ -871,6 +882,26 @@ export const register: Register = on => {
       await $.ui.toast(why === '' ? `answered ${projectOf(it.boss)}: ${option}` : `${projectOf(it.boss)} not answered: ${why}`)
       await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
     }
+    /** The person's click on Start: its boss gets the start, or the manager for a closed boss's item; a refusal's sentence is the toast. */
+    const startAsk = async (it: FleetItem) => {
+      const key = `${it.boss}:${it.id}`
+      if (answeringAsk.has(key)) return
+      answeringAsk.add(key)
+      let why = ''
+      let said = ''
+      try {
+        const ran = await $.process.run(startArgv(DEV_BIN, it), { timeoutMs: 15_000 })
+        why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} todo start exited ${ran.exitCode}`
+        // A boss mid-turn gets it queued: dev says so on stderr
+        said = [ran.stdout.trim(), ran.exitCode === 0 ? ran.stderr.trim() : ''].filter(Boolean).join(' ')
+      } catch (err) {
+        why = errorText(err)
+      } finally {
+        answeringAsk.delete(key)
+      }
+      await $.ui.toast(why === '' ? `${projectOf(it.boss)}: ${said || `#${it.id} sent`}` : `${projectOf(it.boss)} not started: ${why}`)
+      await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
+    }
     const archive = async (w: Worker) => {
       if (!canArchive(w)) {
         await $.ui.toast(`${label(w)} not archived: ${w.state === 'busy' ? 'running a turn' : `waiting${w.statusText === '' ? '' : ` (${w.statusText})`}`}`)
@@ -1474,8 +1505,8 @@ export const register: Register = on => {
                 </Box>
                 {!it.done && it.status !== undefined && (
                   <Box flexShrink={0}>
-                    <Text size={SIZE.meta} color={statusColor(it.status)}>
-                      {it.status}
+                    <Text size={SIZE.meta} color={it.startLate ? TONE.danger : statusColor(it.status)}>
+                      {fleetStatusText(it, nowMs)}
                     </Text>
                   </Box>
                 )}
@@ -1496,7 +1527,13 @@ export const register: Register = on => {
                         ))}
                       </Box>,
                     ]
-                  : []),
+                  : it.status === 'yours' || it.startLate || (it.status === 'boss closed' && f.agents.some(a => a.session === MANAGER))
+                    ? [
+                        <Box key={`${key}:actions`} flexDirection="row" columnGap={SPACE.inline}>
+                          <Button key={`${key}:start`} label="Start" onPress={() => void startAsk(it)} />
+                        </Box>,
+                      ]
+                    : []),
             ]
           })}
           {prompts.map(a => (
