@@ -878,7 +878,7 @@ export const register: Register = on => {
       await $.ui.toast(why === '' ? `answered ${projectOf(it.boss)}: ${option}` : `${projectOf(it.boss)} not answered: ${why}`)
       await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
     }
-    /** The person's click on Start: `dev todo start` with the item's text; its boss gets the start, or the manager for a closed boss's item; a refusal's sentence is the toast. */
+    /** The person's click on Start: its boss gets the start, or the manager for a closed boss's item; a refusal's sentence is the toast. */
     const startAsk = async (it: FleetItem) => {
       const key = `${it.boss}:${it.id}`
       if (answeringAsk.has(key)) return
