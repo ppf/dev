@@ -12,6 +12,7 @@ import (
 const (
 	StatusDecide     = sidebar.StatusDecide
 	StatusYours      = sidebar.StatusYours
+	StatusStarting   = sidebar.StatusStarting
 	StatusWorking    = sidebar.StatusWorking
 	StatusBlocked    = sidebar.StatusBlocked
 	StatusWaiting    = sidebar.StatusWaiting
@@ -53,6 +54,7 @@ func OwnerOf(live []sidebar.Session, boss string, closed bool) Owner {
 
 // Status is its status on o's list and whom it names (its worker or person, "" for none); "" for a ticked item, and
 // for an item on someone while o's workers weren't read. The first that holds:
+//   - the user's own, asked to start: starting, naming the boss the start went to, its boss closed too;
 //   - its boss closed: check when its linked PR moved (sidebar.Check.Event), else boss closed, naming whom it's on;
 //   - on no one, or unlinked on the list's own boss (an older dev filed --on <own name> as a person): decide for an
 //     ask, else check when its PR moved, else yours; an ask handed to someone goes by whom it's on, as below;
@@ -76,6 +78,8 @@ func (o Owner) Status(it Shown) (status, on string) {
 	switch {
 	case it.Done:
 		return "", ""
+	case own && it.Started != nil:
+		return StatusStarting, it.Started.To
 	case o.Closed && moved:
 		return StatusCheck, someone
 	case o.Closed:

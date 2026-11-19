@@ -37,9 +37,10 @@ const (
 	Stuck    = "stuck"
 	Context  = "high context"
 	Resumed  = "resumed"
-	Waits    = "waiting"      // its turn ended on a planned wait (dev agent wait-until)
-	Message  = "message"      // from another boss: dev agent message
-	Answered = "you answered" // the user answered an item on the boss's list: dev todo answer
+	Waits    = "waiting"                 // its turn ended on a planned wait (dev agent wait-until)
+	Message  = "message"                 // from another boss: dev agent message
+	Answered = "you answered"            // the user answered an item on the boss's list: dev todo answer
+	Start    = "you were asked to start" // the user asked to start an item: dev todo start
 	// WaitsOnYou is from a boss under this one: it put an item for the user on its list (dev todo add, ask)
 	WaitsOnYou = "waits on you"
 	// ToDo is an item on the boss's own list that may be out of date, or ticked by itself (todo.Nudge, todo.Ticked)
@@ -70,9 +71,9 @@ type Note struct {
 const leaveIt = "started by a coordinator outside tmux: leave it to that coordinator"
 
 // String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside; a Message's is "message <text>",
-// an Answered's "you answered <text>", a ToDo's "to do <text>".
+// an Answered's "you answered <text>", a Start's "you were asked to start <text>", a ToDo's "to do <text>".
 func (n Note) String() string {
-	if n.Kind == Message || n.Kind == Answered || n.Kind == ToDo {
+	if n.Kind == Message || n.Kind == Answered || n.Kind == Start || n.Kind == ToDo {
 		return n.Kind + " " + n.Text
 	}
 	if n.Outside {
@@ -530,19 +531,19 @@ func (s *state) health(worker string) *health {
 }
 
 func (s *state) add(n Note) bool {
-	// A message's sender, an answer's user and a to do item are no worker of this boss: their key would spoil that
-	// worker's dedupe
-	if n.Kind != Message && n.Kind != Answered && n.Kind != ToDo {
+	// A message's sender, an answer's or a start's user and a to do item are no worker of this boss: their key would
+	// spoil that worker's dedupe
+	if n.Kind != Message && n.Kind != Answered && n.Kind != Start && n.Kind != ToDo {
 		if s.Last[n.Worker] == n.Key {
 			return false
 		}
 		s.Last[n.Worker] = n.Key
 	}
 	s.Notes = append(s.Notes, n)
-	// The oldest go first, answers and ticks last: an answered or ticked item is off the list, so a dropped note would
-	// be lost
+	// The oldest go first, answers, starts and ticks last: an answered or ticked item is off the list and a started one
+	// waits on its note, so a dropped note would be lost
 	for over := len(s.Notes) - maxNotes; over > 0; over-- {
-		i := slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind != Answered && n.Key != tickKey })
+		i := slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind != Answered && n.Kind != Start && n.Key != tickKey })
 		if i < 0 {
 			break
 		}

@@ -33,6 +33,7 @@ const (
 var statusColours = map[string]string{
 	sidebar.StatusDecide:     sidebar.Red,
 	sidebar.StatusYours:      "",
+	sidebar.StatusStarting:   sectionColours[workingSection],
 	sidebar.StatusWorking:    sectionColours[workingSection],
 	sidebar.StatusBlocked:    sidebar.Red,
 	sidebar.StatusWaiting:    sectionColours[waitingSection],

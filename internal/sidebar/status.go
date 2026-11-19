@@ -7,6 +7,7 @@ import "slices"
 const (
 	StatusDecide     = "decide"      // an ask (dev todo ask): the user picks an option
 	StatusYours      = "yours"       // on no one: the user's own
+	StatusStarting   = "starting"    // the user's own, asked to start (dev todo start) and not yet on a worker
 	StatusWorking    = "working"     // on a worker that works
 	StatusBlocked    = "blocked"     // on a worker that waits on the user: a dialog, a turn ended on a question, or failed
 	StatusWaiting    = "waiting"     // on a person, or on a worker in a planned wait or a rate-limit resume
@@ -17,7 +18,7 @@ const (
 )
 
 // Statuses is the order boards list items by status within a group (Groups).
-var Statuses = []string{StatusDecide, StatusYours, StatusWorking, StatusBlocked, StatusWaiting, StatusIdle, StatusGone,
+var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusWorking, StatusBlocked, StatusWaiting, StatusIdle, StatusGone,
 	StatusCheck, StatusBossClosed}
 
 // StatusGroup is a block of the boards' TO DO: its title and the statuses it holds, in Statuses order.
@@ -31,6 +32,7 @@ type StatusGroup struct {
 var Groups = []StatusGroup{
 	{"To decide", []string{StatusDecide}},
 	{"Yours", []string{StatusYours}},
+	{"Starting", []string{StatusStarting}},
 	{"In progress", []string{StatusWorking, StatusBlocked, StatusIdle, StatusGone}},
 	{"Waiting on others", []string{StatusWaiting}},
 	{"Check", []string{StatusCheck}},

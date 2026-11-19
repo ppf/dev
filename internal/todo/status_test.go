@@ -67,6 +67,8 @@ func TestStatus(t *testing.T) {
 		{"linked to a worker named as the boss, case aside", Owner{Name: "boss-x", Workers: []sidebar.Session{{Name: "Boss-X", Agent: "Claude", State: agent.Working}}},
 			Shown{On: "Boss-X", Session: link("Boss-X")}, StatusWorking, "Boss-X"},
 		{"no one", live, Shown{}, StatusYours, ""},
+		{"started, PR merged", live, Shown{Started: &Started{To: "boss-x"}, Check: merged}, StatusStarting, "boss-x"},
+		{"started, boss closed", Owner{Name: "boss-x", Closed: true}, Shown{Started: &Started{To: sidebar.Manager}}, StatusStarting, sidebar.Manager},
 		{"no one, unchanged", live, Shown{Check: unchanged}, StatusYours, ""},
 		{"no one, PR merged", live, Shown{Check: merged}, StatusCheck, ""},
 		{"its own boss", live, Shown{On: "Boss-X"}, StatusYours, ""},
