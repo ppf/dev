@@ -12,9 +12,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ppf/dev/internal/serve"
 )
 
-// dev serve's /v1/board lists are what dev todo --all --json prints, on a loopback bind.
+// dev serve's /v1/board needs a paired session, also on loopback; after pairing with a code from serve.NewCode (what
+// dev serve pair writes), its lists are what dev todo --all --json prints.
 func TestServeBoard(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
@@ -39,19 +43,34 @@ func TestServeBoard(t *testing.T) {
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 
 	url := startServe(t, s, user...)
-	resp, err := http.Get(url + "v1/board")
-	if err != nil {
-		t.Fatal(err)
+	do := func(req *http.Request) (*http.Response, string) {
+		t.Helper()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp, string(body)
 	}
-	body, err := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if err != nil {
-		t.Fatal(err)
+	boardReq := func(cookies ...*http.Cookie) *http.Request {
+		req, _ := http.NewRequest(http.MethodGet, url+"v1/board", nil)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		return req
 	}
+	if resp, body := do(boardReq()); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "isn't paired") {
+		t.Fatalf("❌ /v1/board unpaired: %d %s", resp.StatusCode, body)
+	}
+	resp, body := do(boardReq(pairServe(t, url, filepath.Join(tmp, "state"))))
 	var board struct {
 		Lists any `json:"lists"`
 	}
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &board) != nil {
+	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &board) != nil {
 		t.Fatalf("❌ /v1/board: %d %s", resp.StatusCode, body)
 	}
 	var want any
@@ -61,7 +80,7 @@ func TestServeBoard(t *testing.T) {
 	if !reflect.DeepEqual(board.Lists, want) {
 		t.Errorf("❌ board lists differ from dev todo --all --json:\n%s", body)
 	}
-	if !strings.Contains(string(body), `"Merge #148?"`) || !strings.Contains(string(body), `"decide": 1`) {
+	if !strings.Contains(body, `"Merge #148?"`) || !strings.Contains(body, `"decide": 1`) {
 		t.Errorf("❌ board lacks the ask:\n%s", body)
 	}
 }
@@ -69,18 +88,18 @@ func TestServeBoard(t *testing.T) {
 // startServe runs dev serve on a loopback port of s, as the user, and is the URL it prints.
 func startServe(t *testing.T, s *server, env ...string) string {
 	t.Helper()
-	serve := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0")
-	serve.Env = s.scriptEnv(env...)
+	srv := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0")
+	srv.Env = s.scriptEnv(env...)
 	var stderr strings.Builder
-	serve.Stderr = &stderr
-	stdout, err := serve.StdoutPipe()
+	srv.Stderr = &stderr
+	stdout, err := srv.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := serve.Start(); err != nil {
+	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = serve.Process.Kill(); _ = serve.Wait() })
+	t.Cleanup(func() { _ = srv.Process.Kill(); _ = srv.Wait() })
 	line, err := bufio.NewReader(stdout).ReadString('\n')
 	if err != nil {
 		t.Fatalf("❌ dev serve's first line: %q, %v; stderr: %s", line, err, stderr.String())
@@ -90,4 +109,23 @@ func startServe(t *testing.T, s *server, env ...string) string {
 		t.Fatalf("❌ dev serve printed %q", line)
 	}
 	return url
+}
+
+// pairServe pairs a phone with the dev serve at url through a code as dev serve pair writes it under stateHome, and
+// is the session cookie.
+func pairServe(t *testing.T, url, stateHome string) *http.Cookie {
+	t.Helper()
+	code, err := serve.NewCode(filepath.Join(stateHome, "dev", "serve"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(url+"v1/pair", "application/json", strings.NewReader(`{"code":"`+code+`","device":"phone"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
+		t.Fatalf("❌ /v1/pair: %d", resp.StatusCode)
+	}
+	return resp.Cookies()[0]
 }

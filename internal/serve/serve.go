@@ -26,8 +26,10 @@ type Config struct {
 	// id while it still reads text. Refused tells the page why not.
 	Answer func(boss string, id int, question, answer string) error
 	Done   func(boss string, id int, text string) error
-	// Guard wraps every /v1 call but health: the auth slot.
+	// Guard wraps every /v1 call but health and pair, on every bind: Auth.Session. Required.
 	Guard func(http.Handler) http.Handler
+	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.
+	Pair http.Handler
 	// Page answers "/" and the paths below it the routes above don't take; nil answers a placeholder line at "/".
 	Page http.Handler
 }
@@ -41,6 +43,7 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("GET /v1/board", cfg.Guard(http.HandlerFunc(cfg.board)))
 	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
+	mux.Handle("POST /v1/pair", cfg.Pair)
 	if cfg.Page != nil {
 		mux.Handle("GET /", cfg.Page) // the page's own files sit beside it
 	} else {
@@ -66,18 +69,6 @@ func ipHost(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// LoopbackOnly is the Guard until pairing lands: the board only on a loopback bind, else 403.
-func LoopbackOnly(kind Kind) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		if kind == Loopback {
-			return next
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			writeError(w, http.StatusForbidden, "the board is served on loopback only until pairing lands: run dev serve --addr 127.0.0.1:<port>")
-		})
-	}
 }
 
 type counts struct {

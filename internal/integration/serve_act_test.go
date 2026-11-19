@@ -84,6 +84,7 @@ func TestServeAnswerDone(t *testing.T) {
 	must([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "ask", "Ship it?", "--option", "Yes")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	url := startServe(t, s, user...)
+	var cookie *http.Cookie
 
 	post := func(path, body string, page bool) (int, string) {
 		t.Helper()
@@ -93,6 +94,9 @@ func TestServeAnswerDone(t *testing.T) {
 		}
 		if page {
 			req.Header.Set("X-Dev-Page", "1")
+		}
+		if cookie != nil {
+			req.AddCookie(cookie)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -114,6 +118,7 @@ func TestServeAnswerDone(t *testing.T) {
 		if etag != "" {
 			req.Header.Set("If-None-Match", etag)
 		}
+		req.AddCookie(cookie)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -170,6 +175,13 @@ func TestServeAnswerDone(t *testing.T) {
 			t.Errorf("❌ %s: %d %s, want 409 with one of %q", name, code, body, want)
 		}
 	}
+	// Unpaired, an answer or tick is refused on loopback too, and nothing changes
+	for _, path := range []string{"v1/answer", "v1/done"} {
+		if code, body := post(path, `{"boss":"boss-a","id":3,"question":"Read the plan","option":"x","text":"Read the plan"}`, true); code != http.StatusUnauthorized {
+			t.Errorf("❌ %s unpaired: %d %s, want 401", path, code, body)
+		}
+	}
+	cookie = pairServe(t, url, filepath.Join(tmp, "state"))
 	_, etag, _ := board("")
 
 	// Page → board: answer
