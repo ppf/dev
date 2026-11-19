@@ -13,7 +13,7 @@
   "boss closed"
  ],
  "counts": {
-  "decide": 2,
+  "decide": 3,
   "yours": 3
  },
  "lists": [
@@ -179,6 +179,24 @@
      "on": "kitchen-oven",
      "added": 1795098837,
      "done": false
+    }
+   ]
+  },
+  {
+   "boss": "local_7f3a",
+   "updated": 1795103537,
+   "stale": false,
+   "items": [
+    {
+     "id": 1,
+     "text": "Desktop boss asks: rename the project folder?",
+     "options": [
+      "Rename (Recommended)",
+      "Keep the name"
+     ],
+     "added": 1795103537,
+     "done": false,
+     "status": "decide"
     }
    ]
   },

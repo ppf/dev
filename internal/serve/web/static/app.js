@@ -117,7 +117,7 @@ async function load() {
       const r = route();
       if (r.name === 'pair') return go('#/');
       if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
-        return go(state.back, 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
+        return go(state.back, state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
       }
     }
   }
@@ -328,10 +328,16 @@ function item(boss, id) {
   state.shown = { k, text: it.text };
   const out = [back, el('p', { class: 'item-head' }, project(list) + ' #' + it.id), el('p', { class: 'item-text' }, it.text)];
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
-  if (it.status === 'decide' && it.options?.length) out.push(...answerForm(list, it));
+  // A desktop app boss's list is read here, never answered or ticked: the Mac refuses it.
+  const desktop = list.boss.startsWith('local_');
+  if (desktop) {
+    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(o => el('li', null, option(o).label))));
+    out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
+  }
+  else if (it.status === 'decide' && it.options?.length) out.push(...answerForm(list, it));
   out.push(facts(list, it));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
-  if (TICKABLE.includes(it.status)) {
+  if (!desktop && !it.on && TICKABLE.includes(it.status)) {
     const b = el('button', { class: 'act', type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { b.disabled = true; tick(list, it); } }, 'Tick as done');
     out.push(b, el('p', { class: 'hint' }, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.'));
   }
