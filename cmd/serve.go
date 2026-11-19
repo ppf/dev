@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/serve"
+	"github.com/ppf/dev/internal/serve/web"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -81,6 +82,7 @@ func serveConfig(stderr io.Writer, kind serve.Kind) serve.Config {
 		Answer: pageAnswer,
 		Done:   pageDone(stderr),
 		Guard:  serve.LoopbackOnly(kind),
+		Page:   web.Handler(),
 	}
 }
 

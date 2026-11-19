@@ -1,0 +1,230 @@
+{
+ "generated": 1795103837,
+ "version": "v0.0.0-fixture",
+ "statuses": [
+  "decide",
+  "yours",
+  "working",
+  "blocked",
+  "waiting",
+  "idle",
+  "gone",
+  "check",
+  "boss closed"
+ ],
+ "counts": {
+  "decide": 3,
+  "yours": 3
+ },
+ "lists": [
+  {
+   "boss": "boss-garden",
+   "updated": 1795103717,
+   "stale": false,
+   "items": [
+    {
+     "id": 4,
+     "text": "Ship the watering schedule release now or wait for the sensor fix?",
+     "context": [
+      "The sensor fix is in review and needs one more day.",
+      "Release notes are in notes/release.md"
+     ],
+     "options": [
+      "Ship now (Recommended)",
+      "Wait for the sensor fix",
+      "Ship without the new schedule"
+     ],
+     "added": 1795103237,
+     "done": false,
+     "status": "decide"
+    },
+    {
+     "id": 5,
+     "text": "Which of the nine seed suppliers should the order go to this spring, given the price list in notes/suppliers.md?",
+     "options": [
+      "Alpha seeds",
+      "Beta farms (Recommended)",
+      "Gamma",
+      "Delta",
+      "Epsilon",
+      "Zeta",
+      "Eta",
+      "Theta",
+      "Iota"
+     ],
+     "added": 1795102937,
+     "done": false,
+     "status": "decide"
+    },
+    {
+     "id": 6,
+     "text": "Zadzwonić do księgowej w sprawie faktury korygującej za październik, sprawdzić czy przelew z dwudziestego wpłynął na konto firmowe, a potem przygotować zestawienie godzin dla klienta z Gdańska razem z notatką o zmianie stawki od grudnia; pamiętać o załącznikach źródłowych",
+     "added": 1795100237,
+     "done": false,
+     "status": "yours"
+    },
+    {
+     "id": 7,
+     "text": "Read logs/2026-11-19/very-long-path-without-any-break-points/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.json and say whether the drop at 03:00 is the pump",
+     "added": 1795096637,
+     "done": false,
+     "status": "yours",
+     "until": 1795190237
+    },
+    {
+     "id": 8,
+     "text": "Sensor fix: PR open, waits on review",
+     "on": "garden-sensor",
+     "session": {
+      "id": "$9",
+      "name": "garden-sensor"
+     },
+     "link": "https://example.invalid/garden/pull/12",
+     "added": 1795099837,
+     "done": false,
+     "status": "working",
+     "status_on": "garden-sensor"
+    },
+    {
+     "id": 9,
+     "text": "Old item already ticked",
+     "done": true,
+     "added": 1795094837
+    }
+   ]
+  },
+  {
+   "boss": "boss-kitchen",
+   "updated": 1795099837,
+   "stale": true,
+   "items": [
+    {
+     "id": 1,
+     "text": "Plan the shopping run; waits for the menu",
+     "on": "Ola",
+     "added": 1795098837,
+     "done": false,
+     "status": "waiting",
+     "status_on": "Ola"
+    },
+    {
+     "id": 2,
+     "text": "Menu draft for the week",
+     "on": "kitchen-menu",
+     "session": {
+      "id": "$3",
+      "name": "kitchen-menu"
+     },
+     "added": 1795098837,
+     "done": false,
+     "status": "blocked",
+     "status_on": "kitchen-menu"
+    },
+    {
+     "id": 3,
+     "text": "Oven timer worker rests",
+     "on": "kitchen-timer",
+     "session": {
+      "id": "$4",
+      "name": "kitchen-timer"
+     },
+     "added": 1795098837,
+     "done": false,
+     "status": "idle",
+     "status_on": "kitchen-timer"
+    },
+    {
+     "id": 4,
+     "text": "Fridge worker left",
+     "on": "kitchen-fridge",
+     "session": {
+      "id": "$5",
+      "name": "kitchen-fridge"
+     },
+     "added": 1795098837,
+     "done": false,
+     "status": "gone",
+     "status_on": "kitchen-fridge"
+    },
+    {
+     "id": 5,
+     "text": "Recipe PR merged: tick it",
+     "link": "https://example.invalid/kitchen/pull/3",
+     "check": {
+      "kind": "merged",
+      "pr": 3,
+      "since": 1795103537
+     },
+     "added": 1795098837,
+     "done": false,
+     "status": "check"
+    },
+    {
+     "id": 6,
+     "text": "Something a newer dev knows",
+     "added": 1795098837,
+     "done": false,
+     "status": "snoozed"
+    },
+    {
+     "id": 7,
+     "text": "Pay the plumber",
+     "added": 1795098837,
+     "done": false,
+     "status": "yours"
+    },
+    {
+     "id": 8,
+     "text": "On a worker whose boss's workers weren't read",
+     "on": "kitchen-oven",
+     "added": 1795098837,
+     "done": false
+    }
+   ]
+  },
+  {
+   "boss": "local_7f3a",
+   "updated": 1795103537,
+   "stale": false,
+   "items": [
+    {
+     "id": 1,
+     "text": "Desktop boss asks: rename the project folder?",
+     "options": [
+      "Rename (Recommended)",
+      "Keep the name"
+     ],
+     "added": 1795103537,
+     "done": false,
+     "status": "decide"
+    }
+   ]
+  },
+  {
+   "boss": "boss-shed",
+   "closed": true,
+   "updated": 1795013837,
+   "stale": true,
+   "items": [
+    {
+     "id": 2,
+     "text": "Paint the shed door before the frost",
+     "check": {
+      "kind": "boss closed",
+      "since": 1795023837
+     },
+     "added": 1795013837,
+     "done": false,
+     "status": "boss closed"
+    }
+   ]
+  },
+  {
+   "boss": "boss-attic",
+   "updated": 0,
+   "stale": true,
+   "error": "open list: permission denied",
+   "items": []
+  }
+ ]
+}
