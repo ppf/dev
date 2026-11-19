@@ -75,6 +75,6 @@ func DefaultRoute() (netip.Addr, error) {
 	if err != nil {
 		return netip.Addr{}, fmt.Errorf("default route: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return conn.LocalAddr().(*net.UDPAddr).AddrPort().Addr().Unmap(), nil
 }

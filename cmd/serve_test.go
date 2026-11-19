@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -80,7 +81,7 @@ func TestBoardGolden(t *testing.T) {
 		Guard: serve.LoopbackOnly(serve.Loopback),
 	})
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:8417/v1/board", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8417/v1/board", nil))
 	if w.Code != 200 {
 		t.Fatalf("board %d: %s", w.Code, w.Body)
 	}

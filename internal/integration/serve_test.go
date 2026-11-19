@@ -71,7 +71,7 @@ func TestServeBoard(t *testing.T) {
 	var board struct {
 		Lists any `json:"lists"`
 	}
-	if resp.StatusCode != 200 || json.Unmarshal(body, &board) != nil {
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &board) != nil {
 		t.Fatalf("❌ /v1/board: %d %s", resp.StatusCode, body)
 	}
 	var want any

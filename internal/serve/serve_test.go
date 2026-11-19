@@ -28,7 +28,7 @@ func handler(kind Kind, now *time.Time, lists *string) http.Handler {
 
 func get(t *testing.T, h http.Handler, path, inm string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest("GET", "http://127.0.0.1:8417"+path, nil)
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8417"+path, nil)
 	if inm != "" {
 		r.Header.Set("If-None-Match", inm)
 	}
@@ -82,7 +82,7 @@ func TestBoardLoopbackOnly(t *testing.T) {
 		t.Errorf("placeholder: %d %s", w.Code, w.Body)
 	}
 	for host, want := range map[string]int{"evil.example:8417": 421, "evil.example": 421, "localhost:8417": 200, "[::1]:8417": 200, "192.168.1.5:8417": 200} {
-		r := httptest.NewRequest("GET", "/v1/health", nil)
+		r := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 		r.Host = host
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
