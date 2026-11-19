@@ -44,7 +44,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 				if boss != "" {
 					return errors.New("--all lists every boss: leave out --boss")
 				}
-				return printAll(cmd.OutOrStdout(), tmux.New(), asJSON)
+				return printAll(cmd.OutOrStdout(), cmd.ErrOrStderr(), tmux.New(), asJSON)
 			}
 			// Not the board's --json read, which runs for every desktop session, boss or not
 			s, err := todoStore(boss, !asJSON, cmd.ErrOrStderr())
@@ -57,6 +57,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {
+				setStatus(s, l, cmd.ErrOrStderr())
 				return printJSON(out, l)
 			}
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(boss, cmd.ErrOrStderr()) }); err != nil {
@@ -68,7 +69,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, status: decide, yours, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone on a desktop app boss's list, and status_on: its worker or person), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
@@ -138,6 +139,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				}
 				if w, ok := todo.Match(it.On, ws); ok {
 					it.On, it.Session = w.Name, &w
+				} else if s.Boss() != "" && strings.EqualFold(it.On, s.Boss()) {
+					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: this list's own boss, so the user's own, as --on me\n", it.On)
+					it.On = todo.Me
 				} else {
 					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: no single session this boss started (worker or boss) by that name or id, so a person\n", it.On)
 				}
@@ -171,7 +175,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone) or a person; me: the user's own (with --replaces, gives it back)")
+	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone) or a person; me, or this boss's own name: the user's own (with --replaces, gives it back)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
@@ -508,7 +512,7 @@ type bossList struct {
 
 // printAll prints each dev boss session's list with items on c's server, by session name; none without a server.
 // A list it can't read is a row with its error, the others still printed.
-func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
+func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	now := time.Now()
 	all, err := todo.All(c, now, nil, true)
 	if err != nil {
@@ -530,6 +534,7 @@ func printAll(out io.Writer, c *tmux.Client, asJSON bool) error {
 		lists = append(lists, bl)
 	}
 	if asJSON {
+		setStatuses(c, lists, stderr)
 		return printJSON(out, lists)
 	}
 	if len(lists) == 0 {

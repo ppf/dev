@@ -278,28 +278,18 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 	created, socket := map[string]string{}, ""
 	for _, name := range names {
 		rs := panes[name]
-		ps := make([]agent.Pane, len(rs))
-		for i, r := range rs {
-			ps[i] = r.agentPane()
-		}
-		// Session options: every row of the session carries the same @project and @sidebar_pane
-		sess := Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
-			StartedBy: rs[0].StartedBy}
+		sess, a, i, ok := liveSession(name, rs)
 		created[rs[0].SessionID], socket = rs[0].Created, rs[0].Socket
-		if a, ok := agent.Detect(ps, rs[0].Sidebar); ok {
-			sess.Agent, sess.State, sess.Title = a.Label, a.State, PaneTitle(a.Label, a.Pane.Title, name, host)
+		if ok {
+			sess.Title = PaneTitle(a.Label, a.Pane.Title, name, host)
 			sess.CostUSD, sess.HasCost = a.Cost, a.CostOK
 			if a.CostOK && !CostHidden(rs[0].CostOpt) {
 				sess.Cost = FormatCost(a.Cost)
 			}
-			i := slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
 			sess.Conversation = rs[i].Conversation
-			sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
 			if sess.Deciding {
 				sess.Question = rs[i].Question
 			}
-			sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
-			sess.Resume, sess.Note = rs[i].ResumeAt != "", rs[i].Note
 			sess.Branch = branch(a.Pane.Path)
 			// Before Order moves a worker into its starter's group
 			sess.Named = sess.Branch != "" && name == SessionName(sess.Group, sess.Branch)
@@ -314,6 +304,52 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 	}
 	s.sessions = Order(sessions)
 	return s, nil
+}
+
+// liveSession is session name's own state from its panes' rows: who it is, and its agent's (a, the row of its pane
+// at i; ok false for none) state, dialog, planned wait, resume and note.
+func liveSession(name string, rs []paneRow) (sess Session, a agent.Agent, i int, ok bool) {
+	// Session options: every row of the session carries the same @project and @sidebar_pane
+	sess = Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
+		StartedBy: rs[0].StartedBy}
+	ps := make([]agent.Pane, len(rs))
+	for j, r := range rs {
+		ps[j] = r.agentPane()
+	}
+	if a, ok = agent.Detect(ps, rs[0].Sidebar); !ok {
+		return sess, a, -1, false
+	}
+	i = slices.IndexFunc(rs, func(r paneRow) bool { return r.ID == a.Pane.ID })
+	sess.Agent, sess.State = a.Label, a.State
+	sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
+	sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
+	sess.Resume, sess.Note = rs[i].ResumeAt != "", rs[i].Note
+	return sess, a, i, true
+}
+
+// Live is each session on c's server with its own state as the boards read it (liveSession), in list-panes order;
+// none without a server.
+func Live(c *tmux.Client) ([]Session, error) {
+	rows, err := tmux.Query[paneRow](c, "list-panes", "-a")
+	if tmux.IsNoServer(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	panes := map[string][]paneRow{}
+	for _, r := range rows {
+		if _, seen := panes[r.Session]; !seen {
+			names = append(names, r.Session)
+		}
+		panes[r.Session] = append(panes[r.Session], r)
+	}
+	out := make([]Session, len(names))
+	for i, name := range names {
+		out[i], _, _, _ = liveSession(name, panes[name])
+	}
+	return out, nil
 }
 
 // syncSelection is the selection after a refresh, given @sidebar_selected_session as read

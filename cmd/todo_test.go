@@ -59,6 +59,9 @@ func TestTodo(t *testing.T) {
 			On   string `json:"on"`
 			Link string `json:"link"`
 			Done bool   `json:"done"`
+			// A desktop boss's workers aren't read: an item on someone has no status
+			Status   string `json:"status"`
+			StatusOn string `json:"status_on"`
 		} `json:"items"`
 		Updated int64 `json:"updated"`
 		Stale   bool  `json:"stale"`
@@ -66,7 +69,8 @@ func TestTodo(t *testing.T) {
 	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Items) != 4 || !l.Items[1].Done || l.Items[3].On != "Marek" || l.Items[2].Link == "" || l.Updated == 0 || l.Stale {
+	if len(l.Items) != 4 || !l.Items[1].Done || l.Items[3].On != "Marek" || l.Items[2].Link == "" || l.Updated == 0 || l.Stale ||
+		l.Items[0].Status != "yours" || l.Items[1].Status != "" || l.Items[2].Status != "yours" || l.Items[3].Status != "" || l.Items[3].StatusOn != "" {
 		t.Errorf("json = %+v", l)
 	}
 	if got := run(t, "", "todo", "clear"); got != "to do empty\n" {

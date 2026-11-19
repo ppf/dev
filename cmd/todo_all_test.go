@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestPrintAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := printAll(&out, c, true); err != nil {
+	if err := printAll(&out, io.Discard, c, true); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -53,7 +54,7 @@ func TestPrintAll(t *testing.T) {
 		t.Errorf("JSON not by name:\n%s", got)
 	}
 	out.Reset()
-	if err := printAll(&out, c, false); err != nil {
+	if err := printAll(&out, io.Discard, c, false); err != nil {
 		t.Fatal(err)
 	}
 	if text := out.String(); !strings.Contains(text, "boss-b\t⚠ list not read: ") || !strings.Contains(text, "boss-a\t") {

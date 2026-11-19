@@ -101,6 +101,9 @@ type Shown struct {
 	DoneOn  string         `json:"done_on,omitempty"`
 	Check   *sidebar.Check `json:"check,omitempty"`
 	Gone    bool           `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+	// Status and StatusOn are what Owner.Status says, once SetStatus ran
+	Status   string `json:"status,omitempty"`
+	StatusOn string `json:"status_on,omitempty"`
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
