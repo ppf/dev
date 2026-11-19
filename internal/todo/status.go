@@ -26,7 +26,7 @@ var Statuses = []string{StatusDecide, StatusYours, StatusWorking, StatusBlocked,
 	StatusCheck, StatusBossClosed}
 
 // Owner is a list's boss as statuses read it: Name its session's, Closed when it's gone, Workers the live sessions it
-// started (sidebar.Live); Unread when those weren't read, so an item on someone has no status.
+// started (sidebar.Live, or a desktop boss's workers as sessions); Unread when those weren't read, so an item on someone has no status.
 type Owner struct {
 	Name    string
 	Closed  bool
@@ -112,8 +112,8 @@ func (o Owner) Status(it Shown) (status, on string) {
 	return StatusIdle, w.Name
 }
 
-// worker is the live worker it is on: its linked session by id (a tmux session's id is its name), else the one with
-// an agent its on names (Match), as the previews' cards are.
+// worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's
+// name), else the one with an agent its on names (Match: the only one by that name), as the previews' cards are.
 func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	name := ""
 	if it.Session != nil {
@@ -122,7 +122,7 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 		var ws []Session
 		for _, w := range o.Workers {
 			if w.Agent != "" {
-				ws = append(ws, Session{ID: w.Name, Name: w.Name})
+				ws = append(ws, Session{ID: cmp.Or(w.ID, w.Name), Name: w.Name})
 			}
 		}
 		m, ok := Match(it.On, ws)
@@ -131,7 +131,10 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 		}
 		name = m.ID
 	}
-	i := slices.IndexFunc(o.Workers, func(w sidebar.Session) bool { return w.Name == name })
+	i := slices.IndexFunc(o.Workers, func(w sidebar.Session) bool { return w.ID == name })
+	if i < 0 {
+		i = slices.IndexFunc(o.Workers, func(w sidebar.Session) bool { return w.Name == name })
+	}
 	if i < 0 {
 		return sidebar.Session{}, false
 	}

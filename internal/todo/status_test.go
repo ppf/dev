@@ -1,6 +1,9 @@
 package todo
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,5 +103,17 @@ func TestSetStatus(t *testing.T) {
 		if got := [2]string{l.Items[i].Status, l.Items[i].StatusOn}; got != want {
 			t.Errorf("item %d = %v, want %v", i+1, got, want)
 		}
+	}
+}
+
+// The desktop board's mod orders and words statuses as Statuses does.
+func TestModStatuses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "mods", "dev-board", "hooks", "register.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "export const STATUSES = ['" + strings.Join(Statuses, "', '") + "'] as const"
+	if !strings.Contains(string(data), want) {
+		t.Errorf("register.tsx has no line %q", want)
 	}
 }

@@ -1986,9 +1986,9 @@ test('a thin rule parts the rows of a section: a faint line on the desktop, a bl
 
 const todoRan = (items: TodoItem[], minutesAgo = 12, stale = false): Ran => ({ exitCode: 0, stdout: JSON.stringify({ items, updated: -minutesAgo * 60, stale }), stderr: '' })
 const TODO: TodoItem[] = [
-  { id: 1, text: 'Answer Vince in Slack', done: false },
-  { id: 5, text: 'Merge PR #87', link: 'https://github.com/o/r/pull/87', done: false },
-  { id: 4, text: 'Staging access for lw', on: 'Marek (Ops)', done: false },
+  { id: 1, text: 'Answer Vince in Slack', done: false, status: 'yours' },
+  { id: 5, text: 'Merge PR #87', link: 'https://github.com/o/r/pull/87', done: false, status: 'yours' },
+  { id: 4, text: 'Staging access for lw', on: 'Marek (Ops)', done: false, status: 'waiting', status_on: 'Marek (Ops)' },
 ]
 
 const VIEW_OPEN: Ran = { exitCode: 0, stdout: '{"state":"OPEN"}', stderr: '' }
@@ -2005,7 +2005,7 @@ test('the to do list shows above the sections: header, then a row per item, on e
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const pr = surface === 'desktop' ? '[PR #87 open]' : '○'
-    expect(await todoRows(ui)).toEqual(['TO DO 3 · 1 on others updated 12m', '☐ Answer Vince in Slack', `☐ Merge PR #87 ${pr} #87`, '◌ Staging access for lw on Marek (Ops)'])
+    expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 2 yours updated 12m', '☐ Answer Vince in Slack yours', `☐ Merge PR #87 yours ${pr} #87`, '◌ Staging access for lw waiting · Marek (Ops)'])
     // Above the worker sections
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
     expect(texts.indexOf('Answer Vince in Slack')).toBeLessThan(texts.indexOf('WORKING'))
@@ -2014,7 +2014,7 @@ test('the to do list shows above the sections: header, then a row per item, on e
   // Its age follows the clock
   await clock.advance(60_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await todoRows(ui))?.[0]).toBe('TO DO 3 · 1 on others updated 13m')
+  expect((await todoRows(ui))?.[0]).toBe('TO DO 0 to decide · 2 yours updated 13m')
   await ui.unmount()
 })
 
@@ -2024,7 +2024,7 @@ test("a to do PR link's icon follows the PR's state, none before it is read or w
   const views = () => otherRuns.filter(r => r.argv[1] === 'pr' && r.argv[2] === 'view')
   expect(views()[0]?.argv).toEqual(['gh', 'pr', 'view', 'https://github.com/o/r/pull/87', '--json', 'state'])
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 [PR #87 merged] #87')
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 yours [PR #87 merged] #87')
   const before = views().length
   await clock.advance(30_000)
   expect(views().length).toBe(before)
@@ -2032,31 +2032,31 @@ test("a to do PR link's icon follows the PR's state, none before it is read or w
   // Failing gh: the last good state is replaced by none
   state = { exitCode: 1, stdout: '', stderr: 'no gh' }
   await clock.advance(60_000)
-  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 #87')
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 yours #87')
   await ui.unmount()
 })
 
 test('a to do PR link shows no state icon until gh has answered', async ($, on) => {
   await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem]), gh: { exitCode: 1, stdout: '', stderr: 'boom' } })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 #87')
+  expect((await todoRows(ui))?.[1]).toBe('☐ Merge PR #87 yours #87')
   await ui.unmount()
 })
 
-test('an item waiting on someone else: a dotted circle, its text quieter, who at the right in amber', async ($, on) => {
+test('an item waiting on someone else: a dotted circle, its text quieter, its status and who at the right in amber', async ($, on) => {
   await start($, on, ok(WORKERS), { todo: todoRan([TODO[2] as TodoItem]) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Staging access for lw on Marek (Ops)'])
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '◌ Staging access for lw waiting · Marek (Ops)'])
   expect((await ui.find({ type: 'Text', text: 'Staging access for lw' }))?.props.color).toBe('subtle')
-  expect((await ui.find({ type: 'Text', text: 'on Marek (Ops)' }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: 'waiting · Marek (Ops)' }))?.props.color).toBe('warning')
   await ui.unmount()
 })
 
 test("an item's link opens as the board's PR links do: a PR its icon and number, another link ↗", async ($, on) => {
-  const other = { id: 2, text: 'Read the thread', link: 'https://example.slack.com/archives/C1/p2', done: false }
+  const other = { id: 2, text: 'Read the thread', link: 'https://example.slack.com/archives/C1/p2', done: false, status: 'yours' }
   await start($, on, ok(WORKERS), { todo: todoRan([TODO[1] as TodoItem, other]), gh: VIEW_OPEN })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 2 updated 12m', '☐ Merge PR #87 [PR #87 open] #87', '☐ Read the thread ↗'])
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 2 yours updated 12m', '☐ Merge PR #87 yours [PR #87 open] #87', '☐ Read the thread yours ↗'])
   expect((await ui.findAll({ type: 'Link' })).filter(l => /87|slack/.test(String(l.props.href))).map(l => [l.props.label, l.props.href])).toEqual([
     ['#87', 'https://github.com/o/r/pull/87'],
     ['↗', 'https://example.slack.com/archives/C1/p2'],
@@ -2069,11 +2069,11 @@ test('nine items: the first five, then a toggle that opens the rest and folds th
   await start($, on, ok(WORKERS), { todo: todoRan(nine) })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await todoRows(ui)).toEqual(['TO DO 9 updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '▶ 4 more'])
+    expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '☐ Item 1', '☐ Item 2', '☐ Item 3', '☐ Item 4', '☐ Item 5', '▶ 4 more'])
     expect(await ui.find({ key: 'todo:head:fold' })).toBeFalsy()
     expect((await ui.find({ key: 'todo:fold' }))?.props).toMatchObject({ plain: true, dimColor: true })
     await ui.press({ key: 'todo:fold' })
-    expect((await todoRows(ui))?.slice(0, 2)).toEqual(['▼ TO DO 9 updated 12m', '☐ Item 1'])
+    expect((await todoRows(ui))?.slice(0, 2)).toEqual(['▼ TO DO 0 to decide · 0 yours updated 12m', '☐ Item 1'])
     expect((await todoRows(ui))?.slice(-2)).toEqual(['☐ Item 9', '▼ show fewer'])
     // The open header folds it too
     await ui.press({ key: 'todo:head:fold' })
@@ -2108,9 +2108,9 @@ test('a stale list dims its age on the terminal; a fresh one does not; the deskt
 })
 
 test('a ticked item shows ticked and struck through while the list still carries it, not counted', async ($, on) => {
-  await start($, on, ok(WORKERS), { todo: todoRan([{ ...(TODO[0] as TodoItem), done: true }, TODO[2] as TodoItem]) })
+  await start($, on, ok(WORKERS), { todo: todoRan([{ ...(TODO[0] as TodoItem), done: true, status: undefined }, TODO[2] as TodoItem]) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '☑ Answer Vince in Slack', '◌ Staging access for lw on Marek (Ops)'])
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '◌ Staging access for lw waiting · Marek (Ops)', '☑ Answer Vince in Slack'])
   const text = await ui.find({ type: 'Text', text: 'Answer Vince in Slack' })
   expect([text?.props.strikethrough, text?.props.color]).toEqual([true, 'subtle'])
   expect((await ui.find({ type: 'Text', text: '☑' }))?.props.color).toBe('success')
@@ -2216,71 +2216,48 @@ test('a list with an item this mod does not read shows no block', async ($, on) 
   await ui.unmount()
 })
 
-test('a linked worker is found by its id, a renamed one too; one off the board shows session gone; own items, then needs you, then gone, then the rest', async ($, on) => {
-  const workers = [
-    worker({ id: 'local_c', name: 'renamed', state: 'busy', status: 'working' }),
-    worker({ id: 'local_n', name: 'login', status: 'needs you' }),
-  ]
+test("rows go by dev's status in todo.Statuses' order, an unknown one last, each its word and whom in its section's color", async ($, on) => {
   const items: TodoItem[] = [
-    { id: 1, text: 'Rework companion', on: 'companion-1000', session: { id: 'local_c', name: 'companion-1000' }, done: false },
-    { id: 2, text: 'Staging access', on: 'Marek', done: false },
-    { id: 3, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false },
-    { id: 4, text: 'Fix login', on: 'login', session: { id: 'local_n', name: 'login' }, done: false },
-    { id: 5, text: 'Approve the deploy', done: false },
-    { id: 6, text: 'Same name, other id', on: 'login', session: { id: 'local_old', name: 'login' }, done: false },
+    { id: 1, text: 'Rework companion', on: 'companion-1000', session: { id: 'local_c', name: 'companion-1000' }, done: false, status: 'working', status_on: 'renamed' },
+    { id: 2, text: 'Staging access', on: 'Marek', done: false, status: 'waiting', status_on: 'Marek' },
+    { id: 3, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false, status: 'gone', status_on: 'spike' },
+    { id: 4, text: 'Fix login', on: 'login', session: { id: 'local_n', name: 'login' }, done: false, status: 'blocked', status_on: 'login' },
+    { id: 5, text: 'Approve the deploy', done: false, status: 'yours' },
+    { id: 6, text: 'Something new', on: 'x', done: false, status: 'parked', status_on: 'x' },
+    { id: 7, text: 'Merge #148?', done: false, options: ['Merge', 'Wait'], status: 'decide' },
   ]
-  await start($, on, ok(workers), { todo: todoRan(items) })
+  await start($, on, ok(WORKERS), { todo: todoRan(items) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual([
-    'TO DO 6 · 5 on others updated 12m',
-    '☐ Approve the deploy',
-    '◌ Fix login ● login · needs you',
-    '◌ Old spike ✕ spike · session gone',
-    '◌ Same name, other id ✕ login · session gone',
-    '◌ Rework companion ● renamed · working',
-    '▶ 1 more',
+  await ui.press({ key: 'todo:fold' })
+  expect((await todoRows(ui))?.filter(r => !r.startsWith('  '))).toEqual([
+    '▼ TO DO 1 to decide · 1 yours updated 12m',
+    '☐ Merge #148? decide',
+    '☐ Approve the deploy yours',
+    '◌ Rework companion working · renamed',
+    '◌ Fix login blocked · login',
+    '◌ Staging access waiting · Marek',
+    '◌ Old spike gone · spike',
+    '◌ Something new parked · x',
+    '▼ show fewer',
   ])
-  const gone = (await ui.findAll({ type: 'Text', text: '✕ spike · session gone' })) as { props: Record<string, unknown> }[]
-  expect(gone.map(el => el.props.color)).toEqual(['error'])
+  const color = async (text: string) => (await ui.findAll({ type: 'Text', text })).find(el => el.text === text)?.props.color
+  expect(await Promise.all(['decide', 'yours', 'working · renamed', 'blocked · login', 'waiting · Marek', 'gone · spike', 'parked · x'].map(color))).toEqual([
+    'error',
+    undefined,
+    'success',
+    'error',
+    'warning',
+    'error',
+    'subtle',
+  ])
   await ui.unmount()
 })
 
-test('while the board cannot be read a linked item shows who it is on, not session gone', async ($, on) => {
+test('an item on someone without a status (its workers not read) shows whom it is on', async ($, on) => {
   const items: TodoItem[] = [{ id: 1, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false }]
-  await start($, on, { exitCode: 1, stdout: '', stderr: 'boom' }, { todo: todoRan(items) })
+  await start($, on, ok(WORKERS), { todo: todoRan(items) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Old spike on spike'])
-  await ui.unmount()
-})
-
-test('a linked worker whose record dev could not read shows who it is on, not session gone', async ($, on) => {
-  const items: TodoItem[] = [{ id: 1, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false }]
-  await start($, on, ok([], '⚠ org/local_gone.json: unexpected end of JSON input'), { todo: todoRan(items) })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Old spike on spike'])
-  await ui.unmount()
-})
-
-test('a to do item on a worker in a planned wait says until when', async ($, on) => {
-  const workers = [
-    worker({ id: 'local_w', name: 'fix-review', status: 'waiting', statusText: 'until 16:30 · Codex limit resets', wait: { until: '2026-11-17T16:30:00+01:00', reason: 'Codex limit resets' } }),
-    worker({ id: 'local_c', name: 'ci', status: 'waiting', statusText: 'CI' }),
-  ]
-  const items: TodoItem[] = [
-    { id: 1, text: 'Re-run the Codex review', on: 'fix-review', session: { id: 'local_w', name: 'fix-review' }, done: false },
-    { id: 2, text: 'Get CI green', on: 'ci', session: { id: 'local_c', name: 'ci' }, done: false },
-  ]
-  await start($, on, ok(workers), { todo: todoRan(items) })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 2 · 2 on others updated 12m', '◌ Re-run the Codex review ● fix-review · waiting until 16:30', '◌ Get CI green ● ci · waiting'])
-  await ui.unmount()
-})
-
-test('an unlinked item whose name two workers share shows who it is on, not either worker', async ($, on) => {
-  const workers = [worker({ id: 'local_1', name: '', title: 'Fix login', status: 'idle' }), worker({ id: 'local_2', name: '', title: 'fix login ', status: 'working', state: 'busy' })]
-  await start($, on, ok(workers), { todo: todoRan([{ id: 1, text: 'Login', on: 'Fix login', done: false }]) })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual(['TO DO 1 · 1 on others updated 12m', '◌ Login on Fix login'])
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '◌ Old spike on spike'])
   await ui.unmount()
 })
 
@@ -2292,35 +2269,35 @@ test('a list whose item has a session this mod does not read shows no block', as
   await ui.unmount()
 })
 
-test("a to do item on a worker on the board shows the worker's dot and state, its name opening the worker's row", async ($, on) => {
+test("a to do item on a worker on the board, linked or named, opens the worker's row", async ($, on) => {
   const workers = [
     worker({ id: 'local_c', name: 'companion-1000', state: 'busy', status: 'working' }),
     worker({ id: 'local_i', name: 'docs', status: 'idle' }),
     worker({ id: 'local_j', name: 'other', status: 'idle' }),
   ]
   const items: TodoItem[] = [
-    { id: 1, text: 'Rework companion 10:00', on: ' Companion-1000', done: false },
-    { id: 2, text: 'Read the docs PR', on: 'docs', done: false },
-    { id: 3, text: 'Staging access for lw', on: 'Marek (Ops)', done: false },
-    { id: 4, text: 'Approve the deploy', done: false },
+    { id: 1, text: 'Rework companion 10:00', on: 'companion-1000', session: { id: 'local_c', name: 'companion-1000' }, done: false, status: 'working', status_on: 'companion-1000' },
+    { id: 2, text: 'Read the docs PR', on: 'docs', done: false, status: 'idle', status_on: 'docs' },
+    { id: 3, text: 'Staging access for lw', on: 'Marek (Ops)', done: false, status: 'waiting', status_on: 'Marek (Ops)' },
   ]
   await start($, on, ok(workers), { todo: todoRan(items) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await todoRows(ui)).toEqual([
-    'TO DO 4 · 3 on others updated 12m',
-    '☐ Approve the deploy',
-    '◌ Rework companion 10:00 ● companion-1000 · working',
-    '◌ Read the docs PR ● docs · idle',
-    '◌ Staging access for lw on Marek (Ops)',
-  ])
-  const dots = ((await ui.findAll({ type: 'Text', text: '●' })) as { props: Record<string, unknown> }[]).map(el => el.props.color)
-  expect(dots.slice(0, 2)).toEqual(['success', 'subtle'])
+  expect(await ui.find({ key: 'todo:item3:owner' })).toBeFalsy()
   await ui.press({ key: 'todo:item1:owner' })
   expect(await ui.find({ key: 'local_c:detail' })).toBeTruthy()
   // An idle worker in the shared idle line gets its row, open
   expect(await ui.find({ key: 'local_i:row' })).toBeFalsy()
   await ui.press({ key: 'todo:item2:owner' })
   expect(await ui.find({ key: 'local_i:detail' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('an unlinked item whose name two workers share opens neither', async ($, on) => {
+  const workers = [worker({ id: 'local_1', name: 'fix', status: 'idle' }), worker({ id: 'local_2', name: 'fix', state: 'busy', status: 'working' })]
+  await start($, on, ok(workers), { todo: todoRan([{ id: 1, text: 'Login', on: 'fix', done: false, status: 'waiting', status_on: 'fix' }]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '◌ Login waiting · fix'])
+  expect(await ui.find({ key: 'todo:item1:owner' })).toBeFalsy()
   await ui.unmount()
 })
 
@@ -2532,11 +2509,12 @@ const ASKS: Ran = {
     {
       boss: 'boss-dev',
       items: [
-        { id: 3, text: 'Merge #148?', done: false, options: ['Merge (Recommended)', 'Wait'] },
-        { id: 4, text: 'Reply to Marek', done: false, on: 'Marek' },
+        { id: 3, text: 'Merge #148?', done: false, options: ['Merge (Recommended)', 'Wait'], status: 'decide' },
+        { id: 4, text: 'Reply to Marek', done: false, on: 'Marek', status: 'waiting', status_on: 'Marek' },
         { id: 5, text: 'Orders API: v3 now?', done: true, options: ['Now', 'After release'], answer: 'After release' },
       ],
     },
+    { boss: 'boss-shop', closed: true, items: [{ id: 6, text: 'Review PR #18', done: false, status: 'boss closed' }] },
   ]),
   stderr: '',
 }
@@ -2564,8 +2542,9 @@ test('the all-projects blocks: asks with option buttons, answered ones struck, a
   await clock.advance(10_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
-  expect(needs).toContain('NEEDS YOU · ALL PROJECTS 2')
-  expect(needs).toContain('dev  Merge #148?')
+  expect(needs).toContain('NEEDS YOU · ALL PROJECTS 1 to decide · 0 yours · 1 on a prompt')
+  expect(needs).toContain('dev  Merge #148? decide')
+  expect(needs).toContain('shop  Review PR #18 boss closed')
   expect(needs).not.toContain('Marek')
   expect(needs).toContain('answered: After release')
   expect(needs).toContain('terminal-fix')

@@ -42,6 +42,19 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   idle: 'Idle',
   stopped: 'Idle',
 }
+// A to do item's statuses as dev words them (`status` in `dev todo --json`), in todo.Statuses' order, each in its color; an unknown one shows muted, after them
+export const STATUSES = ['decide', 'yours', 'working', 'blocked', 'waiting', 'idle', 'gone', 'check', 'boss closed'] as const
+const STATUS_COLORS: Record<string, string | undefined> = {
+  decide: TONE.danger,
+  yours: undefined,
+  working: TONE.ok,
+  blocked: TONE.danger,
+  waiting: TONE.caution,
+  idle: TONE.muted,
+  gone: TONE.danger,
+  check: TONE.caution,
+  'boss closed': TONE.muted,
+}
 const MAX_LAST_LINES = 2
 // The words a reply line listing a question's options may hold besides them, e.g. `Pick a reply: Per package, or Total only.`
 const LIST_WORDS = new Set(['pick', 'choose', 'select', 'reply', 'answer', 'one', 'of', 'a', 'an', 'the', 'or', 'and', 'either', 'with', 'please', 'which', 'do', 'you', 'want', 'prefer', 'should', 'i'])
@@ -191,7 +204,7 @@ async function readTodo(run: Run, boss: string, now: number): Promise<Todo | nul
   const isOptional = (v: unknown) => v === undefined || typeof v === 'string'
   const isSession = (v: TodoItem['session']) => v === undefined || (typeof v?.id === 'string' && typeof v.name === 'string')
   const isRead = (it: TodoItem) =>
-    typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isSession(it.session) && isOptional(it.link)
+    typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isSession(it.session) && isOptional(it.link) && isOptional(it.status) && isOptional(it.status_on)
   if (!Array.isArray(list?.items) || !list.items.every(isRead) || typeof list.updated !== 'number') {
     throw new Error(`${DEV_BIN} todo printed a list this mod does not read`)
   }
@@ -229,35 +242,22 @@ const label = (w: Worker) => w.name || w.title
 /** A worker's section; a status a newer dev adds counts as Working rather than nowhere. */
 const groupOf = (w: Worker) => (Object.hasOwn(GROUP_OF, w.status) ? GROUP_OF[w.status] : 'Working')
 
-/** A worker's section as a to do item on it names it, e.g. `waiting until 16:30` in a planned wait (its status text's start, as dev words the time). */
-const ownerState = (w: Worker) => {
-  const group = groupOf(w).toLowerCase()
-  return w.wait && w.status === 'waiting' ? `${group} ${w.statusText.split(' · ')[0]}` : group
+/** An item's place among STATUSES; an unknown status, or none (ticked, or its workers not read), goes last. */
+const statusRank = (it: TodoItem) => {
+  const i = STATUSES.indexOf(it.status as (typeof STATUSES)[number])
+  return i < 0 ? STATUSES.length : i
 }
 
-/** The worker an open to do item is on: its linked session's, else the one worker its `on` names by board label, name or title, case and outer spaces aside. */
-function ownerOf(it: TodoItem, workers: Worker[]): Worker | undefined {
-  if (it.done || !it.on) return undefined
-  const linked = it.session?.id
-  if (linked !== undefined) return workers.find(w => w.id === linked)
-  const key = it.on.trim().toLowerCase()
-  const named = workers.filter(w => [label(w), w.name, w.title].some(n => n !== '' && n.trim().toLowerCase() === key))
-  return named.length === 1 ? named[0] : undefined
-}
+/** A status's color; an unknown one muted. */
+const statusColor = (status: string) => (Object.hasOwn(STATUS_COLORS, status) ? STATUS_COLORS[status] : TONE.muted)
 
-/** Whether an open item's linked worker is no longer on the board (archived or gone); never while the board, or that worker's record, can't be read. */
-const isGone = (it: TodoItem, b: Board) =>
-  !it.done && it.session !== undefined && b.error === '' && !b.warnings.includes(it.session.id) && ownerOf(it, b.workers) === undefined
+/** The to do items as the board lists them: by status in STATUSES' order, each status in dev's order. */
+const todoOrder = (items: TodoItem[]) => items.map((it, i) => ({ it, i })).sort((x, y) => statusRank(x.it) - statusRank(y.it) || x.i - y.i).map(x => x.it)
 
-/** The to do items as the board lists them: the person's own first, then those on a worker that needs them, then on a worker that's gone, then the rest, each in dev's order. */
-function todoOrder(items: TodoItem[], b: Board): TodoItem[] {
-  const rank = (it: TodoItem) => {
-    if (!it.on) return 0
-    if (isGone(it, b)) return 2
-    const owner = ownerOf(it, b.workers)
-    return owner !== undefined && groupOf(owner) === 'Needs you' ? 1 : 3
-  }
-  return items.map((it, i) => ({ it, i, rank: rank(it) })).sort((x, y) => x.rank - y.rank || x.i - y.i).map(x => x.it)
+/** The count dev's boards give a list: its asks to decide and its own items. */
+export const decideCount = (items: { status?: string }[]) => {
+  const n = (st: string) => items.filter(it => it.status === st).length
+  return `${n('decide')} to decide · ${n('yours')} yours`
 }
 
 /**
@@ -1075,14 +1075,21 @@ export const register: Register = on => {
       )
     }
 
-    /** A to do item's row: its box (☐; ◌ waiting on someone else; ☑ ticked, its text struck through), its text cut to one line, then who does it (a worker on the board with its section's dot and state, opening its row; ✕ and session gone for a linked one no longer there; a person), else its link (a PR's icon and number). */
+    /** A to do item's row: its box (☐; ◌ on someone else; ☑ ticked, its text struck through), its text cut to one line, then its status as dev words it and whom (its worker on the board, by its link or the name dev gives, opens its row), else, without one, whom it is on; then its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
       // No icon until the state is read, or when it could not be
       const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
       const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
-      const owner = ownerOf(it, b.workers)
+      const named = b.workers.filter(w => it.status_on !== undefined && label(w) === it.status_on)
+      const worker = it.session !== undefined ? b.workers.find(w => w.id === it.session?.id) : named.length === 1 ? named[0] : undefined
+      const said = it.status ? [it.status, it.status_on].filter(Boolean).join(' · ') : it.on ? `on ${it.on}` : ''
+      const saidText = (
+        <Text size={SIZE.meta} color={it.status ? statusColor(it.status) : TONE.caution} wrap="truncate-end">
+          {said}
+        </Text>
+      )
       return (
         <Box key={`todo:item${it.id}`} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
           <Box flexShrink={0}>
@@ -1095,36 +1102,24 @@ export const register: Register = on => {
               {it.text}
             </Text>
           </Box>
-          {owner !== undefined ? (
-            <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={1} minWidth={0}>
-              {dot(owner, groupOf(owner))}
-              <Button key={`todo:item${it.id}:owner`} plain dimColor={!isDesktop} onPress={() => void fold(owner.id, true)}>
-                <Text size={SIZE.meta} wrap="truncate-end">
-                  {`${label(owner)} · ${ownerState(owner)}`}
-                </Text>
-              </Button>
-            </Box>
-          ) : isGone(it, b) ? (
+          {said !== '' && (
             <Box flexShrink={1} minWidth={0}>
-              <Text size={SIZE.meta} color={TONE.danger} wrap="truncate-end">
-                {`✕ ${it.session?.name ?? it.on} · session gone`}
+              {worker !== undefined ? (
+                <Button key={`todo:item${it.id}:owner`} plain dimColor={!isDesktop} onPress={() => void fold(worker.id, true)}>
+                  {saidText}
+                </Button>
+              ) : (
+                saidText
+              )}
+            </Box>
+          )}
+          {it.link && (
+            <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
+              {pr && prIcon && iconCell(`todo:item${it.id}:pr`, prIcon, `PR #${pr} ${state.toLowerCase()}`)}
+              <Text size={SIZE.meta}>
+                <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
               </Text>
             </Box>
-          ) : it.on ? (
-            <Box flexShrink={1} minWidth={0}>
-              <Text size={SIZE.meta} color={TONE.caution} wrap="truncate-end">
-                {`on ${it.on}`}
-              </Text>
-            </Box>
-          ) : (
-            it.link && (
-              <Box flexDirection="row" alignItems="center" columnGap={SPACE.inline} flexShrink={0}>
-                {pr && prIcon && iconCell(`todo:item${it.id}:pr`, prIcon, `PR #${pr} ${state.toLowerCase()}`)}
-                <Text size={SIZE.meta}>
-                  <Link href={it.link} label={pr ? `#${pr}` : '↗'} />
-                </Text>
-              </Box>
-            )
           )}
         </Box>
       )
@@ -1150,11 +1145,9 @@ export const register: Register = on => {
       </Box>
     )
 
-    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▶ N more` that opens the rest (`▼ show fewer` open; the open header's `▼ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
+    /** The to do list above the sections: its header (`N to decide · N yours`, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▶ N more` that opens the rest (`▼ show fewer` open; the open header's `▼ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
     const todoBlock = (t: Todo) => {
-      const open = t.items.filter(it => !it.done)
-      const onOthers = open.filter(it => it.on).length
-      const ordered = todoOrder(t.items, b)
+      const ordered = todoOrder(t.items)
       const shownItems = v.todoOpen ? ordered : ordered.slice(0, TODO_SHOWN)
       const foldable = t.items.length > TODO_SHOWN
       const toggleTodo = () => void update($, view, s => ({ ...s, todoOpen: !s.todoOpen }))
@@ -1171,13 +1164,8 @@ export const register: Register = on => {
               TO DO
             </Text>
             <Text size={SIZE.meta} color={TONE.muted} tabular>
-              {open.length}
+              {decideCount(t.items)}
             </Text>
-            {onOthers > 0 && (
-              <Text size={SIZE.meta} color={TONE.muted}>
-                {`· ${onOthers} on others`}
-              </Text>
-            )}
             <Box flexGrow={1} />
             <Text size={SIZE.meta} color={TONE.muted} dimColor={!isDesktop && t.stale} tabular>
               {`updated ${t.age}`}
@@ -1462,12 +1450,11 @@ export const register: Register = on => {
 
     /** What waits on the person across the projects: each tmux boss's open item (an ask with its options as buttons; an answered one struck, saying what was answered) and each worker waiting on a prompt, answered or opened in its own session. */
     const needsYouBlock = (f: Fleet) => {
-      const open = f.asks.filter(it => !it.done)
       const prompts = f.agents.filter(a => !a.isBoss)
       if (f.asks.length + prompts.length === 0) return null
       return (
         <Box key="fleet:needs" flexDirection="column" rowGap={SPACE.line} minWidth={0}>
-          {fleetHead('needs', 'NEEDS YOU · ALL PROJECTS', String(open.length + prompts.length), TONE.danger)}
+          {fleetHead('needs', 'NEEDS YOU · ALL PROJECTS', `${decideCount(f.asks)}${prompts.length > 0 ? ` · ${prompts.length} on a prompt` : ''}`, TONE.danger)}
           {f.asks.flatMap((it: FleetItem) => {
             const key = `fleet:ask:${it.boss}:${it.id}`
             const lead = Math.max(0, it.options.findIndex(o => RECOMMENDED.test(o)))
@@ -1484,6 +1471,13 @@ export const register: Register = on => {
                     {it.text}
                   </Text>
                 </Box>
+                {!it.done && it.status !== undefined && (
+                  <Box flexShrink={0}>
+                    <Text size={SIZE.meta} color={statusColor(it.status)}>
+                      {it.status}
+                    </Text>
+                  </Box>
+                )}
               </Box>,
               ...(it.done
                 ? it.answer === undefined
