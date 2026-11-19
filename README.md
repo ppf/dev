@@ -278,7 +278,7 @@ dev serve          # prints the URL to open on the phone
 dev serve pair     # in a real terminal (not a Claude session): prints the URL and a one-time code
 ```
 
-Open the printed URL on the phone and enter the code (8 digits shown as `1234 5678`, valid 5 minutes, once; 5 wrong tries void it); the phone stays paired. Pairing is required on every bind, loopback too. If dev serve runs on `--addr`, pass the same `--addr` to `dev serve pair`. It listens on the Mac's tailnet address when it has one (the phone then needs Tailscale too), else on its home network address: then the phone must be on the same Wi-Fi, and since it is plain HTTP, other devices on that network can read the traffic, so use it on a network you trust (no TLS yet). `--addr ip:port` picks the address.
+Open the printed URL on the phone and enter the code (8 digits shown as `1234 5678`, valid 5 minutes, once; 5 wrong tries void it); the phone stays paired. Pairing is required on every bind, loopback too. If dev serve runs on `--addr`, pass the same `--addr` to `dev serve pair`. After updating dev, restart `dev serve`: an older running one rejects codes the new `dev serve pair` writes. It listens on the Mac's tailnet address when it has one (the phone then needs Tailscale too), else on its home network address: then the phone must be on the same Wi-Fi, and since it is plain HTTP, other devices on that network can read the traffic, so use it on a network you trust (no TLS yet). `--addr ip:port` picks the address.
 
 - Can: read the board, answer an ask (pick, then Send, or your own words), tick your own items.
 - Cannot: push notifications, Start, desktop app bosses' asks (shown read-only), adding items.
