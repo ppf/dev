@@ -55,7 +55,7 @@ func TestHerd(t *testing.T) {
 	}
 	managerPanes := strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{pane_current_path} #{pane_start_command}"), "\n")
 	if len(managerPanes) != 2 || !strings.HasPrefix(managerPanes[0], managerDir+" ") ||
-		!strings.Contains(managerPanes[0], `'claude' '--model' 'fable' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
+		!strings.Contains(managerPanes[0], `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true}' '--append-system-prompt' 'You are the manager`) ||
 		!strings.HasSuffix(managerPanes[0], `'--remote-control=manager'"`) || !strings.Contains(managerPanes[1], "boss --previews") {
 		t.Fatalf("manager panes: %q", managerPanes)
 	}

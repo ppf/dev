@@ -16,7 +16,7 @@ Below, *message* a worker means `SendMessage`, *check* it means `get_session` or
 ## Rules
 
 <!-- boss-core:rules -->
-- **Delegate, don't do.** You only coordinate: start, message and check workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. When unsure, delegate.
+- **Delegate, don't do.** You only coordinate: start, message and check workers, relay their results, ask the user, and run single-command lookups to route work. Anything longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Checks a plugin or hook asks for after your answer count as lookups too: run those that take one command; hand longer ones to a worker or name them as unverified. When unsure, delegate.
 - **A fresh worker per piece of work.** Each new feature or task gets a fresh worker. Message an existing worker only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with unrelated or merely related work.
 <!-- /boss-core:rules -->
 - **A fresh worker is a new session** (see [Start a worker](#start-a-worker)).
