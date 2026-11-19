@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
@@ -25,23 +27,35 @@ func setStatuses(c *tmux.Client, lists []bossList, stderr io.Writer) {
 	}
 }
 
-// setStatus sets the statuses of l, s's list as setStatuses does; a desktop app boss's (boss, as todoBoss reads it)
-// from its workers on the desktop board (desktopOwner).
+// setStatus sets the statuses of l, s's list: a tmux boss's as setStatuses does, a desktop app boss's (boss, as
+// todoBoss reads it) from its workers on the desktop board (desktopOwner).
 func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 	if s.Boss() == "" {
-		l.SetStatus(desktopOwner(boss, stderr))
+		// Only an item on someone reads the workers: the board polls this every 2 s
+		if !slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return !it.Done && it.On != "" }) {
+			l.SetStatus(todo.Owner{})
+			return
+		}
+		o, unreadIDs := desktopOwner(boss, stderr)
+		l.SetStatus(o)
+		for i, it := range l.Items {
+			if it.Session != nil && slices.Contains(unreadIDs, it.Session.ID) {
+				l.Items[i].Status, l.Items[i].StatusOn = "", ""
+			}
+		}
 		return
 	}
 	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, stderr)
 }
 
 // desktopOwner is the desktop app boss's Owner: its workers on the desktop board (desktop.Board, without its question
-// files, so it removes none), each read as the rank of its desktop status (desktopSession). When the board can't be read, or a
-// worker's record can't, it is Unread and stderr says why: an unread record may be a live worker's.
-func desktopOwner(boss string, stderr io.Writer) todo.Owner {
-	unread := func(err error) todo.Owner {
+// files, so it removes none), each read as the rank of its desktop status (desktopSession), and the app session ids of
+// records it couldn't read, which may be live workers'. When the board, or a live session file, can't be read, it is
+// Unread: a running worker would read stopped. stderr says why.
+func desktopOwner(boss string, stderr io.Writer) (todo.Owner, []string) {
+	unread := func(err error) (todo.Owner, []string) {
 		fmt.Fprintln(stderr, "⚠ dev todo: workers not read, items on someone have no status: "+err.Error())
-		return todo.Owner{Unread: true}
+		return todo.Owner{Unread: true}, nil
 	}
 	_, id, err := todoBoss(boss)
 	if err != nil {
@@ -59,16 +73,23 @@ func desktopOwner(boss string, stderr io.Writer) todo.Owner {
 	if err != nil {
 		return unread(err)
 	}
+	var unreadIDs []string
 	for _, w := range warnings {
-		if recordID.MatchString(w.Error()) {
+		msg := w.Error()
+		// A live file with a status Board doesn't know still shows its worker, busy
+		if strings.Contains(msg, p.Live) && !strings.Contains(msg, "doesn't know") {
 			return unread(w)
+		}
+		for _, rec := range recordID.FindAllString(msg, -1) {
+			fmt.Fprintln(stderr, "⚠ dev todo: "+msg)
+			unreadIDs = append(unreadIDs, strings.TrimSuffix(rec, ".json"))
 		}
 	}
 	o := todo.Owner{Workers: make([]sidebar.Session, len(workers))}
 	for i, w := range workers {
 		o.Workers[i] = desktopSession(w)
 	}
-	return o
+	return o, unreadIDs
 }
 
 // desktopSession is desktop worker w as a session whose Rank is its status's: needs you and blocked wait on the

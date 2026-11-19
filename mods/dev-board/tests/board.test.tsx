@@ -2269,7 +2269,7 @@ test('a list whose item has a session this mod does not read shows no block', as
   await ui.unmount()
 })
 
-test("a to do item linked to a worker on the board opens the worker's row", async ($, on) => {
+test("a to do item on a worker on the board, linked or named, opens the worker's row", async ($, on) => {
   const workers = [
     worker({ id: 'local_c', name: 'companion-1000', state: 'busy', status: 'working' }),
     worker({ id: 'local_i', name: 'docs', status: 'idle' }),
@@ -2277,7 +2277,7 @@ test("a to do item linked to a worker on the board opens the worker's row", asyn
   ]
   const items: TodoItem[] = [
     { id: 1, text: 'Rework companion 10:00', on: 'companion-1000', session: { id: 'local_c', name: 'companion-1000' }, done: false, status: 'working', status_on: 'companion-1000' },
-    { id: 2, text: 'Read the docs PR', on: 'docs', session: { id: 'local_i', name: 'docs' }, done: false, status: 'idle', status_on: 'docs' },
+    { id: 2, text: 'Read the docs PR', on: 'docs', done: false, status: 'idle', status_on: 'docs' },
     { id: 3, text: 'Staging access for lw', on: 'Marek (Ops)', done: false, status: 'waiting', status_on: 'Marek (Ops)' },
   ]
   await start($, on, ok(workers), { todo: todoRan(items) })

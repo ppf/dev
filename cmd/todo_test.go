@@ -59,7 +59,7 @@ func TestTodo(t *testing.T) {
 			On   string `json:"on"`
 			Link string `json:"link"`
 			Done bool   `json:"done"`
-			// A worker record dev can't read (local_broken): an item on someone has no status
+			// Marek is no worker: a person
 			Status   string `json:"status"`
 			StatusOn string `json:"status_on"`
 		} `json:"items"`
@@ -70,7 +70,7 @@ func TestTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(l.Items) != 4 || !l.Items[1].Done || l.Items[3].On != "Marek" || l.Items[2].Link == "" || l.Updated == 0 || l.Stale ||
-		l.Items[0].Status != "yours" || l.Items[1].Status != "" || l.Items[2].Status != "yours" || l.Items[3].Status != "" || l.Items[3].StatusOn != "" {
+		l.Items[0].Status != "yours" || l.Items[1].Status != "" || l.Items[2].Status != "yours" || l.Items[3].Status != "waiting" || l.Items[3].StatusOn != "Marek" {
 		t.Errorf("json = %+v", l)
 	}
 	if got := run(t, "", "todo", "clear"); got != "to do empty\n" {

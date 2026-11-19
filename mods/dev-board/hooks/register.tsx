@@ -42,7 +42,7 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   idle: 'Idle',
   stopped: 'Idle',
 }
-// A to do item's statuses as dev words them (`status` in `dev todo --json`), in todo.Statuses' order, each in the section color it matches; an unknown one shows muted, after them
+// A to do item's statuses as dev words them (`status` in `dev todo --json`), in todo.Statuses' order, each in its color; an unknown one shows muted, after them
 export const STATUSES = ['decide', 'yours', 'working', 'blocked', 'waiting', 'idle', 'gone', 'check', 'boss closed'] as const
 const STATUS_COLORS: Record<string, string | undefined> = {
   decide: TONE.danger,
@@ -1075,14 +1075,14 @@ export const register: Register = on => {
       )
     }
 
-    /** A to do item's row: its box (☐; ◌ on someone else; ☑ ticked, its text struck through), its text cut to one line, then its status as dev words it and whom (a worker on the board opens its row), else, without one, whom it is on; then its link (a PR's icon and number). */
+    /** A to do item's row: its box (☐; ◌ on someone else; ☑ ticked, its text struck through), its text cut to one line, then its status as dev words it and whom (its worker on the board, by its link or the name dev gives, opens its row), else, without one, whom it is on; then its link (a PR's icon and number). */
     const todoRow = (it: TodoItem) => {
       const pr = it.link?.match(PR_LINK)?.[1]
       // No icon until the state is read, or when it could not be
       const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
       const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
-      const worker = it.session === undefined ? undefined : b.workers.find(w => w.id === it.session?.id)
+      const worker = it.session !== undefined ? b.workers.find(w => w.id === it.session?.id) : it.status_on ? b.workers.find(w => label(w) === it.status_on) : undefined
       const said = it.status ? [it.status, it.status_on].filter(Boolean).join(' · ') : it.on ? `on ${it.on}` : ''
       const saidText = (
         <Text size={SIZE.meta} color={it.status ? statusColor(it.status) : TONE.caution} wrap="truncate-end">
@@ -1144,7 +1144,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    /** The to do list above the sections: its header (count, how many wait on others, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▶ N more` that opens the rest (`▼ show fewer` open; the open header's `▼ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
+    /** The to do list above the sections: its header (`N to decide · N yours`, how long ago it changed, dim once stale), the first TODO_SHOWN items, then `▶ N more` that opens the rest (`▼ show fewer` open; the open header's `▼ TO DO` folds it too, a long list's top being far from its end); a list of TODO_SHOWN or fewer has no toggle. */
     const todoBlock = (t: Todo) => {
       const ordered = todoOrder(t.items)
       const shownItems = v.todoOpen ? ordered : ordered.slice(0, TODO_SHOWN)
