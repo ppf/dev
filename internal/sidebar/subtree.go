@@ -57,31 +57,32 @@ func (s Session) Rank() Rank {
 	return RankIdle
 }
 
-// ListCount is what a boss's to do list adds to the roll-ups: its open items on no one, asks (with options) apart,
-// and those on someone else.
+// ListCount is what a boss's to do list adds to the roll-ups, by its items' statuses: asks to decide, the user's own
+// plain items, and those on someone else; a closed boss's items and a moved PR's count in none, as TO DO's header has it.
 type ListCount struct {
 	Asks, Plain, On int
 	Unread          bool // the list wasn't read
-	Closed          bool // its boss session is gone: the manager's roll-up counts it, as its NEEDS YOU shows it
+	Closed          bool // its boss session is gone: the manager's roll-up takes it (its items count in none, as TO DO's header has it)
 }
 
-// Add counts an item when it's open.
-func (c *ListCount) Add(done bool, on string, options int) {
+// Add counts an open item by its status: none (on someone whose workers weren't read) is on someone.
+func (c *ListCount) Add(done bool, status string) {
 	switch {
-	case done:
-	case on != "":
-		c.On++
-	case options > 0:
+	case done, status == StatusCheck, status == StatusBossClosed:
+	case status == StatusDecide:
 		c.Asks++
-	default:
+	case status == StatusYours:
 		c.Plain++
+	default:
+		c.On++
 	}
 }
 
 // Rollup is a boss's whole subtree: the strongest Rank across it and every session under it, and its counts.
 type Rollup struct {
 	Rank      Rank
-	Questions int  // dialogs and asks notes, its own too, and asks on its and its bosses' lists
+	Questions int  // sessions that need the user: dialogs and asks notes, its own too
+	Decide    int  // asks on its and its bosses' lists
 	Working   int  // sessions under it working
 	Waiting   int  // sessions under it in a planned wait or rate-limit resume
 	ToDo      int  // plain items on its and its bosses' lists
@@ -180,7 +181,7 @@ func (r *Rollup) add(s Session, lists map[string]ListCount, own bool) {
 
 // addList counts a boss's list l into r.
 func (r *Rollup) addList(l ListCount) {
-	r.Questions += l.Asks
+	r.Decide += l.Asks
 	r.ToDo += l.Plain
 	r.OnOthers += l.On
 	if l.Asks > 0 {
@@ -190,7 +191,8 @@ func (r *Rollup) addList(l ListCount) {
 }
 
 // Parts is the roll-up as its line's parts: the state, then the counts, strongest first, each only when non-zero;
-// a working or waiting state is said by its count when it has one. "· N to do · N on others" come last.
+// a working or waiting state is said by its count when it has one, needing the user by "N need you" (sessions) and
+// "N decide" (asks). "· N to do · N on others" come last.
 func (r Rollup) Parts() []string {
 	var ps []string
 	count := func(n int, what string) {
@@ -200,12 +202,8 @@ func (r Rollup) Parts() []string {
 	}
 	switch r.Rank {
 	case RankNeedsYou:
-		ps = append(ps, "needs you")
-		if r.Questions == 1 {
-			ps = append(ps, "1 question")
-		} else {
-			count(r.Questions, "questions")
-		}
+		count(r.Questions, NeedYouWord)
+		count(r.Decide, DecideWord)
 	case RankWorking:
 		if r.Working == 0 {
 			ps = append(ps, "working")
@@ -226,10 +224,18 @@ func (r Rollup) Parts() []string {
 	if r.Rank <= RankWaiting {
 		count(r.Waiting, "waiting")
 	}
-	count(r.ToDo, "to do")
+	count(r.ToDo, ToDoWord)
 	count(r.OnOthers, "on others")
 	return ps
 }
+
+// The words of the counts the user acts on, alike on the roll lines and the sidebar's TO DO: "need you" only for
+// sessions waiting on the user, "decide" for asks, "to do" for the user's own items.
+const (
+	NeedYouWord = "need you"
+	DecideWord  = "decide"
+	ToDoWord    = "to do"
+)
 
 // Text is Parts as one line.
 func (r Rollup) Text() string { return strings.Join(r.Parts(), " · ") }

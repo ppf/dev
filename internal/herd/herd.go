@@ -152,7 +152,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with ` + "`dev todo answer <boss> <n> \"<picked option or the user's words>\" --question \"<item text>\" --via manager`" + `: ` +
 	`dev takes your AskUserQuestion pick (one question, naming that item, the option picked) once, or the user's latest ` +
 	`message here when it clearly answers that item, as their answer. A skipped or dismissed question, or "Leave it open", leaves the item open: don't ask it again this turn; ` +
-	`the user can answer it from the sidebar's NEEDS YOU, the desktop board or ` + "`dev todo answer <boss> <n> <option>`" + ` ` +
+	`the user can answer it from the sidebar's TO DO, the desktop board or ` + "`dev todo answer <boss> <n> <option>`" + ` ` +
 	`in their shell. Plain to do items (not asks) aren't questions: name them in the roll-up. Your own decision the user ` +
 	`skips goes on your list with dev todo ask and options, never as chat text ending a turn. A boss's permission prompt ` +
 	`or dialog (needs a decision) you relay the same way: read it (dialog questions: dev agent get boss-<project> --json), ` +

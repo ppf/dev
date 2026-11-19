@@ -51,7 +51,7 @@ var managerAsks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []to
 	{ID: 2, Text: "DM David"},
 }}}}
 
-// An item on someone on a boss's list counts on its card as "on others", never as a NEEDS YOU row.
+// An item on someone on a boss's list counts on its card as "on others"; TO DO lists it in progress, not as yours.
 func TestBossCardOnOthers(t *testing.T) {
 	s, err := buildSnapshot(managerRows(), nil, "%1", "", &fakeLookups{})
 	if err != nil {
@@ -67,10 +67,15 @@ func TestBossCardOnOthers(t *testing.T) {
 	if got := ansi.Strip(rollText(*noc.roll)); !strings.HasSuffix(got, " · 1 to do · 1 on others") {
 		t.Errorf("boss-noc status = %q", got)
 	}
-	for _, r := range m.needRows() {
-		if r.Text == "Deploy" {
-			t.Errorf("NEEDS YOU row %+v: it's on noc-pr", r)
-		}
+	i := slices.IndexFunc(m.needRows(), func(r needRow) bool { return r.Text == "Deploy" })
+	if i < 0 {
+		t.Fatal("no Deploy row")
+	}
+	if r := m.needRows()[i]; r.Kind != sidebar.NeedOn || r.Status != sidebar.StatusWorking || r.StatusOn != "noc-pr" || r.Yours() {
+		t.Errorf("Deploy row %+v, want on noc-pr, working", r.NeedRow)
+	}
+	if c := m.tally(); c.ToDo != 1 || c.Decide != 1 {
+		t.Errorf("tally %+v: Deploy counted", c)
 	}
 }
 
@@ -98,7 +103,7 @@ func TestBossCardsRollUp(t *testing.T) {
 		t.Errorf("tiles = %q, want %q", order, want)
 	}
 	for name, want := range map[string]string{
-		"boss-noc": "▸ ● boss-noc needs you · 2 questions · 1 working · 1 to do",
+		"boss-noc": "▸ ● boss-noc 1 need you · 1 decide · 1 working · 1 to do",
 		"boss-dev": "▸ ● boss-dev 2 working",
 		"boss-mag": "▸ ● boss-mag idle · no workers",
 	} {
@@ -113,7 +118,7 @@ func TestBossCardsRollUp(t *testing.T) {
 	m.folds = map[string]bool{"boss-noc": false}
 	rows, _ := m.card(noc, 80)
 	body := ansi.Strip(strings.Join(rows, "\n"))
-	if !strings.Contains(body, "needs you · 2 questions") || !strings.Contains(body, "finished: VPN?") {
+	if !strings.Contains(body, "1 need you · 1 decide") || !strings.Contains(body, "finished: VPN?") {
 		t.Errorf("open card:\n%s", body)
 	}
 	// The sidebar's roll-up reads the same sessions the same way
@@ -139,7 +144,7 @@ func sidebarSessions(rows []row) []sidebar.Session {
 	return out
 }
 
-// A boss's own dialog puts its card under Needs you, folded: NEEDS YOU asks it.
+// A boss's own dialog puts its card under Needs you, folded: TO DO asks it.
 func TestBossCardOwnDialog(t *testing.T) {
 	rows := managerRows()
 	rows[1].State, rows[1].WaitingFor = agent.Waiting, "permission_prompt"
@@ -149,7 +154,7 @@ func TestBossCardOwnDialog(t *testing.T) {
 	}
 	s.rollUp()
 	dev := s.tiles[index(s.tiles, "boss-dev")]
-	if dev.section() != needsYouSection || !dev.folded(nil) || dev.roll.Text() != "needs you · 1 question · 2 working" {
+	if dev.section() != needsYouSection || !dev.folded(nil) || dev.roll.Text() != "1 need you · 2 working" {
 		t.Errorf("boss-dev: section %d folded %v roll %q", dev.section(), dev.folded(nil), dev.roll.Text())
 	}
 }
@@ -216,7 +221,7 @@ func TestBossCardWaitingAndWarn(t *testing.T) {
 	}
 }
 
-// A boss's own turn-ending question folds its card (NEEDS YOU asks it); opened, it shows as an asks card does, the
+// A boss's own turn-ending question folds its card (TO DO asks it); opened, it shows as an asks card does, the
 // roll-up under it.
 func TestBossCardOwnAsks(t *testing.T) {
 	rows := managerRows()
@@ -234,7 +239,7 @@ func TestBossCardOwnAsks(t *testing.T) {
 	}
 	cardRows, _ := m.card(dev, 100)
 	body := ansi.Strip(strings.Join(cardRows, "\n"))
-	if !strings.Contains(body, "Connect the VPN?") || !strings.Contains(body, "needs you · 1 question · 2 working") {
+	if !strings.Contains(body, "Connect the VPN?") || !strings.Contains(body, "1 need you · 2 working") {
 		t.Errorf("open card:\n%s", body)
 	}
 }
@@ -275,16 +280,6 @@ func TestBossCardOnOthersNarrow(t *testing.T) {
 		if got := strings.Join(strings.Fields(ansi.Strip(m.headRow(tl, tl.section(), true, w))), " "); got != want {
 			t.Errorf("%d columns: %q, want %q", w, got, want)
 		}
-	}
-}
-
-// Only a boss list with an item on no one, or one not read, is something NEEDS YOU shows.
-func TestWaitsOnUser(t *testing.T) {
-	on := todo.BossList{Boss: "b", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "x", On: "w"}}}}
-	mine := todo.BossList{Boss: "b", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "x"}}}}
-	bad := todo.BossList{Boss: "b", Err: errors.New("bad")}
-	if waitsOnUser(nil) || waitsOnUser([]todo.BossList{on}) || !waitsOnUser([]todo.BossList{on, mine}) || !waitsOnUser([]todo.BossList{bad}) {
-		t.Error("waitsOnUser: want true only for an item on no one or a list not read")
 	}
 }
 

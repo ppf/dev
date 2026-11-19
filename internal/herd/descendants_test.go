@@ -83,7 +83,7 @@ func viaBoard() Model {
 	return m
 }
 
-// A deeper session's card folds to a row pointing at NEEDS YOU; it's answered as an own one is (1-9 through its
+// A deeper session's card folds to a row pointing at TO DO; it's answered as an own one is (1-9 through its
 // picker), but not closed: no × or Message…, x says where it is closed, ⏎ still goes to it.
 func TestViaCard(t *testing.T) {
 	m := viaBoard()
@@ -208,16 +208,5 @@ func TestBossLists(t *testing.T) {
 	}
 	if slices.Contains(read, "boss-x") {
 		t.Errorf("read %q: boss-x isn't asked for", read)
-	}
-}
-
-// A to do item on a name only a deeper session has isn't on it: that session is its boss's.
-func TestTodoOwnerSkipsVia(t *testing.T) {
-	m := viaBoard()
-	if o := m.todoOwner(todo.Shown{ID: 1, Text: "x", On: "w-dialog"}); o != nil {
-		t.Errorf("owner = %+v, want none", o)
-	}
-	if o := m.todoOwner(todo.Shown{ID: 2, Text: "y", On: "fix-login"}); o == nil || o.name != "fix-login" {
-		t.Errorf("owner = %+v, want fix-login", o)
 	}
 }

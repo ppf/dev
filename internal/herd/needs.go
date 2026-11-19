@@ -8,22 +8,25 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
 )
 
-// needRow is a row of the board's NEEDS YOU (sidebar.NeedRows); a dialog's or question's Text and Options are
+// needRow is a row of the board's TO DO (sidebar.NeedRows); a dialog's or question's Text and Options are
 // rewritten as the tile it answers through shows them.
 type needRow struct {
 	sidebar.NeedRow
 	label string
-	tile  int    // the tile it answers through; -1 for a list's row, or a session not on the board
-	sig   string // the row as shown, its dialog's too: a key acts only on the row its selection was made on
+	tile  int               // the tile it answers through; -1 for a list's row, or a session not on the board
+	sig   string            // the row as shown, its dialog's too: a key acts only on the row its selection was made on
+	fold  []sidebar.NeedRow // Waiting on others' fold row: the rows it stands for, shown under it only while open (waitOpen)
 }
 
-// needLists are the lists NEEDS YOU and the roll-ups read: this boss's own, then its bosses' (a read that failed
+// foldSig is the fold row's sig.
+const foldSig = "fold\x00waiting"
+
+// needLists are the lists TO DO and the roll-ups read: this boss's own, then its bosses' (a read that failed
 // marks each unread).
 func (s snapshot) needLists() []sidebar.NeedList {
 	own := sidebar.NeedList{Boss: s.name, Items: needItems(s.todo.Items), Updated: s.todo.Updated, Stale: s.todo.Stale}
@@ -53,23 +56,51 @@ func (s snapshot) needLists() []sidebar.NeedList {
 func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
-		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Added: it.Added, Check: it.Check}
+		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Added: it.Added,
+			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn}
 	}
 	return out
 }
 
-// needRows are this board's NEEDS YOU rows: what waits on the user under it, labelled "project › who" on a
-// manager's board ("project" for a boss), "who" on a boss's and "to do" for its own list; a dialog or question on
-// the board says what its card does, with its options.
+// needRows are TO DO's rows as the block lists them (listRows): Waiting on others folded into one row standing for
+// them, which they follow only while open (waitOpen).
 func (m Model) needRows() []needRow {
+	rows := m.listRows()
+	at := slices.IndexFunc(rows, func(r needRow) bool { return r.Status == sidebar.StatusWaiting })
+	if at < 0 {
+		return rows
+	}
+	fold := needRow{tile: -1, sig: foldSig}
+	fold.Kind, fold.Status = sidebar.NeedOn, sidebar.StatusWaiting
+	n := 0
+	for _, r := range rows[at:] {
+		if r.Status != sidebar.StatusWaiting {
+			break
+		}
+		fold.fold = append(fold.fold, r.NeedRow)
+		n++
+	}
+	out := append(slices.Clone(rows[:at]), fold)
+	if m.waitOpen {
+		out = append(out, rows[at:at+n]...)
+	}
+	return append(out, rows[at+n:]...)
+}
+
+// listRows are this board's TO DO rows: what waits on the user under it and the items its lists handed out,
+// labelled "project › who" on a manager's board ("project" for a boss, "manager" for its own list), "who" on a boss's
+// ("boss" for its own list); a dialog or question on the board says what its card does, with its options.
+func (m Model) listRows() []needRow {
 	s := m.snap
 	manager := slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == s.name && a.Root == s.name })
 	var out []needRow
 	for _, r := range sidebar.NeedRows(s.all, s.needLists(), s.name) {
 		n := needRow{NeedRow: r, tile: -1, label: r.Who}
 		switch {
+		case r.Boss == s.name && manager:
+			n.label = s.name
 		case r.Boss == s.name:
-			n.label = "to do"
+			n.label = r.Who
 		// A list's row is a boss's, closed ones' too
 		case manager && (r.Boss != "" || slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == r.Session && a.Boss })):
 			n.label = r.Project
@@ -123,21 +154,21 @@ func (m Model) answerable(r needRow) bool {
 	return false
 }
 
-// tooShort reports a pane known to be too short for NEEDS YOU; before the first size message the height is unknown.
+// tooShort reports a pane known to be too short for TO DO; before the first size message the height is unknown.
 func (m Model) tooShort() bool { return m.height > 0 && !m.blockShown() }
 
-// enterNeeds focuses NEEDS YOU on its first row.
+// enterNeeds focuses TO DO on its first row.
 func (m Model) enterNeeds() Model {
 	rows := m.needRows()
 	switch {
 	case len(rows) == 0:
-		m.msg = info("Nothing needs you")
+		m.msg = info("Nothing to do")
 		return m
 	case m.tooShort():
-		m.msg = info("Pane too short for NEEDS YOU")
+		m.msg = info("Pane too short for TO DO")
 		return m
 	}
-	m.needMode, m.needIdx, m.needKey, m.needDone = true, 0, rows[0].sig, ""
+	m.needMode, m.needIdx, m.needKey, m.needDone, m.todoFolded = true, 0, rows[0].sig, "", false
 	return m
 }
 
@@ -150,7 +181,7 @@ func (m *Model) fixNeeds() {
 	}
 	rows := m.needRows()
 	if m.tooShort() {
-		m.needMode, m.msg = false, info("Pane too short for NEEDS YOU: keys act on the cards")
+		m.needMode, m.msg = false, info("Pane too short for TO DO: keys act on the cards")
 		return
 	}
 	if len(rows) == 0 {
@@ -173,9 +204,9 @@ func (m *Model) fixNeeds() {
 	}
 }
 
-// handleNeedKey acts on NEEDS YOU's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick a
-// plain item, g/⏎ go to its session, esc or n back to the cards, ctrl+c quit. An answer key on a row that changed
-// since it was chosen sends nothing.
+// handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
+// user's item, g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc or n back to the cards,
+// t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if len(rows) == 0 {
@@ -194,9 +225,20 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.needKey = rows[m.needIdx].sig
 	case "esc", "n":
 		m.needMode = false
+	case "t":
+		// Folded to its header, its rows take no keys
+		m.todoFolded, m.needMode = true, false
 	case "ctrl+c":
 		return m, tea.Quit
 	case "g", "enter", "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if r.fold != nil {
+			if key == "g" || key == "enter" {
+				m.waitOpen = !m.waitOpen
+			} else {
+				m.msg = info("⏎ opens or folds Waiting on others")
+			}
+			return m, nil
+		}
 		if r.Closed && key != "d" {
 			m.msg = info(r.ClosedHint())
 			return m, nil
@@ -225,10 +267,10 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// tickNeed ticks a plain list item through dev todo done; like an answer, its row goes or fails.
+// tickNeed ticks the user's own list item through dev todo done; like an answer, its row goes or fails.
 func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 	if r.Kind != sidebar.NeedPlain {
-		m.msg = info("d ticks a plain item; g/⏎ goes to " + r.Session)
+		m.msg = info("d ticks your own plain item; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
 	if m.answering != "" {
@@ -267,7 +309,7 @@ func (m Model) replyNeed(r needRow) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openPicker opens the reply box on t's dialog for NEEDS YOU: bare, a draft kept for t staying kept.
+// openPicker opens the reply box on t's dialog for TO DO: bare, a draft kept for t staying kept.
 func (m *Model) openPicker(t tile) {
 	m.selected = t.sess.Name
 	m.box = replyBox{session: t.sess.Name, pane: t.pane, hist: -1, block: true}
@@ -311,197 +353,4 @@ func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 	m.openPicker(t)
 	next, cmd := m.typePick(k, t.pick)
 	return next.(Model), cmd
-}
-
-// optSpan is an answerable option's columns [x0, x1) on a line of the block, and its index.
-type optSpan struct{ x0, x1, n int }
-
-// needBlock is NEEDS YOU at the top of the pane, in about half the gh rows (more for a long selected row; none under
-// 6): its header, then each row (its
-// mark, label and text, the selected one's text wrapped) with its options under it, scrolled to keep the selected
-// row, "+N more" for the rest; at is each line's row, -1 for none; spans each line's answerable options.
-func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
-	rows := m.needRows()
-	if len(rows) == 0 || gh < minBlockRows {
-		return nil, nil, nil
-	}
-	w := m.width
-	head := " " + sidebar.Red + bold + "NEEDS YOU " + strconv.Itoa(len(rows)) + reset
-	if !m.needMode {
-		head += rule + " · n" + reset
-	}
-	lines, at, spans = []string{padRow(head, w), padRow("", w)}, []int{-1, -1}, make([][]optSpan, 2)
-	labelW := labelWidth(rows, w)
-	cur := -1
-	if m.needMode {
-		cur = min(m.needIdx, len(rows)-1)
-	}
-	block := make([][]string, len(rows))
-	blockSpans := make([][][]optSpan, len(rows))
-	total := 0
-	for i, r := range rows {
-		block[i], blockSpans[i] = m.needLines(r, labelW, w, i == cur)
-		total += len(block[i])
-	}
-	// Room for rows: half the rows less the header, its blank and the blank after, one of them for "+N more"
-	room := gh/2 - 3
-	if total > room {
-		room--
-	}
-	// The selected row fits, cut to the pane: the header, its blank, "+N more" and the blank after stay
-	room = min(max(room, len(block[max(cur, 0)])), gh-4)
-	if cur >= 0 && len(block[cur]) > room {
-		block[cur], blockSpans[cur] = block[cur][:room], blockSpans[cur][:room]
-	}
-	span := func(from int) int {
-		used := 0
-		for i := from; i <= cur; i++ {
-			used += len(block[i])
-		}
-		return used
-	}
-	start := 0
-	for start < cur && span(start) > room {
-		start++
-	}
-	used, shown := 0, 0
-	for i := start; i < len(rows) && used+len(block[i]) <= room; i++ {
-		for j, l := range block[i] {
-			lines, at, spans = append(lines, l), append(at, i), append(spans, blockSpans[i][j])
-		}
-		used, shown = used+len(block[i]), shown+1
-	}
-	if more := len(rows) - shown; more > 0 {
-		lines, at, spans = append(lines, padRow(sidebar.HintRow("  +"+strconv.Itoa(more)+" more", w), w)), append(at, -1), append(spans, nil)
-	}
-	return append(lines, padRow("", w)), append(at, -1), append(spans, nil)
-}
-
-// labelWidth is the rows' label column: the longest label, cut at 20, or wider until no two labels cut alike
-// (hiding which worker an answer goes to), and at 2/5 of the pane.
-func labelWidth(rows []needRow, w int) int {
-	labelW := 0
-	for _, r := range rows {
-		labelW = max(labelW, ansi.StringWidth(r.label))
-	}
-	limit, capW := min(labelW, max(4, w*2/5)), 20
-	for capW < limit && cutsAlike(rows, capW) {
-		capW++
-	}
-	return min(limit, capW)
-}
-
-// cutsAlike says two different labels read the same cut at w.
-func cutsAlike(rows []needRow, w int) bool {
-	cuts := map[string]string{}
-	for _, r := range rows {
-		cut := ansi.Truncate(r.label, w, "…")
-		if full, ok := cuts[cut]; ok && full != r.label {
-			return true
-		}
-		cuts[cut] = r.label
-	}
-	return false
-}
-
-// minBlockRows is the fewest rows above the bottom row NEEDS YOU shows in.
-const minBlockRows = 6
-
-// needLines are row r's lines, w columns: its mark (● dialog, ? question or list ask, ☐ list item, ⚠ list not read), its
-// label padded to labelW, its text (wrapped when selected, else cut), then a stale list's age at the right edge, then its options numbered when 1-9 answer
-// them (★ on the recommended one; m to reply to a question; a selected row's go one per line, wrapped, when they
-// don't fit one); the selected row on the selection band.
-func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []string, spans [][]optSpan) {
-	mark := "☐"
-	switch r.Kind {
-	case sidebar.NeedDialog:
-		mark = sidebar.Red + "●" + reset
-	case sidebar.NeedAsk, sidebar.NeedListAsk:
-		mark = sidebar.Gold + bold + "?" + reset
-	case sidebar.NeedUnread:
-		mark = sidebar.Gold + "⚠" + reset
-	}
-	label := ansi.Truncate(r.label, labelW, "…")
-	pre := " " + mark + " " + sidebar.Muted + label + reset + strings.Repeat(" ", labelW-ansi.StringWidth(label)+2)
-	in := 3 + labelW + 2
-	room, age := max(1, w-in-1), r.Age(m.clk.Now())
-	if age != "" && room-len(age)-1 >= sidebar.MinTextAfterAge {
-		room -= len(age) + 1
-	} else {
-		age = ""
-	}
-	text := strings.Join(strings.Fields(r.Text), " ")
-	if selected {
-		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
-		lines = []string{pre + parts[0]}
-		for _, p := range parts[1:] {
-			lines = append(lines, strings.Repeat(" ", in)+p)
-		}
-	} else {
-		lines = []string{pre + ansi.Truncate(text, room, "…")}
-	}
-	spans = make([][]optSpan, len(lines))
-	if age != "" {
-		// Right-aligned on the first line, past the text's room
-		lines[0] += strings.Repeat(" ", max(1, in+room+1-ansi.StringWidth(lines[0]))) + r.Tone().Colour() + age + reset
-	}
-	if len(r.Options) > 0 {
-		answers := m.answerable(r)
-		opts := make([]string, len(r.Options))
-		for i, o := range r.Options {
-			num := sidebar.Muted + "·" + reset
-			if answers {
-				num = sidebar.Green + strconv.Itoa(i+1) + reset
-			}
-			label, rec := todo.Label(o)
-			if rec {
-				label = sidebar.Gold + "★ " + reset + label
-			}
-			opts[i] = num + " " + label
-		}
-		if r.Kind == sidebar.NeedAsk && answers {
-			opts = append(opts, sidebar.Green+"m"+reset+rule+" reply"+reset)
-		}
-		line := "     " + strings.Join(opts, "   ")
-		if selected && ansi.StringWidth(line) >= w {
-			for i, o := range opts {
-				indent := "     "
-				for _, p := range strings.Split(ansi.Wrap(o, max(1, w-8), ""), "\n") {
-					lines = append(lines, indent+p)
-					var sp []optSpan
-					if i < min(len(r.Options), 9) {
-						sp = []optSpan{{5, w, i}}
-					}
-					spans = append(spans, sp)
-					indent = "       "
-				}
-			}
-		} else {
-			lines = append(lines, line)
-			var row []optSpan
-			x := 5
-			for i, o := range opts[:min(len(r.Options), 9)] {
-				ow := ansi.StringWidth(o)
-				// The column cut off by padRow shows an ellipsis, not the option
-				if end := x + ow; end <= w {
-					row = append(row, optSpan{x, end, i})
-				} else if x < w-1 {
-					row = append(row, optSpan{x, w - 1, i})
-				}
-				x += ow + 3
-			}
-			spans = append(spans, row)
-		}
-		if !answers {
-			clear(spans)
-		}
-	}
-	for i, l := range lines {
-		l = padRow(l, w)
-		if selected {
-			l = sidebar.SelectedBG + strings.ReplaceAll(l, reset, reset+sidebar.SelectedBG) + reset
-		}
-		lines[i] = l
-	}
-	return lines, spans
 }

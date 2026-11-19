@@ -38,7 +38,7 @@ type NeedList struct {
 	Items   []NeedItem `json:"items"`
 	Updated int64      `json:"updated"` // the list's last change, unix seconds
 	Stale   bool       `json:"stale"`   // unchanged for long: its items may be out of date
-	Closed  bool       `json:"closed"`  // its boss session is gone: a manager's NEEDS YOU shows it
+	Closed  bool       `json:"closed"`  // its boss session is gone: a manager's TO DO shows it
 }
 
 // Manager is the session of the manager over the bosses (inbox.Manager).
@@ -53,7 +53,15 @@ type NeedItem struct {
 	Options []string `json:"options"`
 	Added   int64    `json:"added"` // when it was added or last replaced, unix seconds; 0 for an older dev's
 	Check   *Check   `json:"check"` // why it may be out of date
+	Until   int64    `json:"until"` // when it ticks by itself, unix seconds; 0 for never
+	// Status and StatusOn are its status (Statuses) and the worker or person it names; none when ticked, or on
+	// someone whose workers weren't read
+	Status   string `json:"status"`
+	StatusOn string `json:"status_on"`
 }
+
+// Own reports an open item that is the user's: one with a status that names no one.
+func (it NeedItem) Own() bool { return it.Status != "" && it.StatusOn == "" }
 
 // NeedCounts are the lists' counts for the roll-ups (Subtree), by boss.
 func NeedCounts(needs []NeedList) map[string]ListCount {
@@ -61,14 +69,14 @@ func NeedCounts(needs []NeedList) map[string]ListCount {
 	for _, l := range needs {
 		c := ListCount{Unread: l.Error != "", Closed: l.Closed}
 		for _, it := range l.Items {
-			c.Add(it.Done, it.On, len(it.Options))
+			c.Add(it.Done, it.Status)
 		}
 		out[l.Boss] = c
 	}
 	return out
 }
 
-// NeedKind is what a NEEDS YOU row waits on, in the order rows sort.
+// NeedKind is what a TO DO row is, in the order rows sort within a status.
 type NeedKind int
 
 const (
@@ -76,11 +84,12 @@ const (
 	NeedAsk                     // a turn that ended on a question (an asks note)
 	NeedListAsk                 // a list item with options
 	NeedPlain                   // a list item without options
+	NeedOn                      // a list item on a worker or a person
 	NeedUnread                  // a list that wasn't read: Text says why
 )
 
-// NeedRow is one row of NEEDS YOU: a session waiting on a dialog or on its turn's question, a list item waiting
-// on the user, or a list not read.
+// NeedRow is one row of TO DO: a session waiting on a dialog or on its turn's question, an open list item, or a list
+// not read.
 type NeedRow struct {
 	Kind    NeedKind
 	Project string   // the session's or the list owner's project
@@ -93,7 +102,50 @@ type NeedRow struct {
 	Updated int64    // a stale list's item's last change (its list's, for an older dev's item), unix seconds; 0 for the others
 	Check   *Check   // why the list item may be out of date
 	Closed  bool     // the list's boss session is closed: its row can't be answered or gone to, only ticked
+	Until   int64    // when the list item ticks by itself, unix seconds; 0 for never
+	On      string   // whom the list item is on, as filed
+	// Status is the list item's (Statuses), none for a session's; StatusOn the worker or person it names
+	Status   string
+	StatusOn string
 }
+
+// Tally is what TO DO's rows count, as its header, the sidebar's and the roll lines (Rollup) say it: the sessions
+// that need the user, the asks to decide, the user's own plain items.
+type Tally struct{ NeedYou, Decide, ToDo int }
+
+// Count tallies rows.
+func Count(rows []NeedRow) Tally {
+	var t Tally
+	for _, r := range rows {
+		switch {
+		case r.Kind == NeedDialog || r.Kind == NeedAsk:
+			t.NeedYou++
+		case r.Status == StatusDecide:
+			t.Decide++
+		case r.Status == StatusYours:
+			t.ToDo++
+		}
+	}
+	return t
+}
+
+// Group is the row's index in Groups: -1 for a session's (Needs you, first), In progress for an item on someone with
+// no status (its workers weren't read), len(Groups) for a list not read, after them.
+func (r NeedRow) Group() int {
+	switch g := GroupOf(r.Status); {
+	case r.Kind == NeedDialog || r.Kind == NeedAsk:
+		return -1
+	case r.Kind == NeedUnread:
+		return len(Groups)
+	case g < 0:
+		return GroupOf(StatusWorking)
+	default:
+		return g
+	}
+}
+
+// Yours reports a row the user acts on: a session's, a list not read, or an item of the user's own (NeedItem.Own).
+func (r NeedRow) Yours() bool { return r.Kind != NeedOn }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.
 func (r NeedRow) ClosedHint() string {
@@ -233,10 +285,11 @@ func (m Model) readNeeds(chain bool) tea.Cmd {
 // needBoard is the sidebar's row standing for the boards' rows: ⏎ goes to the first board with any.
 const needBoard = NeedUnread + 1
 
-// needRows are the lines of NEEDS YOU: with a boss on the server, a row for what its boards show (Boards), then what
-// no board shows (a session under no boss, a list whose boss is gone); else every row.
+// needRows are the lines of the sidebar's TO DO, the rows the user acts on (Yours): with a boss on the server, a row
+// for what its boards show (Boards), then what no board shows (a session under no boss, a list whose boss is gone);
+// else every row.
 func (m Model) needRows() []NeedRow {
-	all := NeedRows(m.snap.sessions, m.needs, "")
+	all := m.yourRows("")
 	boards := Boards(m.snap.sessions)
 	if len(boards) == 0 {
 		return all
@@ -244,7 +297,7 @@ func (m Model) needRows() []NeedRow {
 	shown := map[string]bool{}
 	board := NeedRow{Kind: needBoard}
 	for _, b := range boards {
-		rows := NeedRows(m.snap.sessions, m.needs, b)
+		rows := m.yourRows(b)
 		if len(rows) > 0 && board.Session == "" {
 			board.Session = b
 		}
@@ -261,16 +314,28 @@ func (m Model) needRows() []NeedRow {
 	return append(out, slices.DeleteFunc(all, func(r NeedRow) bool { return shown[r.key()] })...)
 }
 
-// needCount is how many rows NEEDS YOU stands for: the boards' each.
-func needCount(rows []NeedRow) int {
-	n := len(rows)
-	if len(rows) > 0 && rows[0].Kind == needBoard {
-		n += rows[0].ID - 1
-	}
-	return n
+// yourRows are NeedRows under root the user acts on (Yours).
+func (m Model) yourRows(root string) []NeedRow {
+	return slices.DeleteFunc(NeedRows(m.snap.sessions, m.needs, root), func(r NeedRow) bool { return !r.Yours() })
 }
 
-// gotoBoard leaves NEEDS YOU for board's NEEDS YOU.
+// needCounts is the sidebar's TO DO header after its title: what its rows and the boards' count, as the roll lines say
+// it, "N need you" and "N decide" red, "N to do" muted; "" for none.
+func (m Model) needCounts() string {
+	t := Count(m.yourRows(""))
+	var parts []string
+	add := func(n int, colour, word string) {
+		if n > 0 {
+			parts = append(parts, colour+fmt.Sprintf("%d %s", n, word)+reset)
+		}
+	}
+	add(t.NeedYou, red, NeedYouWord)
+	add(t.Decide, red, DecideWord)
+	add(t.ToDo, muted, ToDoWord)
+	return strings.Join(parts, muted+" · "+reset)
+}
+
+// gotoBoard leaves TO DO for board's TO DO.
 func (m Model) gotoBoard(board string) (tea.Model, tea.Cmd) {
 	c, client := m.c, m.client()
 	from := Origin{Session: m.snap.current, Pane: m.pane}
@@ -278,7 +343,7 @@ func (m Model) gotoBoard(board string) (tea.Model, tea.Cmd) {
 	return m, runAction(c, client, func() error { return focusBoard(c, client, board, from) })
 }
 
-// focusBoard switches client to board's session and focuses its previews pane, asking it to focus NEEDS YOU
+// focusBoard switches client to board's session and focuses its previews pane, asking it to focus TO DO
 // (OptNeedsFocus).
 func focusBoard(c *tmux.Client, client, board string, from Origin) error {
 	out, err := c.Run("list-panes", "-s", "-t", tmux.SessionTarget(board), "-F", "#{pane_id}\t#{"+OptBossPane+"}")
@@ -304,10 +369,10 @@ func focusBoard(c *tmux.Client, client, board string, from Origin) error {
 	return err
 }
 
-// NeedRows are the rows of NEEDS YOU from sessions in Order and the bosses' lists, sorted by kind (NeedKind), in
-// sessions' and lists' order within one: each session waiting on a dialog or on the question its turn ended on,
-// each open item on no one, each list not read. root scopes them to its board: the sessions under it (its own
-// question is on its screen) and its and their lists; "" takes them all.
+// NeedRows are the rows of TO DO from sessions in Order and the bosses' lists, sorted by group (Group), status
+// (Statuses) and kind (NeedKind), in sessions' and lists' order within one: each session waiting on a dialog or on
+// the question its turn ended on, each open item, each list not read. root scopes them to its board: the sessions
+// under it (its own question is on its screen) and its and their lists; "" takes them all.
 func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 	scope, owners := sessions, map[string]bool{}
 	if root != "" {
@@ -359,24 +424,31 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 			rows = append(rows, row)
 		}
 		for _, it := range l.Items {
-			if it.Done || it.On != "" {
+			if it.Done {
 				continue
 			}
 			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
+			row.Until, row.On, row.Status, row.StatusOn = it.Until, it.On, it.Status, it.StatusOn
 			if l.Stale {
 				row.Updated = cmp.Or(it.Added, l.Updated)
 			}
-			if len(it.Options) > 0 {
+			switch {
+			case !it.Own():
+				row.Kind = NeedOn
+			case len(it.Options) > 0:
 				row.Kind = NeedListAsk
 			}
 			rows = append(rows, row)
 		}
 	}
-	slices.SortStableFunc(rows, func(a, b NeedRow) int { return cmp.Compare(a.Kind, b.Kind) })
+	slices.SortStableFunc(rows, func(a, b NeedRow) int {
+		return cmp.Or(cmp.Compare(a.Group(), b.Group()), cmp.Compare(slices.Index(Statuses, a.Status), slices.Index(Statuses, b.Status)),
+			cmp.Compare(a.Kind, b.Kind))
+	})
 	return rows
 }
 
-// Boards are the bosses whose boards show NEEDS YOU for the sessions under them: a manager, and each top-level boss
+// Boards are the bosses whose boards show TO DO for the sessions under them: a manager, and each top-level boss
 // (Depth 0) in no manager's group.
 func Boards(sessions []Session) []string {
 	var out []string
@@ -515,7 +587,7 @@ func (m Model) enterNeeds() Model {
 	if rows := m.needRows(); len(rows) > 0 && m.snap.height >= needsMinHeight {
 		m.needMode, m.needOpen, m.needIdx, m.needKey = true, false, 0, rows[0].key()
 	} else {
-		showMessage(m.c, m.client(), "Nothing needs you")
+		showMessage(m.c, m.client(), "Nothing to do")
 	}
 	return m
 }
@@ -541,20 +613,19 @@ func (m Model) renderNeeds(w, h int) ([]string, []needHit) {
 	if len(rows) == 0 || h < needsMinHeight {
 		return nil, nil
 	}
-	if len(rows) == 1 && rows[0].Kind == needBoard {
-		// All on the boards: one line pointing there
-		line := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", rows[0].ID) + reset
-		if m.needsErr != nil {
-			line += muted + " (stale)" + reset
-		}
-		line = truncate(line+faint+"  → board"+reset, w)
-		return []string{cardLine(line, ansi.StringWidth(line), w, m.needMode), ""}, []needHit{{line: 0}}
+	head := " " + bold + "TO DO" + reset
+	if counts := m.needCounts(); counts != "" {
+		head += "  " + counts
 	}
-	head := " " + red + bold + fmt.Sprintf("NEEDS YOU %d", needCount(rows)) + reset
 	if m.needsErr != nil {
 		head += muted + " (stale)" + reset
 	}
-	if m.snap.focused && !m.needMode {
+	if len(rows) == 1 && rows[0].Kind == needBoard {
+		// All on the boards: one line pointing there
+		line := truncate(head+faint+"  → board"+reset, w)
+		return []string{cardLine(line, ansi.StringWidth(line), w, m.needMode), ""}, []needHit{{line: 0}}
+	}
+	if m.snap.focused && !m.needMode && ansi.StringWidth(head)+4 <= w {
 		// The key in, where the bottom row's hint has no room for it
 		head += faint + " · n" + reset
 	}

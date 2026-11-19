@@ -95,7 +95,7 @@ type Model struct {
 
 	winWidth, winHeight int // Bubble Tea's window size: where an error shows before the first snapshot
 
-	// NEEDS YOU: every boss's open list items (dev todo --all), read apart from the tick; nil funcs mean none
+	// TO DO: every boss's open list items (dev todo --all), read apart from the tick; nil funcs mean none
 	needs       []NeedList
 	needsErr    error
 	needsLoad   func() ([]NeedList, error)

@@ -43,7 +43,7 @@ func board4() Model {
 
 // Each section under its header with its count; the working card selected and open with its title, what its
 // call does, branch, cost and context, PR, last words and screen; an idle card folded to one row, and one whose
-// question NEEDS YOU asks.
+// question TO DO asks.
 func TestBoardLayout(t *testing.T) {
 	want := []string{
 		" ASKING 1 ────────────────────────────────────────────────────────────",
@@ -177,7 +177,7 @@ func TestFold(t *testing.T) {
 		t.Errorf("click on old-spike's arrow: folded %v, box %q", m.snap.tiles[3].folded(m.folds), m.box.session)
 	}
 	if !m.snap.tiles[0].folded(m.folds) {
-		t.Error("a deciding card open: NEEDS YOU asks its question")
+		t.Error("a deciding card open: TO DO asks its question")
 	}
 	for m.selected != "fix-login" {
 		m = press(m, "k")
@@ -863,10 +863,6 @@ func TestBoardPlannedWait(t *testing.T) {
 	}
 	if strings.Contains(board, "WORKING") || strings.Contains(board, "Run the desktop tests") {
 		t.Errorf("a planned wait still shows working:\n%s", board)
-	}
-	row := todoItem(m.snap.todo.Items[1], m.todoOwner(m.snap.todo.Items[1]), 90, time.Now())
-	if got := strings.TrimSpace(ansi.Strip(row)); !strings.HasSuffix(got, "● docs-api · waiting until "+at) || !strings.Contains(row, sidebar.Green+"waiting until "+at) {
-		t.Errorf("to do row = %q", row)
 	}
 	m.folds = map[string]bool{"docs-api": true}
 	for i := range m.snap.tiles {

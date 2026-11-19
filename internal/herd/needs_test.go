@@ -91,7 +91,7 @@ func keys(m Model, ks ...string) (Model, tea.Cmd) {
 }
 
 // The manager's block lists every descendant's dialog, then turn-ending questions, then list asks, then plain
-// items (its own list's first, as "to do"), each labelled "project › who", with the options its keys send.
+// items (its own list's first, as "manager"), each labelled "project › who", with the options its keys send.
 func TestNeedsRows(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
@@ -109,7 +109,7 @@ func TestNeedsRows(t *testing.T) {
 		{sidebar.NeedDialog, "noc › triage", "allow Bash: rm -rf build", []string{"Yes", "No"}},
 		{sidebar.NeedAsk, "dev", vpnAskPlain, []string{"Done", "Skip"}},
 		{sidebar.NeedListAsk, "noc", "Release now?", []string{"Now", "Later"}},
-		{sidebar.NeedPlain, "to do", "Call Vince", nil},
+		{sidebar.NeedPlain, "manager", "Call Vince", nil},
 		{sidebar.NeedPlain, "noc", "DM David", nil},
 	}; !slices.EqualFunc(got, w, func(a, b want) bool {
 		return a.kind == b.kind && a.label == b.label && a.text == b.text && slices.Equal(a.options, b.options)
@@ -125,7 +125,7 @@ func TestNeedsRows(t *testing.T) {
 
 const vpnAskPlain = "Reply Done once it's connected, or Skip to leave the lw check for later."
 
-// A long worker's label ends in … at 20 columns, the text after it.
+// A long worker's label ends in … at a fifth of the pane (16 columns at 80), the text after it.
 func TestNeedsLabelCap(t *testing.T) {
 	m := needsBoard(t, new([]listAnswer))
 	i := slices.IndexFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == "noc-triage" })
@@ -133,12 +133,12 @@ func TestNeedsLabelCap(t *testing.T) {
 		t.Fatal("no noc-triage")
 	}
 	m.snap.all[i].Name = "noc-triage-for-the-weekly-report"
-	if got, want := strings.TrimRight(plain(m.render())[2], " "), " ● noc › triage-for-th…  Bash: echo hi"; got != want {
-		t.Errorf("line 2 = %q, want %q", got, want)
+	if got, want := strings.TrimRight(plain(m.render())[3], " "), " ● noc › triage-fo…  Bash: echo hi"; got != want {
+		t.Errorf("line 3 = %q, want %q", got, want)
 	}
 }
 
-// Labels that cut alike at 20 widen the column only until they read apart, up to 2/5 of the pane.
+// Labels that cut alike widen the column (12 at 60 columns, 20 from 100) only until they read apart, up to 2/5 of the pane.
 func TestNeedsLabelCollision(t *testing.T) {
 	rows := []needRow{{label: "kite › billing-export-us"}, {label: "kite › billing-export-eu"}, {label: "noc"}}
 	if got := labelWidth(rows, 60); got != 24 {
@@ -151,11 +151,14 @@ func TestNeedsLabelCollision(t *testing.T) {
 	if got := labelWidth(rows, 50); got != 20 {
 		t.Errorf("narrow pane = %d, want 20", got)
 	}
-	if got := labelWidth(rows[1:], 60); got != 20 {
-		t.Errorf("one long = %d, want 20", got)
+	if got := labelWidth(rows[1:], 60); got != 12 {
+		t.Errorf("one long = %d, want 12", got)
 	}
-	if got := labelWidth([]needRow{rows[0], rows[0]}, 60); got != 20 {
-		t.Errorf("same label twice = %d, want 20", got)
+	if got := labelWidth([]needRow{rows[0], rows[0]}, 60); got != 12 {
+		t.Errorf("same label twice = %d, want 12", got)
+	}
+	if got := labelWidth(rows[1:], 130); got != 20 {
+		t.Errorf("one long, wide = %d, want 20", got)
 	}
 }
 
@@ -187,20 +190,21 @@ func TestNeedsBossBoard(t *testing.T) {
 	for _, r := range m.needRows() {
 		got = append(got, r.label+": "+r.Text)
 	}
-	if want := []string{"noc-triage: Bash: echo hi", "to do: Release now?"}; !slices.Equal(got, want) {
+	if want := []string{"noc-triage: Bash: echo hi", "boss: Release now?"}; !slices.Equal(got, want) {
 		t.Errorf("rows %q, want %q", got, want)
 	}
 }
 
-// The block sits above the cards: header, a row per item with its options under it; its cards fold to a row
-// pointing at it; n focuses it, wrapping the selected row's text.
+// The block sits above the cards: header (whose, the split count), the groups, a row per item with its options under
+// it; its cards fold to a row pointing at it; n focuses it, wrapping the selected row's text.
 func TestNeedsRender(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
 	lines := plain(m.render())
 	for i, want := range []string{
-		" NEEDS YOU 5 · n",
+		" TO DO · all bosses   2 need you · 1 to decide · 2 yours · n",
 		"",
+		" Needs you  2",
 		" ● noc › triage  allow Bash: rm -rf build",
 		"     1 Yes   2 No",
 		" ? dev           Reply Done once it's connected, or Skip to leave the lw check…",
@@ -210,8 +214,8 @@ func TestNeedsRender(t *testing.T) {
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc           Release now?", "     1 Now   2 Later", " ☐ to do         Call Vince",
-		"noc-triage  via boss-noc  Bash prompt · in the block ↑", "n needs"} {
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc           Release now?", "     1 Now   2 Later", " ☐ manager       Call Vince",
+		" To decide  1", " Yours  2", "noc-triage  via boss-noc  Bash prompt · in the block ↑", "n to do"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
 		}
@@ -223,10 +227,11 @@ func TestNeedsRender(t *testing.T) {
 	}
 	m, _ = keys(m, "n", "j")
 	lines = plain(m.render())
-	if !strings.HasPrefix(lines[0], " NEEDS YOU 5 ") || strings.Contains(lines[0], "· n") || !strings.HasSuffix(strings.TrimSpace(lines[5]), "for later.") {
+	if !strings.HasPrefix(lines[0], " TO DO · all bosses ") || strings.Contains(lines[0], "· n") || !strings.HasSuffix(strings.TrimSpace(lines[6]), "for later.") ||
+		!strings.Contains(lines[8], "Reply   Go to session") {
 		t.Errorf("focused, ask selected:\n%s", strings.Join(lines[:8], "\n"))
 	}
-	if hint := lines[len(lines)-1]; !strings.Contains(hint, "1-9 answer  m reply  g/⏎ go  esc cards") {
+	if hint := lines[len(lines)-1]; !strings.Contains(hint, "1-9 answer  m reply  g/⏎ go  t fold to do  esc cards") {
 		t.Errorf("hint = %q", hint)
 	}
 }
@@ -635,7 +640,7 @@ func TestNeedsKeepsDraftAndClickLeaves(t *testing.T) {
 	}
 	m, _ = keys(m, "n")
 	lines := plain(m.render())
-	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "boss-dev  needs you") })
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "boss-dev  1 need you") })
 	next, _ = m.Update(tea.MouseMsg{X: 20, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if m = next.(Model); m.needMode || m.selected != "boss-dev" {
 		t.Errorf("click on a card: mode %v selected %q", m.needMode, m.selected)
@@ -750,6 +755,7 @@ func TestNeedsLongOptions(t *testing.T) {
 	m := needsBoard(t, &answered)
 	long := []string{"★ Keep the grouping, add the items under their boss", "Plain items also move the boss to NEEDS YOU and the sidebar", "Drop it"}
 	m.snap.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Release now?", Options: long}}}}}
+	m.snap.rollUp()
 	m = selectKind(t, m, sidebar.NeedListAsk)
 	all := strings.Join(plain(m.render()), "\n")
 	for _, o := range long {
@@ -924,12 +930,14 @@ func TestNeedsClickTruncatedOptions(t *testing.T) {
 	}
 }
 
-// A closed boss's list on the manager's board: its rows labelled by project, boss closed in red at the right edge.
+// A closed boss's list on the manager's board: its rows labelled by project, under Boss closed, its word muted at
+// the right edge; an expanded row offers Tick and says how to reopen the boss.
 func TestNeedsClosedBoss(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
 	m.snap.asks = append(slices.Clone(managerAsks), todo.BossList{Boss: "boss-kite", Closed: true, List: todo.List{Items: []todo.Shown{
 		{ID: 3, Text: "Ask Mara for the API key", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}}}}})
+	m.snap.rollUp()
 	var row needRow
 	for _, r := range m.needRows() {
 		if r.Boss == "boss-kite" {
@@ -940,9 +948,14 @@ func TestNeedsClosedBoss(t *testing.T) {
 		t.Fatalf("closed boss's row = %+v, want label kite", row)
 	}
 	lines, _ := m.needLines(row, 12, 80, false)
-	if !strings.Contains(lines[0], sidebar.Red+"boss closed") {
-		t.Errorf("line %q, want boss closed in red", lines[0])
+	if !strings.Contains(lines[0], sidebar.Muted+"boss closed") || row.Group() != sidebar.GroupOf(sidebar.StatusBossClosed) {
+		t.Errorf("line %q, want boss closed muted, in its group", lines[0])
 	}
+	m.needMode = true
+	if lines, _ := m.needLines(row, 12, 80, true); !strings.Contains(ansi.Strip(lines[len(lines)-1]), "Tick      boss-kite is closed: dev boss kite reopens it") {
+		t.Errorf("expanded: %q", plain(lines))
+	}
+	m.needMode = false
 	// Its keys say how to reopen it, none acts but d, which ticks it by its file
 	m.needMode, m.needIdx, m.needKey = true, slices.IndexFunc(m.needRows(), func(r needRow) bool { return r.Boss == "boss-kite" }), row.sig
 	for _, k := range []string{"g", "enter", "1", "m"} {

@@ -572,7 +572,7 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 			return fmt.Errorf("no open item %d", id)
 		case f.Items[i].Text != text:
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, f.Items[i].Text, text)
-		case f.Items[i].On != "":
+		case !Own(f.Items[i].On, f.Items[i].Session, s.boss):
 			return fmt.Errorf("item %d is on %s, not the user's to tick", id, f.Items[i].On)
 		case len(f.Items[i].Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
@@ -641,7 +641,7 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, question)
 		case p.Done != 0:
 			return fmt.Errorf("item %d is answered already: %s", id, p.Answer)
-		case p.On != "":
+		case !Own(p.On, p.Session, s.boss):
 			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
 		case len(p.Options) == 0:
 			return fmt.Errorf("item %d is no question (dev todo ask): tick it with dev todo done", id)
