@@ -1,0 +1,33 @@
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Merge
+
+│ dev #7: Merge the ask-shape text PR now? Text only, CI green.
+│
+│ - Link: https://github.com/ppf/dev/pull/203
+│ - Code part (context field, caps) comes in a later PR
+
+❯ 1. Merge now (Recommended)
+     ~1 min; ships with the next release
+  2. Wait for code part
+     ~2 days; one release for both
+  3. Close it
+     drop the text change
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+

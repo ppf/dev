@@ -113,6 +113,24 @@ func TestQuestionAsk(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.328 draws a multi-line question with a │ gutter on each line (the golden, captured on a throwaway
+// tmux server); the manager's layout puts its own lines under the item's.
+func TestQuestionShowsLines(t *testing.T) {
+	screen, err := os.ReadFile("testdata/claude-ask-lines.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := Question{Tool: AskUserQuestion, Questions: []Ask{{Question: "dev #7: Merge the ask-shape text PR now? Text only, CI green.\n\n" +
+		"- Link: https://github.com/ppf/dev/pull/203\n- Code part (context field, caps) comes in a later PR"}}}
+	if !q.Shows(string(screen)) {
+		t.Error("multi-line question not shown on its dialog")
+	}
+	q.Questions[0].Question = "dev #7: Merge the ask-shape text PR now?\n\n- Link: https://github.com/ppf/dev/pull/204"
+	if q.Shows(string(screen)) {
+		t.Error("another multi-line question shown")
+	}
+}
+
 // The user's pick reads from AskUserQuestion's PostToolUse (the golden), each question with its answer; a dialog
 // dismissed (no answers) or another tool or event is none.
 func TestHookPick(t *testing.T) {

@@ -166,9 +166,9 @@ func (q Question) Shows(screen string) bool {
 // maxNeedle bounds how much of a question or command must show: a long one may be cut on screen.
 const maxNeedle = 200
 
-// squeeze drops s's whitespace.
+// squeeze drops s's whitespace and the │ gutter Claude Code draws before each line of a multi-line question.
 func squeeze(s string) string {
-	return strings.Join(strings.Fields(s), "")
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "│", " ")), "")
 }
 
 func cut(s string) string {
