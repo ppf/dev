@@ -208,8 +208,8 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
-// user's item, s start it (dev todo start), g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc or n back to the cards,
-// t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
+// user's item, s start it (dev todo start), g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc
+// or n back to the cards, t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if len(rows) == 0 {

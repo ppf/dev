@@ -371,16 +371,16 @@ func TestBlockStart(t *testing.T) {
 		t.Errorf("started %v, want %s #%d", started, rows[i].Boss, rows[i].ID)
 	}
 
-	now := time.Now()
+	now := m.clk.Now()
 	for _, tt := range []struct {
 		late bool
 		want string
-	}{{false, "sent to manager · 2m"}, {true, "start not picked up"}} {
+	}{{false, "sent to boss-noc · 2m"}, {true, "start not picked up"}} {
 		m := blockBoard(t)
-		for j, it := range m.snap.todo.Items {
+		for j, it := range m.snap.asks[0].Items {
 			if it.Text == "DM David" {
-				m.snap.todo.Items[j].Started = &todo.Started{At: now.Add(-2 * time.Minute).Unix(), To: "manager"}
-				m.snap.todo.Items[j].StartLate = tt.late
+				m.snap.asks[0].Items[j].Started = &todo.Started{At: now.Add(-2 * time.Minute).Unix(), To: "boss-noc"}
+				m.snap.asks[0].Items[j].StartLate = tt.late
 			}
 		}
 		m.snap.rollUp()
@@ -397,12 +397,13 @@ func TestBlockStart(t *testing.T) {
 			m, _ = keys(m, "j")
 		}
 		all := strings.Join(plain(m.render()), "\n")
-		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "Tick      d tick") || strings.Contains(all, "Start   Tick") {
-			t.Errorf("late %v: want Starting, %q and Tick alone:\n%s", tt.late, tt.want, all)
+		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "Tick   Go to boss      d tick") {
+			t.Errorf("late %v: want Starting, %q and no Start:\n%s", tt.late, tt.want, all)
 		}
 	}
 
 	closed := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
+	m.snap.all = slices.DeleteFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
 	if acts, _ := m.actions(rows[closed]); len(acts) != 1 || acts[0].key != "d" {
 		t.Errorf("closed boss, no manager: %v, want Tick alone", acts)
 	}
