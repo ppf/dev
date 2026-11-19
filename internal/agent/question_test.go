@@ -129,6 +129,10 @@ func TestQuestionShowsLines(t *testing.T) {
 	if q.Shows(string(screen)) {
 		t.Error("another multi-line question shown")
 	}
+	// Only a line's leading gutter goes: a │ in a permission's file name stays
+	if q := (Question{Tool: "Write", File: "/tmp/report│draft.txt"}); q.Shows("Do you want to create reportdraft.txt?") {
+		t.Error("permission for report│draft.txt shown for reportdraft.txt")
+	}
 }
 
 // The user's pick reads from AskUserQuestion's PostToolUse (the golden), each question with its answer; a dialog

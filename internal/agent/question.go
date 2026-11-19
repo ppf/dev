@@ -149,7 +149,7 @@ func (q Question) Shows(screen string) bool {
 	var s string
 	switch {
 	case q.Tool == AskUserQuestion && len(q.Questions) > 0:
-		s = q.Questions[0].Question
+		s, screen = q.Questions[0].Question, dropGutter(screen)
 	case q.File != "":
 		s = filepath.Base(q.File)
 	default:
@@ -166,9 +166,20 @@ func (q Question) Shows(screen string) bool {
 // maxNeedle bounds how much of a question or command must show: a long one may be cut on screen.
 const maxNeedle = 200
 
-// squeeze drops s's whitespace and the │ gutter Claude Code draws before each line of a multi-line question.
+// squeeze drops s's whitespace.
 func squeeze(s string) string {
-	return strings.Join(strings.Fields(strings.ReplaceAll(s, "│", " ")), "")
+	return strings.Join(strings.Fields(s), "")
+}
+
+// dropGutter drops the │ Claude Code draws before each line of a multi-line question.
+func dropGutter(screen string) string {
+	lines := strings.Split(screen, "\n")
+	for i, l := range lines {
+		if t := strings.TrimLeft(l, " "); strings.HasPrefix(t, "│") {
+			lines[i] = strings.TrimPrefix(t, "│")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func cut(s string) string {
