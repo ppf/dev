@@ -1,0 +1,64 @@
+{
+  "generated": 1700000000,
+  "version": "v0.0.0-golden",
+  "statuses": [
+    "decide",
+    "yours",
+    "working",
+    "blocked",
+    "waiting",
+    "idle",
+    "gone",
+    "check",
+    "boss closed"
+  ],
+  "counts": {
+    "decide": 1,
+    "yours": 1
+  },
+  "lists": [
+    {
+      "boss": "boss-a",
+      "items": [
+        {
+          "id": 1,
+          "text": "Merge #148 now or after the release?",
+          "done": false,
+          "options": [
+            "Merge now (Recommended)",
+            "After the release"
+          ],
+          "added": 1700000000,
+          "status": "decide"
+        },
+        {
+          "id": 2,
+          "text": "Read the plan",
+          "link": "https://example.com/plan",
+          "done": false,
+          "until": 1700086400,
+          "added": 1700000000,
+          "status": "yours"
+        },
+        {
+          "id": 3,
+          "text": "Send the invoice",
+          "on": "alice",
+          "done": false,
+          "added": 1700000000,
+          "status": "waiting",
+          "status_on": "alice"
+        }
+      ],
+      "updated": 1700000000,
+      "stale": false
+    },
+    {
+      "boss": "boss-b",
+      "error": "list not read: todo $XDG_STATE_HOME/dev/todo/tmp_tmux-1_default-boss-b.json: unexpected end of JSON input",
+      "items": [],
+      "updated": 0,
+      "stale": true
+    }
+  ]
+}

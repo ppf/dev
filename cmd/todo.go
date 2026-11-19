@@ -514,9 +514,34 @@ type bossList struct {
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	now := time.Now()
-	all, err := todo.All(c, now, nil, true)
+	lists, err := todoAll(c, stderr, now, asJSON)
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		return printJSON(out, lists)
+	}
+	if len(lists) == 0 {
+		_, err := fmt.Fprintln(out, "no boss has a to do list")
+		return err
+	}
+	for _, bl := range lists {
+		if bl.Error != "" {
+			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
+		}
+		for _, it := range bl.Items {
+			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it, now))
+		}
+	}
+	return nil
+}
+
+// todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
+// board), else its gone marked.
+func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON bool) ([]bossList, error) {
+	all, err := todo.All(c, now, nil, true)
+	if err != nil {
+		return nil, err
 	}
 	lists := []bossList{}
 	for _, l := range all {
@@ -535,21 +560,8 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	}
 	if asJSON {
 		setStatuses(c, lists, stderr)
-		return printJSON(out, lists)
 	}
-	if len(lists) == 0 {
-		_, err := fmt.Fprintln(out, "no boss has a to do list")
-		return err
-	}
-	for _, bl := range lists {
-		if bl.Error != "" {
-			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
-		}
-		for _, it := range bl.Items {
-			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it, now))
-		}
-	}
-	return nil
+	return lists, nil
 }
 
 // waitsOnYou tells the boss above the list's boss (a boss under a boss) that item id waits on the user; a failure
