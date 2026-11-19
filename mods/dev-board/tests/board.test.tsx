@@ -2292,6 +2292,15 @@ test("a to do item on a worker on the board, linked or named, opens the worker's
   await ui.unmount()
 })
 
+test('an unlinked item whose name two workers share opens neither', async ($, on) => {
+  const workers = [worker({ id: 'local_1', name: 'fix', status: 'idle' }), worker({ id: 'local_2', name: 'fix', state: 'busy', status: 'working' })]
+  await start($, on, ok(workers), { todo: todoRan([{ id: 1, text: 'Login', on: 'fix', done: false, status: 'waiting', status_on: 'fix' }]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '◌ Login waiting · fix'])
+  expect(await ui.find({ key: 'todo:item1:owner' })).toBeFalsy()
+  await ui.unmount()
+})
+
 test('a ticked item on a worker shows ticked, with no live state', async ($, on) => {
   await start($, on, ok([worker({ name: 'companion-1000', state: 'busy', status: 'working' })]), { todo: todoRan([{ id: 1, text: 'Rework companion', on: 'companion-1000', done: true }]) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })

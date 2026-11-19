@@ -1082,7 +1082,8 @@ export const register: Register = on => {
       const state = (it.link !== undefined && linkStatesRead[it.link]?.state) || ''
       const prIcon = Object.hasOwn(PR_ICONS, state) ? PR_ICONS[state] : undefined
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
-      const worker = it.session !== undefined ? b.workers.find(w => w.id === it.session?.id) : it.status_on ? b.workers.find(w => label(w) === it.status_on) : undefined
+      const named = b.workers.filter(w => it.status_on !== undefined && label(w) === it.status_on)
+      const worker = it.session !== undefined ? b.workers.find(w => w.id === it.session?.id) : named.length === 1 ? named[0] : undefined
       const said = it.status ? [it.status, it.status_on].filter(Boolean).join(' · ') : it.on ? `on ${it.on}` : ''
       const saidText = (
         <Text size={SIZE.meta} color={it.status ? statusColor(it.status) : TONE.caution} wrap="truncate-end">
