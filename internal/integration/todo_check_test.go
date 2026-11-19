@@ -57,8 +57,14 @@ esac`, "gh")
 	out = dev([]string{"TMUX_PANE="}, "todo", "--all")
 	check(t, "--all after close", out, "boss-orbit\t2\t☐\tAsk Mara for the API key\t⚠ boss closed\n"+
 		"boss-orbit\t1\t◌\tPR #412 open, CI pending\ton reviewers\t"+url+"\t⚠ PR #412 approved 0m ago\n")
-	if out := dev([]string{"TMUX_PANE="}, "todo", "--all", "--json"); !strings.Contains(strings.Join(strings.Fields(out), ""), `"boss":"boss-orbit","closed":true`) {
+	out = strings.Join(strings.Fields(dev([]string{"TMUX_PANE="}, "todo", "--all", "--json")), "")
+	if !strings.Contains(out, `"boss":"boss-orbit","closed":true`) {
 		t.Errorf("❌ --all --json lacks the closed list:\n%s", out)
+	}
+	for _, want := range []string{`"text":"AskMarafortheAPIkey"`, `"status":"bossclosed"}`, `"status":"check","status_on":"reviewers"}`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("❌ --all --json lacks %s:\n%s", want, out)
+		}
 	}
 
 	// A closed boss's list is checked and ticked by --boss; nothing else takes it, nor a live session that is no boss
