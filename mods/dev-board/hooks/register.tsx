@@ -3,7 +3,7 @@ import type { EngineInterface, Register, SessionMessage } from 'claude-code'
 
 import type { Ask, Board, BossLine, Checks, Delivered, Fleet, FleetAgent, FleetItem, FleetThread, Picks, PR, Status, Step, Todo, TodoItem, Worker } from '../types'
 import { registerAsk } from './ask'
-import { answerArgv, cost, projectOf, readFleet } from './fleet'
+import { answerArgv, cost, projectOf, readFleet, startArgv } from './fleet'
 import { listenForReplies, registerReply, writeReply } from './reply'
 
 // The dev binary with `dev desktop board`: an absolute path when the app's PATH lacks it
@@ -871,6 +871,25 @@ export const register: Register = on => {
       await $.ui.toast(why === '' ? `answered ${projectOf(it.boss)}: ${option}` : `${projectOf(it.boss)} not answered: ${why}`)
       await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
     }
+    /** The person's click on Start: `dev todo start` with the item's text; its boss gets the start, or the manager for a closed boss's item; a refusal's sentence is the toast. */
+    const startAsk = async (it: FleetItem) => {
+      const key = `${it.boss}:${it.id}`
+      if (answeringAsk.has(key)) return
+      answeringAsk.add(key)
+      let why = ''
+      let said = ''
+      try {
+        const ran = await $.process.run(startArgv(DEV_BIN, it), { timeoutMs: 15_000 })
+        why = ran.exitCode === 0 ? '' : ran.stderr.trim() || `${DEV_BIN} todo start exited ${ran.exitCode}`
+        said = ran.stdout.trim()
+      } catch (err) {
+        why = errorText(err)
+      } finally {
+        answeringAsk.delete(key)
+      }
+      await $.ui.toast(why === '' ? `${projectOf(it.boss)}: ${said || `#${it.id} sent`}` : `${projectOf(it.boss)} not started: ${why}`)
+      await refreshFleet().catch((err: unknown) => $.ui.log(`dev-board: all-projects block not read: ${errorText(err)}`, { to: 'debug' }))
+    }
     const archive = async (w: Worker) => {
       if (!canArchive(w)) {
         await $.ui.toast(`${label(w)} not archived: ${w.state === 'busy' ? 'running a turn' : `waiting${w.statusText === '' ? '' : ` (${w.statusText})`}`}`)
@@ -1474,8 +1493,8 @@ export const register: Register = on => {
                 </Box>
                 {!it.done && it.status !== undefined && (
                   <Box flexShrink={0}>
-                    <Text size={SIZE.meta} color={statusColor(it.status)}>
-                      {it.status}
+                    <Text size={SIZE.meta} color={it.startLate ? TONE.danger : statusColor(it.status)}>
+                      {it.startLate ? 'start not picked up' : it.status === 'starting' && it.statusOn !== undefined ? `sent to ${it.statusOn}` : it.status}
                     </Text>
                   </Box>
                 )}
@@ -1496,7 +1515,13 @@ export const register: Register = on => {
                         ))}
                       </Box>,
                     ]
-                  : []),
+                  : it.status === 'yours' || it.startLate
+                    ? [
+                        <Box key={`${key}:actions`} flexDirection="row" columnGap={SPACE.inline}>
+                          <Button key={`${key}:start`} label="Start" onPress={() => void startAsk(it)} />
+                        </Box>,
+                      ]
+                    : []),
             ]
           })}
           {prompts.map(a => (

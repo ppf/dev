@@ -10,6 +10,9 @@ export const projectOf = (boss: string) => boss.replace(/^boss-/, '')
 /** The `dev todo answer` argv a board button runs: `--from-board` is the way past the Claude Code refusal (the board runs inside one), `--question` guards a reused item number, `--` keeps a label starting with `-` an argument. */
 export const answerArgv = (bin: string, it: FleetItem, option: string) => [bin, 'todo', 'answer', '--from-board', '--question', it.text, '--', it.boss, String(it.id), option]
 
+/** The `dev todo start` argv the Start button runs, guarded as `answerArgv` is. */
+export const startArgv = (bin: string, it: FleetItem) => [bin, 'todo', 'start', '--from-board', '--question', it.text, '--', it.boss, String(it.id)]
+
 const readJson = async (run: Run, argv: string[]): Promise<unknown> => {
   const ran = await run(argv, { timeoutMs: 10_000 })
   if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `${argv.slice(0, 3).join(' ')} exited ${ran.exitCode}`)
@@ -33,7 +36,7 @@ export async function readAsks(run: Run, bin: string, errors: string[] = []): Pr
     return l.items.flatMap((it: any): FleetItem[] => {
       if (typeof it?.id !== 'number' || typeof it.text !== 'string' || typeof it.done !== 'boolean') throw new Error('dev todo --all --json printed an item this mod does not read')
       if (it.on) return []
-      return [{ boss: l.boss, id: it.id, text: it.text, done: it.done, options: isArray(it.options) ? it.options.map(String) : [], answer: typeof it.answer === 'string' ? it.answer : undefined, status: typeof it.status === 'string' && it.status !== '' ? it.status : undefined }]
+      return [{ boss: l.boss, id: it.id, text: it.text, done: it.done, options: isArray(it.options) ? it.options.map(String) : [], answer: typeof it.answer === 'string' ? it.answer : undefined, status: typeof it.status === 'string' && it.status !== '' ? it.status : undefined, statusOn: typeof it.status_on === 'string' && it.status_on !== '' ? it.status_on : undefined, startLate: it.start_late === true }]
     })
   })
 }

@@ -73,7 +73,7 @@ const STUCK = { key: 'local_a/stuck/100', kind: 'stuck', text: 'no progress for 
 const RESUME = { key: 'local_b/resume due/200', kind: 'resume due', text: 'rate limit reset 18:05: resume it' }
 
 /** What the other commands the mod runs answer: gh pr checks, dev delivered, dev desktop answer, dev todo, open, mv (by argv[0]/argv[1]/argv[2]). */
-type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'todo' | 'open' | 'mv' | 'asks' | 'agents' | 'threads', Ran | string | (() => Ran | string)>>
+type Others = Partial<Record<'gh' | 'delivered' | 'answer' | 'start' | 'todo' | 'open' | 'mv' | 'asks' | 'agents' | 'threads', Ran | string | (() => Ran | string)>>
 
 // What a dev older than `dev todo` says to it
 const NO_TODO: Ran = { exitCode: 1, stdout: '', stderr: '❌ unknown flag: --json' }
@@ -97,8 +97,8 @@ async function start($: Engine, on: On, ran: Ran | string | (() => Ran | string)
   on('process.run', (_, e) => {
     const isBoard = e.argv[1] === 'desktop' && e.argv[2] === 'board'
     const fleetKey = e.argv[1] === 'todo' && e.argv[2] === '--all' ? 'asks' : e.argv[1] === 'agent' ? (e.argv[2] === 'list' ? 'agents' : 'threads') : undefined
-    const isTodo = e.argv[1] === 'todo' && fleetKey === undefined && e.argv[2] !== 'answer'
-    const other = others[fleetKey ?? (e.argv[1] === 'delivered' || isTodo ? e.argv[1] as 'delivered' | 'todo' : e.argv[2] === 'answer' ? 'answer' : (e.argv[0] as 'gh' | 'open' | 'mv'))]
+    const isTodo = e.argv[1] === 'todo' && fleetKey === undefined && e.argv[2] !== 'answer' && e.argv[2] !== 'start'
+    const other = others[fleetKey ?? (e.argv[1] === 'delivered' || isTodo ? e.argv[1] as 'delivered' | 'todo' : e.argv[2] === 'answer' || e.argv[2] === 'start' ? e.argv[2] : (e.argv[0] as 'gh' | 'open' | 'mv'))]
     const now = isBoard
       ? answer()
       : ((typeof other === 'function' ? other() : other) ??
@@ -2514,6 +2514,14 @@ const ASKS: Ran = {
         { id: 5, text: 'Orders API: v3 now?', done: true, options: ['Now', 'After release'], answer: 'After release' },
       ],
     },
+    {
+      boss: 'boss-api',
+      items: [
+        { id: 7, text: 'Rotate the API key', done: false, status: 'yours' },
+        { id: 8, text: 'Ship the fix', done: false, status: 'starting', status_on: 'boss-api', started: { at: 0, to: 'boss-api' } },
+        { id: 9, text: 'Book the room', done: false, status: 'starting', status_on: 'manager', started: { at: 0, to: 'manager' }, start_late: true },
+      ],
+    },
     { boss: 'boss-shop', closed: true, items: [{ id: 6, text: 'Review PR #18', done: false, status: 'boss closed' }] },
   ]),
   stderr: '',
@@ -2542,7 +2550,7 @@ test('the all-projects blocks: asks with option buttons, answered ones struck, a
   await clock.advance(10_000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
-  expect(needs).toContain('NEEDS YOU · ALL PROJECTS 1 to decide · 0 yours · 1 on a prompt')
+  expect(needs).toContain('NEEDS YOU · ALL PROJECTS 1 to decide · 1 yours · 1 on a prompt')
   expect(needs).toContain('dev  Merge #148? decide')
   expect(needs).toContain('shop  Review PR #18 boss closed')
   expect(needs).not.toContain('Marek')
@@ -2581,6 +2589,27 @@ test('a refused answer says why in a toast', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'fleet:ask:boss-dev:3:o0' })
   expect(toasts).toEqual(['dev not answered: item 3 is "Other?" now, not "Merge #148?"'])
+  await ui.unmount()
+})
+
+test('Start on a yours item (and a late start) runs dev todo start from the board; a starting item says whom it went to, red once not picked up; a refusal says why', async ($, on) => {
+  const toasts = collectToasts(on)
+  let started: Ran = { exitCode: 0, stdout: '#7 sent to boss-api\n', stderr: '' }
+  const { otherRuns, clock } = await start($, on, ok(WORKERS), { asks: ASKS, start: () => started })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
+  expect(needs).toContain('api  Ship the fix sent to boss-api')
+  expect(needs).toContain('api  Book the room start not picked up')
+  expect(await ui.find({ key: 'fleet:ask:boss-api:8:start' })).toBeUndefined()
+  expect(await ui.find({ key: 'fleet:ask:boss-dev:3:start' })).toBeUndefined()
+  expect(await ui.find({ key: 'fleet:ask:boss-shop:6:start' })).toBeUndefined()
+  expect(await ui.find({ key: 'fleet:ask:boss-api:9:start' })).toBeDefined()
+  await ui.press({ key: 'fleet:ask:boss-api:7:start' })
+  expect(otherRuns.filter(r => r.argv[2] === 'start').map(r => r.argv)).toEqual([['dev', 'todo', 'start', '--from-board', '--question', 'Rotate the API key', '--', 'boss-api', '7']])
+  started = { exitCode: 1, stdout: '', stderr: 'item 7: already sent to boss-api 0m ago' }
+  await ui.press({ key: 'fleet:ask:boss-api:7:start' })
+  expect(toasts).toEqual(['api: #7 sent to boss-api', 'api not started: item 7: already sent to boss-api 0m ago'])
   await ui.unmount()
 })
 
