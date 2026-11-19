@@ -98,4 +98,41 @@ func TestTodoAskAnswer(t *testing.T) {
 	if out, _ = dev(boss, "todo"); !strings.Contains(out, "2\t☐\tRelease?\toptions: Now\n") {
 		t.Errorf("❌ with the inbox off the ask stays open: %q", out)
 	}
+
+	// An ask with context lines and option details: --all prints them, a board's button sends the option as stored
+	// and the answer is its label
+	s.T("set-option", "-u", "-t", "=boss-a:", "@dev_boss_inbox")
+	if _, err := dev(boss, "todo", "ask", "Rebase #150?", "--context", "main moved 3 commits", "--context", "~/memo.md", "--option", "Rebase | ~10 min (Recommended)", "--option", "Leave it"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = dev(user, "todo", "--all")
+	if want := "boss-a\t3\t☐\tRebase #150?\toptions: Rebase | ~10 min (Recommended) · Leave it\nboss-a\t    - main moved 3 commits\nboss-a\t    - ~/memo.md\n"; !strings.HasSuffix(out, want) {
+		t.Errorf("❌ --all with context = %q, want it to end %q", out, want)
+	}
+	out, _ = dev(user, "todo", "--all", "--json")
+	var withContext []struct {
+		Items []struct {
+			Context []string `json:"context"`
+			Choices []struct {
+				Label       string `json:"label"`
+				Detail      string `json:"detail"`
+				Recommended bool   `json:"recommended"`
+			} `json:"choices"`
+		} `json:"items"`
+	}
+	err = json.Unmarshal([]byte(out), &withContext)
+	if err != nil || len(withContext) != 1 || len(withContext[0].Items) == 0 {
+		t.Fatalf("❌ --all --json = %s, %v", out, err)
+	}
+	if last := withContext[0].Items[len(withContext[0].Items)-1]; strings.Join(last.Context, "|") != "main moved 3 commits|~/memo.md" ||
+		len(last.Choices) != 2 || last.Choices[0].Detail != "~10 min" || !last.Choices[0].Recommended {
+		t.Errorf("❌ --all --json = %s, want context and choices", out)
+	}
+	if _, err := dev(boss, "todo", "answer", "boss-a", "3", "Rebase | ~10 min (Recommended)", "--from-board", "--question", "Rebase #150?"); err != nil {
+		t.Fatal(err)
+	}
+	// The stub draws no input box after its first paste, so the note waits in the inbox: its row shows the answer
+	if out, _ = dev(boss, "todo"); !strings.Contains(out, "3\t☑\tRebase #150?\tanswered: Rebase\n") {
+		t.Errorf("❌ answered with the stored option: %q, want its label as the answer", out)
+	}
 }

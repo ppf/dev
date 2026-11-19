@@ -363,7 +363,59 @@ func TestTodoAsk(t *testing.T) {
 		{[]string{"todo", "ask", " ", "--option", "a"}, "empty question"},
 		{[]string{"todo", "ask", "Merge?", "--option", "a", "--option", " (Recommended)"}, "option 2 is empty"},
 		{[]string{"todo", "ask", "Merge?", "--option", "Merge", "--option", "merge (Recommended)"}, `option 2 repeats "merge"`},
+		{[]string{"todo", "ask", "Merge?", "--option", "Merge | now", "--option", "merge | later (Recommended)"}, `option 2 repeats "merge"`},
 		{append([]string{"todo", "ask", "Pick?"}, strings.Split(strings.Repeat("--option|x|", 10), "|")[:20]...), "at most 9"},
+	} {
+		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
+		}
+	}
+}
+
+// An ask's --context lines print indented under it and its options with their details; --replaces keeps the context
+// unless given; the caps refuse with the fix.
+func TestTodoAskContext(t *testing.T) {
+	todoEnv(t)
+	if got := run(t, "", "todo", "ask", "Merge #148?", "--context", " CI   green ", "--context", "~/memo.md", "--option", "Merge (Recommended) | now", "--option", "Wait | ~1 day"); got != "asked 1 · to do 1\n" {
+		t.Errorf("ask = %q", got)
+	}
+	want := "1\t☐\tMerge #148?\toptions: Merge | now (Recommended) · Wait | ~1 day\n    - CI green\n    - ~/memo.md\n"
+	if got := run(t, "", "todo"); got != want {
+		t.Errorf("rows = %q, want %q", got, want)
+	}
+	run(t, "", "todo", "add", "--replaces", "1", "Merge #148 now?")
+	if got := run(t, "", "todo"); !strings.HasSuffix(got, "    - CI green\n    - ~/memo.md\n") {
+		t.Errorf("after --replaces without --context: %q", got)
+	}
+	run(t, "", "todo", "add", "--replaces", "1", "--context", "review in")
+	run(t, "", "todo", "add", "Ship", "--context", "CI green")
+	if got := run(t, "", "todo"); !strings.HasSuffix(got, "2\t☐\tShip\n    - CI green\n") {
+		t.Errorf("a plain item's context: %q", got)
+	}
+	var l struct {
+		Items []struct {
+			Context []string `json:"context"`
+			Choices []struct {
+				Label       string `json:"label"`
+				Detail      string `json:"detail"`
+				Recommended bool   `json:"recommended"`
+			} `json:"choices"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 2 || strings.Join(l.Items[0].Context, "|") != "review in" ||
+		len(l.Items[0].Choices) != 2 || l.Items[0].Choices[0].Label != "Merge" || l.Items[0].Choices[0].Detail != "now" || !l.Items[0].Choices[0].Recommended || l.Items[0].Choices[1].Detail != "~1 day" {
+		t.Errorf("json = %+v, %v", l, err)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"todo", "ask", strings.Repeat("x", 101), "--option", "a"}, "put the findings in --context lines or a file"},
+		{[]string{"todo", "ask", "Ok?", "--option", strings.Repeat("x", 31)}, "put the rest after ' | '"},
+		{[]string{"todo", "ask", "Ok?", "--option", "a", "--context", " "}, "--context line 1 is empty"},
+		{[]string{"todo", "ask", "Ok?", "--option", " | detail"}, "option 1 is empty"},
+		{[]string{"todo", "add", "--replaces", "1", strings.Repeat("x", 101)}, "question is 101 characters"},
+		{[]string{"todo", "add", "x", "--context", " "}, "--context line 1 is empty"},
 	} {
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)

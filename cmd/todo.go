@@ -64,12 +64,12 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 				return err
 			}
 			for _, it := range l.Items {
-				fmt.Fprintln(out, todoLine(it, time.Now()))
+				printItem(out, "", it, time.Now())
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, status: decide, yours, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, and status_on: its worker or person), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, status: decide, yours, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, and status_on: its worker or person), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
@@ -129,6 +129,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			case !cmd.Flags().Changed("replaces"):
 				return errors.New("no item: only --replaces keeps the item's text")
 			}
+			if it.Context, err = contextLines(it.Context); err != nil {
+				return err
+			}
 			if it.On = todo.Clean(it.On); strings.EqualFold(it.On, todo.Me) {
 				it.On = todo.Me
 			} else if it.On != "" {
@@ -179,7 +182,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on not given")
+	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context not given")
 	return cmd
 }
 
@@ -189,7 +193,8 @@ func newTodoAskCmd(boss *string) *cobra.Command {
 		Use:   "ask <question>",
 		Short: "Put a decision on the list for the user, with the options to pick from; prints its number",
 		Long: `Put a decision on the list for the user, with its options (the recommended one marked "(Recommended)"),
-and go on: the boss doesn't wait for it. The user answers with dev todo answer (a pick or their own words), which
+and go on: the boss doesn't wait for it. The question is at most 100 characters, its findings go in --context lines;
+an option is "<label> | <detail>", its label at most 30 characters. The user answers with dev todo answer (a pick or their own words), which
 ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -204,16 +209,20 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			}
 			var labels []string
 			for i, o := range it.Options {
-				o = todo.Clean(o)
-				l, _ := todo.Label(o)
-				if l == "" {
+				c := todo.Split(todo.Clean(o))
+				if c.Label == "" {
 					return fmt.Errorf("option %d is empty", i+1)
 				}
-				if slices.ContainsFunc(labels, func(x string) bool { return strings.EqualFold(x, l) }) {
-					return fmt.Errorf("option %d repeats %q", i+1, l)
+				if slices.ContainsFunc(labels, func(x string) bool { return strings.EqualFold(x, c.Label) }) {
+					return fmt.Errorf("option %d repeats %q", i+1, c.Label)
 				}
-				labels, it.Options[i] = append(labels, l), o
+				labels, it.Options[i] = append(labels, c.Label), c.String()
 			}
+			context, err := contextLines(it.Context)
+			if err != nil {
+				return err
+			}
+			it.Context = context
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -228,7 +237,8 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9; the recommended one ends with "(Recommended)"`)
+	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9: "<label> | <detail>", the label at most 30 characters (what an answer names), the detail its cost or effect; the recommended one ends with "(Recommended)"`)
+	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the question, in order: findings, then paths")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	return cmd
 }
@@ -451,7 +461,7 @@ on stderr; the list still prints.`,
 			}
 			out := cmd.OutOrStdout()
 			for _, it := range l.Items {
-				fmt.Fprintln(out, todoLine(it, now))
+				printItem(out, "", it, now)
 			}
 			return nil
 		},
@@ -516,7 +526,7 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
 		}
 		for _, it := range bl.Items {
-			fmt.Fprintln(out, bl.Boss+"\t"+todoLine(it, now))
+			printItem(out, bl.Boss+"\t", it, now)
 		}
 	}
 	return nil
@@ -708,6 +718,17 @@ func printCount(out io.Writer, s todo.Store, prefix string, now time.Time) error
 	return err
 }
 
+// printItem prints it at now (todoLine), then, while open, its context lines indented, each line after prefix.
+func printItem(out io.Writer, prefix string, it todo.Shown, now time.Time) {
+	fmt.Fprintln(out, prefix+todoLine(it, now))
+	if it.Done {
+		return
+	}
+	for _, c := range it.Context {
+		fmt.Fprintln(out, prefix+"    - "+c)
+	}
+}
+
 // todoLine is an item as text at now: number, ☐ (◌ waiting on someone, ☑ ticked), text, who it waits on, link, why
 // to re-check it.
 func todoLine(it todo.Shown, now time.Time) string {
@@ -744,6 +765,16 @@ func todoLine(it todo.Shown, now time.Time) string {
 		parts = append(parts, "⚠ "+it.Check.Long(now))
 	}
 	return strings.Join(parts, "\t")
+}
+
+// contextLines is each --context line cleaned (todo.Clean); an empty one is an error.
+func contextLines(raw []string) ([]string, error) {
+	for i, l := range raw {
+		if raw[i] = todo.Clean(l); raw[i] == "" {
+			return nil, fmt.Errorf("--context line %d is empty", i+1)
+		}
+	}
+	return raw, nil
 }
 
 // lines is r's non-blank lines, cleaned (todo.Clean).

@@ -25,8 +25,22 @@
           "text": "Merge #148 now or after the release?",
           "done": false,
           "options": [
-            "Merge now (Recommended)",
+            "Merge now | CI green (Recommended)",
             "After the release"
+          ],
+          "choices": [
+            {
+              "label": "Merge now",
+              "detail": "CI green",
+              "recommended": true
+            },
+            {
+              "label": "After the release"
+            }
+          ],
+          "context": [
+            "Release is Friday",
+            "~/memo.md"
           ],
           "added": 1700000000,
           "status": "decide"
