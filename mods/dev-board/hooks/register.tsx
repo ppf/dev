@@ -252,6 +252,13 @@ const statusRank = (it: TodoItem) => {
 /** A status's color; an unknown one muted. */
 const statusColor = (status: string) => (Object.hasOwn(STATUS_COLORS, status) ? STATUS_COLORS[status] : TONE.muted)
 
+/** An all-projects item's status words: a late start or whom a start went to over the bare status. */
+const fleetStatusText = (it: FleetItem, status: string) => {
+  if (it.startLate) return 'start not picked up'
+  if (status === 'starting' && it.statusOn !== undefined) return `sent to ${it.statusOn}`
+  return status
+}
+
 /** The to do items as the board lists them: by status in STATUSES' order, each status in dev's order. */
 const todoOrder = (items: TodoItem[]) => items.map((it, i) => ({ it, i })).sort((x, y) => statusRank(x.it) - statusRank(y.it) || x.i - y.i).map(x => x.it)
 
@@ -1494,7 +1501,7 @@ export const register: Register = on => {
                 {!it.done && it.status !== undefined && (
                   <Box flexShrink={0}>
                     <Text size={SIZE.meta} color={it.startLate ? TONE.danger : statusColor(it.status)}>
-                      {it.startLate ? 'start not picked up' : it.status === 'starting' && it.statusOn !== undefined ? `sent to ${it.statusOn}` : it.status}
+                      {fleetStatusText(it, it.status)}
                     </Text>
                   </Box>
                 )}
