@@ -373,9 +373,9 @@ func TestBlockStart(t *testing.T) {
 
 	now := m.clk.Now()
 	for _, tt := range []struct {
-		late bool
-		want string
-	}{{false, "sent to boss-noc · 2m"}, {true, "start not picked up"}} {
+		late       bool
+		want, acts string
+	}{{false, "sent to boss-noc · 2m", "Tick   Go to boss      d tick"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
 		m := blockBoard(t)
 		for j, it := range m.snap.asks[0].Items {
 			if it.Text == "DM David" {
@@ -397,8 +397,8 @@ func TestBlockStart(t *testing.T) {
 			m, _ = keys(m, "j")
 		}
 		all := strings.Join(plain(m.render()), "\n")
-		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "Tick   Go to boss      d tick") {
-			t.Errorf("late %v: want Starting, %q and no Start:\n%s", tt.late, tt.want, all)
+		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "         "+tt.acts) {
+			t.Errorf("late %v: want Starting, %q and %q:\n%s", tt.late, tt.want, tt.acts, all)
 		}
 	}
 

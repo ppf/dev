@@ -523,7 +523,7 @@ func (m Model) actions(r needRow) (out []action, note string) {
 	start := action{"Start", "s", "s start"}
 	if r.Closed {
 		if r.Kind == sidebar.NeedPlain {
-			if r.Status != sidebar.StatusStarting && m.managerRuns() {
+			if (r.Status != sidebar.StatusStarting || r.StartLate) && m.managerRuns() {
 				out = append(out, start)
 			}
 			out = append(out, tick)
@@ -532,7 +532,8 @@ func (m Model) actions(r needRow) (out []action, note string) {
 	}
 	switch r.Kind {
 	case sidebar.NeedPlain:
-		if r.Status == sidebar.StatusYours {
+		if r.Status == sidebar.StatusYours || r.StartLate {
+			// A late start is sent again
 			out = append(out, start)
 		}
 		out = append(out, tick)
