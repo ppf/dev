@@ -28,7 +28,7 @@ type Config struct {
 	Done   func(boss string, id int, text string) error
 	// Guard wraps every /v1 call but health: the auth slot.
 	Guard func(http.Handler) http.Handler
-	// Page answers "/"; nil answers a placeholder line.
+	// Page answers "/" and the paths below it the routes above don't take; nil answers a placeholder line at "/".
 	Page http.Handler
 }
 
@@ -41,14 +41,14 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("GET /v1/board", cfg.Guard(http.HandlerFunc(cfg.board)))
 	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
-	page := cfg.Page
-	if page == nil {
-		page = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	if cfg.Page != nil {
+		mux.Handle("GET /", cfg.Page) // the page's own files sit beside it
+	} else {
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			_, _ = w.Write([]byte("dev serve: the page isn't built yet; the board is at /v1/board\n"))
 		})
 	}
-	mux.Handle("GET /{$}", page)
 	return ipHost(mux)
 }
 

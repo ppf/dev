@@ -162,3 +162,15 @@ func captureLog(t *testing.T) *strings.Builder {
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	return &b
 }
+
+// A page answers "/" and its own files below it; the API's routes stay the API's.
+func TestPage(t *testing.T) {
+	page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("page " + r.URL.Path)) })
+	h := Handler(Config{Version: "v1.2.3", Now: time.Now, Guard: LoopbackOnly(Loopback), Page: page,
+		Lists: func() (json.RawMessage, error) { return json.RawMessage(lists), nil }})
+	for path, want := range map[string]string{"/": "page /", "/app.js": "page /app.js", "/v1/health": `"ok"`} {
+		if w := get(t, h, path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: %d %s, want %s", path, w.Code, w.Body, want)
+		}
+	}
+}
