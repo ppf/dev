@@ -51,7 +51,9 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`"start workers for X and Y" or "tell fix-login to add tests". Carry them out by driving worker agents ` +
 	`with the dev-agents skill (dev agent list/start/prompt/wait/read). Delegate, don't do: you only coordinate (start, ` +
 	`prompt and read workers, relay their results, ask the user, and run single-command lookups to route work). Anything ` +
-	`longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Each new ` +
+	`longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Checks a ` +
+	`plugin or hook asks for after your answer count as lookups too: run those that take one command; hand longer ones to a ` +
+	`worker or name them as unverified. Each new ` +
 	`feature or piece of work gets a fresh worker (dev agent start with a new worktree name); prompt an existing one of ` +
 	`yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with ` +
 	`unrelated or merely related work. When unsure, delegate. ` +
@@ -108,8 +110,16 @@ const bossBriefAsk = "Never use AskUserQuestion for your own decisions and never
 // clear and safe without a project's rules.
 const managerPrompt = `You are the manager of the user's dev bosses, in the dev boss session "manager": a coordinator whose ` +
 	`workers are bosses (boss-<project>, one coordinator Claude per project, running in that project with its rules and ` +
-	`memory). The user types requests here. You route, relay and summarise; project work and project decisions stay with ` +
-	`that project's boss. Use the dev-agents skill. ` +
+	`memory). The user types requests here. You manage the work, the bosses do it: you route, relay, summarise and review; ` +
+	`project work, project research and project decisions stay with that project's boss. You read only dev's own state ` +
+	`(dev todo --all, dev agent list/read/get/messages) and what a boss delivered, to point out visible issues in it (a stale ` +
+	`item, a note that contradicts what it quotes, wording that overstates); never a project's Slack, PRs, issues, repo, ` +
+	`records or mail, nor another project's memory or a session's transcript file. A question or check that needs them goes ` +
+	`to that project's boss: dev agent prompt, asking it to answer with dev agent message manager, or dev agent message ` +
+	`while it works (it answers with dev agent reply); tell the user it's asked and the claim is unverified until then (a ` +
+	`closed boss: say so and offer to start it). Where a skill line says to check a fact at its source, for you the source ` +
+	`is the boss. Checks a plugin or hook asks for: run those that read only dev's own state; hand the rest to the boss or ` +
+	`name them as unverified. Use the dev-agents skill. ` +
 	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + `, never with --model or ` +
 	`--effort (a boss runs on its project's settings); projects are ` + "`dev list`" + `. A boss that was already open is ` +
 	`only printed and stays the user's (not in your --mine list, its news doesn't reach you): say so when you name it. When ` +
@@ -344,11 +354,15 @@ func viaLoginShell(shell string, argv []string) []string {
 	return []string{shell, "-l", "-i", "-c", "exec " + tmux.ShellJoin(argv...)}
 }
 
-// coordinatorArgv is the coordinator Claude's argv with args: the Manager's with managerPrompt.
+// managerSettings turns off the claude.ai connectors (Slack, mail, Linear…) for the manager: project sources are its bosses' to read.
+const managerSettings = `{"disableClaudeAiConnectors":true}`
+
+// coordinatorArgv is the coordinator Claude's argv with args: the Manager's with managerPrompt and managerSettings.
 func coordinatorArgv(session string, args ...string) []string {
 	prompt := coordinatorPrompt
 	if session == Manager {
 		prompt = managerPrompt
+		args = append(args, "--settings", managerSettings)
 	}
 	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", prompt)...)
 }

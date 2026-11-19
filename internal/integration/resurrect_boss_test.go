@@ -163,7 +163,7 @@ func TestResurrectManager(t *testing.T) {
 	out, err := again.Output()
 	check(t, "restored manager only printed", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
 	start, _ := d.Try("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}")
-	if !strings.Contains(start, `'claude' '--model' 'fable' '--effort' 'medium' '--append-system-prompt' 'You are the manager`) ||
+	if !strings.Contains(start, `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true}' '--append-system-prompt' 'You are the manager`) ||
 		!strings.Contains(start, `'--remote-control=manager'`) {
 		t.Errorf("restored manager's coordinator: %q", start)
 	}

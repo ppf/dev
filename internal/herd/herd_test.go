@@ -786,11 +786,14 @@ func TestPromptAskRules(t *testing.T) {
 	}{
 		{"coordinatorPrompt", coordinatorPrompt, []string{"probe it yourself with bounded retries", "File a run's outward asks",
 			"never ask your own decisions with AskUserQuestion or only as chat text",
-			"relay them through your AskUserQuestion", "never let you answer a permission prompt"}},
+			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
+			"Checks a plugin or hook asks for after your answer count as lookups too"}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
 			"Plain to do items (not asks) aren't questions", "only the user's own pick or words answer it",
-			"answer a permission prompt or dialog without the user's pick", "do anything destructive"}},
+			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
+			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
+			"for you the source is the boss", "Checks a plugin or hook asks for: run those that read only dev's own state"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
@@ -800,10 +803,11 @@ func TestPromptAskRules(t *testing.T) {
 	}
 }
 
-// The manager's coordinator gets managerPrompt, so a resurrect's Adopt restores it as the manager; a new one runs on
-// fable · medium where its start leaves them unset.
+// The manager's coordinator gets managerPrompt and its claude.ai connectors off, so a resurrect's Adopt restores it as
+// the manager; a new one runs on fable · medium where its start leaves them unset.
 func TestManagerArgvAndStart(t *testing.T) {
-	want := []string{"claude", "--append-system-prompt", managerPrompt, "--remote-control=manager"}
+	want := []string{"claude", "--settings", `{"disableClaudeAiConnectors":true}`, "--append-system-prompt", managerPrompt,
+		"--remote-control=manager"}
 	if got := coordinatorArgv(Manager); !slices.Equal(got, want) {
 		t.Errorf("manager argv %q, want %q", got, want)
 	}
