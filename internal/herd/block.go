@@ -444,6 +444,13 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 		// Right-aligned on the first line, past the text's room
 		lines[0] += strings.Repeat(" ", max(2, in+room+2-ansi.StringWidth(lines[0]))) + colour + right + reset
 	}
+	if selected {
+		for _, c := range r.Context {
+			for _, p := range strings.Split(ansi.Wrap("- "+c, room, ""), "\n") {
+				lines, spans = append(lines, strings.Repeat(" ", in)+sidebar.Muted+p+reset), append(spans, nil)
+			}
+		}
+	}
 	if len(r.Options) > 0 {
 		lines, spans = m.optionLines(r, w, selected, lines, spans)
 	}
@@ -468,27 +475,45 @@ func band(l string, selected bool) string {
 }
 
 // optionLines adds r's options under its lines: numbered when 1-9 answer them, ★ on the recommended one, m to reply to
-// a question; a selected row's one per line, wrapped, when they don't fit one.
+// a question; a list ask's by label, a selected one's one per line with its detail muted beside it; another selected
+// row's one per line, wrapped, when they don't fit one.
 func (m Model) optionLines(r needRow, w int, selected bool, lines []string, spans [][]optSpan) ([]string, [][]optSpan) {
 	answers := m.answerable(r)
+	listAsk := r.Kind == sidebar.NeedListAsk
 	opts := make([]string, len(r.Options))
+	details := make([]string, len(r.Options))
 	for i, o := range r.Options {
 		num := sidebar.Muted + "·" + reset
 		if answers {
 			num = sidebar.Green + strconv.Itoa(i+1) + reset
 		}
 		label, rec := todo.Label(o)
+		if listAsk {
+			label, details[i], rec = sidebar.SplitOption(o)
+		}
 		if rec {
 			label = sidebar.Gold + "★ " + reset + label
 		}
 		opts[i] = num + " " + label
+	}
+	if selected && listAsk {
+		// The details in one column, past the longest label
+		col := 0
+		for _, o := range opts {
+			col = max(col, ansi.StringWidth(o))
+		}
+		for i, d := range details {
+			if d != "" {
+				opts[i] += strings.Repeat(" ", col-ansi.StringWidth(opts[i])+3) + sidebar.Muted + d + reset
+			}
+		}
 	}
 	if r.Kind == sidebar.NeedAsk && answers {
 		opts = append(opts, sidebar.Green+"m"+reset+rule+" reply"+reset)
 	}
 	first := len(spans)
 	line := "     " + strings.Join(opts, "   ")
-	if selected && ansi.StringWidth(line) >= w {
+	if selected && (listAsk || ansi.StringWidth(line) >= w) {
 		for i, o := range opts {
 			indent := "     "
 			for _, p := range strings.Split(ansi.Wrap(o, max(1, w-8), ""), "\n") {

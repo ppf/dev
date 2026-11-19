@@ -838,15 +838,20 @@ func TestNeedsClickOption(t *testing.T) {
 		}
 		lines := plain(m.render())
 		y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Release now?") })
-		x := strings.Index(lines[y+1], "2 Later")
+		// Selected, each option has its own line
+		at := y + 1
+		if selected {
+			at = y + 2
+		}
+		x := strings.Index(lines[at], "2 Later")
 		if x < 0 {
-			t.Fatalf("selected %v: no option 2 on %q", selected, lines[y+1])
+			t.Fatalf("selected %v: no option 2 on %q", selected, lines[at])
 		}
 		_, cmd := click(m, x+3, y)
 		if cmd != nil {
 			t.Errorf("selected %v: a click on the text answered", selected)
 		}
-		next, cmd := click(m, x+3, y+1)
+		next, cmd := click(m, x+3, at)
 		if cmd == nil {
 			t.Fatalf("selected %v: the click sent nothing", selected)
 		}
@@ -975,5 +980,60 @@ func TestNeedsClosedBoss(t *testing.T) {
 	cmd()
 	if !slices.Equal(ticked, [][2]any{{"boss-kite", 3}}) {
 		t.Errorf("ticked %v, want boss-kite #3", ticked)
+	}
+}
+
+// A list ask's resting row shows its options by label; expanded, its context lines follow its text, then each option on
+// its own line with its detail beside it.
+func TestNeedsAskContext(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Release now?",
+		Options: []string{"Now | CI green (Recommended)", "Later | after Friday"}, Context: []string{"main moved 3 commits", "~/memo.md"}}}}}}
+	m.snap.rollUp()
+	rest := strings.Join(plain(m.render()), "\n")
+	if !strings.Contains(rest, "     1 ★ Now   2 Later ") || strings.Contains(rest, "CI green") || strings.Contains(rest, "main moved") {
+		t.Errorf("resting:\n%s", rest)
+	}
+	lines := plain(selectKind(t, m, sidebar.NeedListAsk).render())
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Release now?") })
+	if y < 0 || y+5 > len(lines) {
+		t.Fatalf("no ask in:\n%s", strings.Join(lines, "\n"))
+	}
+	got := make([]string, 4)
+	for i, l := range lines[y+1 : y+5] {
+		got[i] = strings.TrimRight(l, " ")
+	}
+	in := strings.Repeat(" ", strings.Index(lines[y], "Release now?"))
+	want := []string{in + "- main moved 3 commits", in + "- ~/memo.md", "     1 ★ Now   CI green", "     2 Later   after Friday"}
+	if !slices.Equal(got, want) {
+		t.Errorf("expanded:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// On an expanded ask with context lines, a click on an option's line answers that option, one on a context line nothing.
+func TestNeedsClickOptionUnderContext(t *testing.T) {
+	var answered []listAnswer
+	m := needsBoard(t, &answered)
+	m.snap.asks = []todo.BossList{{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Release now?",
+		Options: []string{"Now | CI green (Recommended)", "Later | after Friday"}, Context: []string{"main moved 3 commits", "~/memo.md"}}}}}}
+	m.snap.rollUp()
+	m = selectKind(t, m, sidebar.NeedListAsk)
+	lines := plain(m.render())
+	ctx := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "- main moved") })
+	later := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "2 Later") })
+	if ctx < 0 || later < 0 {
+		t.Fatalf("no context or option line in:\n%s", strings.Join(lines, "\n"))
+	}
+	if _, cmd := click(m, strings.Index(lines[ctx], "main"), ctx); cmd != nil {
+		t.Error("a click on a context line answered")
+	}
+	next, cmd := click(m, strings.Index(lines[later], "Later"), later)
+	if cmd == nil {
+		t.Fatal("the click on 2 Later sent nothing")
+	}
+	next.Update(cmd())
+	if len(answered) != 1 || answered[0].option != "Later | after Friday" {
+		t.Errorf("answered %+v, want Later | after Friday", answered)
 	}
 }

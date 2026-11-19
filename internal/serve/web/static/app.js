@@ -43,11 +43,19 @@ const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const key = (boss, id) => boss + '/' + id;
 const project = l => l.project || l.boss;
 
-// An option is a string ending in " (Recommended)" for the pick the boss recommends (as todo.Label reads it), or an object.
+// An option is a string "label | detail", ending " (Recommended)" for the pick the boss recommends, either side of
+// " | " (as todo.Split reads it), or an object. An answer names the label.
 function option(o) {
   if (typeof o !== 'string') return { label: o.label, detail: o.detail || '', rec: !!o.recommended };
-  const m = o.match(/\s*\(recommended\)$/i);
-  return { label: m ? o.slice(0, m.index).trim() : o, detail: '', rec: !!m };
+  const cut = s => {
+    const m = s.match(/\s*\(recommended\)$/i);
+    return m ? [s.slice(0, m.index).trim(), true] : [s, false];
+  };
+  const [rest, rec] = cut(o);
+  // Padded: an empty label or detail still splits
+  const padded = ' ' + rest + ' ', i = padded.indexOf(' | ');
+  const [label, recLabel] = cut(i < 0 ? rest : padded.slice(0, i).trim());
+  return { label, detail: i < 0 ? '' : padded.slice(i + 3).trim(), rec: rec || recLabel };
 }
 
 function openItems() {

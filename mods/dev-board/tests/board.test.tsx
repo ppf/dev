@@ -2,6 +2,7 @@ import type { On, UiPane } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { splitOption } from '../hooks/register'
 import type { TodoItem, Worker } from '../types'
 
 // No node types in this mod's tsconfig
@@ -2043,6 +2044,26 @@ test('a to do PR link shows no state icon until gh has answered', async ($, on) 
   await ui.unmount()
 })
 
+test("a desktop boss's ask shows its context lines and each option by label with its detail, to answer in the chat", async ($, on) => {
+  const ask = { id: 3, text: 'Merge?', done: false, status: 'decide', context: ['CI green'], options: ['Merge | ~1 min (Recommended)', 'Wait'] }
+  await start($, on, ok(WORKERS), { todo: todoRan([ask as TodoItem]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 1 to decide · 0 yours updated 12m', '☐ Merge? decide', '  - CI green', '  Merge (~1 min) · Wait — answer in the chat'])
+  await ui.unmount()
+})
+
+test('an option splits as dev reads it: the label, the detail after " | ", the mark either side', () => {
+  const cases: [string, { label: string; detail: string; isRec: boolean }][] = [
+    ['Merge', { label: 'Merge', detail: '', isRec: false }],
+    ['Merge | ~1 day (Recommended)', { label: 'Merge', detail: '~1 day', isRec: true }],
+    ['Merge (Recommended) | ~1 day', { label: 'Merge', detail: '~1 day', isRec: true }],
+    ['A | b | c', { label: 'A', detail: 'b | c', isRec: false }],
+    ['a|b', { label: 'a|b', detail: '', isRec: false }],
+    ['Merge |', { label: 'Merge', detail: '', isRec: false }],
+  ]
+  for (const [o, want] of cases) expect(splitOption(o)).toEqual(want)
+})
+
 test('an item waiting on someone else: a dotted circle, its text quieter, its status and who at the right in amber', async ($, on) => {
   await start($, on, ok(WORKERS), { todo: todoRan([TODO[2] as TodoItem]) })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -2579,6 +2600,30 @@ test('a click on an ask option runs dev todo answer from the board with the item
   await ui.press({ key: 'fleet:ask:boss-dev:3:o1' })
   const runs = otherRuns.filter(r => r.argv[1] === 'todo' && r.argv[2] === 'answer')
   expect(runs.map(r => r.argv)).toEqual([['dev', 'todo', 'answer', '--from-board', '--question', 'Merge #148?', '--', 'boss-dev', '3', 'Wait']])
+  await ui.unmount()
+})
+
+test('an ask shows its context lines muted and, where an option has a detail, one option per row with its detail beside it; the answer sent is the option as stored', async ($, on) => {
+  const asks: Ran = {
+    exitCode: 0,
+    stdout: JSON.stringify([
+      {
+        boss: 'boss-dev',
+        items: [{ id: 7, text: 'Rebase #150?', done: false, context: ['main moved 3 commits', '~/memo.md'], options: ['Rebase | ~10 min (Recommended)', 'Leave it'], status: 'decide' }],
+      },
+    ]),
+    stderr: '',
+  }
+  const { otherRuns, clock } = await start($, on, ok(WORKERS), { asks, agents: AGENTS, threads: THREADS })
+  await clock.advance(10_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const needs = readEl((await ui.find({ key: 'fleet:needs' })) as El).join(' ')
+  expect(needs).toContain('- main moved 3 commits')
+  expect(needs).toContain('- ~/memo.md')
+  expect(readEl((await ui.find({ key: 'fleet:ask:boss-dev:7:o0:row' })) as El).join(' ')).toContain('~10 min')
+  expect((await ui.findAll({ type: 'Button' })).map(b => b.props.label).filter(l => typeof l === 'string' && /Rebase|Leave/.test(l))).toEqual(['★ Rebase', 'Leave it'])
+  await ui.press({ key: 'fleet:ask:boss-dev:7:o0' })
+  expect(otherRuns.filter(r => r.argv[2] === 'answer').map(r => r.argv.at(-1))).toEqual(['Rebase | ~10 min (Recommended)'])
   await ui.unmount()
 })
 

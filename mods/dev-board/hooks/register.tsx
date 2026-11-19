@@ -64,6 +64,17 @@ const LIST_WORDS = new Set(['pick', 'choose', 'select', 'reply', 'answer', 'one'
 // An option label's `(Recommended)` suffix, which the board shows as a ★ before the label
 const RECOMMENDED = /\s*\(recommended\)\s*$/i
 
+/** A list ask's option in parts, as dev's todo.Split reads "label | detail (Recommended)": the mark may end either part. */
+export const splitOption = (o: string) => {
+  const isRec = RECOMMENDED.test(o)
+  const rest = o.replace(RECOMMENDED, '')
+  // Padded: an empty label or detail still splits
+  const padded = ` ${rest} `
+  const at = padded.indexOf(' | ')
+  const label = at < 0 ? rest : padded.slice(0, at).trim()
+  return { label: label.replace(RECOMMENDED, ''), detail: at < 0 ? '' : padded.slice(at + 3).trim(), isRec: isRec || RECOMMENDED.test(label) }
+}
+
 // What dev adds to a busy worker's status text for its background work, left out where a reply line is compared with it
 const BACKGROUND = /(^|\s·\s)\d+ background running$/
 // A reply handed to a worker's mod that it still waits for after this was not taken: the board offers the ask again
@@ -207,7 +218,8 @@ async function readTodo(run: Run, boss: string, now: number): Promise<Todo | nul
   const isOptional = (v: unknown) => v === undefined || typeof v === 'string'
   const isSession = (v: TodoItem['session']) => v === undefined || (typeof v?.id === 'string' && typeof v.name === 'string')
   const isRead = (it: TodoItem) =>
-    typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isSession(it.session) && isOptional(it.link) && isOptional(it.status) && isOptional(it.status_on)
+    typeof it?.id === 'number' && typeof it.text === 'string' && typeof it.done === 'boolean' && isOptional(it.on) && isSession(it.session) && isOptional(it.link) && isOptional(it.status) && isOptional(it.status_on) &&
+    (it.context === undefined || (Array.isArray(it.context) && it.context.every(c => typeof c === 'string')))
   if (!Array.isArray(list?.items) || !list.items.every(isRead) || typeof list.updated !== 'number') {
     throw new Error(`${DEV_BIN} todo printed a list this mod does not read`)
   }
@@ -1205,11 +1217,12 @@ export const register: Register = on => {
           </Box>
           {shownItems.flatMap(it => [
             todoRow(it),
+            ...(!it.done ? contextLines(`todo:item${it.id}`, it.context ?? []) : []),
             // This boss is a desktop session: dev has no inbox for it, so the answer is typed in its chat
             ...(!it.done && it.options !== undefined && it.options.length > 0
               ? [
                   <Text key={`todo:item${it.id}:options`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
-                    {`  ${it.options.map(o => o.replace(RECOMMENDED, '')).join(' · ')} — answer in the chat`}
+                    {`  ${it.options.map(splitOption).map(c => (c.detail === '' ? c.label : `${c.label} (${c.detail})`)).join(' · ')} — answer in the chat`}
                   </Text>,
                 ]
               : []),
@@ -1480,6 +1493,14 @@ export const register: Register = on => {
       </Text>
     )
 
+    /** An ask's context lines, muted under its question. */
+    const contextLines = (key: string, context: string[]) =>
+      context.map((c, ci) => (
+        <Text key={`${key}:context${ci}`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
+          {`  - ${c}`}
+        </Text>
+      ))
+
     /** What waits on the person across the projects: each tmux boss's open item (an ask with its options as buttons; an answered one struck, saying what was answered) and each worker waiting on a prompt, answered or opened in its own session. */
     const needsYouBlock = (f: Fleet) => {
       const prompts = f.agents.filter(a => !a.isBoss)
@@ -1489,7 +1510,9 @@ export const register: Register = on => {
           {fleetHead('needs', 'NEEDS YOU · ALL PROJECTS', `${decideCount(f.asks)}${prompts.length > 0 ? ` · ${prompts.length} on a prompt` : ''}`, TONE.danger)}
           {f.asks.flatMap((it: FleetItem) => {
             const key = `fleet:ask:${it.boss}:${it.id}`
-            const lead = Math.max(0, it.options.findIndex(o => RECOMMENDED.test(o)))
+            const choices = it.options.map(splitOption)
+            const lead = Math.max(0, choices.findIndex(c => c.isRec))
+            const isDescribed = choices.some(c => c.detail !== '')
             return [
               <Box key={key} flexDirection="row" alignItems="center" columnGap={SPACE.inline} minWidth={0}>
                 <Box flexShrink={0}>
@@ -1519,21 +1542,37 @@ export const register: Register = on => {
                       {`  answered: ${it.answer}`}
                     </Text>,
                   ]
-                : it.options.length > 0
-                  ? [
-                      <Box key={`${key}:options`} flexDirection="row" flexWrap="wrap" columnGap={SPACE.inline} rowGap={SPACE.line}>
-                        {it.options.map((o, oi) => (
-                          <Button key={`${key}:o${oi}`} label={`${oi === lead && RECOMMENDED.test(o) ? '★ ' : ''}${o.replace(RECOMMENDED, '')}`} onPress={() => void answerAsk(it, o)} />
-                        ))}
-                      </Box>,
-                    ]
-                  : it.status === 'yours' || it.startLate || (it.status === 'boss closed' && f.agents.some(a => a.session === MANAGER))
-                    ? [
-                        <Box key={`${key}:actions`} flexDirection="row" columnGap={SPACE.inline}>
-                          <Button key={`${key}:start`} label="Start" onPress={() => void startAsk(it)} />
-                        </Box>,
-                      ]
-                    : []),
+                : [
+                    ...contextLines(key, it.context),
+                    ...(it.options.length > 0
+                      ? [
+                          // One per row with its detail beside it where any has one; the answer sent is the option as stored
+                          <Box key={`${key}:options`} flexDirection={isDescribed ? 'column' : 'row'} flexWrap={isDescribed ? undefined : 'wrap'} columnGap={SPACE.inline} rowGap={SPACE.line} minWidth={0}>
+                            {it.options.map((o, oi) => {
+                              const c = choices[oi]
+                              const button = <Button key={`${key}:o${oi}`} label={`${oi === lead && c.isRec ? '★ ' : ''}${c.label}`} onPress={() => void answerAsk(it, o)} />
+                              if (!isDescribed) return button
+                              return (
+                                <Box key={`${key}:o${oi}:row`} flexDirection="row" columnGap={SPACE.inline} alignItems="center" minWidth={0}>
+                                  {button}
+                                  {c.detail !== '' && (
+                                    <Text key={`${key}:o${oi}:detail`} size={SIZE.meta} color={TONE.muted} wrap="truncate-end">
+                                      {c.detail}
+                                    </Text>
+                                  )}
+                                </Box>
+                              )
+                            })}
+                          </Box>,
+                        ]
+                      : it.status === 'yours' || it.startLate || (it.status === 'boss closed' && f.agents.some(a => a.session === MANAGER))
+                        ? [
+                            <Box key={`${key}:actions`} flexDirection="row" columnGap={SPACE.inline}>
+                              <Button key={`${key}:start`} label="Start" onPress={() => void startAsk(it)} />
+                            </Box>,
+                          ]
+                        : []),
+                  ]),
             ]
           })}
           {prompts.map(a => (

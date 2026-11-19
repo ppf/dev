@@ -339,10 +339,23 @@ func TestNeedsMouse(t *testing.T) {
 	}
 }
 
+// A list ask's option shows its label only; a dialog's choice keeps a " | " in it.
 func TestOptionLabel(t *testing.T) {
-	for in, want := range map[string]string{"Merge (Recommended)": "Merge", "Wait": "Wait", "A (recommended) ": "A (recommended) ", "(Recommended)": ""} {
-		if got, _ := optionLabel(in); got != want {
-			t.Errorf("optionLabel(%q) = %q, want %q", in, got, want)
+	for _, tt := range []struct {
+		kind    NeedKind
+		in, out string
+		rec     bool
+	}{
+		{NeedListAsk, "Merge (Recommended)", "Merge", true},
+		{NeedListAsk, "Wait", "Wait", false},
+		{NeedListAsk, "A (recommended) ", "A", true},
+		{NeedListAsk, "(Recommended)", "", true},
+		{NeedListAsk, "Merge | CI green (Recommended)", "Merge", true},
+		{NeedListAsk, "Merge (Recommended) | CI green", "Merge", true},
+		{NeedDialog, "Run | staging (Recommended)", "Run | staging", true},
+	} {
+		if got, rec := optionLabel(tt.kind, tt.in); got != tt.out || rec != tt.rec {
+			t.Errorf("optionLabel(%d, %q) = %q %v, want %q %v", tt.kind, tt.in, got, rec, tt.out, tt.rec)
 		}
 	}
 }

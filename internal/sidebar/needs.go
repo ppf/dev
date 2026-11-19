@@ -51,9 +51,10 @@ type NeedItem struct {
 	On      string   `json:"on"`
 	Done    bool     `json:"done"`
 	Options []string `json:"options"`
-	Added   int64    `json:"added"` // when it was added or last replaced, unix seconds; 0 for an older dev's
-	Check   *Check   `json:"check"` // why it may be out of date
-	Until   int64    `json:"until"` // when it ticks by itself, unix seconds; 0 for never
+	Context []string `json:"context"` // an ask's lines under its question
+	Added   int64    `json:"added"`   // when it was added or last replaced, unix seconds; 0 for an older dev's
+	Check   *Check   `json:"check"`   // why it may be out of date
+	Until   int64    `json:"until"`   // when it ticks by itself, unix seconds; 0 for never
 	// Status and StatusOn are its status (Statuses) and the worker or person it names; none when ticked, or on
 	// someone whose workers weren't read
 	Status   string `json:"status"`
@@ -104,6 +105,7 @@ type NeedRow struct {
 	ID      int      // the list item's number
 	Text    string   // the item's text, what the dialog or the question asks, or why the list wasn't read
 	Options []string // a list ask's answers; a dialog's choices (the sidebar only shows them; a board answers them)
+	Context []string // the list item's lines under its text
 	Session string   // where ⏎ goes: the session, or the list's boss
 	Updated int64    // a stale list's item's last change (its list's, for an older dev's item), unix seconds; 0 for the others
 	Check   *Check   // why the list item may be out of date
@@ -444,7 +446,7 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 				continue
 			}
 			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
-			row.Until, row.On, row.Status, row.StatusOn = it.Until, it.On, it.Status, it.StatusOn
+			row.Until, row.On, row.Status, row.StatusOn, row.Context = it.Until, it.On, it.Status, it.StatusOn, it.Context
 			row.StartedAt, row.StartLate = 0, it.StartLate
 			if it.Started != nil {
 				row.StartedAt = it.Started.At
@@ -612,13 +614,33 @@ func (m Model) enterNeeds() Model {
 	return m
 }
 
-// optionLabel is option o without its " (Recommended)" (todo.Label, which this package can't import); rec reports it had one.
-func optionLabel(o string) (label string, rec bool) {
+// SplitOption is a list ask's option o in parts (todo.Split): its label, the detail after " | ", and whether it ends
+// " (Recommended)", which may end the label or the detail.
+func SplitOption(o string) (label, detail string, rec bool) {
+	rest, rec := cutRecommended(o)
+	// Padded: an empty label or detail, cleaned to "| x" or "x |", still splits
+	label, detail, _ = strings.Cut(" "+rest+" ", " | ")
+	label, recLabel := cutRecommended(strings.TrimSpace(label))
+	return label, strings.TrimSpace(detail), rec || recLabel
+}
+
+// cutRecommended is s without its ending " (Recommended)", case aside; rec reports it had one.
+func cutRecommended(s string) (string, bool) {
 	const suffix = "(recommended)"
-	if n := len(o) - len(suffix); n >= 0 && strings.EqualFold(o[n:], suffix) {
-		return strings.TrimSpace(o[:n]), true
+	if n := len(s) - len(suffix); n >= 0 && strings.EqualFold(s[n:], suffix) {
+		return strings.TrimSpace(s[:n]), true
 	}
-	return o, false
+	return s, false
+}
+
+// optionLabel is option o of row kind k as shown: a list ask's label only (SplitOption), another's choice without its
+// " (Recommended)"; rec reports it had one.
+func optionLabel(k NeedKind, o string) (label string, rec bool) {
+	if k == NeedListAsk {
+		label, _, rec = SplitOption(o)
+		return label, rec
+	}
+	return cutRecommended(o)
 }
 
 const needsMinHeight = 10
@@ -759,7 +781,7 @@ func (m Model) openLines(r NeedRow, w int) (lines []string, opts []int) {
 	opts = make([]int, len(lines))
 	for i, o := range r.Options {
 		n := 0
-		label, rec := optionLabel(o)
+		label, rec := optionLabel(r.Kind, o)
 		if rec {
 			label = gold + "★ " + reset + label
 		}
