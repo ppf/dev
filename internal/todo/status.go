@@ -112,8 +112,8 @@ func (o Owner) Status(it Shown) (status, on string) {
 	return StatusIdle, w.Name
 }
 
-// worker is the live worker it is on: its linked session by id (a tmux session's id is its name), else the one with
-// an agent its on names (Match), as the previews' cards are.
+// worker is the live worker it is on: its linked session by id (a tmux session's id is its name, a desktop app
+// session's its ID), else the one with an agent its on names (Match), as the previews' cards are.
 func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	name := ""
 	if it.Session != nil {
@@ -131,7 +131,7 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 		}
 		name = m.ID
 	}
-	i := slices.IndexFunc(o.Workers, func(w sidebar.Session) bool { return w.Name == name })
+	i := slices.IndexFunc(o.Workers, func(w sidebar.Session) bool { return w.Name == name || w.ID == name })
 	if i < 0 {
 		return sidebar.Session{}, false
 	}

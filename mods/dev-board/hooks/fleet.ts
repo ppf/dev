@@ -33,7 +33,7 @@ export async function readAsks(run: Run, bin: string, errors: string[] = []): Pr
     return l.items.flatMap((it: any): FleetItem[] => {
       if (typeof it?.id !== 'number' || typeof it.text !== 'string' || typeof it.done !== 'boolean') throw new Error('dev todo --all --json printed an item this mod does not read')
       if (it.on) return []
-      return [{ boss: l.boss, id: it.id, text: it.text, done: it.done, options: isArray(it.options) ? it.options.map(String) : [], answer: typeof it.answer === 'string' ? it.answer : undefined }]
+      return [{ boss: l.boss, id: it.id, text: it.text, done: it.done, options: isArray(it.options) ? it.options.map(String) : [], answer: typeof it.answer === 'string' ? it.answer : undefined, status: typeof it.status === 'string' && it.status !== '' ? it.status : undefined }]
     })
   })
 }

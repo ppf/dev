@@ -57,7 +57,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {
-				setStatus(s, l, cmd.ErrOrStderr())
+				setStatus(s, l, boss, cmd.ErrOrStderr())
 				return printJSON(out, l)
 			}
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(boss, cmd.ErrOrStderr()) }); err != nil {
@@ -69,7 +69,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, status: decide, yours, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone on a desktop app boss's list, and status_on: its worker or person), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, status: decide, yours, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, and status_on: its worker or person), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))

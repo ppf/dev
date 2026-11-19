@@ -59,7 +59,7 @@ func TestTodo(t *testing.T) {
 			On   string `json:"on"`
 			Link string `json:"link"`
 			Done bool   `json:"done"`
-			// A desktop boss's workers aren't read: an item on someone has no status
+			// A worker record dev can't read (local_broken): an item on someone has no status
 			Status   string `json:"status"`
 			StatusOn string `json:"status_on"`
 		} `json:"items"`
