@@ -810,6 +810,12 @@ func TestOwnNameItem(t *testing.T) {
 	if err := s.DoneText(3, "c", now); err == nil {
 		t.Error("linked to a session: ticked")
 	}
+	if _, err := s.Add(Item{Text: "e", On: "boss-a"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Start(4, "e", "boss-a", now); err != nil {
+		t.Errorf("own name: not started: %v", err)
+	}
 	other := store(t)
 	if _, err := other.Add(Item{Text: "d", On: "boss-a"}, now); err != nil {
 		t.Fatal(err)

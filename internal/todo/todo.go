@@ -636,7 +636,7 @@ func (s Store) Start(id int, text, to string, now time.Time) (it Item, prev *Sta
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, text)
 		case p.Started != nil && now.Sub(time.Unix(p.Started.At, 0)) < StartLate:
 			return fmt.Errorf("item %d: already sent to %s %s ago", id, p.Started.To, wait.Span(now.Sub(time.Unix(p.Started.At, 0))))
-		case p.On != "":
+		case !Own(p.On, p.Session, s.boss):
 			return fmt.Errorf("item %d is on %s, not the user's to start", id, p.On)
 		case len(p.Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
