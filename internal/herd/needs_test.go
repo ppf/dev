@@ -943,11 +943,24 @@ func TestNeedsClosedBoss(t *testing.T) {
 	if !strings.Contains(lines[0], sidebar.Red+"boss closed") {
 		t.Errorf("line %q, want boss closed in red", lines[0])
 	}
-	// Its keys say how to reopen it, none acts
+	// Its keys say how to reopen it, none acts but d, which ticks it by its file
 	m.needMode, m.needIdx, m.needKey = true, slices.IndexFunc(m.needRows(), func(r needRow) bool { return r.Boss == "boss-kite" }), row.sig
-	for _, k := range []string{"d", "enter", "1"} {
+	for _, k := range []string{"g", "enter", "1", "m"} {
 		if got, cmd := keys(m, k); cmd != nil || !strings.Contains(got.msg.text, "boss-kite is closed: dev boss kite reopens it") {
 			t.Errorf("%s: cmd %v, msg %q", k, cmd != nil, got.msg.text)
 		}
+	}
+	var ticked [][2]any
+	m.tickList = func(boss string, id int, text string) (string, error) {
+		ticked = append(ticked, [2]any{boss, id})
+		return "done 3", nil
+	}
+	got, cmd := keys(m, "d")
+	if cmd == nil {
+		t.Fatalf("d on a closed boss's item: msg %q", got.msg.text)
+	}
+	cmd()
+	if !slices.Equal(ticked, [][2]any{{"boss-kite", 3}}) {
+		t.Errorf("ticked %v, want boss-kite #3", ticked)
 	}
 }

@@ -269,7 +269,8 @@ func (s *state) observePR(now time.Time, worker, since string, outside bool, pr 
 // the inbox if the coordinator is ready. Notes that waited for the coordinator to go idle with an empty
 // input box get there this way too. Last, as gh may be slow, it checks the open PRs of workers idle
 // StuckIdlePR (see checkPR), once per idle stretch, and delivers what they find, then looks up the PRs its to do
-// items link to (lookupList), and queues and delivers its to do notes (nudgeList).
+// items link to (lookupList), and queues and delivers its to do notes (nudgeList); the manager's then those of the
+// closed bosses' lists (lookupClosed).
 func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	b, ok, err := Here(c, pane)
 	switch {
@@ -277,7 +278,11 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		return err
 	case !ok:
 		// Its inbox off: its board still shows its list
-		return lookupList(c, pane, clk.Now())
+		manager, err := lookupList(c, pane, clk.Now())
+		if manager {
+			err = errors.Join(err, lookupClosed(c, clk.Now()))
+		}
+		return err
 	}
 	out, err := c.Run("display-message", "-p", "-t", pane, "#{session_id}")
 	if err != nil {
@@ -427,7 +432,12 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if len(due) > 0 {
 		errs = append(errs, checkPRs(c, clk, b, due))
 	}
-	if err := lookupList(c, pane, now); err != nil {
+	manager, err := lookupList(c, pane, now)
+	if manager {
+		// Its own list failing doesn't hold them up
+		errs = append(errs, lookupClosed(c, now))
+	}
+	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
 	queued, err := nudgeList(c, b, pane, live, now)
@@ -445,16 +455,41 @@ var viewPR = sidebar.ViewPR
 
 // lookupList looks up the PRs the boss's open to do items link to, those not looked up within todo.LookupTTL, at
 // most listLookups; a failed lookup is kept on its item, not reported, as gh may be down for long. None for a pane
-// not in a boss session.
-func lookupList(c *tmux.Client, pane string, now time.Time) error {
+// not in a boss session. manager reports the manager's list, failed or not: it owns the closed bosses' (lookupClosed).
+func lookupList(c *tmux.Client, pane string, now time.Time) (manager bool, err error) {
 	s, err := todo.ForPane(c, pane)
 	if errors.Is(err, todo.ErrNotBoss) {
-		return nil
+		return false, nil
 	}
+	if err != nil {
+		return false, err
+	}
+	return s.Boss() == sidebar.Manager, s.Lookup(now, todo.LookupTTL, listLookups, viewPR)
+}
+
+// lookupClosed looks up the PRs of the closed bosses' lists as lookupList does, at most listLookups across them, so
+// a merged PR shows on its item rather than only boss closed, and a --done-on item ticks. A list not read is skipped: the board shows why.
+func lookupClosed(c *tmux.Client, now time.Time) error {
+	lists, err := todo.Closed(c, now)
 	if err != nil {
 		return err
 	}
-	return s.Lookup(now, todo.LookupTTL, listLookups, viewPR)
+	left := listLookups
+	view := func(url string) (sidebar.PRView, error) {
+		left--
+		return viewPR(url)
+	}
+	var errs []error
+	for _, l := range lists {
+		// Lookup's limit 0 is no limit
+		if left <= 0 {
+			break
+		}
+		if l.Err == nil {
+			errs = append(errs, l.Store.Lookup(now, todo.LookupTTL, left, view))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // nudgeList queues a note for each item on the boss's list that ticked by itself on its PR's move, and each it should

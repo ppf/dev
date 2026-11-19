@@ -59,7 +59,7 @@ type NeedItem struct {
 func NeedCounts(needs []NeedList) map[string]ListCount {
 	out := map[string]ListCount{}
 	for _, l := range needs {
-		c := ListCount{Unread: l.Error != ""}
+		c := ListCount{Unread: l.Error != "", Closed: l.Closed}
 		for _, it := range l.Items {
 			c.Add(it.Done, it.On, len(it.Options))
 		}
@@ -92,7 +92,7 @@ type NeedRow struct {
 	Session string   // where ⏎ goes: the session, or the list's boss
 	Updated int64    // a stale list's item's last change (its list's, for an older dev's item), unix seconds; 0 for the others
 	Check   *Check   // why the list item may be out of date
-	Closed  bool     // the list's boss session is closed: its row can't be answered, ticked or gone to
+	Closed  bool     // the list's boss session is closed: its row can't be answered or gone to, only ticked
 }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.
@@ -436,7 +436,7 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	row := rows[m.needIdx]
 	switch s := k.String(); {
-	case row.Closed && (s == "enter" || s == "d" || len(s) == 1 && s >= "1" && s <= "9"):
+	case row.Closed && (s == "enter" || len(s) == 1 && s >= "1" && s <= "9"):
 		showMessage(m.c, m.client(), row.ClosedHint())
 		return m, nil
 	}

@@ -60,4 +60,24 @@ esac`, "gh")
 	if out := dev([]string{"TMUX_PANE="}, "todo", "--all", "--json"); !strings.Contains(strings.Join(strings.Fields(out), ""), `"boss":"boss-orbit","closed":true`) {
 		t.Errorf("❌ --all --json lacks the closed list:\n%s", out)
 	}
+
+	// A closed boss's list is checked and ticked by --boss; nothing else takes it, nor a live session that is no boss
+	writeFile(t, view, `{"state":"MERGED","mergedAt":"2026-01-01T00:00:00Z","closedAt":null,"reviewDecision":"APPROVED","statusCheckRollup":[]}`)
+	out = dev([]string{"TMUX_PANE="}, "todo", "check", "--boss", "boss-orbit")
+	if !strings.Contains(out, "1\t◌\tPR #412 open, CI pending\ton reviewers\t"+url+"\t⚠ PR #412 merged") {
+		t.Errorf("❌ check of the closed list:\n%s", out)
+	}
+	out = dev([]string{"TMUX_PANE="}, "todo", "done", "--boss", "boss-orbit", "--text", "Ask Mara for the API key", "2")
+	check(t, "done on the closed list", out, "done 2 · to do 1, 1 on others\n")
+	fails := func(argv ...string) {
+		t.Helper()
+		cmd := exec.Command(devBin, argv...)
+		cmd.Env = s.scriptEnv("TMUX_PANE=", "PATH="+stubs+":"+os.Getenv("PATH"))
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Errorf("❌ dev %s took it:\n%s", strings.Join(argv, " "), out)
+		}
+	}
+	fails("todo", "add", "--boss", "boss-orbit", "new")
+	fails("todo", "done", "--boss", "other", "1")
+	fails("todo", "done", "--boss", "boss-nope", "1")
 }

@@ -832,3 +832,30 @@ func TestNeedsMouseOption(t *testing.T) {
 		t.Errorf("answered %+v, want Wait", calls)
 	}
 }
+
+// d ticks a closed boss's item by its list; ⏎ and 1-9 say how to reopen it.
+func TestNeedsTickClosed(t *testing.T) {
+	var calls []answerCall
+	m := needsModel(&calls)
+	m.snap.sessions = nil
+	m.needs = []NeedList{{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 3, Text: "Ask Mara"}}}}
+	var ticked [][2]any
+	m.needsDone = func(boss string, id int, text string) (string, error) {
+		ticked = append(ticked, [2]any{boss, id})
+		return "done 3", nil
+	}
+	m, _ = key(m, "n")
+	for _, k := range []string{"enter", "1"} {
+		if _, cmd := key(m, k); cmd != nil {
+			t.Errorf("%s on a closed boss's row acted", k)
+		}
+	}
+	m, cmd := key(m, "d")
+	if cmd == nil {
+		t.Fatal("d on a closed boss's item sent nothing")
+	}
+	cmd()
+	if !slices.Equal(ticked, [][2]any{{"boss-kite", 3}}) {
+		t.Errorf("ticked %v, want boss-kite #3", ticked)
+	}
+}
