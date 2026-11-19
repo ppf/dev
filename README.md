@@ -269,6 +269,23 @@ and `"CLAUDE_CODE_FORCE_TERMINAL_IMAGES": "1"` in the `env` of Claude's `setting
 
 dev starts claude (new sessions, the boss, `dev resurrect` resumes) with `--remote-control=<session>`, so in Remote Control each shows as its tmux session (`dev-flaky-tests`, `boss-dev`) rather than a title made from its first message; a resume keeps the name. This turns Remote Control on for those sessions even without `remoteControlAtStartup`. Workers (sessions `dev agent start` opens from a tmux pane, marked `@dev_started_by`, and their `dev resurrect` resumes) start without it, so a busy boss doesn't flood your phone with Remote Control notifications: with `--settings '{"remoteControlAtStartup":false}'`, which outranks that setting in your user settings; `/remote-control` still turns it on in one. A worker started by a plain session (not a boss) loses its `@dev_started_by` across `dev resurrect`, so it comes back with Remote Control. dev doesn't use `--name`: it would pin the pane title to the session name, and the sidebar and boss previews would lose the task title Claude sets there. Codex and Grok panes start unnamed.
 
+## Phone page
+
+`dev serve` serves the bosses' to do lists (what `dev todo --all --json` shows) to a page you open in the phone's browser. The page and the lists stay on the Mac: no app, account or outside service.
+
+```bash
+dev serve          # prints the URL to open on the phone
+dev serve pair     # in a real terminal (not a Claude session): prints the URL and a one-time code
+```
+
+Open the printed URL on the phone and enter the code (8 digits shown as `1234 5678`, valid 5 minutes, once; 5 wrong tries void it); the phone stays paired. Pairing is required on every bind, loopback too. If dev serve runs on `--addr`, pass the same `--addr` to `dev serve pair`. It listens on the Mac's tailnet address when it has one (the phone then needs Tailscale too), else on its home network address: then the phone must be on the same Wi-Fi, and since it is plain HTTP, other devices on that network can read the traffic, so use it on a network you trust (no TLS yet). `--addr ip:port` picks the address.
+
+- Can: read the board, answer an ask (pick, then Send, or your own words), tick your own items.
+- Cannot: push notifications, Start, desktop app bosses' asks (shown read-only), adding items.
+- `--awake` (default on): holds a no-sleep assertion (`caffeinate -s`) while serving, which macOS honours on mains power only; on battery it says the Mac may sleep. A closed laptop lid still sleeps.
+- `dev serve --install [--addr ip:port]` writes `~/Library/LaunchAgents/dev.serve.plist` so it runs at each login (on tmux's default server), and prints the `launchctl` line to start it now; `dev serve --uninstall` removes it and prints the `launchctl bootout` line. It picks its address when it starts: after updating dev, or when the Mac's address changes (another Wi-Fi, Tailscale up later), run the printed line again.
+- `dev serve unpair [device]` drops one phone's session, or every one, at once.
+
 ## Development
 
 ```bash

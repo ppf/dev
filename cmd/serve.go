@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 
 func newServeCmd() *cobra.Command {
 	var addr string
+	var install, uninstall, awake bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the board to the phone page over HTTP",
@@ -35,6 +37,9 @@ address, port %d; --addr takes a loopback, tailnet or private LAN ip:port, never
 address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too: dev serve pair.`, serve.DefaultPort),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if install || uninstall {
+				return launchAgent(cmd.OutOrStdout(), install, addr, awake)
+			}
 			ap, kind, err := bind(addr)
 			if err != nil {
 				return err
@@ -49,6 +54,11 @@ address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too:
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
+			if awake {
+				if err := keepAwake(out, cmd.ErrOrStderr()); err != nil {
+					return err
+				}
+			}
 			if kind == serve.LAN {
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
@@ -57,6 +67,12 @@ address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too:
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "the ip:port to listen on: loopback, tailnet or private LAN")
+	cmd.Flags().BoolVar(&install, "install", false, "write a launchd agent that runs dev serve (with --addr) at login, and print the launchctl line to start it")
+	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "remove dev serve's launchd agent")
+	cmd.Flags().BoolVar(&awake, "awake", runtime.GOOS == "darwin", "keep the Mac from sleeping while serving, on mains power (caffeinate -s)")
+	cmd.MarkFlagsMutuallyExclusive("install", "uninstall")
+	cmd.MarkFlagsMutuallyExclusive("uninstall", "addr")
+	cmd.MarkFlagsMutuallyExclusive("uninstall", "awake")
 	cmd.AddCommand(newServePairCmd(), newServeUnpairCmd())
 	return cmd
 }
