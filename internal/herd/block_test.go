@@ -402,6 +402,14 @@ func TestBlockStart(t *testing.T) {
 		}
 	}
 
+	if (needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting}}).Yours() {
+		t.Error("a starting row is in the sidebar's TO DO")
+	}
+	check := rows[i]
+	check.Status = sidebar.StatusCheck
+	if _, cmd := m.startNeed(check); cmd != nil {
+		t.Error("s started an item whose PR moved")
+	}
 	closed := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
 	m.snap.all = slices.DeleteFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
 	if acts, _ := m.actions(rows[closed]); len(acts) != 1 || acts[0].key != "d" {

@@ -153,8 +153,9 @@ func (r NeedRow) Group() int {
 	}
 }
 
-// Yours reports a row the user acts on: a session's, a list not read, or an item of the user's own (NeedItem.Own).
-func (r NeedRow) Yours() bool { return r.Kind != NeedOn }
+// Yours reports a row the user acts on: a session's, a list not read, or an item of the user's own (NeedItem.Own) not yet
+// asked to start.
+func (r NeedRow) Yours() bool { return r.Kind != NeedOn && r.Status != StatusStarting }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.
 func (r NeedRow) ClosedHint() string {
