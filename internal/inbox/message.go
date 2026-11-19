@@ -396,6 +396,20 @@ func AnswerPage(id int, text, answer string) Note {
 	return n
 }
 
+// Started is the note asking a boss to start item id, text, on its own list; with closed, the list of that closed boss,
+// sent to the Manager.
+func Started(boss string, id int, text string, closed bool) Note {
+	n := Note{Kind: Start, Key: fmt.Sprintf("start %s %d", boss, id)}
+	if closed {
+		n.Text = fmt.Sprintf(`%s #%d "%s": %s is closed: reopen it (dev boss %s --background), its start list asks it to start #%d`,
+			boss, id, text, boss, strings.TrimPrefix(boss, "boss-"), id)
+		return n
+	}
+	n.Text = fmt.Sprintf(`#%d "%s": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
+		`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
+	return n
+}
+
 // Socket is the socket path of the tmux server c reaches.
 func Socket(c *tmux.Client) (string, error) {
 	out, err := c.Run("display-message", "-p", "#{socket_path}")

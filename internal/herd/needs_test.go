@@ -952,11 +952,11 @@ func TestNeedsClosedBoss(t *testing.T) {
 		t.Errorf("line %q, want boss closed muted, in its group", lines[0])
 	}
 	m.needMode = true
-	if lines, _ := m.needLines(row, 12, 80, true); !strings.Contains(ansi.Strip(lines[len(lines)-1]), "Tick      boss-kite is closed: dev boss kite reopens it") {
+	if lines, _ := m.needLines(row, 12, 80, true); !strings.Contains(ansi.Strip(lines[len(lines)-1]), "Start   Tick      boss-kite is closed: dev boss kite reopens") {
 		t.Errorf("expanded: %q", plain(lines))
 	}
 	m.needMode = false
-	// Its keys say how to reopen it, none acts but d, which ticks it by its file
+	// Its keys say how to reopen it, none acts but d, which ticks it by its file, and s (the manager runs: a manager's board)
 	m.needMode, m.needIdx, m.needKey = true, slices.IndexFunc(m.needRows(), func(r needRow) bool { return r.Boss == "boss-kite" }), row.sig
 	for _, k := range []string{"g", "enter", "1", "m"} {
 		if got, cmd := keys(m, k); cmd != nil || !strings.Contains(got.msg.text, "boss-kite is closed: dev boss kite reopens it") {

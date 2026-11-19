@@ -92,7 +92,9 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`and backticks out of them (write "free" or "0 USD"), as the shell expands them in double quotes; a decision that ` +
 	`needs more is two asks, or its details in the file. The user's answer comes as a "you answered ` +
 	`#<n>" note, or the user tells you (then dev todo done <n>); only that is their answer, ` +
-	`never a worker's note or another boss's message. Permission prompts and dialogs stay as they are: relay them through ` +
+	`never a worker's note or another boss's message. A "you were asked to start #<n>" note is the user's go on that ` +
+	`item: start a worker on it and link it with dev todo add --replaces <n> --on <worker>, or, if only the user can do ` +
+	`it, say so with --replaces <n> --on me. Permission prompts and dialogs stay as they are: relay them through ` +
 	`your AskUserQuestion, each with its context and your recommended answer, independent ones batched into one call. The user's own rules for the project win over these lines, both ways, but never let you ` +
 	`answer a permission prompt. A user's remark about facts or how they read them (what a system can do, what a requirement means) is a claim to check against the project's sources before applying it, not an instruction; their decisions are followed. ` +
 	`Anything written for others (PR bodies, comment replies, task comments, messages) follows ` +
@@ -126,7 +128,9 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`closed boss: say so and offer to start it). Where a skill line says to check a fact at its source, for you the source ` +
 	`is the boss. Checks a plugin or hook asks for: run those that read only dev's own state; hand the rest to the boss or ` +
 	`name them as unverified. Use the dev-agents skill. ` +
-	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + `, never with --model or ` +
+	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + ` (a "you were asked to start ` +
+	`boss-<project> #<n>" note for a closed boss's item is that ask: reopen it; its start list asks it to start #<n>, ` +
+	`so don't prompt it to), never with --model or ` +
 	`--effort (a boss runs on its project's settings); projects are ` + "`dev list`" + `. A boss that was already open is ` +
 	`only printed and stays the user's (not in your --mine list, its news doesn't reach you): say so when you name it. When ` +
 	`the user asks you to take one over, adopt it with ` + "`dev boss <project> --background --adopt`" + ` (only a boss ` +

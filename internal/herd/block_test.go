@@ -143,7 +143,7 @@ func TestBlockBudget(t *testing.T) {
 	}
 	block, _, _ = m.needBlock(gh)
 	all = strings.Join(plain(block), "\n")
-	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Tick      d tick · esc back") {
+	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Start   Tick      s start · d tick · esc back") {
 		t.Errorf("selected row not shown with its actions:\n%s", all)
 	}
 }
@@ -164,14 +164,14 @@ func TestBlockActionClick(t *testing.T) {
 	_, at, spans := m.needBlock(m.height - len(m.bottom()))
 	y := -1
 	for j := range at {
-		if at[j] == i && len(spans[j]) > 0 && spans[j][0].key == "d" {
+		if at[j] == i && len(spans[j]) > 1 && spans[j][1].key == "d" {
 			y = j
 		}
 	}
 	if y < 0 {
 		t.Fatalf("no Tick on the expanded row:\n%s", strings.Join(plain(m.render()), "\n"))
 	}
-	next, cmd := m.Update(tea.MouseMsg{X: spans[y][0].x0, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	next, cmd := m.Update(tea.MouseMsg{X: spans[y][1].x0, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if cmd == nil {
 		t.Fatalf("click on Tick: msg %q", next.(Model).msg.text)
 	}
@@ -347,5 +347,90 @@ func TestBlockShortSweep(t *testing.T) {
 				t.Errorf("gh %d: selected row %d %q hidden:\n%s", gh, i, text, all)
 			}
 		}
+	}
+}
+
+// s on the user's own row asks for it to be started; the row then shows under Starting, whom it went to and since
+// when, "start not picked up" once late, with no Start word; a closed boss's row offers Start only while the manager runs.
+func TestBlockStart(t *testing.T) {
+	m := blockBoard(t)
+	var started [][2]any
+	m.startList = func(boss string, id int, text string) (string, error) {
+		started = append(started, [2]any{boss, id})
+		return "", nil
+	}
+	rows := m.needRows()
+	i := slices.IndexFunc(rows, func(r needRow) bool { return r.Text == "DM David" })
+	m.needMode, m.needIdx, m.needKey = true, i, rows[i].sig
+	_, cmd := keys(m, "s")
+	if cmd == nil {
+		t.Fatal("s: nothing sent")
+	}
+	cmd()
+	if !slices.Equal(started, [][2]any{{rows[i].Boss, rows[i].ID}}) {
+		t.Errorf("started %v, want %s #%d", started, rows[i].Boss, rows[i].ID)
+	}
+
+	now := m.clk.Now()
+	for _, tt := range []struct {
+		late       bool
+		want, acts string
+	}{{false, "sent to boss-noc · 2m", "Start   Tick   Go to boss      s start"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
+		m := blockBoard(t)
+		for j, it := range m.snap.asks[0].Items {
+			if it.Text == "DM David" {
+				m.snap.asks[0].Items[j].Started = &todo.Started{At: now.Add(-2 * time.Minute).Unix(), To: "boss-noc"}
+				m.snap.asks[0].Items[j].StartLate = tt.late
+			}
+		}
+		m.snap.rollUp()
+		rows := m.needRows()
+		i := slices.IndexFunc(rows, func(r needRow) bool { return r.Text == "DM David" })
+		if rows[i].Status != sidebar.StatusStarting || rows[i].Kind != sidebar.NeedPlain {
+			t.Fatalf("row %+v, want the user's own, starting", rows[i])
+		}
+		if c := m.tally(); c.ToDo != 1 {
+			t.Errorf("tally %+v, want 1 yours: a starting item isn't", c)
+		}
+		m, _ = keys(m, "n")
+		for range i {
+			m, _ = keys(m, "j")
+		}
+		all := strings.Join(plain(m.render()), "\n")
+		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "         "+tt.acts) {
+			t.Errorf("late %v: want Starting, %q and %q:\n%s", tt.late, tt.want, tt.acts, all)
+		}
+	}
+
+	if (needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting}}).Yours() {
+		t.Error("a starting row is in the sidebar's TO DO")
+	}
+	check := rows[i]
+	check.Status = sidebar.StatusCheck
+	if _, cmd := m.startNeed(check); cmd != nil {
+		t.Error("s started an item whose PR moved")
+	}
+	closed := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
+	m.snap.all = slices.DeleteFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
+	if acts, _ := m.actions(rows[closed]); len(acts) != 1 || acts[0].key != "d" {
+		t.Errorf("closed boss, no manager: %v, want Tick alone", acts)
+	}
+	m.snap.all = append(m.snap.all, sidebar.Session{Name: sidebar.Manager})
+	if acts, _ := m.actions(rows[closed]); len(acts) != 2 || acts[0].key != "s" {
+		t.Errorf("closed boss, manager runs: %v, want Start then Tick", acts)
+	}
+}
+
+// A starting row names whom the start went to only where names fit, and keeps a moved PR's warning.
+func TestStartingRight(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	r := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting, StatusOn: "boss-x",
+		StartedAt: now.Add(-2 * time.Minute).Unix()}}
+	if got, _ := r.right(now, true); got != "sent to boss-x · 2m" {
+		t.Errorf("named = %q", got)
+	}
+	r.Check = &sidebar.Check{Kind: sidebar.CheckMerged, PR: 18, Since: now.Unix()}
+	if got, _ := r.right(now, false); !strings.HasPrefix(got, "sent · 2m · ⚠ ") {
+		t.Errorf("narrow, PR moved = %q", got)
 	}
 }

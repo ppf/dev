@@ -4,6 +4,7 @@
   "statuses": [
     "decide",
     "yours",
+    "starting",
     "working",
     "blocked",
     "waiting",

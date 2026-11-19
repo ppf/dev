@@ -25,6 +25,7 @@ import (
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/wait"
 )
 
 const (
@@ -65,7 +66,17 @@ type Item struct {
 	Answer  string   `json:"answer,omitempty"`
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
 	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
+	Started *Started `json:"started,omitempty"` // the user asked to start it (dev todo start), until a --replaces or set
 }
+
+// Started is when the user asked to start an item, unix seconds, and To, the boss that note went to.
+type Started struct {
+	At int64  `json:"at"`
+	To string `json:"to"`
+}
+
+// StartLate is how long a start may go without a --replaces before boards say it wasn't picked up.
+const StartLate = 10 * time.Minute
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty; Boss is its boss
 // session's name, once a change through ForPane wrote it; Ticked the items that ticked by themselves, until its boss
@@ -104,7 +115,10 @@ type Shown struct {
 	Added   int64          `json:"added,omitempty"`
 	DoneOn  string         `json:"done_on,omitempty"`
 	Check   *sidebar.Check `json:"check,omitempty"`
-	Gone    bool           `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+	Started *Started       `json:"started,omitempty"`
+	// StartLate is a start 10 minutes old (the StartLate duration) that no --replaces took up
+	StartLate bool `json:"start_late,omitempty"`
+	Gone      bool `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
 	// Status and StatusOn are what Owner.Status says, once SetStatus ran
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
@@ -474,12 +488,13 @@ func (s Store) Read(now time.Time) (List, error) {
 	}
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
 		if !sh.Done {
 			sh.Check = check(it, facts[it.key()], now)
+			sh.StartLate = it.Started != nil && now.Sub(time.Unix(it.Started.At, 0)) >= StartLate
 		}
 		l.Items = append(l.Items, sh)
 	}
@@ -604,6 +619,43 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 		f.Items[i].Done = now.Unix()
 		return nil
 	}))
+}
+
+// Start marks the user's own open item id started, its note going to to, only while it still reads text and no start
+// under StartLate old waits; an ask, an item on someone or one started already is an error. A late start is sent again:
+// prev is the start it replaced.
+func (s Store) Start(id int, text, to string, now time.Time) (it Item, prev *Started, err error) {
+	err = s.update(now, refusing(func(f *file) error {
+		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
+		if i < 0 {
+			return fmt.Errorf("no open item %d", id)
+		}
+		p := &f.Items[i]
+		switch {
+		case p.Text != text:
+			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, text)
+		case p.Started != nil && now.Sub(time.Unix(p.Started.At, 0)) < StartLate:
+			return fmt.Errorf("item %d: already sent to %s %s ago", id, p.Started.To, wait.Span(now.Sub(time.Unix(p.Started.At, 0))))
+		case !Own(p.On, p.Session, s.boss):
+			return fmt.Errorf("item %d is on %s, not the user's to start", id, p.On)
+		case len(p.Options) > 0:
+			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
+		}
+		prev, p.Started = p.Started, &Started{At: now.Unix(), To: to}
+		it = *p
+		return nil
+	}))
+	return it, prev, err
+}
+
+// Unstart puts back prev in place of item id's start made at at, when its note couldn't be sent.
+func (s Store) Unstart(id int, at int64, prev *Started, now time.Time) error {
+	return s.update(now, func(f *file) error {
+		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Started != nil && it.Started.At == at }); i >= 0 {
+			f.Items[i].Started = prev
+		}
+		return nil
+	})
 }
 
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
@@ -931,6 +983,9 @@ func (l List) lines(limit int, now time.Time) string {
 		}
 		if it.DoneOn != "" {
 			b.WriteString(" (done on " + it.DoneOn + ")")
+		}
+		if it.Started != nil {
+			b.WriteString(" (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)")
 		}
 		if it.Check != nil {
 			b.WriteString(" ⚠ " + it.Check.Long(now))

@@ -57,7 +57,10 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
 		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Added: it.Added,
-			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn}
+			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate}
+		if it.Started != nil {
+			out[i].Started = &struct{ At int64 }{it.Started.At}
+		}
 	}
 	return out
 }
@@ -205,8 +208,8 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
-// user's item, g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc or n back to the cards,
-// t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
+// user's item, s start it (dev todo start), g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc
+// or n back to the cards, t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if len(rows) == 0 {
@@ -230,7 +233,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.todoFolded, m.needMode = true, false
 	case "ctrl+c":
 		return m, tea.Quit
-	case "g", "enter", "d", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case "g", "enter", "d", "s", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		if r.fold != nil {
 			if key == "g" || key == "enter" {
 				m.waitOpen = !m.waitOpen
@@ -239,7 +242,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if r.Closed && key != "d" {
+		if r.Closed && key != "d" && !(key == "s" && r.Kind == sidebar.NeedPlain && m.managerRuns()) {
 			m.msg = info(r.ClosedHint())
 			return m, nil
 		}
@@ -259,6 +262,8 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "d":
 			return m.tickNeed(r)
+		case "s":
+			return m.startNeed(r)
 		case "m", "i":
 			return m.replyNeed(r)
 		}
@@ -281,6 +286,27 @@ func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 	m.needKey, m.needDone, m.needFor = "", r.sig, r.Boss
 	tick := m.tickList
 	return m, listCmd(r.Boss, "Ticked ", func() (string, error) { return tick(r.Boss, r.ID, r.Text) })
+}
+
+// startNeed asks for the user's own list item to be started through dev todo start: its boss, or the manager for a
+// closed boss's; a second start says when the first went.
+func (m Model) startNeed(r needRow) (tea.Model, tea.Cmd) {
+	if r.Kind != sidebar.NeedPlain || r.Status == sidebar.StatusCheck {
+		m.msg = info("s starts your own plain item; g/⏎ goes to " + r.Session)
+		return m, nil
+	}
+	if m.answering != "" {
+		m.msg = info("⏳ answering " + m.answering + "…: start again once it's done")
+		return m, nil
+	}
+	m.answering = r.Boss
+	start := m.startList
+	return m, listCmd(r.Boss, "Sent ", func() (string, error) { return start(r.Boss, r.ID, r.Text) })
+}
+
+// managerRuns reports the manager's session is open: it takes a closed boss's starts.
+func (m Model) managerRuns() bool {
+	return slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
 }
 
 // listCmd runs a dev todo call on boss's list; its output, or done+boss when it prints none, or its failure.

@@ -512,16 +512,17 @@ func TestAddAnswer(t *testing.T) {
 	}
 }
 
-// A full inbox drops its oldest notes, never an answer: its item is ticked already.
+// A full inbox drops its oldest notes, never an answer nor a start: its item is ticked already, or waits on it.
 func TestAddCapsKeepsAnswers(t *testing.T) {
 	b := testBox(t)
 	_, _ = b.Add(Answer(1, "a?", "Yes"), time.Time{})
+	_, _ = b.Add(Started("boss-x", 2, "b", false), time.Time{})
 	for i := range maxNotes + 3 {
 		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
 	}
 	bt, _ := b.Take()
-	if len(bt.Notes) != maxNotes || bt.Dropped != 4 || bt.Notes[0].Kind != Answered {
-		t.Errorf("got %d notes, %d dropped, first %+v; want the answer kept first", len(bt.Notes), bt.Dropped, bt.Notes[0])
+	if len(bt.Notes) != maxNotes || bt.Dropped != 5 || bt.Notes[0].Kind != Answered || bt.Notes[1].Kind != Start {
+		t.Errorf("got %d notes, %d dropped, first %+v, %+v; want the answer and the start kept first", len(bt.Notes), bt.Dropped, bt.Notes[0], bt.Notes[1])
 	}
 }
 
