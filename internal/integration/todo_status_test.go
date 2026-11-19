@@ -4,8 +4,10 @@ package integration
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -109,6 +111,52 @@ func TestTodoStatus(t *testing.T) {
 			if got[w.Text] != w {
 				t.Errorf("❌ %s %q = %+v, want %+v", name, w.Text, got[w.Text], w)
 			}
+		}
+	}
+
+	// An item an older dev filed on the boss's own name reads yours, and a board's tick (done --text) ticks it
+	files, _ := filepath.Glob(filepath.Join(tmp, "state", "dev", "todo", "*boss-a.json"))
+	if len(files) != 1 {
+		t.Fatalf("❌ boss-a's list: %q", files)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f map[string]any
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	id := 0
+	for _, it := range f["items"].([]any) {
+		if it := it.(map[string]any); it["text"] == "mine" {
+			it["on"], id = "boss-a", int(it["id"].(float64))
+		}
+	}
+	if raw, err = json.Marshal(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(files[0], raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "todo", "--all", "--json")
+	if err := json.Unmarshal([]byte(out), &all); err != nil || byText(all[0].Items)["mine"] != (item{"mine", "boss-a", "yours", ""}) {
+		t.Errorf("❌ filed on its own boss: %v %+v", err, byText(all[0].Items)["mine"])
+	}
+	dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "todo", "done", "--boss", "boss-a", "--text", "mine", strconv.Itoa(id))
+	out, _ = dev(env, "todo", "--json")
+	var ticked struct {
+		Items []struct {
+			Text string `json:"text"`
+			Done bool   `json:"done"`
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &ticked); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range ticked.Items {
+		if it.Text == "mine" && !it.Done {
+			t.Errorf("❌ filed on its own boss: not ticked")
 		}
 	}
 }

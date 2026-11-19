@@ -29,7 +29,7 @@ func (m Model) View() string {
 	return strings.Join(m.render(), "\n")
 }
 
-// render lays out exactly m.height lines: NEEDS YOU and the to do block, the board under them scrolled to the
+// render lays out exactly m.height lines: TO DO, the board under them scrolled to the
 // selected card, the message threads under it, then the bottom rows.
 func (m Model) render() []string {
 	w, h := m.width, m.height
@@ -54,24 +54,24 @@ func (m Model) render() []string {
 	return lines
 }
 
-// topRows are the rows above the board, in gh rows: NEEDS YOU, then the to do block.
+// topRows are the rows above the board, in gh rows: TO DO.
 func (m Model) topRows(gh int) []string {
 	block, _, _ := m.needBlock(gh)
 	if len(block) == 0 && m.snap.todoErr != nil && gh > 0 {
-		// NEEDS YOU, too short to show, would say it
+		// TO DO, too short to show, would say it
 		return []string{sidebar.AlertRow("❌ to do: "+m.snap.todoErr.Error(), m.width)}
 	}
-	return append(block, m.todoRows(gh-len(block))...)
+	return block
 }
 
-// boardSpan is the row the board starts at, under NEEDS YOU and the to do block, and the rows it gets above the
+// boardSpan is the row the board starts at, under TO DO, and the rows it gets above the
 // message threads, when gh rows are above the bottom rows.
 func (m Model) boardSpan(gh int) (top, height int) {
 	top = len(m.topRows(gh))
 	return top, gh - top - len(m.msgRows(gh-top))
 }
 
-// boardHeight is the rows the board gets between the to do block and the message threads.
+// boardHeight is the rows the board gets between TO DO and the message threads.
 func (m Model) boardHeight() int {
 	_, bh := m.boardSpan(m.height - len(m.bottom()))
 	return bh
@@ -101,10 +101,16 @@ func (m Model) bottom() []string {
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
 	if m.needMode {
-		if rows := m.needRows(); m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain {
-			return []string{sidebar.HintRow("j/k move  d tick (stays till ticked)  g/⏎ go  esc cards", w)}
+		rows := m.needRows()
+		switch {
+		case m.needIdx < len(rows) && rows[m.needIdx].fold != nil:
+			return []string{sidebar.HintRow("j/k move  ⏎ open or fold  t fold to do  esc cards", w)}
+		case m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain:
+			return []string{sidebar.HintRow("j/k move  d tick (stays till ticked)  g/⏎ go  t fold to do  esc cards", w)}
+		case m.needIdx < len(rows) && (rows[m.needIdx].Kind == sidebar.NeedOn || rows[m.needIdx].Kind == sidebar.NeedUnread || rows[m.needIdx].Closed):
+			return []string{sidebar.HintRow("j/k move  g/⏎ go  t fold to do  esc cards", w)}
 		}
-		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply  g/⏎ go  esc cards", w)}
+		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply  g/⏎ go  t fold to do  esc cards", w)}
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
@@ -113,12 +119,8 @@ func (m Model) bottom() []string {
 		pages = fmt.Sprintf("%d/%d  ", sel+1, len(tiles))
 	}
 	hint := "j/k select  g/⏎ go  m message  v screen  f fold  x kill"
-	todo := ""
-	if len(m.panelItems()) > 0 {
-		todo = "t fold to do  "
-		if m.todoFolded {
-			todo = "t open to do  "
-		}
+	if m.todoFolded && len(m.needRows()) > 0 {
+		pages += "t open to do  "
 	}
 	if sel < len(tiles) {
 		// o only offers what openPR does: the PR, or why its lookup failed
@@ -132,9 +134,9 @@ func (m Model) bottom() []string {
 		}
 	}
 	if len(m.needRows()) > 0 && !m.tooShort() {
-		hint += "  n needs"
+		hint += "  n to do"
 	}
-	return []string{sidebar.HintRow(pages+todo+hint, w)}
+	return []string{sidebar.HintRow(pages+hint, w)}
 }
 
 // boxRows is the reply box bound to t, boxed like t's card in t's colour: a top border naming what it does and

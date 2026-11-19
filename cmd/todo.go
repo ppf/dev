@@ -472,7 +472,7 @@ func baseline(s todo.Store, stderr io.Writer) {
 func newTodoClearCmd(boss *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear",
-		Short: "Empty the list: its board shows no to do block",
+		Short: "Empty the list: its items leave the board's TO DO",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := todoStore(*boss, false, cmd.ErrOrStderr())

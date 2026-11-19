@@ -788,3 +788,33 @@ func TestDoneText(t *testing.T) {
 		t.Errorf("an unreadable list is Refused: %v", err)
 	}
 }
+
+// An item an older dev filed on its own boss's name, unlinked, is the user's: DoneText ticks it and Answer answers
+// it; on another list, or linked to a session by that name, it stays someone else's.
+func TestOwnNameItem(t *testing.T) {
+	s := store(t)
+	s.boss = "boss-a"
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a", On: "boss-a"}, {Text: "b?", On: "Boss-A", Options: []string{"Yes", "No"}},
+		{Text: "c", On: "boss-a", Session: &Session{ID: "boss-a", Name: "boss-a"}}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DoneText(1, "a", now); err != nil {
+		t.Errorf("own name: %v", err)
+	}
+	if _, err := s.Answer(2, "b?", "Yes", 0, now); err != nil {
+		t.Errorf("own name, case aside: %v", err)
+	}
+	if err := s.DoneText(3, "c", now); err == nil {
+		t.Error("linked to a session: ticked")
+	}
+	other := store(t)
+	if _, err := other.Add(Item{Text: "d", On: "boss-a"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.DoneText(1, "d", now); err == nil {
+		t.Error("another list's boss: ticked")
+	}
+}

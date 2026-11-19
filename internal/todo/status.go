@@ -8,22 +8,21 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 )
 
-// An open item's status: the one word both boards group and mark it by.
+// An open item's status: the one word both boards group and mark it by (sidebar.Statuses).
 const (
-	StatusDecide     = "decide"      // an ask (dev todo ask): the user picks an option
-	StatusYours      = "yours"       // on no one: the user's own
-	StatusWorking    = "working"     // on a worker that works
-	StatusBlocked    = "blocked"     // on a worker that waits on the user: a dialog, a turn ended on a question, or failed
-	StatusWaiting    = "waiting"     // on a person, or on a worker in a planned wait or a rate-limit resume
-	StatusIdle       = "idle"        // on a worker that rests, or a session it started with no agent
-	StatusGone       = "gone"        // on a worker session no longer listed
-	StatusCheck      = "check"       // its linked PR moved (merged, closed, approved, …): see its check
-	StatusBossClosed = "boss closed" // its boss session is gone
+	StatusDecide     = sidebar.StatusDecide
+	StatusYours      = sidebar.StatusYours
+	StatusWorking    = sidebar.StatusWorking
+	StatusBlocked    = sidebar.StatusBlocked
+	StatusWaiting    = sidebar.StatusWaiting
+	StatusIdle       = sidebar.StatusIdle
+	StatusGone       = sidebar.StatusGone
+	StatusCheck      = sidebar.StatusCheck
+	StatusBossClosed = sidebar.StatusBossClosed
 )
 
-// Statuses is the order boards group items by status.
-var Statuses = []string{StatusDecide, StatusYours, StatusWorking, StatusBlocked, StatusWaiting, StatusIdle, StatusGone,
-	StatusCheck, StatusBossClosed}
+// Statuses is the order boards list items by status within a group (sidebar.Groups).
+var Statuses = sidebar.Statuses
 
 // Owner is a list's boss as statuses read it: Name its session's, Closed when it's gone, Workers the live sessions it
 // started (sidebar.Live, or a desktop boss's workers as sessions); Unread when those weren't read, so an item on someone has no status.
@@ -69,7 +68,7 @@ func OwnerOf(live []sidebar.Session, boss string, closed bool) Owner {
 // A stuck note isn't blocked: it outlives the stretch it reports until the turn ends.
 func (o Owner) Status(it Shown) (status, on string) {
 	moved := it.Check != nil && it.Check.Event()
-	own := it.On == "" || it.Session == nil && o.Name != "" && strings.EqualFold(it.On, o.Name)
+	own := Own(it.On, it.Session, o.Name)
 	someone := it.On
 	if own {
 		someone = ""
@@ -110,6 +109,12 @@ func (o Owner) Status(it Shown) (status, on string) {
 		return StatusWaiting, w.Name
 	}
 	return StatusIdle, w.Name
+}
+
+// Own reports an item on no one, or unlinked (no session) on boss itself: an older dev filed --on <own name> as a
+// person; its status is the user's, and the user ticks or answers it.
+func Own(on string, session *Session, boss string) bool {
+	return on == "" || session == nil && boss != "" && strings.EqualFold(on, boss)
 }
 
 // worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's

@@ -26,7 +26,7 @@ const (
 const OptHerd = "@dev_herd"
 
 // OptBossPane holds a boss pane's role (RolePreviews for its board); OptNeedsFocus on its board asks it to focus
-// NEEDS YOU, which the board does on its next refresh, clearing it.
+// TO DO, which the board does on its next refresh, clearing it.
 const (
 	OptBossPane   = "@dev_boss_pane"
 	RolePreviews  = "previews"
@@ -132,7 +132,7 @@ type frame struct {
 	lines  []string
 	rows   []rowStart // display order
 	links  []link
-	needs  []needHit // NEEDS YOU's rows, above the header
+	needs  []needHit // TO DO's rows, above the header
 	header int       // the line of the SESSIONS header
 }
 

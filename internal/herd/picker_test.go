@@ -456,7 +456,7 @@ func TestCardAnswerClicks(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
 	m.box = replyBox{}
 	c, sent := screens(t, "claude-ask-q1", "")
-	// Open, for their chips: NEEDS YOU asks their questions
+	// Open, for their chips: TO DO asks their questions
 	m.folds = map[string]bool{"a": false, "b": false}
 	m.c = c
 	x, y := cellOf(t, m, "2 Green")
@@ -742,7 +742,7 @@ func TestCardClicksAcrossCards(t *testing.T) {
 	m := pickerModel(t, "claude-ask-q1", colors)
 	m.height = 40
 	b := goldenPick(t, "claude-permission-bash", agent.Question{})
-	// Open, for their chips: NEEDS YOU asks their questions
+	// Open, for their chips: TO DO asks their questions
 	m.folds = map[string]bool{"a": false, "b": false}
 	m.snap.tiles[1].deciding, m.snap.tiles[1].pick, m.snap.tiles[1].pane = true, &b, "%6"
 	m.snap.tiles[1].sess.State = agent.Waiting
@@ -780,7 +780,7 @@ func TestCardClicksAcrossCards(t *testing.T) {
 func TestCardDialogCursor(t *testing.T) {
 	m := pickerModel(t, "claude-ask-multi-other-typed", agent.Question{})
 	m.box = replyBox{}
-	// Open, for their chips: NEEDS YOU asks their questions
+	// Open, for their chips: TO DO asks their questions
 	m.folds = map[string]bool{"a": false, "b": false}
 	if x, y := cellOf(t, m, "[3 ☑ a fish]"); x == 0 || y == 0 {
 		t.Error("the dialog's cursor isn't bracketed")

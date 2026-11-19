@@ -101,7 +101,7 @@ type snapshot struct {
 	visible bool              // a client shows own window
 	focused bool              // own pane is its window's active pane
 	zoomed  bool              // own window is zoomed
-	// The sidebar asked to focus NEEDS YOU (sidebar.OptNeedsFocus), cleared as read
+	// The sidebar asked to focus TO DO (sidebar.OptNeedsFocus), cleared as read
 	needsFocus bool
 	client     string // tty of the client viewing own session; "" lets tmux pick
 	todo       todo.List
@@ -134,10 +134,11 @@ type Model struct {
 	size          paneSize        // how fit last sized the pane
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
-	todoFolded    bool            // the to do block shows as its header only (t)
+	todoFolded    bool            // TO DO shows as its header only (t)
+	waitOpen      bool            // TO DO lists Waiting on others' rows, not only their fold row
 	msgs          *inbox.Messages // the tmux server's messages; nil reads none, unless findMsgs
 	findMsgs      bool            // refresh looks up msgs until it's found
-	// NEEDS YOU
+	// TO DO
 	needMode   bool                                                               // its keys act on it
 	needIdx    int                                                                // the selected row, clamped to the rows at each use
 	needKey    string                                                             // the selected row's sig when chosen: keys act only while it's the same; "" after an answer
@@ -208,7 +209,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && !waitsOnUser(m.snap.asks) && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -311,7 +312,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		m.msg = msg.msg
 		if msg.msg.alert && m.needDone != "" {
-			// A reply from NEEDS YOU not sent: its row takes keys again
+			// A reply from TO DO not sent: its row takes keys again
 			m.needKey, m.needDone = m.needDone, ""
 		}
 		return m, nil
@@ -319,7 +320,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.msg, m.answering = msg.msg, ""
 		switch {
 		case m.box.block && msg.session == m.box.session && (!msg.took || !m.multiPick()):
-			// NEEDS YOU's answer is done, or failed: its keys go back to the block, which shows the row as it is now
+			// TO DO's answer is done, or failed: its keys go back to the block, which shows the row as it is now
 			m.blur()
 		case !msg.took && msg.session == m.box.session:
 			m.box.sent = ""
@@ -619,6 +620,7 @@ func (s *snapshot) rollUp() {
 			s.all[i].Deciding, s.all[i].State = t.deciding, t.sess.State
 		}
 	}
+	s.setStatuses()
 	rolls := sidebar.Subtree(s.all, sidebar.NeedCounts(s.needLists()))
 	for i, t := range s.tiles {
 		if t.via == "" {
@@ -629,6 +631,15 @@ func (s *snapshot) rollUp() {
 	slices.SortStableFunc(s.tiles, func(a, b tile) int {
 		return cmp.Or(cmp.Compare(a.section(), b.section()), cmp.Compare(min(len(a.via), 1), min(len(b.via), 1)))
 	})
+}
+
+// setStatuses sets the statuses of the own list's items and its bosses' (todo.Owner.Status), from the sessions as
+// this refresh saw them, as dev todo --all --json does.
+func (s *snapshot) setStatuses() {
+	s.todo.SetStatus(todo.OwnerOf(s.all, s.name, false))
+	for _, l := range s.asks {
+		l.SetStatus(todo.OwnerOf(s.all, l.Boss, l.Closed))
+	}
 }
 
 // descendants are the sessions the bosses under this boss (id, name) started, bosses at any depth, each with the
@@ -674,13 +685,6 @@ func bossLists(c *tmux.Client, bosses []string, closed bool, now time.Time) ([]t
 		}
 	}
 	return out, nil
-}
-
-// waitsOnUser reports a boss list NEEDS YOU shows: one with an item on no one, or not read.
-func waitsOnUser(lists []todo.BossList) bool {
-	return slices.ContainsFunc(lists, func(l todo.BossList) bool {
-		return l.Err != nil || slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return it.On == "" })
-	})
 }
 
 // index is name's tile index, 0 when not listed.

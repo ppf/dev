@@ -137,7 +137,7 @@ func (m Model) hitAt(x, y int) (hit, bool) {
 }
 
 // folded reports whether t's card shows as one row: the user's choice, else a boss's card (its row says its
-// subtree), one needing the user itself (NEEDS YOU asks it) or an idle card without a warning is.
+// subtree), one needing the user itself (TO DO asks it) or an idle card without a warning is.
 func (t tile) folded(folds map[string]bool) bool {
 	if f, ok := folds[t.sess.Name]; ok {
 		return f
@@ -470,10 +470,10 @@ func (m Model) headRow(t tile, sec section, folded bool, w int) string {
 	return left + strings.Repeat(" ", max(1, w-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 }
 
-// blockShown reports a pane tall enough for NEEDS YOU (needBlock), which then asks what folded cards point at.
+// blockShown reports a pane tall enough for TO DO (needBlock), which then asks what folded cards point at.
 func (m Model) blockShown() bool { return m.height-1 >= minBlockRows }
 
-// blockStatus is a folded card's status while NEEDS YOU asks its question: what it is, and where.
+// blockStatus is a folded card's status while TO DO asks its question: what it is, and where.
 func blockStatus(t tile) string {
 	what := "question"
 	switch {

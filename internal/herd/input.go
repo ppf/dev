@@ -40,7 +40,7 @@ type replyBox struct {
 	hl      int    // the picker's highlighted option
 	hlSig   string // the dialog hl is for: another one starts on its own cursor
 	other   bool   // ed holds the picker's free-text answer
-	block   bool   // opened from NEEDS YOU on a dialog: it closes once its answer is done, a multi-select's once it's gone
+	block   bool   // opened from TO DO on a dialog: it closes once its answer is done, a multi-select's once it's gone
 	// sent is the key of the dialog being answered: cleared when the answer fails, once the screen shows
 	// another dialog, or after staleRefreshes still showing it
 	sent  string
@@ -101,7 +101,7 @@ func (m *Model) syncPick() {
 	b := &m.box
 	t, ok := m.bound()
 	if !ok || t.pick == nil {
-		// A capture mid-redraw may miss the dialog: free text being typed stays; NEEDS YOU's picker closes once
+		// A capture mid-redraw may miss the dialog: free text being typed stays; TO DO's picker closes once
 		// its answer's dialog is gone
 		if b.block && b.sent != "" && !b.other {
 			m.blur()
@@ -151,8 +151,8 @@ func (m Model) waiting(p *pick) bool {
 
 // handleKey acts on the selected card: j/k/↓/↑ move (wrapping), g/⏎ switch to the worker, m (i) reply to it
 // here, 1-9 answer its dialog or its question's options, o open its PR, x kill (asks y/n; a deeper session's boss
-// closes it), v show more of its screen or less again, f fold or unfold it, t fold or open the to do block, n focus
-// NEEDS YOU (its keys: handleNeedKey), ctrl+c quit.
+// closes it), v show more of its screen or less again, f fold or unfold it, t fold or open TO DO, n focus
+// TO DO (its keys: handleNeedKey), ctrl+c quit.
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.box.session != "" {
 		return m.typeBox(k)
@@ -230,7 +230,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse: a left click on a row of NEEDS YOU selects it there, on one of its options answers it, as its key does; on a card it leaves NEEDS YOU: on its ▸/▾ folds
+// handleMouse: a left click on a row of TO DO selects (expands) it there, on one of its options or action words acts as
+// its key does, on Waiting on others' fold row opens or folds it; on a card it leaves TO DO: on its ▸/▾ folds
 // or unfolds it; on one of its dialog's options picks it (Submit goes on), as its key does; on Open switches to the
 // worker, on Message… opens the reply box for it, on its PR opens it, on × asks to close it; elsewhere on it selects
 // it, for the keys. A deeper session's card has no Message… or ×: its boss closes it.
@@ -240,10 +241,19 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if _, at, spans := m.needBlock(m.height - len(m.bottom())); ms.Y < len(at) {
 		if i := at[ms.Y]; i >= 0 && m.box.session == "" {
-			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, m.needRows()[i].sig, message{}, ""
+			rows := m.needRows()
+			m.needMode, m.needIdx, m.needKey, m.msg, m.confirm = true, i, rows[i].sig, message{}, ""
+			if rows[i].fold != nil {
+				m.waitOpen = !m.waitOpen
+				return m, nil
+			}
 			for _, sp := range spans[ms.Y] {
 				if ms.X >= sp.x0 && ms.X < sp.x1 {
-					return m.handleNeedKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune('1' + sp.n)}})
+					key := string(rune('1' + sp.n))
+					if sp.key != "" {
+						key = sp.key
+					}
+					return m.handleNeedKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 				}
 			}
 		}

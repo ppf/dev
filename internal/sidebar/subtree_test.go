@@ -45,10 +45,10 @@ func TestSubtreeText(t *testing.T) {
 	lists := map[string]ListCount{"boss-noc": {Asks: 1, Plain: 1}, "boss-dev": {Plain: 1}}
 	rolls := Subtree(subtreeSessions(), lists)
 	for name, want := range map[string]string{
-		"boss-noc": "needs you · 2 questions · 2 working · 1 to do",
+		"boss-noc": "1 need you · 1 decide · 2 working · 1 to do",
 		"boss-dev": "5 working · 1 to do",
 		"boss-mag": "idle · no workers",
-		"manager":  "needs you · 2 questions · 7 working · 2 to do",
+		"manager":  "1 need you · 1 decide · 7 working · 2 to do",
 	} {
 		if got := rolls[name].Text(); got != want {
 			t.Errorf("%s = %q, want %q", name, got, want)
@@ -78,17 +78,17 @@ func TestSubtreeEdges(t *testing.T) {
 		warn     bool
 	}{
 		{"planned wait", under(Session{State: agent.Idle, Wait: held}), nil, RankWaiting, "1 waiting", false},
-		{"dialog during a planned wait", under(Session{State: agent.Waiting, Deciding: true, Wait: held}), nil, RankNeedsYou, "needs you · 1 question", false},
+		{"dialog during a planned wait", under(Session{State: agent.Waiting, Deciding: true, Wait: held}), nil, RankNeedsYou, "1 need you", false},
 		{"rate limited", under(Session{State: agent.Idle, Resume: true, Note: "failed: rate limit"}), nil, RankWaiting, "1 waiting", true},
 		{"stale needs a decision note", under(Session{State: agent.Idle, Note: "needs a decision: Bash"}), nil, RankIdle, "idle", false},
-		{"asks note", under(Session{State: agent.Idle, Note: "asks: Merge?"}), nil, RankNeedsYou, "needs you · 1 question", false},
+		{"asks note", under(Session{State: agent.Idle, Note: "asks: Merge?"}), nil, RankNeedsYou, "1 need you", false},
 		{"resumed by hand", under(Session{State: agent.Working, Resume: true}), nil, RankWorking, "1 working", false},
 		{"asks note while working", under(Session{State: agent.Working, Note: "asks: Merge?"}), nil, RankWorking, "1 working", false},
 		{"idle reminder", under(Session{State: agent.Waiting}), nil, RankIdle, "idle", false},
 		{"stuck worker working", under(Session{State: agent.Working, Note: "stuck: 20m"}), nil, RankWorking, "1 working", true},
 		{"list not read", under(Session{State: agent.Idle}), map[string]ListCount{"b": {Unread: true}}, RankIdle, "idle", true},
 		{"plain items only", under(Session{State: agent.Idle}), map[string]ListCount{"b": {Plain: 3}}, RankIdle, "idle · 3 to do", false},
-		{"own asks note", []Session{{Name: "b", Boss: true, Agent: "Claude", State: agent.Idle, Note: "asks: VPN?"}}, nil, RankNeedsYou, "needs you · 1 question", false},
+		{"own asks note", []Session{{Name: "b", Boss: true, Agent: "Claude", State: agent.Idle, Note: "asks: VPN?"}}, nil, RankNeedsYou, "1 need you", false},
 		{"own work only", []Session{{Name: "b", Boss: true, Agent: "Claude", State: agent.Working}}, nil, RankWorking, "working", false},
 	}
 	for _, c := range cases {
@@ -144,20 +144,24 @@ func TestSubtreeGrandchild(t *testing.T) {
 	})
 	rolls := Subtree(ss, map[string]ListCount{"c": {Asks: 1}})
 	for _, name := range []string{"m", "b", "c"} {
-		if got := rolls[name].Text(); got != "needs you · 2 questions" {
+		if got := rolls[name].Text(); got != "1 need you · 1 decide" {
 			t.Errorf("%s = %q", name, got)
 		}
 	}
 }
 
-// Only an open item counts: on no one an ask apart from a plain one, else on others.
+// Only an open item counts, by its status: an ask to decide, the user's own plain item, else on others; a closed
+// boss's or a moved PR's in none.
 func TestListCountAdd(t *testing.T) {
 	var c ListCount
-	c.Add(false, "", 2)
-	c.Add(false, "", 0)
-	c.Add(true, "", 2)
-	c.Add(false, "w1", 0)
-	if c != (ListCount{Asks: 1, Plain: 1, On: 1}) {
+	c.Add(false, StatusDecide)
+	c.Add(false, StatusYours)
+	c.Add(true, "")
+	c.Add(false, StatusWorking)
+	c.Add(false, "")
+	c.Add(false, StatusBossClosed)
+	c.Add(false, StatusCheck)
+	if c != (ListCount{Asks: 1, Plain: 1, On: 2}) {
 		t.Errorf("count = %+v", c)
 	}
 }
@@ -176,8 +180,8 @@ func TestSubtreeFromPanes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM"}}}}))["boss"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 need you · 1 waiting" {
+	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM", Status: StatusYours}}}}))["boss"]
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 to do · 1 waiting" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
 }
@@ -185,7 +189,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 // NeedCounts counts open items on no one, asks apart, and on others; a list not read is unread.
 func TestNeedCounts(t *testing.T) {
 	got := NeedCounts([]NeedList{
-		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3, Done: true}, {ID: 4, On: "w"}}},
+		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide}, {ID: 2, Status: StatusYours}, {ID: 3, Done: true}, {ID: 4, On: "w", Status: StatusWaiting, StatusOn: "w"}}},
 		{Boss: "b", Error: "bad json"},
 	})
 	if got["a"] != (ListCount{Asks: 1, Plain: 1, On: 1}) || got["b"] != (ListCount{Unread: true}) {
@@ -193,77 +197,82 @@ func TestNeedCounts(t *testing.T) {
 	}
 }
 
-// A list's ask alone makes a boss need you: "1 need you" in red on the sidebar.
+// A list's ask alone makes a boss need you: "1 decide" in red on the sidebar.
 func TestRollLineListAsk(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Idle}}
 	got, _ := rollLine(Subtree(ss, map[string]ListCount{"b": {Asks: 1}})["b"], 40)
-	if !strings.HasPrefix(got, red+"1 need you") {
+	if !strings.HasPrefix(got, red+"1 decide") {
 		t.Errorf("line = %q", got)
 	}
 }
 
-// A roll line's "N need you" is what NEEDS YOU counts for the subtree: asks and the user's own plain items, no "to do";
-// an item on someone else is "on others".
-func TestRollLineMatchesNeedsYou(t *testing.T) {
+// A roll line says what TO DO counts for the subtree (Count), in the same words: asks to decide, the user's own plain
+// items to do (one filed on the boss's own name too: its status is yours); an item on someone else is "on others".
+func TestRollLineMatchesToDo(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
-		{ID: 1, Options: []string{"x", "y"}}, {ID: 2}, {ID: 3}, {ID: 4, On: "w"},
+		{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide}, {ID: 2, Status: StatusYours}, {ID: 3, On: "b", Status: StatusYours},
+		{ID: 4, On: "w", Status: StatusIdle, StatusOn: "w"},
 	}}
 	r := Subtree(ss, NeedCounts([]NeedList{list}))["b"]
 	got, _ := rollLine(r, 60)
-	if want := "3 need you · 1 on others"; ansi.Strip(got) != want {
+	if want := "1 decide · 2 to do · 1 on others"; ansi.Strip(got) != want {
 		t.Errorf("line = %q, want %q", ansi.Strip(got), want)
 	}
-	if n := needCount(NeedRows(ss, []NeedList{list}, "")); n != 3 {
-		t.Errorf("NEEDS YOU = %d, want 3", n)
+	if !strings.HasPrefix(got, red+"1 decide"+reset) || !strings.Contains(got, muted+"2 to do"+reset) {
+		t.Errorf("decide red, to do muted: %q", got)
 	}
-	// Plain items alone say "need you", the state left to the row above
+	if c := Count(NeedRows(ss, []NeedList{list}, "")); c != (Tally{Decide: 1, ToDo: 2}) {
+		t.Errorf("TO DO = %+v, want 1 decide, 2 to do", c)
+	}
+	// Plain items alone say "to do", the state left to the row above
 	r = Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["b"]
-	if got, _ := rollLine(r, 60); ansi.Strip(got) != "2 need you" {
+	if got, _ := rollLine(r, 60); ansi.Strip(got) != "2 to do" {
 		t.Errorf("plain only = %q", ansi.Strip(got))
 	}
 }
 
-// A manager's "N need you" by its plain items alone leads, whatever the width.
+// A manager's "N to do" by its plain items alone leads, whatever the width.
 func TestRollLineManagerPlainOnly(t *testing.T) {
 	ss := []Session{
 		{Name: "m", ID: "$1", Boss: true, Root: "m", State: agent.Idle},
 		{Name: "b", ID: "$2", Boss: true, Root: "m", Depth: 1, State: agent.Idle},
 	}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["m"]
-	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "2 need you") {
+	if got, _ := rollLine(r, 22); !strings.HasPrefix(ansi.Strip(got), "2 to do") {
 		t.Errorf("line = %q", ansi.Strip(got))
 	}
 }
 
-// A workerless boss with plain items only keeps a red "N need you", without the idle or "no workers" its rows already say.
+// A workerless boss with plain items only keeps a muted "N to do", without the idle or "no workers" its rows already say.
 func TestRollLineWorkerlessPlainOnly(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
 	for _, width := range []int{20, 36, 40} {
 		got, _ := rollLine(r, width)
-		if !strings.HasPrefix(got, red+"1 need you"+reset) || ansi.Strip(got) != "1 need you" {
+		if !strings.HasPrefix(got, muted+"1 to do"+reset) || ansi.Strip(got) != "1 to do" {
 			t.Errorf("width %d: %q", width, got)
 		}
 		if strings.Contains(strings.Split(ansi.Strip(got), " · ")[0], "…") {
-			t.Errorf("width %d: need you cut: %q", width, ansi.Strip(got))
+			t.Errorf("width %d: to do cut: %q", width, ansi.Strip(got))
 		}
 	}
 }
 
-// A workerless boss: "no workers" never shares the line with a need you, the cost or "on others".
+// A workerless boss: "no workers" never shares the line with a to do, the cost or "on others".
 func TestRollLineNoWorkersLast(t *testing.T) {
 	boss := Session{Name: "b", ID: "$1", Boss: true, State: agent.Idle, HasCost: true, CostUSD: 28.47}
 	for _, tc := range []struct {
-		name string
-		list ListCount
+		name  string
+		list  ListCount
+		wants map[int]string
 	}{
-		{"to do", ListCount{Plain: 6, On: 5}},
-		{"ask open", ListCount{Asks: 6, On: 5}},
+		{"to do", ListCount{Plain: 16, On: 15}, map[int]string{36: "16 to do · $28.47", 40: "16 to do · $28.47 · 15 on others"}},
+		{"ask open", ListCount{Asks: 16, On: 15}, map[int]string{34: "16 decide · $28.47", 40: "16 decide · $28.47 · 15 on others"}},
 	} {
 		r := Subtree([]Session{boss}, map[string]ListCount{"b": tc.list})["b"]
-		// rollLine gets the pane width less 5: the sidebar at 36 and 40 columns
-		for pane, want := range map[int]string{36: "6 need you · $28.47", 40: "6 need you · $28.47 · 5 on others"} {
+		// rollLine gets the pane width less 5
+		for pane, want := range tc.wants {
 			got, _ := rollLine(r, pane-5)
 			if ansi.Strip(got) != want {
 				t.Errorf("%s, %d columns: %q, want %q", tc.name, pane, ansi.Strip(got), want)
@@ -278,28 +287,28 @@ func TestRollLineNoWorkersLast(t *testing.T) {
 	}
 }
 
-// Worker counts stay muted next to the red "need you", and the cost goes before they do.
+// Worker counts stay muted next to the red "decide", and the cost goes before they do.
 func TestRollLineCountsMutedCostLast(t *testing.T) {
 	ss := []Session{
 		{Name: "b", ID: "$1", Boss: true, State: agent.Idle},
 		{Name: "w1", ID: "$2", StartedBy: "b", Depth: 1, State: agent.Working, CostUSD: 4, HasCost: true},
 		{Name: "w2", ID: "$3", StartedBy: "b", Depth: 1, State: agent.Waiting},
 	}
-	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1}})["b"]
+	r := Subtree(ss, map[string]ListCount{"b": {Asks: 1}})["b"]
 	got, _ := rollLine(r, 60)
-	if strings.Contains(got, red+"1 working") || strings.Contains(got, red+"1 waiting") || !strings.Contains(got, red+"1 need you") {
+	if strings.Contains(got, red+"1 working") || strings.Contains(got, red+"1 waiting") || !strings.Contains(got, red+"1 decide") {
 		t.Errorf("colours: %q", got)
 	}
-	if got, _ := rollLine(r, 28); strings.Contains(ansi.Strip(got), "$") {
+	if got, _ := rollLine(r, 26); strings.Contains(ansi.Strip(got), "$") {
 		t.Errorf("cost shown over a dropped count: %q", ansi.Strip(got))
 	}
 }
 
-// "N on others" comes last on the roll line, whole or not at all: a narrow sidebar drops it, never "N need you".
+// "N on others" comes last on the roll line, whole or not at all: a narrow sidebar drops it, never "N to do".
 func TestRollLineOnOthers(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Working}}
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1, On: 3}})["b"]
-	for width, want := range map[int]string{60: "1 working · 1 need you · 3 on others", 30: "1 working · 1 need you"} {
+	for width, want := range map[int]string{60: "1 working · 1 to do · 3 on others", 30: "1 working · 1 to do"} {
 		if got, _ := rollLine(r, width); ansi.Strip(got) != want {
 			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
 		}
@@ -342,9 +351,9 @@ func TestRollLineCostBeforeOnOthers(t *testing.T) {
 	Spend(ss, map[string]spent.Ledger{"$1": {"c": 20.71}})
 	r := Subtree(ss, map[string]ListCount{"b": {Plain: 1, On: 2}})["b"]
 	for width, want := range map[int]string{
-		60: "1 working · 1 need you · $54.93 · 2 on others",
-		35: "1 working · 1 need you · $54.93",
-		25: "1 working · 1 need you",
+		60: "1 working · 1 to do · $54.93 · 2 on others",
+		35: "1 working · 1 to do · $54.93",
+		25: "1 working · 1 to do",
 	} {
 		if got, _ := rollLine(r, width); ansi.Strip(got) != want {
 			t.Errorf("%d columns: %q, want %q", width, ansi.Strip(got), want)
@@ -408,11 +417,11 @@ func TestRollLineManagerPartsWhole(t *testing.T) {
 	}
 	r := Subtree(ss, map[string]ListCount{"m": {Plain: 6}})["m"]
 	for width, want := range map[int]string{
-		60: "6 working · 6 need you · 2 bosses · 6 workers · $13.00",
-		44: "6 working · 6 need you · 2 bosses",
-		40: "6 working · 6 need you · 2 bosses",
-		36: "6 working · 6 need you · 2 bosses",
-		32: "6 working · 6 need you",
+		60: "6 working · 6 to do · 2 bosses · 6 workers · $13.00",
+		44: "6 working · 6 to do · 2 bosses · 6 workers",
+		40: "6 working · 6 to do · 2 bosses",
+		36: "6 working · 6 to do · 2 bosses",
+		32: "6 working · 6 to do · 2 bosses",
 	} {
 		got, _ := rollLine(r, width)
 		if ansi.Strip(got) != want {
@@ -433,14 +442,14 @@ func TestRollLineLeavesOutOwnState(t *testing.T) {
 		ss   []Session
 		want string
 	}{
-		{"working boss, idle worker", []Session{boss(agent.Working), worker(agent.Idle)}, "7 need you · 6 on others"},
-		{"working boss, no workers", []Session{boss(agent.Working)}, "7 need you · 6 on others"},
+		{"working boss, idle worker", []Session{boss(agent.Working), worker(agent.Idle)}, "7 to do · 6 on others"},
+		{"working boss, no workers", []Session{boss(agent.Working)}, "7 to do · 6 on others"},
 		// A held wait is not on the row above: it stays
-		{"resuming boss", []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle, Resume: true}, worker(agent.Idle)}, "waiting · 7 need you · 6 on others"},
-		{"idle boss, idle worker", []Session{boss(agent.Idle), worker(agent.Idle)}, "7 need you · 6 on others"},
-		{"idle boss, no workers", []Session{boss(agent.Idle)}, "7 need you · 6 on others"},
-		{"idle boss, working worker", []Session{boss(agent.Idle), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
-		{"working boss, working worker", []Session{boss(agent.Working), worker(agent.Working)}, "1 working · 7 need you · 6 on others"},
+		{"resuming boss", []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle, Resume: true}, worker(agent.Idle)}, "waiting · 7 to do · 6 on others"},
+		{"idle boss, idle worker", []Session{boss(agent.Idle), worker(agent.Idle)}, "7 to do · 6 on others"},
+		{"idle boss, no workers", []Session{boss(agent.Idle)}, "7 to do · 6 on others"},
+		{"idle boss, working worker", []Session{boss(agent.Idle), worker(agent.Working)}, "1 working · 7 to do · 6 on others"},
+		{"working boss, working worker", []Session{boss(agent.Working), worker(agent.Working)}, "1 working · 7 to do · 6 on others"},
 	} {
 		r := Subtree(tc.ss, list)["b"]
 		for _, width := range []int{36, 40} {
@@ -473,24 +482,31 @@ func TestRollLineNarrowKeepsSomething(t *testing.T) {
 	}
 }
 
-// The manager's roll-up counts its closed bosses' lists, as its NEEDS YOU lists them; no other boss's does.
+// The manager's roll-up counts its closed bosses' lists as its TO DO does: their items in neither decide nor to do,
+// a list not read only as ⚠; no other boss's does.
 func TestSubtreeClosedLists(t *testing.T) {
 	sessions := subtreeSessions()
 	needs := []NeedList{
-		{Boss: "boss-noc", Items: []NeedItem{{ID: 1, Text: "a", Options: []string{"Yes"}}, {ID: 2, Text: "b"}}},
-		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "c"}}},
-		{Boss: "boss-old", Closed: true, Items: []NeedItem{{ID: 1, Text: "d"}, {ID: 2, Text: "e"}, {ID: 3, Text: "f", On: "Ana"},
-			{ID: 4, Text: "g", Options: []string{"Yes"}}, {ID: 5, Text: "h", Done: true}}},
+		{Boss: "boss-noc", Items: []NeedItem{{ID: 1, Text: "a", Options: []string{"Yes"}, Status: StatusDecide}, {ID: 2, Text: "b", Status: StatusYours}}},
+		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "c", Status: StatusYours}}},
+		{Boss: "boss-old", Closed: true, Items: []NeedItem{{ID: 1, Text: "d", Status: StatusBossClosed}, {ID: 2, Text: "e", Status: StatusBossClosed}, {ID: 3, Text: "f", On: "Ana", Status: StatusBossClosed, StatusOn: "Ana"},
+			{ID: 4, Text: "g", Options: []string{"Yes"}, Status: StatusBossClosed}, {ID: 5, Text: "h", Done: true}}},
 	}
 	rolls := Subtree(sessions, NeedCounts(needs))
-	if got, want := rolls[Manager].Text(), "needs you · 3 questions · 7 working · 4 to do · 1 on others"; got != want {
+	if got, want := rolls[Manager].Text(), "1 need you · 1 decide · 7 working · 2 to do"; got != want {
 		t.Errorf("manager = %q, want %q", got, want)
 	}
 	if got, want := rolls["boss-dev"].Text(), "5 working · 1 to do"; got != want {
 		t.Errorf("boss-dev = %q, want %q", got, want)
 	}
 	r := rolls[Manager]
-	if rows := NeedRows(sessions, needs, Manager); len(rows) != r.Questions+r.ToDo {
-		t.Errorf("NEEDS YOU %d rows, roll-up %d need you", len(rows), r.Questions+r.ToDo)
+	var yours []NeedRow
+	for _, row := range NeedRows(sessions, needs, Manager) {
+		if row.Yours() {
+			yours = append(yours, row)
+		}
+	}
+	if c := Count(yours); c != (Tally{NeedYou: r.Questions, Decide: r.Decide, ToDo: r.ToDo}) {
+		t.Errorf("TO DO %+v, roll-up %d need you · %d decide · %d to do", c, r.Questions, r.Decide, r.ToDo)
 	}
 }

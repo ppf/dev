@@ -5,22 +5,19 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/control"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
 
 // withTodo is board4 at 50 columns with a list of four, three waiting on someone else, one ticked linking its
-// PR, changed 2 minutes ago: what the block lists, the user's own items being NEEDS YOU's.
+// PR, changed 2 minutes ago: what the block lists, the user's own items being TO DO's.
 func withTodo() Model {
 	m := board4()
 	m.width = 50
@@ -55,177 +52,8 @@ func checkRows(t *testing.T, got, want []string, width int) {
 }
 
 // The block: a header in the section rows' style with the open count and the age, then one row per item with its
-// number, box, text and at the right who it waits on or its PR; the user's own open items are NEEDS YOU's.
-func TestTodoBlock(t *testing.T) {
-	m := withTodo()
-	m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: 6, Text: "Call Vince"})
-	checkRows(t, m.todoRows(39), []string{
-		" TO DO 3 ───────────────────────────── updated 2m ",
-		" 5 ☑ Merge PR #87                           ○ #87 ",
-		" 1 ◌ Answer Vince in Slack: lw deploy w… on Vince ",
-		" 3 ◌ Approve Kasia's PR #84              on Kasia ",
-		" 4 ◌ Staging access for lw         on Marek (Ops) ",
-	}, 50)
-	rows := m.todoRows(39)
-	if !strings.Contains(rows[0], bold+"TO DO 3") || !strings.Contains(rows[0], sidebar.Muted+"updated 2m") {
-		t.Errorf("header: bold title, muted age: %q", rows[0])
-	}
-	if !strings.Contains(rows[4], sidebar.Gold+"on Marek") {
-		t.Errorf("who it waits on in gold: %q", rows[4])
-	}
-	// Only the user's own: none
-	m.snap.todo.Items = []todo.Shown{{ID: 6, Text: "Call Vince"}}
-	if rows := m.todoRows(39); len(rows) != 0 {
-		t.Errorf("rows %q, want none", plain(rows))
-	}
-}
-
-// A ticked item shows ☑, struck through, and leaves the count; a stale list's age goes faint.
-func TestTodoDoneStale(t *testing.T) {
-	m := withTodo()
-	m.snap.todo.Items[1].Done = true
-	m.snap.todo.Stale = true
-	m.snap.todo.Updated = m.clk.Now().Add(-2 * time.Hour).Unix()
-	rows := m.todoRows(39)
-	if got := ansi.Strip(rows[0]); !strings.HasPrefix(got, " TO DO 2 ") || !strings.HasSuffix(got, " updated 2h ") {
-		t.Errorf("header = %q", got)
-	}
-	if !strings.Contains(rows[0], rule+"updated 2h") {
-		t.Errorf("stale age not faint: %q", rows[0])
-	}
-	if i := slices.IndexFunc(rows, func(r string) bool { return strings.Contains(r, "Approve") }); i < 0 || !strings.Contains(rows[i], sidebar.Green+"☑") || !strings.Contains(rows[i], strike+"Approve") {
-		t.Errorf("ticked item: green ☑, struck text: %q", rows)
-	}
-}
-
-// Nine items show five, then "+N more"; a short pane gives the block at most half its rows.
-func TestTodoMore(t *testing.T) {
-	m := withTodo()
-	for i := 6; i <= 10; i++ {
-		m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: i, Text: "item " + strconv.Itoa(i), On: "Ola"})
-	}
-	rows := plain(m.todoRows(39))
-	if len(rows) != 7 || !strings.HasPrefix(rows[5], " 6 ◌ item 6") || strings.TrimSpace(rows[6]) != "+4 more" {
-		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
-	}
-	rows = plain(m.todoRows(8))
-	if len(rows) != 4 || strings.TrimSpace(rows[3]) != "+7 more" {
-		t.Errorf("8 rows: want header, 2 items, +7 more:\n%s", strings.Join(rows, "\n"))
-	}
-	if rows = plain(m.todoRows(3)); len(rows) != 1 {
-		t.Errorf("3 rows: want the header only:\n%s", strings.Join(rows, "\n"))
-	}
-}
-
-// A narrow pane cuts every row to its width: the age goes first, then the text and who it's on.
-func TestTodoNarrow(t *testing.T) {
-	m := withTodo()
-	m.width = 26
-	checkRows(t, m.todoRows(39), []string{
-		" TO DO 3 ───── updated 2m ",
-		" 5 ☑ Merge PR #87   ○ #87 ",
-		" 1 ◌ Answer Vin… on Vince ",
-		" 3 ◌ Approve Ka… on Kasia ",
-		" 4 ◌ Staging ac… on Mare… ",
-	}, 26)
-	m.width = 12
-	for i, l := range m.todoRows(39) {
-		if w := ansi.StringWidth(l); w != 12 {
-			t.Errorf("row %d is %d wide: %q", i, w, ansi.Strip(l))
-		}
-	}
-}
-
-// t folds the block to its header and opens it again; the hint says which.
-func TestTodoFold(t *testing.T) {
-	m := withTodo()
-	m.height = 30
-	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	m = next.(Model)
-	checkRows(t, m.todoRows(29), []string{" ▸ TO DO 3 ─────────────────────────── updated 2m "}, 50)
-	if hint := ansi.Strip(m.bottom()[0]); !strings.Contains(hint, "  t open to do  j/k") {
-		t.Errorf("hint = %q", hint)
-	}
-	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	if m = next.(Model); len(m.todoRows(29)) != 5 {
-		t.Error("t again: want the block open")
-	}
-	if hint := ansi.Strip(m.bottom()[0]); !strings.Contains(hint, "  t fold to do  j/k") {
-		t.Errorf("hint = %q", hint)
-	}
-}
-
 // The block stays at the top while the board under it scrolls to the selected card, and clicks land on the
-// cards under it; an empty list renders exactly as without one.
-func TestTodoRender(t *testing.T) {
-	m := withTodo()
-	m.height = 20
-	m.selected = "old-spike"
-	lines := plain(m.render())
-	if len(lines) != 20 || lines[0] != plain(m.todoRows(19))[0] || !strings.HasPrefix(lines[5], " ") {
-		t.Fatalf("render:\n%s", strings.Join(lines, "\n"))
-	}
-	if !strings.Contains(lines[18], "old-spike") {
-		t.Errorf("the selected card above the hint row, under the block:\n%s", strings.Join(lines, "\n"))
-	}
-	h, ok := m.hitAt(3, 18)
-	if !ok || m.snap.tiles[h.tile].sess.Name != "old-spike" {
-		t.Errorf("click on old-spike's row: %+v, %t", h, ok)
-	}
-	if _, ok := m.hitAt(3, 2); ok {
-		t.Error("click on the block hit a card")
-	}
-
-	empty := board4()
-	empty.width, empty.height, empty.selected = 50, 20, "old-spike"
-	withEmpty := empty
-	withEmpty.snap.todo = todo.List{Items: []todo.Shown{}, Updated: 1}
-	if a, b := plain(empty.render()), plain(withEmpty.render()); !slices.Equal(a, b) {
-		t.Errorf("empty list changed the board:\n%s\nwant:\n%s", strings.Join(b, "\n"), strings.Join(a, "\n"))
-	}
-}
-
-// With no workers the block shows over the no-workers line, and the pane keeps its share rather than collapse.
-func TestTodoNoWorkers(t *testing.T) {
-	m := withTodo()
-	m.snap.tiles = nil
-	m.height = 12
-	lines := plain(m.render())
-	if !strings.HasPrefix(lines[0], " TO DO 3") || !strings.HasPrefix(lines[5], " No worker sessions yet") {
-		t.Errorf("render:\n%s", strings.Join(lines, "\n"))
-	}
-	var ran []string
-	m.c, m.pane, m.size = tmux.NewFake(func(args []string) (string, error) {
-		ran = append(ran, args[0])
-		return "200\n", nil
-	}), "%2", shared
-	next, _ := m.Update(refreshMsg{snap: snapshot{todo: m.snap.todo}})
-	if len(ran) != 0 || next.(Model).size != shared {
-		t.Errorf("ran %q, size %v: want the pane kept at its share", ran, next.(Model).size)
-	}
-}
-
 // A pane with no rows above its bottom rows (one row, or a reply box filling it) shows no block, and the
-// bottom rows keep their place.
-func TestTodoTinyPane(t *testing.T) {
-	for _, box := range []bool{false, true} {
-		m := withTodo()
-		m.selected = "old-spike"
-		m.height = 1
-		if box {
-			m.box.session = "old-spike"
-			m.height = len(m.bottom())
-		}
-		for _, err := range []error{nil, errors.New("bad")} {
-			m.snap.todoErr = err
-			got := m.render()
-			if len(got) != m.height || !slices.Equal(got[len(got)-len(m.bottom()):], m.bottom()) {
-				t.Errorf("box %t, err %v: render %q, want the bottom rows %q", box, err, plain(got), plain(m.bottom()))
-			}
-		}
-	}
-}
-
 // Each refresh reads the boss's list, found once from its pane: unreadable is an alert row; a not-yet-boss shows none, retried next refresh.
 func TestRefreshTodo(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -289,6 +117,7 @@ func TestFitTodo(t *testing.T) {
 		{"a list", snapshot{todo: list}, shared},
 		{"unreadable", snapshot{todoErr: errors.New("bad")}, shared},
 		{"emptied", snapshot{todo: todo.List{Items: []todo.Shown{}}}, collapsed},
+		{"bosses' items on others only", snapshot{asks: []todo.BossList{{Boss: "b", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "x", On: "Carl"}}}}}}, shared},
 	} {
 		next, _ := m.Update(refreshMsg{snap: st.snap})
 		if m = next.(Model); m.size != st.want {
@@ -319,180 +148,9 @@ func withWorkers() Model {
 	return m
 }
 
-// A ticked item on a worker that's gone shows ticked, with no state and no session gone.
-func TestTodoDoneWorker(t *testing.T) {
-	m := withWorkers()
-	it := todo.Shown{ID: 3, Text: "Rework companion importer", On: "companion-1000-feed", Session: &todo.Session{ID: "companion-1000-feed", Name: "companion-1000-feed"}, Done: true}
-	if o := m.todoOwner(it); o != nil {
-		t.Errorf("owner = %+v, want none for a ticked item", o)
-	}
-	if row := ansi.Strip(todoItem(it, nil, 70, time.Now())); strings.Contains(row, "gone") || !strings.Contains(row, "on companion-1000-feed") {
-		t.Errorf("row = %q", row)
-	}
-}
-
 // A worker's item shows its dot, name and section in that section's colour; a linked session no longer listed
-// shows ✕ session gone, one without an agent idle; an unlinked name matches a worker too; a person stays gold.
-func TestTodoWorkers(t *testing.T) {
-	m := withWorkers()
-	var rows []string
-	for _, it := range m.snap.todo.Items {
-		rows = append(rows, todoItem(it, m.todoOwner(it), 70, time.Now()))
-	}
-	checkRows(t, rows, []string{
-		" 1 ☐ Answer Vince                                                     ",
-		" 2 ◌ Document the API                            ● docs-api · working ",
-		" 3 ◌ Rework companion importer             ✕ companio… · session gone ",
-		" 4 ◌ Fix login                                   ● fix-login · asking ",
-		" 5 ◌ Get CI green                                  ● ci-fix · waiting ",
-		" 6 ◌ Spike notes                                   ● old-spike · idle ",
-		" 7 ◌ Shell job                                    ● shell-only · idle ",
-		" 8 ◌ Staging access                                          on Marek ",
-		" 9 ☐ Approve Kasia's PR                                               ",
-	}, 70)
-	if !strings.Contains(rows[1], sidebar.Gold+"●") || !strings.Contains(rows[1], sidebar.Gold+"working") {
-		t.Errorf("working: gold dot and state: %q", rows[1])
-	}
-	if !strings.Contains(rows[2], sidebar.Red+"✕ ") || !strings.Contains(rows[2], sidebar.Red+" · session gone") {
-		t.Errorf("gone: red: %q", rows[2])
-	}
-	if !strings.Contains(rows[3], sidebar.Red+"asking") {
-		t.Errorf("asking: red state: %q", rows[3])
-	}
-	if !strings.Contains(rows[7], sidebar.Gold+"on Marek") {
-		t.Errorf("a person stays gold: %q", rows[7])
-	}
-}
-
 // An item linked to a boss this one started (a manager's) shows the boss's state, its whole subtree's; once the
-// boss is closed, session gone.
-func TestTodoOnBoss(t *testing.T) {
-	m := board4()
-	m.snap.tiles = append(m.snap.tiles, tile{sess: sidebar.Session{Name: "boss-orbit", Agent: "Claude", State: "working"},
-		roll: &sidebar.Rollup{Rank: sidebar.RankNeedsYou}})
-	m.snap.started = map[string]bool{"boss-orbit": true}
-	on := func(name string) todo.Shown {
-		return todo.Shown{ID: 1, Text: "Ship v2.3", On: name, Session: &todo.Session{ID: name, Name: name}}
-	}
-	checkRows(t, []string{
-		todoItem(on("boss-orbit"), m.todoOwner(on("boss-orbit")), 70, time.Now()),
-		todoItem(on("boss-harbor"), m.todoOwner(on("boss-harbor")), 70, time.Now()),
-	}, []string{
-		" 1 ◌ Ship v2.3                                  ● boss-orbit · asking ",
-		" 1 ◌ Ship v2.3                             ✕ boss-har… · session gone ",
-	}, 70)
-}
-
 // The block lists those on a worker that needs the user first, then on a session that's gone, then the rest in
-// the list's order (the user's own are NEEDS YOU's); five of them, then +N more.
-func TestTodoWorkerOrder(t *testing.T) {
-	m := withWorkers()
-	var got []int
-	for _, it := range m.todoOrder(m.snap.todo.Items) {
-		got = append(got, it.ID)
-	}
-	if want := []int{1, 9, 4, 3, 2, 5, 6, 7, 8}; !slices.Equal(got, want) {
-		t.Errorf("order = %v, want %v", got, want)
-	}
-	rows := plain(m.todoRows(39))
-	if len(rows) != 7 || !strings.HasPrefix(rows[1], " 4 ◌ Fix login") || !strings.HasPrefix(rows[2], " 3 ◌ Rework") || strings.TrimSpace(rows[6]) != "+2 more" {
-		t.Errorf("rows:\n%s", strings.Join(rows, "\n"))
-	}
-}
-
 // A narrow pane keeps a worker's state whole, cutting its name; one too narrow even for that cuts the state rather
-// than overflow the row.
-func TestTodoWorkerNarrow(t *testing.T) {
-	m := withWorkers()
-	if row := ansi.Strip(todoItem(m.snap.todo.Items[3], m.todoOwner(m.snap.todo.Items[3]), 40, time.Now())); !strings.HasSuffix(row, " · asking ") {
-		t.Errorf("40 columns: %q, want the state whole", row)
-	}
-	for _, w := range []int{12, 20, 30, 40} {
-		for _, it := range m.snap.todo.Items {
-			if got := ansi.StringWidth(todoItem(it, m.todoOwner(it), w, time.Now())); got != w {
-				t.Errorf("item %d at %d columns is %d wide", it.ID, w, got)
-			}
-		}
-	}
-}
-
-// An answered item shows what was answered; an open ask is NEEDS YOU's.
-func TestTodoAsk(t *testing.T) {
-	m := withTodo()
-	m.snap.todo.Items = []todo.Shown{
-		{ID: 2, Text: "Merge #148 boss picker?", Options: []string{"Merge (Recommended)", "Wait for review"}},
-		{ID: 3, Text: "Orders API: v3 when?", Done: true, Answer: "After release"},
-		{ID: 1, Text: "Answer Vince"},
-	}
-	checkRows(t, m.todoRows(39), []string{
-		" TO DO ─────────────────────────────── updated 2m ",
-		" 3 ☑ Orders API: v3 when?                         ",
-		"     answered: After release                      ",
-	}, 50)
-	if rows := m.todoRows(39); !strings.Contains(rows[2], sidebar.Green+"answered") {
-		t.Errorf("answered green: %q", rows[2])
-	}
-}
-
 // An item on a person shows the person and its PR's number; once its PR moved, the person and ⚠ why, the name cut
-// first so the check keeps its age.
-func TestTodoItemCheck(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	it := todo.Shown{ID: 2, Text: "PR #412 open, CI pending", On: "reviewers", Link: "https://github.com/acme/orbit/pull/412"}
-	if row := ansi.Strip(todoItem(it, nil, 84, now)); !strings.HasSuffix(strings.TrimRight(row, " "), "on reviewers · #412") {
-		t.Errorf("row = %q", row)
-	}
-	it.Check = &sidebar.Check{Kind: sidebar.CheckApproved, PR: 412, Since: now.Add(-2 * time.Hour).Unix()}
-	row := todoItem(it, nil, 84, now)
-	if !strings.HasSuffix(strings.TrimRight(ansi.Strip(row), " "), "reviewers · ⚠ #412 approved 2h") || !strings.Contains(row, sidebar.Gold+"⚠ #412") {
-		t.Errorf("row = %q", ansi.Strip(row))
-	}
-	it.On = "the platform reviewers group"
-	for _, w := range []int{84, 60} {
-		row := ansi.Strip(todoItem(it, nil, w, now))
-		if !strings.Contains(row, "⚠ #412 approved"+map[int]string{84: " 2h"}[w]) || ansi.StringWidth(row) != w {
-			t.Errorf("width %d: row = %q", w, row)
-		}
-	}
-}
-
-// A worker's item shows its check after the worker's state; a long person's name is cut before the PR's number.
-func TestTodoItemWorkerCheck(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	it := todo.Shown{ID: 3, Text: "Rework rounding", On: "fix", Link: "https://github.com/acme/orbit/pull/7",
-		Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 7, Since: now.Add(-time.Hour).Unix()}}
-	row := ansi.Strip(todoItem(it, &owner{name: "fix", sec: restingSection}, 84, now))
-	if !strings.Contains(row, "fix · idle · ⚠ #7 merged 1h") {
-		t.Errorf("row = %q", row)
-	}
-	it = todo.Shown{ID: 2, Text: "Review", On: "the platform reviewers group of the payments team", Link: "https://github.com/acme/orbit/pull/412"}
-	if row := ansi.Strip(todoItem(it, nil, 84, now)); !strings.HasSuffix(strings.TrimRight(row, " "), "· #412") || ansi.StringWidth(row) != 84 {
-		t.Errorf("row = %q", row)
-	}
-}
-
 // A worker's name stays readable beside a check: whole while the row has room, else the check gives up its age, then
-// itself, before the name is cut below 8 columns.
-func TestTodoOwnerWidth(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	check := &sidebar.Check{Kind: sidebar.CheckMerged, PR: 301, Since: now.Add(-10 * time.Minute).Unix()}
-	boss := todo.Shown{ID: 4, Text: "Approve boss-orbit's release plan", On: "boss-orbit", Check: check}
-	ana := todo.Shown{ID: 5, Text: "Approve boss-orbit's release plan", On: "Ana", Check: check}
-	for _, c := range []struct {
-		it   todo.Shown
-		o    *owner
-		w    int
-		want string
-	}{
-		{boss, &owner{name: "boss-orbit", sec: needsYouSection}, 100, "● boss-orbit · asking · ⚠ #301 merged 10m"},
-		{boss, &owner{name: "boss-orbit", sec: needsYouSection}, 62, "● boss-orbit · asking"},
-		{ana, nil, 100, "Ana · ⚠ #301 merged 10m"},
-		{ana, nil, 62, "Ana · ⚠ #301 merged"},
-		{todo.Shown{ID: 6, Text: "Approve boss-orbit's release plan", On: "Ana", Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 301, Since: now.Add(-18*time.Hour - 19*time.Minute).Unix()}}, nil, 62, "Ana · ⚠ #301 merged"},
-	} {
-		row := ansi.Strip(todoItem(c.it, c.o, c.w, now))
-		if !strings.HasSuffix(strings.TrimRight(row, " "), c.want) || ansi.StringWidth(row) != c.w {
-			t.Errorf("%d columns: %q, want …%q", c.w, row, c.want)
-		}
-	}
-}

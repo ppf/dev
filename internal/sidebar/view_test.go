@@ -587,7 +587,7 @@ func rollupSessions() []Session {
 func TestViewBossRollup(t *testing.T) {
 	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: rollupSessions()}}
 	f := m.render()
-	// w1 waits on a dialog, so NEEDS YOU draws above the header
+	// w1 waits on a dialog, so TO DO draws above the header
 	off := f.header
 	var got []string
 	for _, l := range f.lines[off+3 : off+14] {
@@ -798,11 +798,11 @@ func TestViewManagerBossSameGroup(t *testing.T) {
 func TestWorkerlessBossRollLine(t *testing.T) {
 	sessions := []Session{{Name: "boss-solo", Group: "dev", ID: "$1", Boss: true, Agent: "Claude", State: "idle"}}
 	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: sessions}, needs: []NeedList{{Boss: "boss-solo", Items: []NeedItem{
-		{ID: 1, Text: "Merge?", Options: []string{"Merge", "Wait"}},
-		{ID: 2, Text: "Call Vince"},
+		{ID: 1, Text: "Merge?", Options: []string{"Merge", "Wait"}, Status: StatusDecide},
+		{ID: 2, Text: "Call Vince", Status: StatusYours},
 	}}}}
 	lines := m.render().lines
-	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "2 need you") })
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "1 decide · 1 to do") })
 	if i < 0 {
 		t.Fatalf("no roll line:\n%s", strings.Join(lines, "\n"))
 	}
