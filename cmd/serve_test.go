@@ -50,7 +50,7 @@ func TestBoardGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, it := range []todo.Item{
-		{Text: "Merge #148 now or after the release?", Options: []string{"Merge now (Recommended)", "After the release"}},
+		{Text: "Merge #148 now or after the release?", Options: []string{"Merge now | CI green (Recommended)", "After the release"}, Context: []string{"Release is Friday", "~/memo.md"}},
 		{Text: "Read the plan", Link: "https://example.com/plan", Until: 1700086400},
 		{Text: "Send the invoice", On: "alice"},
 	} {

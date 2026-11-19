@@ -146,7 +146,10 @@ func TestAskRules(t *testing.T) {
 			"They never let you answer a permission prompt.",
 			"probe it yourself right before the step that needs it, with bounded retries",
 			"one question of at most 100 characters ending in \"?\"",
-			"go in a file whose path comes last",
+			"go in a file whose path is the last",
+			"--context '<finding>'",
+			"Each option is `<label> | <detail>`",
+			"Put the question, context and option texts in single quotes, or keep \"$\" and backticks out of them",
 		} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s/SKILL.md: missing %q", name, want)
@@ -166,7 +169,8 @@ func TestAskRules(t *testing.T) {
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
-		"a short paraphrase of each in its `description`",
+		"each option's detail (after ` | `) in its `description`",
+		"the item's context as `- ` lines",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

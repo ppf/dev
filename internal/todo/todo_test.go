@@ -818,3 +818,123 @@ func TestOwnNameItem(t *testing.T) {
 		t.Error("another list's boss: ticked")
 	}
 }
+
+// An option splits into its label, the detail after " | " and its mark, wherever the mark is, and is stored with
+// the mark last; a label without a detail reads as before.
+func TestSplit(t *testing.T) {
+	for _, tt := range []struct {
+		o, stored string
+		want      Choice
+	}{
+		{"Merge", "Merge", Choice{Label: "Merge"}},
+		{"Merge (Recommended)", "Merge (Recommended)", Choice{Label: "Merge", Recommended: true}},
+		{"Merge | ~1 day", "Merge | ~1 day", Choice{Label: "Merge", Detail: "~1 day"}},
+		{"Merge | ~1 day (recommended)", "Merge | ~1 day (Recommended)", Choice{Label: "Merge", Detail: "~1 day", Recommended: true}},
+		{"Merge (Recommended) | ~1 day", "Merge | ~1 day (Recommended)", Choice{Label: "Merge", Detail: "~1 day", Recommended: true}},
+		{"A | b | c", "A | b | c", Choice{Label: "A", Detail: "b | c"}},
+		{"a|b", "a|b", Choice{Label: "a|b"}},
+		{"Merge |", "Merge", Choice{Label: "Merge"}},
+		{"| detail", " | detail", Choice{Detail: "detail"}},
+	} {
+		got := Split(tt.o)
+		if got != tt.want || got.String() != tt.stored {
+			t.Errorf("Split(%q) = %+v %q, want %+v %q", tt.o, got, got.String(), tt.want, tt.stored)
+		}
+	}
+	if l, rec := Label("Merge (Recommended) | ~1 day"); l != "Merge | ~1 day" || !rec {
+		t.Errorf("Label = %q %v", l, rec)
+	}
+	if d := Detail("Merge | ~1 day (Recommended)"); d != "~1 day" {
+		t.Errorf("Detail = %q", d)
+	}
+}
+
+// An answer names an option by its label only: a board sends the option as stored, detail and all.
+func TestPickDetail(t *testing.T) {
+	opts := []string{"Merge | now, CI green (Recommended)", "Wait | ~1 day"}
+	for _, tt := range []struct{ arg, want string }{
+		{"Merge | now, CI green (Recommended)", "Merge"},
+		{"wait", "Wait"},
+		{"2", "Wait"},
+		{"Wait | ~1 DAY", "Wait"},
+		{"Merge | but only after CI", "Merge | but only after CI"},
+		{"later | maybe", "later | maybe"},
+	} {
+		if got, err := Pick(opts, tt.arg); got != tt.want || err != nil {
+			t.Errorf("Pick(%q) = %q, %v; want %q", tt.arg, got, err, tt.want)
+		}
+	}
+	// An older ask's options sharing a label before " | " answer whole
+	older := []string{"Deploy | staging", "Deploy | production (Recommended)"}
+	for _, tt := range []struct{ arg, want string }{{"2", "Deploy | production"}, {"Deploy | staging", "Deploy | staging"}} {
+		if got, err := Pick(older, tt.arg); got != tt.want || err != nil {
+			t.Errorf("older Pick(%q) = %q, %v; want %q", tt.arg, got, err, tt.want)
+		}
+	}
+}
+
+// An ask's question over 100 characters and a label over 30 are refused, counted in characters, the label without its
+// detail and mark; a replace refuses an ask's long new text, not a plain item's, nor an ask's kept text.
+func TestAskCaps(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	q := strings.Repeat("ż", 99) + "?"
+	label := strings.Repeat("ł", 30)
+	id, err := s.Add(Item{Text: q, Options: []string{label + " | " + strings.Repeat("x", 80) + " (Recommended)", "No"}}, now)
+	if err != nil {
+		t.Fatalf("100 characters, a 30-character label: %v", err)
+	}
+	if _, err := s.Add(Item{Text: q + "?", Options: []string{"Yes"}}, now); err == nil || err.Error() != "question is 101 characters, at most 100: put the findings in --context lines or a file" {
+		t.Errorf("101 characters: %v", err)
+	}
+	if _, err := s.Add(Item{Text: "Ok?", Options: []string{"Yes", label + "ł (Recommended)"}}, now); err == nil || !strings.Contains(err.Error(), "option 2's label") || !strings.HasSuffix(err.Error(), "is 31 characters, at most 30 (its detail and \" (Recommended)\" aside): put the rest after ' | '") {
+		t.Errorf("31-character label: %v", err)
+	}
+	if err := s.Replace(id, Item{Text: q + "?"}, now); err == nil || !strings.Contains(err.Error(), "question is 101 characters") {
+		t.Errorf("replace an ask with 101 characters: %v", err)
+	}
+	if err := s.Replace(id, Item{On: "Marek"}, now); err != nil {
+		t.Errorf("replace keeping the text: %v", err)
+	}
+	plain, _ := s.Add(Item{Text: "a"}, now)
+	if err := s.Replace(plain, Item{Text: q + q}, now); err != nil {
+		t.Errorf("a plain item's long text: %v", err)
+	}
+}
+
+// An ask's context lines read back in order; a replace keeps them unless it gives new ones; the JSON carries them and
+// each option's parts.
+func TestContext(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Merge?", Options: []string{"Merge | CI green (Recommended)", "Wait"}, Context: []string{"CI green", "~/memo.md"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(id, Item{Text: "Merge now?"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, s, now).Items[0].Context; !slices.Equal(got, []string{"CI green", "~/memo.md"}) {
+		t.Errorf("context after a replace without it: %q", got)
+	}
+	if err := s.Replace(id, Item{Context: []string{"review in"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	l := read(t, s, now)
+	if got := l.Items[0].Context; !slices.Equal(got, []string{"review in"}) {
+		t.Errorf("context after a replace with it: %q", got)
+	}
+	data, err := json.Marshal(l.Items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"context":["review in"]`, `"choices":[{"label":"Merge","detail":"CI green","recommended":true},{"label":"Wait"}]`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("json = %s, want %s", data, want)
+		}
+	}
+	plain, _ := s.Add(Item{Text: "a"}, now)
+	if data, _ := json.Marshal(read(t, s, now).Items[plain-1]); strings.Contains(string(data), "context") || strings.Contains(string(data), "choices") {
+		t.Errorf("a plain item's json = %s, want no context nor choices", data)
+	}
+}

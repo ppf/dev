@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/sidebar"
@@ -60,6 +61,7 @@ type Item struct {
 	Done    int64    `json:"done,omitempty"`
 	Until   int64    `json:"until,omitempty"`
 	Options []string `json:"options,omitempty"`
+	Context []string `json:"context,omitempty"` // an ask's lines under its question
 	Answer  string   `json:"answer,omitempty"`
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
 	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
@@ -96,6 +98,8 @@ type Shown struct {
 	Done    bool           `json:"done"`
 	Until   int64          `json:"until,omitempty"`
 	Options []string       `json:"options,omitempty"`
+	Choices []Choice       `json:"choices,omitempty"` // Options split (Split)
+	Context []string       `json:"context,omitempty"`
 	Answer  string         `json:"answer,omitempty"`
 	Added   int64          `json:"added,omitempty"`
 	DoneOn  string         `json:"done_on,omitempty"`
@@ -470,7 +474,10 @@ func (s Store) Read(now time.Time) (List, error) {
 	}
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn}
+		for _, o := range it.Options {
+			sh.Choices = append(sh.Choices, Split(o))
+		}
 		if !sh.Done {
 			sh.Check = check(it, facts[it.key()], now)
 		}
@@ -500,6 +507,14 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	if err := it.checkDoneOn(); err != nil {
 		return 0, err
 	}
+	if len(it.Options) > 0 {
+		if err := checkQuestion(it.Text); err != nil {
+			return 0, err
+		}
+		if err := checkLabels(it.Options); err != nil {
+			return 0, err
+		}
+	}
 	err = s.update(now, func(f *file) error {
 		if len(f.Items) == 0 {
 			f.Next = 1
@@ -515,8 +530,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	return id, err
 }
 
-// Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until
-// and DoneOn it doesn't set; On Me gives it back to the user. An id that isn't one is an error.
+// Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
+// DoneOn and Context it doesn't set; On Me gives it back to the user. An id that isn't one is an error, as is an ask's
+// new text over MaxQuestion.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
@@ -536,6 +552,14 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		it.DoneOn = cmp.Or(it.DoneOn, old.DoneOn)
 		if it.Options == nil {
 			it.Options = old.Options
+		}
+		if it.Context == nil {
+			it.Context = old.Context
+		}
+		if len(it.Options) > 0 && it.Text != old.Text {
+			if err := checkQuestion(it.Text); err != nil {
+				return err
+			}
 		}
 		if err := it.checkDoneOn(); err != nil {
 			return err
@@ -585,39 +609,118 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
 const MaxOptions = 9
 
-// recommended ends the label of an option the asker recommends, case aside.
+// recommended ends the option the asker recommends, case aside.
 const recommended = "(recommended)"
 
-// Label is option o without its " (Recommended)"; rec reports it had one.
-func Label(o string) (label string, rec bool) {
-	if n := len(o) - len(recommended); n >= 0 && strings.EqualFold(o[n:], recommended) {
-		return strings.TrimSpace(o[:n]), true
-	}
-	return o, false
+// detailSep splits an option's label from its detail: "label | detail".
+const detailSep = " | "
+
+// The longest ask question and option label, in characters: one board row, and a few words a row of options fits.
+const (
+	MaxQuestion = 100
+	MaxLabel    = 30
+)
+
+// Choice is an option in parts: its label, the detail after " | ", and whether the asker recommends it.
+type Choice struct {
+	Label       string `json:"label"`
+	Detail      string `json:"detail,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
 }
 
-// Pick is the answer arg gives to an item with options: the option whose label (Label) it names, case aside, else
-// option n for a number 1 to len(options), else arg itself, the user's own words. Another number is an error, as is
-// an empty answer.
+// Split is option o in parts; its " (Recommended)" may end the label or the detail.
+func Split(o string) Choice {
+	rest, rec := cutRecommended(o)
+	// Padded: an empty label or detail, cleaned to "| x" or "x |", still splits
+	label, detail, _ := strings.Cut(" "+rest+" ", detailSep)
+	label, recLabel := cutRecommended(strings.TrimSpace(label))
+	return Choice{Label: label, Detail: strings.TrimSpace(detail), Recommended: rec || recLabel}
+}
+
+// String is the option as stored: "label | detail (Recommended)", the mark last where boards look for it.
+func (c Choice) String() string {
+	o := c.Label
+	if c.Detail != "" {
+		o += detailSep + c.Detail
+	}
+	if c.Recommended {
+		o += " (Recommended)"
+	}
+	return o
+}
+
+// cutRecommended is s without its ending " (Recommended)"; rec reports it had one.
+func cutRecommended(s string) (string, bool) {
+	if n := len(s) - len(recommended); n >= 0 && strings.EqualFold(s[n:], recommended) {
+		return strings.TrimSpace(s[:n]), true
+	}
+	return s, false
+}
+
+// Label is option o as boards show it: without its " (Recommended)", its detail kept; rec reports it had one.
+func Label(o string) (label string, rec bool) {
+	c := Split(o)
+	rec, c.Recommended = c.Recommended, false
+	return c.String(), rec
+}
+
+// Detail is what follows option o's label after " | ", "" for none.
+func Detail(o string) string { return Split(o).Detail }
+
+// checkQuestion refuses an ask's question over MaxQuestion characters.
+func checkQuestion(q string) error {
+	if n := utf8.RuneCountInString(q); n > MaxQuestion {
+		return fmt.Errorf("question is %d characters, at most %d: put the findings in --context lines or a file", n, MaxQuestion)
+	}
+	return nil
+}
+
+// checkLabels refuses an option whose label (Split) is over MaxLabel characters.
+func checkLabels(options []string) error {
+	for i, o := range options {
+		l := Split(o).Label
+		if n := utf8.RuneCountInString(l); n > MaxLabel {
+			return fmt.Errorf("option %d's label %q is %d characters, at most %d (its detail and \" (Recommended)\" aside): put the rest after ' | '", i+1, l, n, MaxLabel)
+		}
+	}
+	return nil
+}
+
+// Pick is the answer arg gives: the option whose label (Split) it names, else option n of 1-len(options), else arg.
 func Pick(options []string, arg string) (string, error) {
 	arg = Clean(arg)
 	if arg == "" {
 		return "", errors.New("empty answer")
 	}
-	want, _ := Label(arg)
+	// A board sends the option as stored; a detail not the option's own ("Merge | after CI") is the user's words
+	want := Split(arg)
 	for _, o := range options {
-		if l, _ := Label(o); strings.EqualFold(l, want) {
-			return l, nil
+		if c := Split(o); strings.EqualFold(c.Label, want.Label) && (want.Detail == "" || strings.EqualFold(c.Detail, want.Detail)) {
+			return answerOf(options, o), nil
 		}
 	}
 	if n, err := strconv.Atoi(arg); err == nil && len(options) > 0 {
 		if n < 1 || n > len(options) {
 			return "", fmt.Errorf("option %d: it has %d (1-%d)", n, len(options), len(options))
 		}
-		l, _ := Label(options[n-1])
-		return l, nil
+		return answerOf(options, options[n-1]), nil
 	}
 	return arg, nil
+}
+
+// answerOf is option o's label, or o without " (Recommended)" when an older ask's options share that label.
+func answerOf(options []string, o string) string {
+	label := Split(o).Label
+	n := 0
+	for _, x := range options {
+		if strings.EqualFold(Split(x).Label, label) {
+			n++
+		}
+	}
+	if n > 1 {
+		label, _ = Label(o)
+	}
+	return label
 }
 
 // Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
