@@ -661,9 +661,6 @@ func (s Store) Unstart(id int, at int64, prev *Started, now time.Time) error {
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
 const MaxOptions = 9
 
-// recommended ends the option the asker recommends, case aside.
-const recommended = "(recommended)"
-
 // detailSep splits an option's label from its detail: "label | detail".
 const detailSep = " | "
 
@@ -682,11 +679,8 @@ type Choice struct {
 
 // Split is option o in parts; its " (Recommended)" may end the label or the detail.
 func Split(o string) Choice {
-	rest, rec := cutRecommended(o)
-	// Padded: an empty label or detail, cleaned to "| x" or "x |", still splits
-	label, detail, _ := strings.Cut(" "+rest+" ", detailSep)
-	label, recLabel := cutRecommended(strings.TrimSpace(label))
-	return Choice{Label: label, Detail: strings.TrimSpace(detail), Recommended: rec || recLabel}
+	label, detail, rec := sidebar.SplitOption(o)
+	return Choice{Label: label, Detail: detail, Recommended: rec}
 }
 
 // String is the option as stored: "label | detail (Recommended)", the mark last where boards look for it.
@@ -699,14 +693,6 @@ func (c Choice) String() string {
 		o += " (Recommended)"
 	}
 	return o
-}
-
-// cutRecommended is s without its ending " (Recommended)"; rec reports it had one.
-func cutRecommended(s string) (string, bool) {
-	if n := len(s) - len(recommended); n >= 0 && strings.EqualFold(s[n:], recommended) {
-		return strings.TrimSpace(s[:n]), true
-	}
-	return s, false
 }
 
 // Label is option o as boards show it: without its " (Recommended)", its detail kept; rec reports it had one.

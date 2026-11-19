@@ -56,7 +56,7 @@ func (s snapshot) needLists() []sidebar.NeedList {
 func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
-		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Added: it.Added,
+		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Context: it.Context, Added: it.Added,
 			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate}
 		if it.Started != nil {
 			out[i].Started = &struct{ At int64 }{it.Started.At}
@@ -122,7 +122,7 @@ func (m Model) listRows() []needRow {
 			}
 		}
 		n.sig = strings.Join([]string{strconv.Itoa(int(r.Kind)), r.Session, r.Boss, strconv.Itoa(r.ID), n.Text,
-			strings.Join(n.Options, "\x01"), dialog}, "\x00")
+			strings.Join(n.Options, "\x01"), strings.Join(r.Context, "\x01"), dialog}, "\x00")
 		out = append(out, n)
 	}
 	return out

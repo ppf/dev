@@ -30,9 +30,9 @@
       "Release notes are in notes/release.md"
      ],
      "options": [
-      "Ship now (Recommended)",
-      "Wait for the sensor fix",
-      "Ship without the new schedule"
+      "Ship now | the release goes out today (Recommended)",
+      "Wait for the sensor fix | one more day",
+      "Ship without the schedule | the rest goes out today"
      ],
      "added": 1795103237,
      "done": false,
