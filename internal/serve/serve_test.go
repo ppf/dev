@@ -47,12 +47,15 @@ func TestBoardETag(t *testing.T) {
 		t.Fatalf("board %d:\n%s", w.Code, w.Body)
 	}
 	etag := w.Header().Get("ETag")
-	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) {
-		t.Fatalf("ETag %q, want a strong one", etag)
+	if !strings.HasPrefix(etag, `W/"`) || !strings.HasSuffix(etag, `"`) {
+		t.Fatalf("ETag %q, want a weak one: generated differs", etag)
 	}
 	now = now.Add(time.Minute)
 	if w := get(t, h, "/v1/board", etag); w.Code != http.StatusNotModified || w.Body.Len() != 0 {
 		t.Errorf("unchanged board a minute on: %d %q, want 304", w.Code, w.Body)
+	}
+	if w := get(t, h, "/v1/board", strings.TrimPrefix(etag, "W/")); w.Code != http.StatusNotModified {
+		t.Errorf("etag without W/: %d, want 304", w.Code)
 	}
 	if w := get(t, h, "/v1/board", `"other", `+etag); w.Code != http.StatusNotModified {
 		t.Errorf("etag in a list: %d, want 304", w.Code)
@@ -139,6 +142,10 @@ func TestDefault(t *testing.T) {
 	}
 	if ap, kind, err := Default(addrs[:2], lan); err != nil || kind != LAN || ap.String() != "192.168.1.5:8417" {
 		t.Errorf("LAN: %s %d %v", ap, kind, err)
+	}
+	vpn := func() (netip.Addr, error) { return netip.MustParseAddr("10.8.0.2"), nil }
+	if _, _, err := Default(append(addrs[:2:2], ipnet("10.8.0.2/32")), vpn); err == nil || !strings.Contains(err.Error(), "pass --addr") {
+		t.Errorf("full-tunnel VPN route: %v, want refused with how to pass --addr", err)
 	}
 	public := func() (netip.Addr, error) { return netip.MustParseAddr("8.8.8.8"), nil }
 	noRoute := func() (netip.Addr, error) { return netip.Addr{}, errors.New("network is unreachable") }

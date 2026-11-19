@@ -122,7 +122,8 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	// Weak: two 200s of one board differ in generated
+	etag := `W/"` + hex.EncodeToString(sum[:16]) + `"`
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "no-cache")
 	if matches(r.Header.Get("If-None-Match"), etag) {
@@ -139,7 +140,7 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 func matches(header, etag string) bool {
 	for _, t := range strings.Split(header, ",") {
 		t = strings.TrimPrefix(strings.TrimSpace(t), "W/")
-		if t == etag || t == "*" {
+		if t == strings.TrimPrefix(etag, "W/") || t == "*" {
 			return true
 		}
 	}
