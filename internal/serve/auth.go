@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -33,14 +34,22 @@ const (
 )
 
 // Auth is the phone page's pairing and sessions, kept in Dir, which dev serve pair and unpair write too. The Mac
-// keeps only the SHA-256 of a session token; a code's hash guards it only by its 5 minutes and single use.
+// keeps only the SHA-256 of a session token and a slow salted hash of a code.
 type Auth struct {
 	Dir string
 	Now func() time.Time
 }
 
+// defaultCodeIter is PBKDF2-SHA256's iteration count for a code: about 100 ms a guess on an Apple M-series core, so
+// trying all 10^8 codes takes months there (hours on a GPU farm): far past the code's 5 minutes, which is all it needs.
+const defaultCodeIter = 1_000_000
+
+var codeIter = defaultCodeIter // tests lower it
+
 type pending struct {
-	Hash    string `json:"code_sha256"`
+	Hash    string `json:"code_pbkdf2_sha256"`
+	Salt    string `json:"salt"`
+	Iter    int    `json:"iterations"`
 	Expires int64  `json:"expires"`
 	Misses  int    `json:"misses,omitempty"`
 }
@@ -58,12 +67,18 @@ func NewCode(dir string, now time.Time) (string, error) {
 		return "", err
 	}
 	code := fmt.Sprintf("%08d", n.Int64())
+	salt := make([]byte, 16)
+	_, _ = rand.Read(salt) // never fails: it crashes instead
 	unlock, err := lock(dir)
 	if err != nil {
 		return "", err
 	}
 	defer unlock()
-	if err := writeFile(dir, codeFile, pending{Hash: hash(code), Expires: now.Add(CodeTTL).Unix()}); err != nil {
+	p := pending{Salt: hex.EncodeToString(salt), Iter: codeIter, Expires: now.Add(CodeTTL).Unix()}
+	if p.Hash, err = p.derive(code); err != nil {
+		return "", err
+	}
+	if err := writeFile(dir, codeFile, p); err != nil {
 		return "", err
 	}
 	return code[:4] + " " + code[4:], nil
@@ -175,11 +190,20 @@ func (a *Auth) Pair(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
+	if !p.checkable() {
+		a.drop(w, http.StatusUnauthorized, "this dev serve can't check the pending code (restart dev serve after updating dev): run dev serve pair on the Mac again")
+		return
+	}
 	if a.Now().Unix() >= p.Expires {
 		a.drop(w, http.StatusUnauthorized, "the code has expired: run dev serve pair on the Mac again")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(hash(code)), []byte(p.Hash)) != 1 {
+	got, err := p.derive(code)
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(got), []byte(p.Hash)) != 1 {
 		if p.Misses++; p.Misses >= maxMisses {
 			log.Printf("dev serve: pairing code voided after %d wrong codes", maxMisses)
 			a.drop(w, http.StatusTooManyRequests, "too many wrong codes: run dev serve pair on the Mac again")
@@ -247,6 +271,26 @@ func deviceName(name string) string {
 		name = strings.TrimSpace(string(r[:maxDevice]))
 	}
 	return name
+}
+
+// checkable is whether p is a code record this build wrote: its hash, a 16-byte salt and a sane iteration count, so
+// a stale or damaged file can't stall pairing or pass as a wrong code.
+func (p pending) checkable() bool {
+	salt, err := hex.DecodeString(p.Salt)
+	return p.Hash != "" && err == nil && len(salt) == 16 && p.Iter >= 1 && p.Iter <= 10*defaultCodeIter
+}
+
+// derive is code's PBKDF2-SHA256 under p's salt and iterations.
+func (p pending) derive(code string) (string, error) {
+	salt, err := hex.DecodeString(p.Salt)
+	if err != nil {
+		return "", fmt.Errorf("pairing code salt: %w", err)
+	}
+	key, err := pbkdf2.Key(sha256.New, code, salt, p.Iter, 32)
+	if err != nil {
+		return "", fmt.Errorf("pairing code hash: %w", err)
+	}
+	return hex.EncodeToString(key), nil
 }
 
 func hash(s string) string {

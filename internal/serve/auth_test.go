@@ -2,10 +2,13 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +63,64 @@ func refused(t *testing.T, what string, w *httptest.ResponseRecorder, code int, 
 	var e struct{ Error string }
 	if w.Code != code || json.Unmarshal(w.Body.Bytes(), &e) != nil || !strings.Contains(e.Error, why) {
 		t.Errorf("%s: %d %s, want %d with %q", what, w.Code, w.Body, code, why)
+	}
+}
+
+// A cheap code hash keeps the tests fast; BenchmarkCodeGuess times the real one.
+func init() { codeIter = 1000 }
+
+// One guess at the real cost: go test ./internal/serve -run - -bench CodeGuess
+func BenchmarkCodeGuess(b *testing.B) {
+	p := pending{Salt: strings.Repeat("ab", 16), Iter: defaultCodeIter}
+	for b.Loop() {
+		if _, err := p.derive("12345678"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// The code file holds a salted PBKDF2 hash with its parameters, never the code or its plain SHA-256; a record this
+// dev serve can't check (an older format, a bad salt or iteration count) is dropped, not counted as a wrong code.
+func TestCodeFile(t *testing.T) {
+	s := newAuthed(t)
+	code := strings.ReplaceAll(s.code(t), " ", "")
+	raw, err := os.ReadFile(filepath.Join(s.dir, codeFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	keys := slices.Sorted(maps.Keys(fields))
+	if strings.Join(keys, ",") != "code_pbkdf2_sha256,expires,iterations,salt" {
+		t.Errorf("code file fields %v", keys)
+	}
+	var p pending
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Hash == hash(code) || len(p.Salt) != 32 || p.Iter != codeIter {
+		t.Errorf("code file %s", raw)
+	}
+	if got, err := p.derive(code); err != nil || got != p.Hash {
+		t.Errorf("derive: %s %v, want the stored hash", got, err)
+	}
+	if got, _ := (pending{Salt: strings.Repeat("0", 32), Iter: p.Iter}).derive(code); got == p.Hash {
+		t.Error("the salt doesn't change the hash")
+	}
+
+	for name, bad := range map[string]string{
+		"old format":      `{"code_sha256":"` + hash(code) + `","expires":%d}`,
+		"no iterations":   `{"code_pbkdf2_sha256":"` + p.Hash + `","salt":"` + p.Salt + `","expires":%d}`,
+		"huge iterations": `{"code_pbkdf2_sha256":"` + p.Hash + `","salt":"` + p.Salt + `","iterations":2000000000,"expires":%d}`,
+		"short salt":      `{"code_pbkdf2_sha256":"` + p.Hash + `","salt":"00","iterations":1000,"expires":%d}`,
+	} {
+		if err := os.WriteFile(filepath.Join(s.dir, codeFile), fmt.Appendf(nil, bad, p.Expires), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, name, s.pair(code, "p"), 401, "run dev serve pair on the Mac again")
+		refused(t, name+", then", s.pair(code, "p"), 401, "no pairing code is pending")
 	}
 }
 
