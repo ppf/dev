@@ -375,7 +375,7 @@ func TestBlockStart(t *testing.T) {
 	for _, tt := range []struct {
 		late       bool
 		want, acts string
-	}{{false, "sent to boss-noc · 2m", "Tick   Go to boss      d tick"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
+	}{{false, "sent to boss-noc · 2m", "Start   Tick   Go to boss      s start"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
 		m := blockBoard(t)
 		for j, it := range m.snap.asks[0].Items {
 			if it.Text == "DM David" {
@@ -418,5 +418,19 @@ func TestBlockStart(t *testing.T) {
 	m.snap.all = append(m.snap.all, sidebar.Session{Name: sidebar.Manager})
 	if acts, _ := m.actions(rows[closed]); len(acts) != 2 || acts[0].key != "s" {
 		t.Errorf("closed boss, manager runs: %v, want Start then Tick", acts)
+	}
+}
+
+// A starting row names whom the start went to only where names fit, and keeps a moved PR's warning.
+func TestStartingRight(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	r := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting, StatusOn: "boss-x",
+		StartedAt: now.Add(-2 * time.Minute).Unix()}}
+	if got, _ := r.right(now, true); got != "sent to boss-x · 2m" {
+		t.Errorf("named = %q", got)
+	}
+	r.Check = &sidebar.Check{Kind: sidebar.CheckMerged, PR: 18, Since: now.Unix()}
+	if got, _ := r.right(now, false); !strings.HasPrefix(got, "sent · 2m · ⚠ ") {
+		t.Errorf("narrow, PR moved = %q", got)
 	}
 }

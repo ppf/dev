@@ -378,10 +378,20 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 		return with(with(r.Status, who), "⚠ "+r.Check.Short(now)), statusColours[r.Status]
 	case r.Kind == sidebar.NeedOn || r.Status == sidebar.StatusBossClosed:
 		return with(r.Status, who), statusColours[r.Status]
-	case r.Status == sidebar.StatusStarting && r.StartLate:
-		return "start not picked up", sidebar.Red
 	case r.Status == sidebar.StatusStarting:
-		return with("sent to "+r.StatusOn, wait.Span(now.Sub(time.Unix(r.StartedAt, 0)))), statusColours[r.Status]
+		text, colour := "sent", statusColours[r.Status]
+		if who != "" {
+			text = "sent to " + who
+		}
+		text = with(text, wait.Span(now.Sub(time.Unix(r.StartedAt, 0))))
+		if r.StartLate {
+			text, colour = "start not picked up", sidebar.Red
+		}
+		if r.Check != nil && r.Check.Kind != sidebar.CheckBossClosed {
+			// Its status hides a moved PR, as a worker's does
+			text = with(text, "⚠ "+r.Check.Short(now))
+		}
+		return text, colour
 	case r.Until != 0 && r.Age(now) == "":
 		return "till " + wait.Clock(time.Unix(r.Until, 0), now), sidebar.Muted
 	}
@@ -516,14 +526,15 @@ func (m Model) optionLines(r needRow, w int, selected bool, lines []string, span
 // action is a word on an expanded row that does what its key does.
 type action struct{ word, key, hint string }
 
-// actions are what the selected row offers: Start and Tick the user's item, Reply to a question, Go to the session or
-// the list's boss; a closed boss's row only Tick, and Start while the manager runs, then how to reopen it.
+// actions are what the selected row offers: Start (on a starting row too, so the words stay put once started) and Tick
+// the user's item, Reply to a question, Go to the session or the list's boss; a closed boss's row only Tick, and Start
+// while the manager runs, then how to reopen it.
 func (m Model) actions(r needRow) (out []action, note string) {
 	tick := action{"Tick", "d", "d tick"}
 	start := action{"Start", "s", "s start"}
 	if r.Closed {
 		if r.Kind == sidebar.NeedPlain {
-			if (r.Status != sidebar.StatusStarting || r.StartLate) && m.managerRuns() {
+			if r.Status != sidebar.StatusCheck && m.managerRuns() {
 				out = append(out, start)
 			}
 			out = append(out, tick)
@@ -532,8 +543,7 @@ func (m Model) actions(r needRow) (out []action, note string) {
 	}
 	switch r.Kind {
 	case sidebar.NeedPlain:
-		if r.Status == sidebar.StatusYours || r.StartLate {
-			// A late start is sent again
+		if r.Status != sidebar.StatusCheck {
 			out = append(out, start)
 		}
 		out = append(out, tick)
