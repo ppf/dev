@@ -55,7 +55,7 @@
     },
     {
       "boss": "boss-b",
-      "error": "list not read: todo $XDG_STATE_HOME/dev/todo/tmp_tmux-1_default-boss-b.json: unexpected end of JSON input",
+      "error": "list not read: todo ~/state/dev/todo/tmp_tmux-1_default-boss-b.json: unexpected end of JSON input",
       "items": [],
       "updated": 0,
       "stale": true

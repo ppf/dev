@@ -17,12 +17,15 @@ import (
 const lists = `[{"boss":"boss-a","items":[{"id":1,"text":"Merge?","done":false,"options":["Merge","Wait"],"status":"decide"},` +
 	`{"id":2,"text":"Read","done":false,"status":"yours"},{"id":3,"text":"Fix","done":false,"on":"w","status":"working","status_on":"w"}],"updated":1,"stale":false}]`
 
-func handler(kind Kind, now *time.Time, lists *string) http.Handler {
+func noGuard(h http.Handler) http.Handler { return h }
+
+func handler(now *time.Time, lists *string) http.Handler {
 	return Handler(Config{
 		Version: "v1.2.3",
 		Now:     func() time.Time { return *now },
 		Lists:   func() (json.RawMessage, error) { return json.RawMessage(*lists), nil },
-		Guard:   LoopbackOnly(kind),
+		Guard:   noGuard,
+		Pair:    http.NotFoundHandler(),
 	})
 }
 
@@ -41,7 +44,7 @@ func get(t *testing.T, h http.Handler, path, inm string) *httptest.ResponseRecor
 // when a list changes.
 func TestBoardETag(t *testing.T) {
 	now, l := time.Unix(1700000000, 0), lists
-	h := handler(Loopback, &now, &l)
+	h := handler(&now, &l)
 	w := get(t, h, "/v1/board", "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"generated": 1700000000`) || !strings.Contains(w.Body.String(), `"decide": 1,`) || !strings.Contains(w.Body.String(), `"yours": 1`) {
 		t.Fatalf("board %d:\n%s", w.Code, w.Body)
@@ -67,17 +70,10 @@ func TestBoardETag(t *testing.T) {
 	}
 }
 
-// Off loopback the board is refused with a sentence; health and the placeholder still answer, other paths 404.
-func TestBoardLoopbackOnly(t *testing.T) {
+// Health and the placeholder answer, a non-IP Host gets 421, other paths 404.
+func TestRoutes(t *testing.T) {
 	now, l := time.Unix(0, 0), lists
-	for _, kind := range []Kind{Tailnet, LAN} {
-		w := get(t, handler(kind, &now, &l), "/v1/board", "")
-		var e struct{ Error string }
-		if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &e) != nil || !strings.Contains(e.Error, "loopback only") {
-			t.Errorf("kind %d: %d %s, want 403 with its reason", kind, w.Code, w.Body)
-		}
-	}
-	h := handler(LAN, &now, &l)
+	h := handler(&now, &l)
 	if w := get(t, h, "/v1/health", ""); w.Code != 200 || strings.Join(strings.Fields(w.Body.String()), "") != `{"ok":true,"version":"v1.2.3"}` {
 		t.Errorf("health: %d %s", w.Code, w.Body)
 	}
@@ -100,7 +96,7 @@ func TestBoardLoopbackOnly(t *testing.T) {
 
 // A board that can't be read is a 500 with a sentence, not the reason (it may name a list).
 func TestBoardError(t *testing.T) {
-	h := Handler(Config{Now: time.Now, Guard: LoopbackOnly(Loopback), Lists: func() (json.RawMessage, error) { return nil, errors.New("boom") }})
+	h := Handler(Config{Now: time.Now, Guard: noGuard, Pair: http.NotFoundHandler(), Lists: func() (json.RawMessage, error) { return nil, errors.New("boom") }})
 	logged := captureLog(t)
 	if w := get(t, h, "/v1/board", ""); w.Code != 500 || strings.Contains(w.Body.String(), "boom") {
 		t.Errorf("%d %s", w.Code, w.Body)
@@ -163,14 +159,18 @@ func captureLog(t *testing.T) *strings.Builder {
 	return &b
 }
 
-// A page answers "/" and its own files below it; the API's routes stay the API's.
+// A page answers "/" and its own files below it without a session, so Pair can show; the API's routes stay the API's.
 func TestPage(t *testing.T) {
 	page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("page " + r.URL.Path)) })
-	h := Handler(Config{Version: "v1.2.3", Now: time.Now, Guard: LoopbackOnly(Loopback), Page: page,
+	auth := &Auth{Dir: t.TempDir(), Now: time.Now}
+	h := Handler(Config{Version: "v1.2.3", Now: time.Now, Guard: auth.Session, Pair: http.HandlerFunc(auth.Pair), Page: page,
 		Lists: func() (json.RawMessage, error) { return json.RawMessage(lists), nil }})
-	for path, want := range map[string]string{"/": "page /", "/app.js": "page /app.js", "/v1/health": `"ok"`} {
+	for path, want := range map[string]string{"/": "page /", "/app.js": "page /app.js", "/app.css": "page /app.css", "/v1/health": `"ok"`} {
 		if w := get(t, h, path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), want) {
 			t.Errorf("%s: %d %s, want %s", path, w.Code, w.Body, want)
 		}
+	}
+	if w := get(t, h, "/v1/board", ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("/v1/board unpaired: %d, want 401", w.Code)
 	}
 }

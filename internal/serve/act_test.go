@@ -14,7 +14,7 @@ type call struct {
 	text, pick string
 }
 
-func actHandler(kind Kind, calls *[]call, err error) http.Handler {
+func actHandler(calls *[]call, err error) http.Handler {
 	return Handler(Config{
 		Answer: func(boss string, id int, question, answer string) error {
 			*calls = append(*calls, call{boss, id, question, answer})
@@ -24,7 +24,8 @@ func actHandler(kind Kind, calls *[]call, err error) http.Handler {
 			*calls = append(*calls, call{boss, id, text, ""})
 			return err
 		},
-		Guard: LoopbackOnly(kind),
+		Guard: noGuard,
+		Pair:  http.NotFoundHandler(),
 	})
 }
 
@@ -41,7 +42,7 @@ func post(h http.Handler, path, body string, page bool) *httptest.ResponseRecord
 // An answer passes the option or own words through; a tick its text; each answers ok.
 func TestActOK(t *testing.T) {
 	var calls []call
-	h := actHandler(Loopback, &calls, nil)
+	h := actHandler(&calls, nil)
 	for _, body := range []string{
 		`{"boss":"boss-a","id":1,"question":"Merge?","option":"Merge"}`,
 		`{"boss":"boss-a","id":1,"question":"Merge?","text":"after the API one"}`,
@@ -59,31 +60,29 @@ func TestActOK(t *testing.T) {
 	}
 }
 
-// Without the page's header, off loopback, with a malformed body, or with no item text, nothing runs.
+// Without the page's header, with a malformed body, or with no item text, nothing runs.
 func TestActRefused(t *testing.T) {
 	cases := []struct {
 		name, path, body string
-		kind             Kind
 		page             bool
 		code             int
 	}{
-		{"no header", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, Loopback, false, http.StatusForbidden},
-		{"no header, done", "/v1/done", `{"boss":"b","id":1,"text":"T"}`, Loopback, false, http.StatusForbidden},
-		{"off loopback", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, Tailnet, true, http.StatusForbidden},
-		{"no JSON", "/v1/answer", `option=A`, Loopback, true, http.StatusBadRequest},
-		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, Loopback, true, http.StatusBadRequest},
-		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, Loopback, true, http.StatusBadRequest},
-		{"no answer", "/v1/answer", `{"boss":"b","id":1,"question":"Q","text":" "}`, Loopback, true, http.StatusBadRequest},
-		{"no boss", "/v1/done", `{"id":1,"text":"T"}`, Loopback, true, http.StatusBadRequest},
-		{"desktop boss", "/v1/done", `{"boss":"local_1","id":1,"text":"T"}`, Loopback, true, http.StatusBadRequest},
-		{"no text", "/v1/done", `{"boss":"b","id":1}`, Loopback, true, http.StatusBadRequest},
-		{"no id", "/v1/done", `{"boss":"b","text":"T"}`, Loopback, true, http.StatusBadRequest},
-		{"trailing data", "/v1/done", `{"boss":"b","id":1,"text":"T"} {}`, Loopback, true, http.StatusBadRequest},
-		{"too big", "/v1/done", `{"boss":"b","id":1,"text":"` + strings.Repeat("x", maxAct) + `"}`, Loopback, true, http.StatusBadRequest},
+		{"no header", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, false, http.StatusForbidden},
+		{"no header, done", "/v1/done", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
+		{"no JSON", "/v1/answer", `option=A`, true, http.StatusBadRequest},
+		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, true, http.StatusBadRequest},
+		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, true, http.StatusBadRequest},
+		{"no answer", "/v1/answer", `{"boss":"b","id":1,"question":"Q","text":" "}`, true, http.StatusBadRequest},
+		{"no boss", "/v1/done", `{"id":1,"text":"T"}`, true, http.StatusBadRequest},
+		{"desktop boss", "/v1/done", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
+		{"no text", "/v1/done", `{"boss":"b","id":1}`, true, http.StatusBadRequest},
+		{"no id", "/v1/done", `{"boss":"b","text":"T"}`, true, http.StatusBadRequest},
+		{"trailing data", "/v1/done", `{"boss":"b","id":1,"text":"T"} {}`, true, http.StatusBadRequest},
+		{"too big", "/v1/done", `{"boss":"b","id":1,"text":"` + strings.Repeat("x", maxAct) + `"}`, true, http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		var calls []call
-		w := post(actHandler(c.kind, &calls, nil), c.path, c.body, c.page)
+		w := post(actHandler(&calls, nil), c.path, c.body, c.page)
 		if w.Code != c.code || len(calls) != 0 || !strings.Contains(w.Body.String(), `"error"`) {
 			t.Errorf("%s: %d %s, calls %v; want %d", c.name, w.Code, w.Body, calls, c.code)
 		}
@@ -94,12 +93,12 @@ func TestActRefused(t *testing.T) {
 func TestActErrors(t *testing.T) {
 	var calls []call
 	stale := Refused{Code: http.StatusConflict, Err: errors.New(`item 1 is answered already: Merge`)}
-	w := post(actHandler(Loopback, &calls, stale), "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, true)
+	w := post(actHandler(&calls, stale), "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, true)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "answered already: Merge") {
 		t.Errorf("refused = %d %s", w.Code, w.Body)
 	}
 	logged := captureLog(t)
-	w = post(actHandler(Loopback, &calls, errors.New("boom")), "/v1/done", `{"boss":"b","id":1,"text":"T"}`, true)
+	w = post(actHandler(&calls, errors.New("boom")), "/v1/done", `{"boss":"b","id":1,"text":"T"}`, true)
 	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "boom") || !strings.Contains(logged.String(), "boom") {
 		t.Errorf("error = %d %s, log %q", w.Code, w.Body, logged)
 	}
