@@ -38,27 +38,7 @@ func TestServeBoard(t *testing.T) {
 	dev(boss, "todo", "add", "Read the plan")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 
-	serve := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0")
-	serve.Env = s.scriptEnv(user...)
-	var stderr strings.Builder
-	serve.Stderr = &stderr
-	stdout, err := serve.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := serve.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = serve.Process.Kill(); _ = serve.Wait() })
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		t.Fatalf("❌ dev serve's first line: %q, %v; stderr: %s", line, err, stderr.String())
-	}
-	url := strings.Fields(line)[3]
-	if !strings.HasPrefix(url, "http://127.0.0.1:") {
-		t.Fatalf("❌ dev serve printed %q", line)
-	}
-
+	url := startServe(t, s, user...)
 	resp, err := http.Get(url + "v1/board")
 	if err != nil {
 		t.Fatal(err)
@@ -84,4 +64,30 @@ func TestServeBoard(t *testing.T) {
 	if !strings.Contains(string(body), `"Merge #148?"`) || !strings.Contains(string(body), `"decide": 1`) {
 		t.Errorf("❌ board lacks the ask:\n%s", body)
 	}
+}
+
+// startServe runs dev serve on a loopback port of s, as the user, and is the URL it prints.
+func startServe(t *testing.T, s *server, env ...string) string {
+	t.Helper()
+	serve := exec.Command(devBin, "serve", "--addr", "127.0.0.1:0")
+	serve.Env = s.scriptEnv(env...)
+	var stderr strings.Builder
+	serve.Stderr = &stderr
+	stdout, err := serve.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serve.Process.Kill(); _ = serve.Wait() })
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("❌ dev serve's first line: %q, %v; stderr: %s", line, err, stderr.String())
+	}
+	url := strings.Fields(line)[3]
+	if !strings.HasPrefix(url, "http://127.0.0.1:") {
+		t.Fatalf("❌ dev serve printed %q", line)
+	}
+	return url
 }

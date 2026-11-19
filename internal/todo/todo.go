@@ -565,7 +565,7 @@ func (s Store) Done(ids []int, now time.Time) error {
 // DoneText ticks the user's own open item id, only while it still reads text, as item numbers restart once a list
 // empties and a boss may rewrite its list under a board's row.
 func (s Store) DoneText(id int, text string, now time.Time) error {
-	return s.update(now, func(f *file) error {
+	return s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
 		switch {
 		case i < 0:
@@ -579,7 +579,7 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 		}
 		f.Items[i].Done = now.Unix()
 		return nil
-	})
+	}))
 }
 
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
@@ -630,7 +630,7 @@ func (s Store) Answer(id int, question, arg string, before int64, now time.Time)
 // AnswerPick is Answer refusing an answer other than picked, the user's pick for it, when given.
 func (s Store) AnswerPick(id int, question, arg, picked string, before int64, now time.Time) (Item, error) {
 	var it Item
-	err := s.update(now, func(f *file) error {
+	err := s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
 		if i < 0 {
 			return fmt.Errorf("no open item %d", id)
@@ -666,7 +666,7 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 		p.Done, p.Answer = now.Unix(), answer
 		it = *p
 		return nil
-	})
+	}))
 	return it, err
 }
 
@@ -722,6 +722,22 @@ func (s Store) locked(fn func() error) error {
 		return err
 	}
 	return fn()
+}
+
+// Refused is the list refusing a change: the item changed, was answered, or isn't the user's; not a failure to read or
+// write it.
+type Refused struct{ error }
+
+func (r Refused) Unwrap() error { return r.error }
+
+// refusing is check with its error Refused: it reads and writes nothing, only the list.
+func refusing(check func(*file) error) func(*file) error {
+	return func(f *file) error {
+		if err := check(f); err != nil {
+			return Refused{err}
+		}
+		return nil
+	}
 }
 
 // update runs fn on the file under an exclusive lock, stamps it now and writes it back.

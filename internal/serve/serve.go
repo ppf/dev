@@ -22,6 +22,10 @@ type Config struct {
 	Now     func() time.Time
 	// Lists is the JSON dev todo --all --json prints: an array of lists, each with its items' status.
 	Lists func() (json.RawMessage, error)
+	// Answer answers ask id of boss's list as the user while it still reads question; Done ticks the user's own item
+	// id while it still reads text. Refused tells the page why not.
+	Answer func(boss string, id int, question, answer string) error
+	Done   func(boss string, id int, text string) error
 	// Guard wraps every /v1 call but health: the auth slot.
 	Guard func(http.Handler) http.Handler
 	// Page answers "/"; nil answers a placeholder line.
@@ -35,6 +39,8 @@ func Handler(cfg Config) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": cfg.Version})
 	})
 	mux.Handle("GET /v1/board", cfg.Guard(http.HandlerFunc(cfg.board)))
+	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
+	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
 	page := cfg.Page
 	if page == nil {
 		page = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

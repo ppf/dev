@@ -389,6 +389,13 @@ func AnswerVia(id int, text, answer, words string) Note {
 	return n
 }
 
+// AnswerPage is Answer given on the phone page (dev serve).
+func AnswerPage(id int, text, answer string) Note {
+	n := Answer(id, text, answer)
+	n.Text = fmt.Sprintf(`#%d "%s" on the phone page: %s`, id, text, answer)
+	return n
+}
+
 // Socket is the socket path of the tmux server c reaches.
 func Socket(c *tmux.Client) (string, error) {
 	out, err := c.Run("display-message", "-p", "#{socket_path}")
