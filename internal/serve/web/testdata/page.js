@@ -103,5 +103,16 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   run('load()');
   await settle();
   check('paired again elsewhere reopens the stream', !run('state.unpaired') && ctx.streams.length === streams + 1 && !es().closed);
+
+  const sheetText = () => run("item('boss-x', 4)")[1].children.join('');
+  run("state.board = { lists: [{ boss: 'boss-x', error: 'invalid character' }] }");
+  check('an item of an unreadable list says the list could not be read', /could not be read: invalid character/.test(sheetText()));
+  run("state.board = { lists: [{ boss: 'boss-x', items: [] }] }");
+  check('an item gone from a readable list is no longer open', /no longer open/.test(sheetText()));
+  const drawn = () => els.sheet.children[1].children.join('');
+  run("state.board = { lists: [{ boss: 'boss-x', error: 'invalid character' }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
+  check('an open sheet shows the read error', /could not be read/.test(drawn()));
+  run("state.board = { lists: [{ boss: 'boss-x', items: [] }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
+  check('an open sheet redraws once the list reads again', /no longer open/.test(drawn()));
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
