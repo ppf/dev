@@ -225,6 +225,15 @@ func TestNeedsRender(t *testing.T) {
 			t.Errorf("line %d is %d wide", i, w)
 		}
 	}
+	// The keys n leads to, only where they fit whole
+	if strings.Contains(all, "n to do:") {
+		t.Errorf("80 wide: n's keys shown cut:\n%s", all)
+	}
+	wide := m
+	wide.width = 120
+	if hint := plain(wide.render()); !strings.HasSuffix(strings.TrimRight(hint[len(hint)-1], " "), "n to do: space open  b board") {
+		t.Errorf("120 wide: hint %q, want n's keys", hint[len(hint)-1])
+	}
 	m, _ = keys(m, "n", "j")
 	lines = plain(m.render())
 	if !strings.HasPrefix(lines[0], " TO DO · all bosses ") || strings.Contains(lines[0], "· n") || !strings.HasSuffix(strings.TrimSpace(lines[6]), "for later.") ||

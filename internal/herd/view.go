@@ -2,6 +2,7 @@ package herd
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -139,6 +140,14 @@ func (m Model) bottom() []string {
 	}
 	if len(m.needRows()) > 0 && !m.tooShort() {
 		hint += "  n to do"
+		// What n leads to, only whole
+		then := ": b board"
+		if slices.ContainsFunc(m.needRows(), needRow.opens) {
+			then = ": space open  b board"
+		}
+		if ansi.StringWidth(pages+hint+then) <= w-1 {
+			hint += then
+		}
 	}
 	return []string{sidebar.HintRow(pages+hint, w)}
 }

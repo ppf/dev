@@ -144,7 +144,9 @@ func showPopup(c *tmux.Client, client string, m itemview.Model, boss string, id 
 
 // popup runs command in a borderless popup on client, w by h (cells or a percentage), guard set in its environment.
 func popup(c *tmux.Client, client, w, h, guard, command string) error {
-	_, err := c.Run("display-popup", "-c", client, "-E", "-B", "-w", w, "-h", h, "-e", guard+"=1", "--", command)
+	// Terminal's colours, as the views are made for: tmux 3.8's popup-style is mid grey on a light-theme client
+	_, err := c.Run("display-popup", "-c", client, "-E", "-B", "-s", "bg=terminal,fg=terminal", "-w", w, "-h", h,
+		"-e", guard+"=1", "--", command)
 	// display-popup exits with the view's status, and the view, or the error that stopped it (Execute waits for a key),
 	// showed in the popup
 	if e, ok := errors.AsType[*tmux.Error](err); ok && e.Stderr == "" {
