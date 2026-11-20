@@ -107,6 +107,7 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 	var statuses []struct {
 		Items []struct {
 			Status string `json:"status"`
+			Quiet  bool   `json:"quiet"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(lists, &statuses); err != nil {
@@ -117,6 +118,9 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns()}
 	for _, l := range statuses {
 		for _, it := range l.Items {
+			if it.Quiet {
+				continue
+			}
 			switch it.Status {
 			case todo.StatusDecide:
 				b.Counts.Decide++

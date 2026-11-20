@@ -605,6 +605,9 @@ func (m Model) topLine(cards [][]card, w int) string {
 	var decide, yours, open int
 	for _, cs := range cards {
 		for _, c := range cs {
+			if c.it.Quiet {
+				continue
+			}
 			open++
 			switch c.it.Status {
 			case sidebar.StatusDecide:
@@ -758,6 +761,9 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 		lines = append(lines, style+l+reset)
 	}
 	foot := []string{owner(c)}
+	if it.Quiet {
+		foot = []string{"TEST", owner(c)}
+	}
 	if len(it.Options) > 0 {
 		foot = append(foot, strconv.Itoa(len(it.Options))+" options")
 	}

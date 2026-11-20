@@ -957,3 +957,17 @@ func TestNeedsOpenBoard(t *testing.T) {
 		t.Errorf("opened %q, want every boss's board", opened)
 	}
 }
+
+// A test ask's long question wraps with its TEST tag, no word lost to the tag.
+func TestNeedsOpenQuietWraps(t *testing.T) {
+	var calls []answerCall
+	r := NeedRow{Kind: NeedListAsk, Project: "dev", Text: "Should the page keep its filters across reloads?", Options: []string{"Yes", "No"}, Session: "boss-dev", Quiet: true}
+	lines, _ := needsModel(&calls).openLines(r, 30)
+	var words []string
+	for _, l := range lines {
+		words = append(words, strings.Fields(ansi.Strip(l))...)
+	}
+	if got := strings.Join(words, " "); !strings.Contains(got, "TEST Should the page keep its filters across reloads?") {
+		t.Errorf("lines = %q", got)
+	}
+}

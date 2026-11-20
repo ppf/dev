@@ -209,6 +209,7 @@ dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00"  # ticks itself then; --
 dev todo add "Approve PR #85" --replaces 2            # in place of open item 2: keeps its number, --on, --link, --until, --done-on
 dev todo add "Approve PR #85" --on Ana --link <PR url> --done-on approved  # ticks itself once the PR is approved (merged|approved|green)
 dev todo ask "Merge #148?" --option "Merge (Recommended)" --option "Wait"  # a decision for you, up to 9 options
+dev todo ask "Test?" --option "A" --option "B" --quiet  # a test item (add or ask): a TEST tag on the boards, in no tally or roll-up, the boss above not told
 dev todo answer boss-dev 5 1                          # answer it: option 1, its label or your own words
 dev todo done 2 3                                     # tick by number
 dev todo clear                                        # empty: no block

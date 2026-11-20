@@ -35,7 +35,8 @@ export async function readAsks(run: Run, bin: string, errors: string[] = []): Pr
     if (typeof l.error === 'string' && l.error !== '') errors.push(`${l.boss}: ${l.error}`)
     return l.items.flatMap((it: any): FleetItem[] => {
       if (typeof it?.id !== 'number' || typeof it.text !== 'string' || typeof it.done !== 'boolean') throw new Error('dev todo --all --json printed an item this mod does not read')
-      if (it.on) return []
+      // A test item (dev todo add --quiet) waits on no one
+      if (it.on || it.quiet === true) return []
       return [{ boss: l.boss, id: it.id, text: it.text, done: it.done, options: isArray(it.options) ? it.options.map(String) : [], context: isArray(it.context) ? it.context.map(String) : [], answer: typeof it.answer === 'string' ? it.answer : undefined, status: typeof it.status === 'string' && it.status !== '' ? it.status : undefined, statusOn: typeof it.status_on === 'string' && it.status_on !== '' ? it.status_on : undefined, startedAt: typeof it.started?.at === 'number' ? it.started.at : undefined, startLate: it.start_late === true }]
     })
   })

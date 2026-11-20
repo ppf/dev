@@ -1009,3 +1009,21 @@ func TestStart(t *testing.T) {
 		t.Errorf("--replaces kept the start: %+v", sh)
 	}
 }
+
+// A quiet item reads back quiet and stays so through a replace that doesn't say it.
+func TestQuiet(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "test ask?", Options: []string{"A", "B"}, Quiet: true}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "real"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(1, Item{Text: "test ask 2?"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(t, s, now); !l.Items[0].Quiet || l.Items[1].Quiet {
+		t.Errorf("quiet = %v, %v; want true, false", l.Items[0].Quiet, l.Items[1].Quiet)
+	}
+}

@@ -599,3 +599,20 @@ func TestTodoNoteIDs(t *testing.T) {
 		t.Errorf("after dropping the highest = %q, want n3", got)
 	}
 }
+
+// --quiet on add and ask stores a test item, quiet in the JSON, kept by --replaces.
+func TestTodoQuiet(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "add", "t", "--quiet")
+	run(t, "", "todo", "ask", "t?", "--option", "a", "--option", "b", "--quiet")
+	run(t, "", "todo", "add", "real")
+	run(t, "", "todo", "add", "--replaces", "1", "t2")
+	var l struct {
+		Items []struct {
+			Quiet bool `json:"quiet"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 3 || !l.Items[0].Quiet || !l.Items[1].Quiet || l.Items[2].Quiet {
+		t.Errorf("json = %+v, %v; want quiet, quiet, not", l, err)
+	}
+}

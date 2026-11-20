@@ -70,7 +70,7 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, and now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait)), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), and now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait)), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
@@ -172,7 +172,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if it.On == "" || it.On == todo.Me {
+			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
 			baseline(s, cmd.ErrOrStderr())
@@ -185,6 +185,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context not given")
+	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	return cmd
 }
 
@@ -233,7 +234,9 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			if err != nil {
 				return err
 			}
-			waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
+			if !it.Quiet {
+				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
+			}
 			baseline(s, cmd.ErrOrStderr())
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
@@ -241,8 +244,11 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9: "<label> | <detail>", the label at most 30 characters (what an answer names), the detail its cost or effect; the recommended one ends with "(Recommended)"`)
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the question, in order: findings, then paths")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
+	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	return cmd
 }
+
+const quietHelp = "a test item: a TEST tag on the boards, left out of their tallies and roll-ups (a column still lists it), the boss above not told; kept by --replaces"
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
 	var question, via string
@@ -686,7 +692,7 @@ func replacedWaits(s todo.Store, boss string, stderr io.Writer, id int, now time
 		fmt.Fprintf(stderr, "⚠ dev todo: the boss above wasn't told: #%d left the list\n", id)
 		return
 	}
-	if l.Items[i].On == "" {
+	if l.Items[i].On == "" && !l.Items[i].Quiet {
 		waitsOnYou(boss, stderr, id, l.Items[i].Text, l.Items[i].Options)
 	}
 }

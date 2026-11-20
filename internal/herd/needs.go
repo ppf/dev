@@ -62,7 +62,7 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
 		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Context: it.Context, Added: it.Added,
-			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate}
+			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate, Quiet: it.Quiet}
 		if it.Started != nil {
 			out[i].Started = &struct{ At int64 }{it.Started.At}
 		}

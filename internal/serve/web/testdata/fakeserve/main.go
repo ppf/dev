@@ -201,7 +201,7 @@ func (s *server) recount() {
 	for _, l := range s.board["lists"].([]any) {
 		for _, it := range l.(map[string]any)["items"].([]any) {
 			it := it.(map[string]any)
-			if st, ok := it["status"].(string); ok && it["done"] != true {
+			if st, ok := it["status"].(string); ok && it["done"] != true && it["quiet"] != true {
 				if _, counted := counts[st]; counted {
 					counts[st]++
 				}

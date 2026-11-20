@@ -278,9 +278,9 @@ const fleetStatusText = (it: FleetItem, nowMs: number) => {
 /** The to do items as the board lists them: by status in STATUSES' order, each status in dev's order. */
 const todoOrder = (items: TodoItem[]) => items.map((it, i) => ({ it, i })).sort((x, y) => statusRank(x.it) - statusRank(y.it) || x.i - y.i).map(x => x.it)
 
-/** The count dev's boards give a list: its asks to decide and its own items. */
-export const decideCount = (items: { status?: string }[]) => {
-  const n = (st: string) => items.filter(it => it.status === st).length
+/** The count dev's boards give a list: its asks to decide and its own items, test items left out. */
+export const decideCount = (items: { status?: string; quiet?: boolean }[]) => {
+  const n = (st: string) => items.filter(it => it.status === st && it.quiet !== true).length
   return `${n('decide')} to decide · ${n('yours')} yours`
 }
 
@@ -1143,7 +1143,7 @@ export const register: Register = on => {
           </Box>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Text color={it.done ? (isDesktop ? TONE.muted : 'inactive') : it.on ? TONE.muted : undefined} strikethrough={it.done} wrap="truncate-end">
-              {it.text}
+              {it.quiet === true ? `TEST ${it.text}` : it.text}
             </Text>
           </Box>
           {said !== '' && (

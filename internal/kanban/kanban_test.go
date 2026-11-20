@@ -144,6 +144,17 @@ func TestViewFits(t *testing.T) {
 	}
 }
 
+// Test items count in none of the top line's numbers and say TEST on their cards.
+func TestColumnsQuiet(t *testing.T) {
+	ls := fixture(2)
+	ls[0].Items = append(ls[0].Items, todo.Shown{ID: 50, Text: "T?", Status: sidebar.StatusDecide, Options: []string{"a", "b"}, Quiet: true},
+		todo.Shown{ID: 51, Text: "T", Status: sidebar.StatusYours, Quiet: true})
+	m, _ := board(t, ls, 200, 55)
+	if out := plain(m); !strings.Contains(out, "1 to decide · 2 yours · 6 open") || !strings.Contains(out, "TEST") {
+		t.Errorf("❌ quiet items counted or untagged:\n%s", out)
+	}
+}
+
 func TestColumns(t *testing.T) {
 	m, _ := board(t, fixture(2), 200, 55)
 	out := plain(m)
