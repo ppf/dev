@@ -5,20 +5,36 @@
 const POLL_MS = 5000;
 const TIMEOUT_MS = 4000;
 const TICKABLE = ['yours', 'check', 'boss closed'];
-const FOLDED = ['yours', 'waiting'];
+const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
+// sidebar.Groups: the board's columns. "For you" on the phone is the first two.
+const GROUPS = [
+  { key: 'decide', title: 'To decide', statuses: ['decide'] },
+  { key: 'yours', title: 'Yours', statuses: ['yours'] },
+  { key: 'starting', title: 'Starting', statuses: ['starting'] },
+  { key: 'progress', title: 'In progress', statuses: ON_WORKER },
+  { key: 'waiting', title: 'Waiting on others', statuses: ['waiting'] },
+  { key: 'check', title: 'Check', statuses: ['check'] },
+  { key: 'closed', title: 'Boss closed', statuses: ['boss closed'] },
+];
+const FOLDED = ['waiting', 'closed'];
+const CLOSED_SHOWN = 2; // the desktop's Boss closed column shows this many until "show more"
+const wide = matchMedia('(min-width: 900px)');
 
 const state = {
   board: null, etag: '', asOf: null, reachable: true, unpaired: false,
   problem: '', // why the board isn't read, when the Mac answered but refused or sent what this page can't read
   seq: 0, // the latest board request: an older one's answer is dropped
   picks: {}, // item key → {option, text}: kept across polls
-  open: {}, // status → whether its board group is unfolded
+  open: {}, // lane key → whether it is unfolded
+  more: false, // the desktop's Boss closed column shows all
+  filter: { project: '', on: 'anyone' },
   note: '', errors: {}, // item key → the server's last refusal
   pending: {}, // item key → an answer or tick on its way
-  sig: '',
-  back: location.hash === '#/board' ? '#/board' : '#/', // the list an item was opened from
+  sig: '', sheetSig: '',
   noteFor: '', // the screen the note was left for: any other clears it
-  shown: null, // the open item as last drawn, {k, text}: when a poll finds it gone, its view closes
+  noteShown: '', // the note last drawn: a new one is scrolled to
+  opener: '', // the open sheet's hash: closing it focuses its card
+  shown: null, // the open item as last drawn, {k, text}: when a poll finds it gone, its sheet closes
 };
 
 function el(tag, attrs, ...kids) {
@@ -28,7 +44,7 @@ function el(tag, attrs, ...kids) {
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
     else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
   }
-  for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) e.append(k);
   return e;
 }
 
@@ -39,9 +55,26 @@ function when(unix) {
   if (d.toDateString() === now.toDateString()) return 'today ' + hhmm(d);
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + hhmm(d);
 }
+function age(unix) {
+  const s = Math.max(0, Date.now() / 1000 - unix);
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm';
+  if (s < 86400) return Math.round(s / 3600) + 'h';
+  return Math.round(s / 86400) + 'd';
+}
 const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const key = (boss, id) => boss + '/' + id;
-const project = l => l.project || l.boss;
+const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
+// The project is the boss's name without boss-: the board has no project of its own.
+const project = l => l.boss.startsWith('local_') ? 'desktop' : l.boss.replace(/^boss-/, '');
+// A desktop app boss's list is read here, never answered or ticked: the Mac refuses it.
+const desktop = l => l.boss.startsWith('local_');
+// own is whether the item is the user's, as todo.Own has it.
+const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.toLowerCase());
+const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
+const onWorker = ({ list, it }) => !own(list, it) && (!!it.session || ON_WORKER.includes(it.status));
+const held = it => it.status === 'decide' || it.status === 'yours';
+const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
+const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
 
 // An option is a string "label | detail", ending " (Recommended)" for the pick the boss recommends, either side of
 // " | " (as todo.Split reads it), or an object. An answer names the label.
@@ -56,6 +89,13 @@ function option(o) {
   const padded = ' ' + rest + ' ', i = padded.indexOf(' | ');
   const [label, recLabel] = cut(i < 0 ? rest : padded.slice(0, i).trim());
   return { label, detail: i < 0 ? '' : padded.slice(i + 3).trim(), rec: rec || recLabel };
+}
+
+// choices are an ask's options split, each with the value an answer sends: the label, or, for an older ask whose
+// options share it, the option whole, to tell them apart.
+function choices(it) {
+  const os = it.options.map(raw => ({ raw, ...option(raw) }));
+  return os.map(o => ({ ...o, value: os.filter(p => p.label === o.label).length > 1 ? o.raw : o.label }));
 }
 
 function openItems() {
@@ -125,7 +165,7 @@ async function load() {
       const r = route();
       if (r.name === 'pair') return go('#/');
       if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
-        return go(state.back, state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
+        return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
       }
     }
   }
@@ -165,10 +205,11 @@ async function post(path, body, k) {
     res = null;
   } finally {
     delete state.pending[k];
-    state.sig = ''; // redraw: the item's buttons were disabled while it was pending
+    state.sheetSig = ''; // redraw: the item's buttons were disabled while it was pending
   }
   if (!res) {
     state.errors[k] = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
+    onBoard(k, state.errors[k]);
     return load();
   }
   if (res.status === 401) {
@@ -177,6 +218,7 @@ async function post(path, body, k) {
   }
   if (!res.ok) {
     state.errors[k] = (res.status === 409 ? 'Already answered or changed on your Mac: ' : '') + errorOf(res);
+    onBoard(k, state.errors[k]);
     return load();
   }
   return res;
@@ -199,13 +241,20 @@ async function tick(list, it) {
   }
 }
 
-// leave closes item k's view with note, when it is still the one shown, and reads the board again.
+// leave closes item k's sheet with note, when it is still the one shown, and reads the board again.
 function leave(k, note) {
   if (state.shown?.k === k) {
     state.shown = null;
-    go(state.back, note);
-  }
+    go('#/', note);
+  } else onBoard(k, note);
   load();
+}
+
+// onBoard shows item k's outcome on the board when its sheet was closed while it was on its way.
+function onBoard(k, note) {
+  if (state.shown?.k === k) return;
+  state.note = note;
+  state.noteFor = route().name === 'board' ? location.hash : '#/';
 }
 
 async function pair(code, device, out, btn) {
@@ -232,61 +281,124 @@ async function pair(code, device, out, btn) {
 const statusOf = it => it.status || 'no status';
 
 function statusWord(it) {
-  return el('span', { class: statusClass(statusOf(it)) }, statusOf(it));
+  if (it.start_late) return el('span', { class: 'st s-decide' }, 'start not picked up');
+  return el('span', { class: 'st ' + statusClass(statusOf(it)) }, statusOf(it));
 }
 
-function row({ list, it }, withStatus) {
-  const meta = [project(list)];
-  if (withStatus) meta.push(' · ', statusWord(it));
-  if (it.status_on) meta.push(' · ' + it.status_on);
-  if (it.options?.length && !withStatus) meta.push(' · ' + it.options.length + ' options');
-  return el('li', null, el('a', { class: 'row', href: '#/item/' + encodeURIComponent(list.boss) + '/' + it.id },
-    el('span', { class: 'text' }, it.text), el('div', { class: 'meta' }, meta)));
+// pick takes option value on an ask's card and opens its sheet with it ready to send.
+function pick(list, it, value) {
+  state.picks[key(list.boss, it.id)] = { question: it.text, added: it.added, option: value, text: '' };
+  location.hash = itemHash(list.boss, it.id);
 }
 
-function section(title, xs) {
-  return xs.length ? [el('h2', null, title, el('span', { class: 'n' }, xs.length)), el('ul', { class: 'cells' }, xs.map(x => row(x)))] : [];
+function card(x) {
+  const { list, it } = x;
+  const foot = [owner(x)];
+  if (it.options?.length) foot.push(it.options.length + ' options');
+  if (it.until) foot.push('till ' + when(it.until));
+  if (it.link) {
+    const pr = it.link.match(/\/pull\/(\d+)/);
+    foot.push(pr ? 'PR #' + pr[1] : 'link');
+  }
+  if (it.added) foot.push(age(it.added));
+  const cls = 'card' + (held(it) ? ' held' : '') + (it.status === 'boss closed' ? ' quiet' : '');
+  return el('article', { class: cls },
+    el('div', { class: 'ctop' }, el('span', { class: 'num' }, project(list) + ' #' + it.id), statusWord(it)),
+    el('a', { class: 'title', href: itemHash(list.boss, it.id), 'data-f': itemHash(list.boss, it.id) }, it.text),
+    answerable(list, it) && el('div', { class: 'quick' }, choices(it).map(c =>
+      el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': itemHash(list.boss, it.id) + '/' + c.value, title: c.detail || false, onclick: () => pick(list, it, c.value) }, c.label))),
+    el('div', { class: 'foot' }, foot.join(' · ')));
 }
 
-function forYou() {
+const cards = xs => xs.map(card);
+
+// shown is whether x passes the filters.
+function shown(x) {
+  const f = state.filter;
+  if (f.project && project(x.list) !== f.project) return false;
+  switch (f.on) {
+    case 'you': return own(x.list, x.it);
+    case 'workers': return onWorker(x);
+    case 'people': return !own(x.list, x.it) && !onWorker(x);
+  }
+  return true;
+}
+
+function filters(projects) {
+  const seg = (name, label, vals) => el('div', { class: 'filter' }, el('span', { class: 'flabel' }, label),
+    el('div', { class: 'seg', role: 'group', 'aria-label': label }, vals.map(([v, text]) =>
+      el('button', { type: 'button', 'data-f': name + ':' + v, 'aria-pressed': String(state.filter[name] === v), onclick: () => { state.filter[name] = v; render(); } }, text))));
+  return el('div', { class: 'filters' },
+    seg('project', 'Project', [['', 'All'], ...projects.map(p => [p, p])]),
+    seg('on', 'On', [['anyone', 'Anyone'], ['you', 'You'], ['workers', 'Workers'], ['people', 'People']]));
+}
+
+// lanes are the open items by column; no or an unknown status is In progress, as the boards have it (NeedRow.Group).
+function lanes(xs) {
+  const known = GROUPS.flatMap(g => g.statuses);
+  const lane = it => known.includes(it.status) ? it.status : 'working';
+  // Within a lane by status, as the boards sort it (sidebar.Statuses); sort is stable
+  const rank = x => known.indexOf(lane(x.it));
+  return GROUPS.map(g => ({ ...g, xs: xs.filter(x => g.statuses.includes(lane(x.it))).sort((a, b) => rank(a) - rank(b)) }));
+}
+
+// who is whom a lane's items are on, for its header while folded.
+const who = xs => [...new Set(xs.map(x => x.it.status_on || x.it.on).filter(Boolean))].slice(0, 3).join(' · ');
+
+const hidden = n => n > 0 && n + ' hidden by the filters';
+
+function stack(ls) {
+  const [decide, yours, ...rest] = ls;
+  const forYou = el('section', { class: 'foryou' }, el('h2', null, 'For you', el('span', { class: 'n' }, decide.xs.length + yours.xs.length)),
+    decide.xs.length > 0 && [el('h3', null, 'To decide · ' + decide.xs.length), cards(decide.xs)],
+    yours.xs.length > 0 && [el('h3', null, 'Yours · ' + yours.xs.length), cards(yours.xs)],
+    !decide.xs.length && !yours.xs.length && el('p', { class: 'quiet' }, hidden(decide.hidden + yours.hidden) || 'Nothing waits on you.'));
+  return [forYou, ...rest.filter(l => l.xs.length).map(l => {
+    const open = state.open[l.key] ?? !FOLDED.includes(l.key);
+    const d = el('details', { class: 'lane', open },
+      el('summary', { 'data-f': 'lane:' + l.key }, el('span', { class: 'lt' }, l.title), el('span', { class: 'n' }, l.xs.length), !open && el('span', { class: 'who' }, who(l.xs))),
+      el('div', { class: 'cards' }, cards(l.xs)));
+    d.addEventListener('toggle', () => {
+      if (state.open[l.key] === d.open) return; // a lane drawn open fires toggle too
+      state.open[l.key] = d.open;
+      render();
+    });
+    return d;
+  })];
+}
+
+function wall(ls) {
+  const col = l => {
+    const xs = l.key === 'closed' && !state.more ? l.xs.slice(0, CLOSED_SHOWN) : l.xs;
+    return el('section', { class: 'col' + (l.key === 'decide' || l.key === 'yours' ? ' hot' : '') },
+      el('h2', null, l.title, el('span', { class: 'n' }, l.xs.length)),
+      xs.length ? cards(xs) : el('p', { class: 'quiet' }, hidden(l.hidden) || 'None'),
+      xs.length < l.xs.length && el('button', { class: 'more', type: 'button', onclick: () => { state.more = true; render(); } }, 'Show ' + (l.xs.length - xs.length) + ' more'));
+  };
+  return [el('div', { class: 'wall' }, ls.slice(0, 4).map(col)), el('div', { class: 'wall' }, ls.slice(4).map(col))];
+}
+
+function board() {
   const all = openItems();
-  const decide = all.filter(x => x.it.status === 'decide');
-  const yours = all.filter(x => x.it.status === 'yours');
-  const out = [];
-  out.push(...section('To decide', decide), ...section('Yours', yours));
-  if (!decide.length && !yours.length) out.push(el('p', { class: 'quiet' }, 'Nothing waits on you.'));
-  return out.concat(listErrors());
+  const projects = [...new Set(all.map(x => project(x.list)))].sort();
+  if (!projects.includes(state.filter.project)) state.filter.project = '';
+  const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
+  const ls = lanes(all.filter(shown)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
+  const out = [filters(projects), ...(wide.matches ? wall(ls) : stack(ls)), ...listErrors()];
+  if (!all.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
+  return out;
 }
 
 function listErrors() {
   return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error));
 }
 
-function board() {
-  const groups = new Map((state.board.statuses || []).map(s => [s, []]));
-  for (const x of openItems()) {
-    const s = statusOf(x.it);
-    if (!groups.has(s)) groups.set(s, []);
-    groups.get(s).push(x);
-  }
-  const out = [];
-  for (const [s, xs] of groups) {
-    if (!xs.length) continue;
-    const d = el('details', { open: state.open[s] ?? !FOLDED.includes(s) },
-      el('summary', null, el('span', { class: statusClass(s) }, s[0].toUpperCase() + s.slice(1)), ' ', el('span', { class: 'n' }, xs.length)),
-      el('ul', { class: 'cells' }, xs.map(x => row(x, true))));
-    d.addEventListener('toggle', () => { state.open[s] = d.open; });
-    out.push(d);
-  }
-  out.push(...listErrors());
-  if (!out.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
-  return out;
-}
-
-function facts(list, it) {
-  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['List', list.boss]];
+function facts(x) {
+  const { list, it } = x;
+  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', owner(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
   if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);
   return el('dl', { class: 'facts' }, rows.map(([k, v]) => el('div', null, el('dt', null, k), el('dd', null, v))));
@@ -295,63 +407,56 @@ function facts(list, it) {
 function answerForm(list, it) {
   const k = key(list.boss, it.id);
   const p = state.picks[k] || (state.picks[k] = { question: it.text, added: it.added, option: '', text: '' });
-  const sendBtn = el('button', { class: 'act', type: 'button', onclick: () => { sendBtn.disabled = true; send(list, it); } }, 'Send answer');
+  const sendBtn = el('button', { class: 'btn primary', type: 'button', onclick: () => { sendBtn.disabled = true; send(list, it); } }, 'Send answer');
   const sync = () => {
-    for (const b of opts.querySelectorAll('.option')) {
-      const on = b.dataset.label === p.option;
-      b.setAttribute('aria-checked', on);
-      b.querySelector('.mark').textContent = on ? '✓' : '';
-    }
+    for (const b of opts.querySelectorAll('.opt')) b.setAttribute('aria-checked', b.dataset.value === p.option);
     sendBtn.disabled = !state.reachable || state.pending[k] || (!p.option && !p.text.trim());
   };
-  const labels = it.options.map(raw => option(raw).label);
-  const opts = el('ul', { class: 'cells', role: 'radiogroup', 'aria-label': 'Options' }, it.options.map(raw => {
-    const o = option(raw);
-    // The label is the answer; an older ask whose options share it sends the option whole, to tell them apart
-    const value = labels.filter(l => l === o.label).length > 1 ? raw : o.label;
-    const b = el('button', { class: 'option', type: 'button', role: 'radio', 'data-label': value, onclick: () => {
-      p.option = p.option === value ? '' : value;
+  const opts = el('div', { class: 'opts', role: 'radiogroup', 'aria-label': 'Options' }, choices(it).map((c, i) =>
+    el('button', { class: 'opt', type: 'button', role: 'radio', 'data-value': c.value, onclick: () => {
+      p.option = p.option === c.value ? '' : c.value;
       p.text = '';
-      own.value = '';
+      words.value = '';
       sync();
-    } }, el('span', { class: 'mark' }), el('span', null, o.label, o.detail && el('span', { class: 'detail' }, o.detail), o.rec && el('span', { class: 'rec' }, '★ Recommended')));
-    return el('li', null, b);
-  }));
-  const own = el('textarea', { id: 'own', rows: 3, placeholder: 'Answer…', oninput: () => {
-    p.text = own.value;
+    } }, el('span', { class: 'k' }, String(i + 1)), el('span', null, el('span', { class: 'lab' }, c.label),
+      c.rec && el('span', { class: 'rec' }, '★ recommended'), c.detail && el('span', { class: 'det' }, c.detail)))));
+  const words = el('textarea', { id: 'own', rows: 3, placeholder: 'Answer…', oninput: () => {
+    p.text = words.value;
     if (p.text.trim()) p.option = '';
     sync();
   } });
-  own.value = p.text;
+  words.value = p.text;
   sync();
-  return [el('h2', null, 'Options'), opts, el('label', { class: 'own', for: 'own' }, 'Or in your own words'), own, sendBtn,
+  return [opts, el('label', { class: 'own', for: 'own' }, 'Or in your own words'), words, el('div', { class: 'acts' }, sendBtn),
     el('p', { class: 'hint' }, 'Goes to ' + list.boss + ' on your Mac and ticks the item.')];
 }
 
+const closeSheet = () => { location.hash = '#/'; };
+
 function item(boss, id) {
   const x = find(boss, id);
-  const back = el('a', { class: 'back', href: state.back }, state.back === '#/board' ? '‹ Board' : '‹ For you');
+  const close = el('button', { class: 'close', type: 'button', onclick: closeSheet }, 'Close');
   if (!x) {
     state.shown = null;
-    return [back, el('p', { class: 'quiet' }, 'This item is no longer open.')];
+    return [el('div', { class: 'sh-head' }, el('span'), close), el('p', { class: 'quiet', id: 'sheet-text' }, 'This item is no longer open.')];
   }
   const { list, it } = x, k = key(boss, id);
   state.shown = { k, text: it.text };
-  const out = [back, el('p', { class: 'item-head' }, project(list) + ' #' + it.id), el('p', { class: 'item-text' }, it.text)];
+  const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close),
+    el('p', { class: 'sh-text', id: 'sheet-text' }, it.text)];
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
-  // A desktop app boss's list is read here, never answered or ticked: the Mac refuses it.
-  const desktop = list.boss.startsWith('local_');
-  if (desktop) {
-    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(o => { const c = option(o); return el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label); })));
+  if (desktop(list)) {
+    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
     out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
-  }
-  else if (it.status === 'decide' && it.options?.length) out.push(...answerForm(list, it));
-  out.push(facts(list, it));
+  } else if (answerable(list, it)) out.push(...answerForm(list, it));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
-  if (!desktop && !it.on && TICKABLE.includes(it.status)) {
-    const b = el('button', { class: 'act', type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { b.disabled = true; tick(list, it); } }, 'Tick as done');
-    out.push(b, el('p', { class: 'hint' }, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.'));
+  if (tickable(list, it)) {
+    const b = el('button', { class: 'btn primary', type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { b.disabled = true; tick(list, it); } }, 'Tick as done');
+    out.push(el('div', { class: 'acts' }, b), el('p', { class: 'hint' }, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.'));
+  } else if (!own(list, it)) {
+    out.push(el('p', { class: 'hint' }, onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
   }
+  out.push(facts(x));
   return out;
 }
 
@@ -361,7 +466,7 @@ function pairScreen() {
   const out = el('p', { class: 'err' }, state.note);
   return [el('p', null, 'On the Mac, in a terminal, run dev serve pair, then type the code it shows. It is good for 5 minutes and one use.'),
     el('label', { class: 'own', for: 'code' }, 'Code'), code, el('label', { class: 'own', for: 'device' }, 'This phone\'s name'), device,
-    el('button', { class: 'act', type: 'button', onclick: e => pair(code.value, device.value, out, e.currentTarget) }, 'Pair'), out];
+    el('div', { class: 'acts' }, el('button', { class: 'btn primary', type: 'button', onclick: e => pair(code.value, device.value, out, e.currentTarget) }, 'Pair')), out];
 }
 
 function route() {
@@ -372,16 +477,35 @@ function route() {
     } catch {}
   }
   if (location.hash === '#/pair') return { name: 'pair' };
-  if (location.hash === '#/board') return { name: 'board' };
-  return { name: 'you' };
+  return { name: 'board' };
+}
+
+// sheet draws the open item over the board, or hides it.
+function sheet(r) {
+  const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
+  // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
+  const x = on && find(r.boss, r.id);
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.errors[key(r.boss, r.id)], state.reachable].join('\n') : '';
+  if (on && sig !== state.sheetSig) {
+    if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
+    state.opener = location.hash;
+    s.replaceChildren(...item(r.boss, r.id));
+  }
+  state.sheetSig = sig;
+  const was = s.classList.contains('on');
+  s.classList.toggle('on', on);
+  document.getElementById('shade').hidden = !on;
+  document.getElementById('view').inert = on; // the board behind takes no tap or Tab
+  document.documentElement.classList.toggle('locked', on);
+  if (on && !was) s.focus({ preventScroll: true });
+  else if (!on && was) {
+    [...document.querySelectorAll('#view a.title')].find(a => a.getAttribute('href') === state.opener)?.focus({ preventScroll: true });
+  }
 }
 
 function render() {
   const r = route(), b = state.board;
-  document.getElementById('title').textContent = { you: 'For you', board: 'Board', item: 'Item', pair: 'Pair with your Mac' }[r.name];
-  document.getElementById('tab-you').classList.toggle('on', r.name === 'you');
-  document.getElementById('tab-board').classList.toggle('on', r.name === 'board');
-  document.getElementById('badge').textContent = b?.counts?.decide || '';
+  document.getElementById('title').textContent = r.name === 'pair' ? 'Pair with your Mac' : 'Board';
 
   const line = document.getElementById('line');
   line.replaceChildren();
@@ -389,32 +513,41 @@ function render() {
     line.append(el('span', { class: 'down' }, (state.problem || 'unreachable') + (state.asOf ? ' · as of ' + hhmm(state.asOf) : '')));
   } else if (b) {
     const c = b.counts || {};
-    line.append(el('span', { class: c.decide ? 'red' : '' }, (c.decide || 0) + ' to decide'), ' · ' + (c.yours || 0) + ' yours · updated ' + hhmm(state.asOf));
+    line.append(el('span', { class: c.decide ? 'hot' : '' }, (c.decide || 0) + ' to decide'), ' · ' + (c.yours || 0) + ' yours · ' + openItems().length + ' open · updated ' + hhmm(state.asOf));
   }
 
-  // Redraw the view only when what it shows changed, so a poll keeps a pick, typed words, focus and scroll.
-  let shown = state.etag;
-  if (r.name === 'item') shown = JSON.stringify(b && find(r.boss, r.id)?.it) + JSON.stringify(state.errors[key(r.boss, r.id)]);
+  // Redraw the board only when what it shows changed (ages: each minute), so a poll or the sheet keeps its scroll.
   // The pair screen keeps what was typed: it is drawn once per visit.
-  const sig = r.name === 'pair' ? location.hash : [location.hash, state.reachable, state.unpaired, shown, state.note].join('\n');
-  if (sig === state.sig) return;
-  state.sig = sig;
-  const view = document.getElementById('view');
-  if (r.name === 'pair') view.replaceChildren(...pairScreen());
-  else if (!b) view.replaceChildren(el('p', { class: 'quiet' }, state.reachable ? 'Loading…' : state.problem || 'Your Mac did not answer.'));
-  else if (r.name === 'item') view.replaceChildren(...item(r.boss, r.id));
-  else view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...(r.name === 'board' ? board() : forYou()));
+  const sig = r.name === 'pair' ? 'pair' : [state.reachable, state.unpaired, state.etag, state.note, JSON.stringify(state.filter), JSON.stringify(state.open), state.more, wide.matches,
+    Math.floor(Date.now() / 60000)].join('\n');
+  if (sig !== state.sig) {
+    state.sig = sig;
+    const view = document.getElementById('view');
+    if (r.name === 'pair') view.replaceChildren(...pairScreen());
+    else if (!b) view.replaceChildren(el('p', { class: 'quiet' }, state.reachable ? 'Loading…' : state.problem || 'Your Mac did not answer.'));
+    else {
+      // A redraw keeps focus on its control, and a new note is scrolled to
+      const f = document.activeElement?.dataset?.f;
+      view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
+      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus();
+      if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
+      state.noteShown = state.note;
+    }
+  }
+  sheet(r);
 }
 
 window.addEventListener('hashchange', () => {
   const r = route().name;
-  if (r === 'you' || r === 'board') state.back = location.hash || '#/';
   if (location.hash !== state.noteFor) state.note = '';
   if (r !== 'item') state.shown = null;
   state.errors = {};
   render();
-  window.scrollTo(0, 0);
+  if (r === 'pair') window.scrollTo(0, 0);
 });
+document.getElementById('shade').addEventListener('click', closeSheet);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && route().name === 'item') closeSheet(); });
+wide.addEventListener('change', render);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, POLL_MS);
 load();
