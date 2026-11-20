@@ -6,7 +6,7 @@ const POLL_MS = 5000;
 const TIMEOUT_MS = 4000;
 const TICKABLE = ['yours', 'starting', 'check', 'boss closed'];
 const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
-// sidebar.Groups: the board's columns. "For you" on the phone is the first two.
+// sidebar.Groups: the board's columns.
 const GROUPS = [
   { key: 'decide', title: 'To decide', statuses: ['decide'] },
   { key: 'yours', title: 'Yours', statuses: ['yours'] },
@@ -75,8 +75,8 @@ const DAY = 86400;
 function due(unix) {
   const left = unix - Date.now() / 1000;
   if (left < 0) return el('span', { class: 'chip red' }, '⏱ overdue ' + age(unix));
-  if (left < DAY / 2) return el('span', { class: 'chip amber' }, '⏱ ' + hhmm(new Date(unix * 1000)));
-  return el('span', { class: 'chip' }, '⏱ ' + new Date(unix * 1000).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }));
+  const d = new Date(unix * 1000), at = d.toDateString() === new Date().toDateString() ? hhmm(d) : when(unix);
+  return el('span', { class: 'chip' + (left < DAY / 2 ? ' amber' : '') }, '⏱ ' + at);
 }
 const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
@@ -227,7 +227,7 @@ async function post(path, body, k) {
     res = null;
   } finally {
     delete state.pending[k];
-    state.sheetSig = ''; // redraw: the item's buttons were disabled while it was pending
+    state.sheetSig = state.sig = ''; // redraw: the item's buttons were disabled while it was pending
   }
   if (!res) {
     state.errors[k] = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
@@ -322,8 +322,8 @@ function pick(list, it, value) {
 
 // band is the strip across a card's top for a state worth reading first: [text, background, ink].
 function band(it) {
-  if (it.start_late) return ['start not picked up', 'var(--red)', '#fff'];
-  if (it.status === 'blocked') return ['blocked · needs you', 'var(--red)', '#fff'];
+  if (it.start_late) return ['start not picked up', 'var(--red)', 'var(--on-red)'];
+  if (it.status === 'blocked') return ['blocked · needs you', 'var(--red)', 'var(--on-red)'];
   if (it.status === 'gone') return ['worker gone', 'var(--chip-red)', 'var(--red)'];
   const c = it.check;
   // Unchanged is the Check column's reason only: elsewhere the age says it
@@ -335,7 +335,7 @@ function band(it) {
 }
 
 const initials = (name, proj) => name.replace(/^boss-/, '').replace(new RegExp('^' + proj.replace(/\W/g, '\\$&') + '-'), '')
-  .split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => [...w][0].toUpperCase()).join('');
+  .split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => [...w][0].toUpperCase()).join('') || [...name][0].toUpperCase();
 
 function avatar(x) {
   if (own(x.list, x.it)) return null; // the user's: the column says so
@@ -350,14 +350,14 @@ function prChip(it) {
 }
 
 function label(list, it) {
-  return el('div', { class: 'lab' }, el('span', { class: 'bar', vars: { '--h': hue(project(list)) } }), el('span', { class: 'pn' }, project(list)), '#' + it.id);
+  return el('div', { class: 'clab' }, el('span', { class: 'bar', vars: { '--h': hue(project(list)) } }), el('span', { class: 'pn' }, project(list)), '#' + it.id);
 }
 
 function card(x) {
   const { list, it } = x, b = band(it), h = itemHash(list.boss, it.id), k = key(list.boss, it.id);
   const lab = label(list, it);
   // The status word where neither the band nor the column says it
-  if (!b && !['decide', 'yours', 'check'].includes(it.status)) lab.append(el('span', { class: 'st' }, statusOf(it)));
+  if (!(it.start_late || ['decide', 'yours', 'check', 'blocked', 'gone'].includes(it.status))) lab.append(el('span', { class: 'st' }, statusOf(it)));
   const old = it.added && Date.now() / 1000 - it.added > DAY && own(list, it);
   const startBtn = startable(list, it) && el('button', { class: 'start', type: 'button', 'data-f': h + '/start', disabled: !state.reachable || state.pending[k],
     onclick: e => { e.currentTarget.disabled = true; start(list, it); } }, 'Start');
@@ -412,13 +412,16 @@ function lanes(xs) {
   const rank = x => known.indexOf(lane(x.it));
   return GROUPS.map(g => {
     const got = xs.filter(x => g.statuses.includes(lane(x.it))).sort((a, b) => rank(a) - rank(b));
-    if (hot(g)) got.sort((a, b) => urgency(a.it) - urgency(b.it));
+    if (hot(g)) got.sort((a, b) => urgency(a.it, b.it));
     return { ...g, xs: got };
   });
 }
 
 // urgency orders what waits on the user: the soonest due first, then the oldest.
-const urgency = it => it.until ? it.until - 2e9 : it.added || 0;
+const urgency = (a, b) => (!a.until - !b.until) || (a.until || 0) - (b.until || 0) || (a.added || 0) - (b.added || 0);
+
+// who is whom a lane's items are on, for its header while folded.
+const who = xs => [...new Set(xs.map(x => x.it.status_on || x.it.on).filter(Boolean))].slice(0, 3).join(' · ');
 
 const hidden = n => n > 0 && n + ' hidden by the filters';
 const hot = l => l.key === 'decide' || l.key === 'yours';
@@ -461,7 +464,9 @@ function stack(ls) {
   const empty = ls.filter(l => !l.xs.length);
   return el('div', { class: 'board' }, ls.filter(l => l.xs.length).map(l => {
     const open = state.open[l.key] ?? !FOLDED.includes(l.key);
-    const d = el('details', { class: 'col' + (hot(l) ? ' hot' : ''), open }, head(l, 'summary'), body(l));
+    const h = head(l, 'summary');
+    if (!open) h.append(el('span', { class: 'who' }, who(l.xs)));
+    const d = el('details', { class: 'col' + (hot(l) ? ' hot' : ''), open }, h, body(l));
     d.addEventListener('toggle', () => {
       if (state.open[l.key] === d.open) return; // a lane drawn open fires toggle too
       state.open[l.key] = d.open;

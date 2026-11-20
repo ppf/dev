@@ -167,15 +167,16 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// start marks the user's own yours or boss closed item starting, sent to its boss.
+// start marks the user's own yours or boss closed item, or one whose start wasn't picked up, starting, sent to its boss.
 func (s *server) start(req request, it map[string]any) (int, string) {
 	switch {
 	case req.Text != it["text"]:
 		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)
-	case !slices.Contains([]any{todo.StatusYours, todo.StatusBossClosed}, it["status"]):
+	case it["start_late"] != true && !slices.Contains([]any{todo.StatusYours, todo.StatusBossClosed}, it["status"]):
 		return 409, fmt.Sprintf("item %d is %v: not yours to start", req.ID, it["status"])
 	}
 	it["status"], it["status_on"] = todo.StatusStarting, req.Boss
+	delete(it, "start_late")
 	return 200, ""
 }
 
