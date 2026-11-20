@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/wait"
 )
@@ -111,6 +112,16 @@ type Model struct {
 	needMode, needOpen bool
 	needIdx            int
 	needKey            string
+
+	// Self-reload: a held Ready waits for idle; reloadNow quits the program for Run to exec it
+	running     counter        // actions running off the update loop
+	watch       func() tea.Cmd // starts a watcher, its Ready as a readyMsg; set by run, nil in tests
+	ready       *selfreload.Ready
+	reloadNow   *selfreload.Ready
+	reloadErr   error  // a failed reload or watcher check, kept on the bottom row until the next key
+	reloadFlash string // the version a reload just brought, shown for reloadFlashFor
+	failedTo    string // the version whose exec failed last, fails times in a row
+	fails       int
 }
 
 // tickMsg starts a refresh.
@@ -127,14 +138,6 @@ type refreshMsg struct {
 	err      error
 }
 
-// Run shows the sidebar in pane until the process is killed (its pane closes) or Ctrl-C.
-func Run(c *tmux.Client, pane string) error {
-	if _, err := tea.NewProgram(newModel(c, pane), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
-		return fmt.Errorf("sidebar: %w", err)
-	}
-	return nil
-}
-
 // newModel returns the sidebar for pane, before its first refresh.
 func newModel(c *tmux.Client, pane string) Model {
 	host, err := os.Hostname()
@@ -142,12 +145,17 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed, openItem: OpenItem, openBoard: OpenBoard}
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed, openItem: OpenItem, openBoard: OpenBoard,
+		running: newCounter(), reloadFlash: reloadedTo(selfreload.Version())}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), m.readNeeds(true))
+	cmds := []tea.Cmd{m.refresh(), m.readNeeds(true), m.watchCmd()}
+	if m.reloadFlash != "" {
+		cmds = append(cmds, tea.Tick(reloadFlashFor, func(time.Time) tea.Msg { return flashDoneMsg{} }))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update routes refreshes to the model and input to the actions.
@@ -158,7 +166,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m = m.apply(msg)
 		m.fixNeeds()
+		m, quit := m.maybeReload()
+		if quit != nil {
+			return m, quit
+		}
 		return m, tick()
+	case readyMsg:
+		r := selfreload.Ready(msg)
+		if m.gaveUp(r.Version) {
+			// A new watcher checks the same file at once: look again much later, for a newer release
+			return m, tea.Tick(rewatchAfter, func(time.Time) tea.Msg { return rewatchMsg{} })
+		}
+		// The watcher's checks passed: its last warning is gone
+		m.ready, m.reloadErr = &r, nil
+		return m.maybeReload()
+	case reloadWarnMsg:
+		m.reloadErr = fmt.Errorf("reload: %w", msg.err)
+		return m, nil
+	case flashDoneMsg:
+		m.reloadFlash = ""
+		return m, nil
 	case needsTickMsg:
 		return m, m.readNeeds(true)
 	case needsMsg:
@@ -188,10 +215,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.winWidth, m.winHeight = msg.Width, msg.Height
 		return m, nil
-	case tea.KeyMsg:
-		return m.handleKey(msg)
-	case tea.MouseMsg:
-		return m.handleMouse(msg)
+	case tea.KeyMsg, tea.MouseMsg:
+		// Quitting to reload: tea.Quit lands later, and an action started meanwhile would be cut off by the exec
+		if m.reloadNow != nil {
+			return m, nil
+		}
+		if k, ok := msg.(tea.KeyMsg); ok {
+			return m.handleKey(k)
+		}
+		return m.handleMouse(msg.(tea.MouseMsg))
+	case rewatchMsg:
+		return m, m.watchCmd()
 	}
 	return m, nil
 }
