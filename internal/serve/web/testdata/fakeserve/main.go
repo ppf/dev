@@ -221,6 +221,6 @@ func (s *server) pair(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.unpaired = false
 	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "dev_session", Value: "fake", HttpOnly: true, SameSite: http.SameSiteStrictMode, Path: "/"})
+	http.SetCookie(w, &http.Cookie{Name: "fake_session", Value: "fake", HttpOnly: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 	reply(w, 200, map[string]any{"ok": true})
 }

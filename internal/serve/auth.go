@@ -13,6 +13,7 @@ import (
 	"log"
 	"math/big"
 	"mime"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -25,14 +26,14 @@ import (
 
 const (
 	// CodeTTL is how long a pairing code from dev serve pair stays valid.
-	CodeTTL     = 5 * time.Minute
-	maxMisses   = 5
-	cookieName  = "dev_session"
-	cookieAge   = 400 * 24 * time.Hour // browsers' cap
-	maxDevice   = 40
-	codeFile    = "pair.json"
-	addrFile    = "addr.json"
-	sessionFile = "sessions.json"
+	CodeTTL      = 5 * time.Minute
+	maxMisses    = 5
+	cookiePrefix = "dev_session"
+	cookieAge    = 400 * 24 * time.Hour // browsers' cap
+	maxDevice    = 40
+	codeFile     = "pair.json"
+	addrFile     = "addr.json"
+	sessionFile  = "sessions.json"
 )
 
 // Auth is the phone page's pairing and sessions, kept in Dir, which dev serve pair and unpair write too. The Mac
@@ -175,8 +176,16 @@ func (a *Auth) Session(next http.Handler) http.Handler {
 	})
 }
 
+// cookieName is per port: browsers scope cookies by host only, so two dev serves on one host would share one.
+func cookieName(r *http.Request) string {
+	if _, port, err := net.SplitHostPort(r.Host); err == nil {
+		return cookiePrefix + "_" + port
+	}
+	return cookiePrefix
+}
+
 func (a *Auth) paired(r *http.Request) (bool, error) {
-	c, err := r.Cookie(cookieName)
+	c, err := r.Cookie(cookieName(r))
 	if err != nil {
 		return false, nil
 	}
@@ -282,7 +291,7 @@ func (a *Auth) Pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("dev serve: a phone paired")
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", MaxAge: int(cookieAge.Seconds()),
+	http.SetCookie(w, &http.Cookie{Name: cookieName(r), Value: token, Path: "/", MaxAge: int(cookieAge.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]string{"device": device})
 }
