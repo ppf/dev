@@ -553,11 +553,13 @@ func TestCodexPane(t *testing.T) {
 }
 
 func TestCodexPaneErrors(t *testing.T) {
-	noServer := tmux.NewFake(func([]string) (string, error) {
-		return "", &tmux.Error{Stderr: "no server running on /tmp/tmux-501/default", Err: errors.New("exit status 1")}
-	})
-	if pane, ok, err := CodexPane(noServer, []byte(`{"cwd":"/"}`)); pane != "" || ok || err != nil {
-		t.Errorf("no server: CodexPane = %q, %v, %v; want no pane, nil", pane, ok, err)
+	for _, stderr := range []string{"no server running on /tmp/tmux-501/default", "no current target"} {
+		none := tmux.NewFake(func([]string) (string, error) {
+			return "", &tmux.Error{Stderr: stderr, Err: errors.New("exit status 1")}
+		})
+		if pane, ok, err := CodexPane(none, []byte(`{"cwd":"/"}`)); pane != "" || ok || err != nil {
+			t.Errorf("%s: CodexPane = %q, %v, %v; want no pane, nil", stderr, pane, ok, err)
+		}
 	}
 	failing := tmux.NewFake(func([]string) (string, error) { return "", errors.New("boom") })
 	for _, input := range []string{`{"cwd":"/"}`, `{"cwd":5}`, `{}`} {
