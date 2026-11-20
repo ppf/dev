@@ -721,6 +721,17 @@ func TestNeedsTick(t *testing.T) {
 	if hint := ansi.Strip(m.needsHint()); !strings.Contains(hint, "d tick (stays till ticked)") {
 		t.Errorf("hint %q", hint)
 	}
+	// b and space, each where it fits whole
+	for _, c := range []struct {
+		width int
+		want  string
+	}{{40, " d tick (stays till ticked) · esc leave"}, {60, " d tick (stays till ticked) · b board · esc leave"}, {80, " d tick (stays till ticked) · b board · space open · esc leave"}} {
+		wide := m
+		wide.snap.width = c.width
+		if hint := ansi.Strip(wide.needsHint()); hint != c.want {
+			t.Errorf("%d wide: hint %q, want %q", c.width, hint, c.want)
+		}
+	}
 	m, cmd := key(m, "d")
 	if cmd == nil || !m.answering {
 		t.Fatal("d on a plain item sent nothing")

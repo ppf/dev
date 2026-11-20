@@ -832,17 +832,27 @@ func (m Model) needsHint() string {
 	var hint string
 	switch {
 	case row.Kind == needBoard:
-		hint = "⏎ board · esc leave"
+		return " " + faint + "⏎ board · esc leave" + reset
 	case m.needOpen && ask:
-		hint = "1-9 answer · esc back"
+		return " " + faint + "1-9 answer · esc back" + reset
 	case m.needOpen:
-		hint = "⏎ go · esc back"
+		return " " + faint + "⏎ go · esc back" + reset
 	case ask:
-		hint = "j/k ⏎ options · esc leave"
+		hint = "j/k ⏎ options"
 	case row.Kind == NeedPlain:
-		hint = "d tick (stays till ticked) · esc leave"
+		hint = "d tick (stays till ticked)"
 	default:
-		hint = "j/k ⏎ expand · b board · esc leave"
+		hint = "j/k ⏎ expand"
 	}
-	return " " + faint + hint + reset
+	// The popups' keys, each where it fits whole
+	keys := []string{"b board"}
+	if row.Boss != "" && row.Kind != NeedUnread {
+		keys = append(keys, "space open")
+	}
+	for _, k := range keys {
+		if ansi.StringWidth(hint+" · "+k+" · esc leave") <= m.snap.width-1 {
+			hint += " · " + k
+		}
+	}
+	return " " + faint + hint + " · esc leave" + reset
 }
