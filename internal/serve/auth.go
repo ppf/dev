@@ -178,10 +178,14 @@ func (a *Auth) Session(next http.Handler) http.Handler {
 
 // cookieName is per port: browsers scope cookies by host only, so two dev serves on one host would share one.
 func cookieName(r *http.Request) string {
-	if _, port, err := net.SplitHostPort(r.Host); err == nil {
+	if _, port, err := net.SplitHostPort(r.Host); err == nil && isDigits(port) {
 		return cookiePrefix + "_" + port
 	}
 	return cookiePrefix
+}
+
+func isDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
 }
 
 func (a *Auth) paired(r *http.Request) (bool, error) {

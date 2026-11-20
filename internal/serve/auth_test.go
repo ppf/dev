@@ -165,6 +165,15 @@ func TestCookiePerPort(t *testing.T) {
 	refused(t, "a cookie named for another port", s.do(http.MethodGet, "/v1/board", "", other, false), 401, "isn't paired")
 }
 
+// A Host without a numeric port (a proxy, a hostile header) gets the plain name, a valid cookie name.
+func TestCookieNameHost(t *testing.T) {
+	for host, want := range map[string]string{"h:8417": "dev_session_8417", "[::1]:8417": "dev_session_8417", "h": "dev_session", "h:8 4": "dev_session", "h:;": "dev_session"} {
+		if got := cookieName(&http.Request{Host: host}); got != want {
+			t.Errorf("%q: %q, want %q", host, got, want)
+		}
+	}
+}
+
 // Each refusal answers its status with a sentence.
 func TestAuthRefusals(t *testing.T) {
 	s := newAuthed(t)
