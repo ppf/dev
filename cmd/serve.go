@@ -223,7 +223,7 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 		if err != nil {
 			return nil, err
 		}
-		lists, err := todoAll(c, stderr, now(), true, true)
+		lists, err := todoAll(c, stderr, now(), true, true, true)
 		if err != nil {
 			return nil, err
 		}

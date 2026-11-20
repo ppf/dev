@@ -8,7 +8,7 @@ import (
 
 // Closed are the lists with open items of the bosses closed on c's server, and those not read (Err), as All reads them.
 func Closed(c *tmux.Client, now time.Time) ([]BossList, error) {
-	return All(c, now, func(string) bool { return false }, true)
+	return All(c, now, func(string) bool { return false }, true, false)
 }
 
 // ClosedStore is the list of boss when it is a boss closed on c's server with open items; ok false when it isn't.

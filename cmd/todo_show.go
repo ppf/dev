@@ -78,7 +78,7 @@ link, w goes to the worker it's on, g to its boss; esc closes. The boards' and t
 // showItem is item id of boss name's list as dev todo --all --json has it, its status set; refused when it's gone,
 // ticked, or reads other than question.
 func showItem(c *tmux.Client, stderr io.Writer, name string, id int, question string) (itemview.Item, error) {
-	lists, err := todoAll(c, stderr, time.Now(), true, false)
+	lists, err := todoAll(c, stderr, time.Now(), true, false, false)
 	if err != nil {
 		return itemview.Item{}, err
 	}
