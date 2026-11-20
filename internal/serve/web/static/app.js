@@ -64,11 +64,12 @@ function when(unix) {
   if (d.toDateString() === now.toDateString()) return 'today ' + hhmm(d);
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + hhmm(d);
 }
+// age mirrors sidebar.AgeSpan: whole minutes under two days ("18h 19m"), whole days from there.
 function age(unix) {
-  const s = Math.max(0, Date.now() / 1000 - unix);
-  if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm';
-  if (s < 86400) return Math.round(s / 3600) + 'h';
-  return Math.round(s / 86400) + 'd';
+  const m = Math.floor(Math.max(0, Date.now() / 1000 - unix) / 60);
+  if (m >= 2880) return Math.floor(m / 1440) + 'd';
+  if (m < 60) return m + 'm';
+  return Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
 }
 const DAY = 86400;
 // due is the chip for when an item ticks by itself: red once past, amber within 12 h
