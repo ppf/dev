@@ -32,6 +32,8 @@ type Owner struct {
 	Closed  bool
 	Workers []sidebar.Session
 	Unread  bool
+	// Doing is what a worker an item is on does now, asked only for those; nil: its Session.Doing
+	Doing func(sidebar.Session) string
 }
 
 // OwnerOf is boss's Owner among the live sessions: its workers are those it started, bosses among them; Unread when an
@@ -150,9 +152,19 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	return o.Workers[i], true
 }
 
-// SetStatus sets each item's Status and StatusOn (Owner.Status).
+// SetStatus sets each item's Status and StatusOn (Owner.Status), and Now for an item on a live worker.
 func (l List) SetStatus(o Owner) {
 	for i, it := range l.Items {
 		l.Items[i].Status, l.Items[i].StatusOn = o.Status(it)
+		l.Items[i].Now = ""
+		switch l.Items[i].Status {
+		case StatusWorking, StatusWaiting, StatusBlocked, StatusIdle, StatusCheck:
+			if w, ok := o.worker(it); ok && !Own(it.On, it.Session, o.Name) {
+				l.Items[i].Now = w.Doing
+				if o.Doing != nil {
+					l.Items[i].Now = o.Doing(w)
+				}
+			}
+		}
 	}
 }

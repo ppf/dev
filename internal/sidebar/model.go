@@ -59,6 +59,7 @@ type paneRow struct {
 	Socket       string `tmux:"socket_path"`
 	Created      string `tmux:"session_created"`
 	Conversation string `tmux:"@agent_session"`
+	Transcript   string `tmux:"@agent_transcript"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -325,7 +326,7 @@ func liveSession(name string, rs []paneRow) (sess Session, a agent.Agent, i int,
 	sess.Agent, sess.State = a.Label, a.State
 	sess.Deciding = agent.Deciding(a.State, rs[i].WaitingFor)
 	sess.Wait = wait.FromOptions(rs[i].WaitUntil, rs[i].WaitReason)
-	sess.Resume, sess.Note = rs[i].ResumeAt != "", rs[i].Note
+	sess.Resume, sess.Note, sess.Transcript = rs[i].ResumeAt != "", rs[i].Note, rs[i].Transcript
 	return sess, a, i, true
 }
 

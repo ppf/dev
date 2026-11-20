@@ -365,6 +365,7 @@ function card(x) {
     b && el('div', { class: 'band', vars: { '--bb': b[1], '--bf': b[2] } }, b[0]),
     lab,
     el('a', { class: 'title', href: h, 'data-f': h }, it.text),
+    it.now && el('div', { class: 'now', title: it.now }, it.now),
     answerable(list, it) && el('div', { class: 'quick' }, choices(it).map((c, i) =>
       el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': h + '/' + c.value, onclick: () => pick(list, it, c.value) },
         el('span', { class: 'k' }, String(i + 1)), c.label, c.detail && el('small', null, c.detail)))),
@@ -497,6 +498,7 @@ function facts(x) {
   const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', owner(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
   if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.now) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);
@@ -642,7 +644,7 @@ function render() {
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
-      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus();
+      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
       state.noteShown = state.note;
     }

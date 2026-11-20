@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -18,11 +20,16 @@ import (
 
 // setStatuses sets the statuses (todo.Owner.Status) of each list's items from the sessions live on c's server; when
 // those can't be read, the lists still print, an item on someone without a status, and stderr says why.
-func setStatuses(c *tmux.Client, lists []bossList, stderr io.Writer) {
+// With withNow, an item on a worker also gets what the worker does now (doing, a transcript read each): dev serve's
+// board only, as the sidebars poll this every 2 s.
+func setStatuses(c *tmux.Client, lists []bossList, now time.Time, withNow bool, stderr io.Writer) {
 	live, err := liveSessions(c, stderr)
 	for _, bl := range lists {
 		o := todo.OwnerOf(live, bl.Boss, bl.Closed)
 		o.Unread = o.Unread || err != nil
+		if withNow {
+			o.Doing = func(s sidebar.Session) string { return doing(s, now, stderr) }
+		}
 		bl.SetStatus(o)
 	}
 }
@@ -40,12 +47,12 @@ func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 		l.SetStatus(o)
 		for i, it := range l.Items {
 			if it.Session != nil && slices.Contains(unreadIDs, it.Session.ID) {
-				l.Items[i].Status, l.Items[i].StatusOn = "", ""
+				l.Items[i].Status, l.Items[i].StatusOn, l.Items[i].Now = "", "", ""
 			}
 		}
 		return
 	}
-	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, stderr)
+	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, time.Now(), false, stderr)
 }
 
 // desktopOwner is the desktop app boss's Owner: its workers on the desktop board (desktop.Board, without its question
@@ -96,7 +103,7 @@ func desktopOwner(boss string, stderr io.Writer) (todo.Owner, []string) {
 // user, working and stuck work, waiting and rate-limited wait (as a planned wait or a rate-limit resume), and review
 // ready, idle and stopped rest. ID is its app session id, which its linked items name.
 func desktopSession(w desktop.Worker) sidebar.Session {
-	s := sidebar.Session{Name: cmp.Or(w.Name, w.Title, w.ID), ID: w.ID, Agent: "Claude"}
+	s := sidebar.Session{Name: cmp.Or(w.Name, w.Title, w.ID), ID: w.ID, Agent: "Claude", Doing: w.StatusText}
 	switch w.Status {
 	case desktop.StatusNeedsYou, desktop.StatusBlocked:
 		s.Deciding = true
@@ -106,6 +113,40 @@ func desktopSession(w desktop.Worker) sidebar.Session {
 		s.Resume = true
 	}
 	return s
+}
+
+// doing is what tmux worker s is doing now, as the boss board's card says it (herd's own section and statusText):
+// "" in a dialog (herd reads that off the screen); its planned wait; working, its tool call's description, else the
+// tool; its question when its turn ended on one; else what its reply's newest WAITING marker names. A transcript not
+// written yet says nothing.
+func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
+	switch {
+	case s.Deciding:
+		return ""
+	case s.Wait.Held():
+		return s.Wait.Text(now)
+	case sidebar.NoteKind(s.Note) == sidebar.NoteAsks && s.State != agent.Working:
+		_, ask, _ := strings.Cut(s.Note, ": ")
+		return strings.Join(strings.Fields(ask), " ")
+	case s.Transcript == "":
+		return ""
+	}
+	t, err := desktop.ReadTail(s.Transcript)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintln(stderr, "⚠ dev todo: "+s.Name+"'s transcript not read: "+err.Error())
+		}
+		return ""
+	}
+	what := cmp.Or(t.ToolDescription, t.Tool)
+	if s.State != agent.Working {
+		if st, marked, _ := desktop.Marker(t.Lines); st == desktop.StatusWaiting {
+			what = marked
+		} else {
+			what = ""
+		}
+	}
+	return strings.Join(strings.Fields(what), " ")
 }
 
 // liveSessions is sidebar.Live's sessions; a failure is reported on stderr.

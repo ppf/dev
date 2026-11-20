@@ -70,7 +70,7 @@ every 5 seconds and after an action. The previews' and the sidebar's TO DO open 
 // kanbanLists are the lists as dev todo --all --json reads them, only bosses' when any are named.
 func kanbanLists(c *tmux.Client, bosses []string) kanban.Loaded {
 	var warn strings.Builder
-	lists, err := todoAll(c, &warn, time.Now(), true)
+	lists, err := todoAll(c, &warn, time.Now(), true, false)
 	if err != nil {
 		return kanban.Loaded{Err: err}
 	}
@@ -89,7 +89,7 @@ func knownBosses(c *tmux.Client, bosses []string) error {
 	if len(bosses) == 0 {
 		return nil
 	}
-	lists, err := todoAll(c, io.Discard, time.Now(), false)
+	lists, err := todoAll(c, io.Discard, time.Now(), false, false)
 	if err != nil {
 		return err
 	}

@@ -80,6 +80,8 @@ type Session struct {
 	Root      string // the manager (its name) whose group the row is in, the manager's own row included; "" outside one
 
 	Conversation string  // the agent pane's Claude conversation (@agent_session); "" when none
+	Transcript   string  // the agent's transcript (@agent_transcript); "" when unknown
+	Doing        string  // what it is doing now, as dev todo --json's now says it (set by dev todo, not Live)
 	SpentUSD     float64 // what ended under it (its spent ledger), see Spend
 	SpentErr     string  // why its ledger couldn't be read: its boss's total misses it
 }

@@ -5,12 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
+	"github.com/ppf/dev/internal/wait"
 )
 
 // Each desktop status reads as its rank's status, on an item linked to the worker by its app session id or one
@@ -113,5 +116,60 @@ func TestTodoDesktopStatus(t *testing.T) {
 	}
 	if got := statuses(); got["Run"] != " " || got["Answer Vince"] != "yours " {
 		t.Errorf("with a live file unread: %v, want Run without a status", got)
+	}
+}
+
+// A tmux worker's doing follows herd's sections: its tool call working, its planned wait, its newest WAITING marker
+// otherwise; nothing asking, resting without a marker or before its transcript is written. A desktop worker's is
+// its board's status text.
+func TestDoing(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, rows ...any) string {
+		var b strings.Builder
+		for _, r := range rows {
+			data, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.Write(append(data, '\n'))
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	reply := func(blocks ...any) map[string]any {
+		return map[string]any{"type": "assistant", "message": map[string]any{"model": "claude-opus-5-5", "content": blocks}}
+	}
+	tool := write("tool.jsonl", reply(map[string]any{"type": "tool_use", "id": "a", "name": "Bash", "input": map[string]any{"description": "Run  the\ntests"}}))
+	waits := write("wait.jsonl", reply(map[string]any{"type": "text", "text": "Pushed.\nWAITING (CI on #12)"}))
+	now := time.Date(2026, 11, 20, 15, 0, 0, 0, time.Local)
+	planned := wait.Wait{Until: now.Add(time.Hour), Reason: "Codex limit resets"}
+	var stderr strings.Builder
+	for _, tt := range []struct {
+		name string
+		s    sidebar.Session
+		want string
+	}{
+		{"working", sidebar.Session{State: agent.Working, Transcript: tool}, "Run the tests"},
+		{"rate-limited on a marker", sidebar.Session{Resume: true, Transcript: waits}, "CI on #12"},
+		{"resting on a marker", sidebar.Session{State: agent.Idle, Transcript: waits}, "CI on #12"},
+		{"planned wait", sidebar.Session{Wait: planned, Transcript: tool}, planned.Text(now)},
+		{"resting", sidebar.Session{State: agent.Idle, Transcript: tool}, ""},
+		{"asking", sidebar.Session{State: agent.Waiting, Deciding: true, Transcript: waits}, ""},
+		{"turn ended on a question", sidebar.Session{State: agent.Idle, Note: "asks: which  one?", Transcript: waits}, "which one?"},
+		{"no transcript yet", sidebar.Session{State: agent.Working, Transcript: filepath.Join(dir, "none.jsonl")}, ""},
+		{"no transcript option", sidebar.Session{State: agent.Working}, ""},
+	} {
+		if got := doing(tt.s, now, &stderr); got != tt.want {
+			t.Errorf("%s: doing = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("stderr = %q, want nothing for a transcript not written yet", stderr.String())
+	}
+	if got := desktopSession(desktop.Worker{ID: "local_w", Status: desktop.StatusWorking, StatusText: "Edit show.go"}).Doing; got != "Edit show.go" {
+		t.Errorf("desktop Doing = %q, want its status text", got)
 	}
 }
