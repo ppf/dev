@@ -135,18 +135,23 @@ func (f *file) hasOpen(id int) bool {
 	return slices.ContainsFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
 }
 
+// staleNote is how long a note stands before it is marked to re-check.
+const staleNote = 7 * 24 * time.Hour
+
 // NotesText is the notes as a boss reads them, one per line, with their age and what to check; "" for none.
 func NotesText(notes []Note, now time.Time) string {
 	if len(notes) == 0 {
 		return ""
 	}
-	oldest := now.Sub(time.Unix(notes[0].Added, 0))
-	age := wait.Span(oldest)
-	if oldest >= 24*time.Hour {
-		age = strconv.Itoa(int(oldest.Hours()/24)) + "d"
+	age := func(n Note) string {
+		d := now.Sub(time.Unix(n.Added, 0))
+		if d >= 24*time.Hour {
+			return strconv.Itoa(int(d.Hours()/24)) + "d"
+		}
+		return wait.Span(d)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[dev todo] Your notes (%d of %d, oldest %s):", len(notes), MaxNotes, age)
+	fmt.Fprintf(&b, "[dev todo] Your notes (%d of %d, oldest %s):", len(notes), MaxNotes, age(notes[0]))
 	for _, n := range notes {
 		fmt.Fprintf(&b, "\n n%d %s %s: %s", n.ID, time.Unix(n.Added, 0).Format(time.DateOnly), n.Kind, n.Text)
 		if n.Why != "" {
@@ -160,6 +165,9 @@ func NotesText(notes []Note, now time.Time) string {
 			fmt.Fprintf(&b, " (item #%d done)", n.Item)
 		case n.Item != 0:
 			fmt.Fprintf(&b, " #%d", n.Item)
+		}
+		if now.Sub(time.Unix(n.Added, 0)) >= staleNote {
+			b.WriteString(" (" + age(n) + ", still true?)")
 		}
 	}
 	b.WriteString("\nCheck each still holds: drop what's over (dev todo note drop <n>).")

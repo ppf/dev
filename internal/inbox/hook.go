@@ -133,7 +133,7 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	return l.Reminder(ticked, now), gone
 }
 
-// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list; "" otherwise.
+// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
 func startList(c *tmux.Client, pane, source string) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
@@ -152,8 +152,8 @@ func startList(c *tmux.Client, pane, source string) (string, error) {
 	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, source, time.Now())
 }
 
-// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked; "" after
-// a compaction, whose summary carries them.
+// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes;
+// "" after a compaction, whose summary carries both.
 func StartContext(s todo.Store, workers func() ([]todo.Session, error), source string, now time.Time) (string, error) {
 	if source == "compact" {
 		return "", nil
@@ -165,6 +165,10 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), source s
 	if err := l.MarkGone(workers); err != nil {
 		return "", err
 	}
+	notes, err := s.Notes(now)
+	if err != nil {
+		return "", err
+	}
 	// Taken last: a reminder that doesn't go out leaves them for the next
 	ticked, err := s.TakeTicked(now, nil, nil)
 	if err != nil {
@@ -174,7 +178,8 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), source s
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	text := l.StartReminder(source == "startup", age, ticked, now)
+	parts := []string{l.StartReminder(source == "startup", age, ticked, now), todo.NotesText(notes, now)}
+	text := strings.Join(slices.DeleteFunc(parts, func(t string) bool { return t == "" }), "\n")
 	if text == "" {
 		return "", nil
 	}
