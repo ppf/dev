@@ -101,7 +101,7 @@ func TestStartShapes(t *testing.T) {
 	if _, _, err := s.Start(sh, "b", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
 		t.Errorf("start of an item the boss took up meanwhile: %v", err)
 	}
-	// A late start whose PR moved since (in Review) is sent again, as before the board model
+	// A late start whose PR moved since (in Review) is sent again
 	if _, err := s.Add(Item{Text: "c"}, now); err != nil {
 		t.Fatal(err)
 	}
