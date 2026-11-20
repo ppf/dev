@@ -80,13 +80,16 @@ const StartLate = 10 * time.Minute
 
 // file is a list as stored; Next is the id the next add gets, reset once the list is empty; Boss is its boss
 // session's name, once a change through ForPane wrote it; Ticked the items that ticked by themselves, until its boss
-// is told (TakeTicked).
+// is told (TakeTicked); Notes the boss's notes (dev todo note).
 type file struct {
 	Items   []Item   `json:"items"`
 	Updated int64    `json:"updated"`
 	Next    int      `json:"next"`
 	Boss    string   `json:"boss,omitempty"`
 	Ticked  []Ticked `json:"ticked,omitempty"`
+	Notes   []Note   `json:"notes,omitempty"`
+	// NextNote is the id the next note gets: never reused while the file lives
+	NextNote int `json:"next_note,omitempty"`
 }
 
 // List is a list as its boards show it, for dev todo --json: items waiting on the user first, then those
@@ -507,6 +510,7 @@ func (s Store) Read(now time.Time) (List, error) {
 // Set replaces the list with texts, numbered from 1.
 func (s Store) Set(texts []string, now time.Time) error {
 	return s.update(now, func(f *file) error {
+		f.endItems()
 		f.Items = make([]Item, len(texts))
 		for i, t := range texts {
 			f.Items[i] = Item{ID: i + 1, Text: t, Added: now.Unix()}
@@ -814,13 +818,14 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 // Clear empties the list.
 func (s Store) Clear(now time.Time) error {
 	return s.update(now, func(f *file) error {
+		f.endItems()
 		f.Items, f.Next, f.Ticked = nil, 1, nil
 		return nil
 	})
 }
 
-// prune ticks the open items whose Until has come, as at Until, keeping them in Ticked, and drops the items ticked
-// over doneShown ago.
+// prune ticks the open items whose Until has come, as at Until, keeping them in Ticked, drops the items ticked
+// over doneShown ago and the notes whose Until has come, and marks the notes whose item is gone.
 func (f *file) prune(now time.Time) {
 	for i, it := range f.Items {
 		if it.Done == 0 && it.Until != 0 && now.Unix() >= it.Until {
@@ -831,6 +836,8 @@ func (f *file) prune(now time.Time) {
 	f.Items = slices.DeleteFunc(f.Items, func(it Item) bool {
 		return it.Done != 0 && now.Sub(time.Unix(it.Done, 0)) >= doneShown
 	})
+	f.Notes = slices.DeleteFunc(f.Notes, func(n Note) bool { return n.Until != 0 && now.Unix() >= n.Until })
+	f.settleNotes()
 }
 
 // read loads the file; a missing one is empty.
