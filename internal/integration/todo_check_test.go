@@ -61,7 +61,7 @@ esac`, "gh")
 	if !strings.Contains(out, `"boss":"boss-orbit","closed":true`) {
 		t.Errorf("❌ --all --json lacks the closed list:\n%s", out)
 	}
-	for _, want := range []string{`"text":"AskMarafortheAPIkey"`, `"status":"bossclosed"}`, `"status":"check","status_on":"reviewers"}`} {
+	for _, want := range []string{`"text":"AskMarafortheAPIkey"`, `"status":"bossclosed","column"`, `"status":"check","status_on":"reviewers","pr_state":"open","column":"review"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("❌ --all --json lacks %s:\n%s", want, out)
 		}
