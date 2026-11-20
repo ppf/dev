@@ -71,10 +71,10 @@ function marks(x, now = Date.now()) {
   return m;
 }
 
-// checkBand is a PR's or a stale item's band; unchanged is the Review column's reason only: elsewhere the age says it.
+// checkBand is a PR's or a stale item's band; unchanged is a check item's reason only: elsewhere the age says it.
 function checkBand(it, now) {
   const c = it.check;
-  if (!c || c.kind === 'boss closed' || (c.kind === 'unchanged' && it.column !== 'review')) return null;
+  if (!c || c.kind === 'boss closed' || (c.kind === 'unchanged' && it.status !== 'check')) return null;
   const text = (c.pr ? 'PR #' + c.pr + ' ' : '') + c.kind + (c.since ? ' ' + age(c.since, now) : '');
   if (['merged', 'approved', 'checks green'].includes(c.kind)) return [text, 'green'];
   return [text, c.kind === 'unchanged' ? 'amber' : 'soft-red'];

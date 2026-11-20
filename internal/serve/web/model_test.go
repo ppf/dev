@@ -90,6 +90,8 @@ for (const r of ROWS) {
   say(r.name, [columnOf(x), whoOf(x), m.band, m.word, m.chips, m.line, m.red], WANT[r.name]);
 }
 say('every row has a want', ROWS.length, Object.keys(WANT).length);
+say('unchanged 2 days on a check item: its band', marks({ list: live, it: { id: 1, status: 'check', check: { kind: 'unchanged', since: t - 3 * 86400 }, column: 'todo', assignee: you } }, now).band, ['unchanged 3d', 'amber']);
+say('unchanged on another item: no band', marks({ list: live, it: { id: 1, status: 'working', check: { kind: 'unchanged', since: t - 3 * 86400 }, column: 'progress', assignee: worker('w') } }, now).band, null);
 say('no column named: In progress', columnOf({ list: live, it: { id: 1, status: 'working' }, done: false }), 'progress');
 say('an unknown column: In progress', columnOf({ list: live, it: { id: 1, column: 'later' }, done: false }), 'progress');
 const fin = { boss: 'boss-dev', items: [{ id: 1, text: 'open #1', column: 'todo', assignee: you }],
