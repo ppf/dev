@@ -44,8 +44,8 @@ func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 		s, _, err := listStore(boss, true, stderr)
 		switch {
 		case err != nil && !running(tmux.New(), boss):
-			// A closed boss's list leaves once its last item is ticked
-			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("%s is closed and its list has no open item", boss)}
+			// A closed boss's list leaves once its last item is ticked: that and an unknown boss look the same
+			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		case err != nil:
 			return err
 		}

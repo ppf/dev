@@ -244,6 +244,10 @@ func TestServeAnswerDone(t *testing.T) {
 		t.Errorf("❌ the closed boss's ask left: %+v", lists)
 	}
 
+	if code, body := post("v1/done", `{"boss":"boss-nope","id":1,"text":"x"}`, true); code != http.StatusNotFound || !strings.Contains(body, "no list for boss-nope") {
+		t.Errorf("❌ page tick under an unknown boss: %d %s, want 404 no list for boss-nope", code, body)
+	}
+
 	// Exactly one note per answer, the page's saying so; the filler stays open
 	b, ok, err := inbox.Here(s.tmux, pane)
 	if !ok || err != nil {
