@@ -92,6 +92,16 @@ func keepAwake(out, stderr io.Writer) error {
 	return nil
 }
 
+// awakeAlive: caffeinate pid (0: none) is a running child of this process; a dead one is reaped.
+func awakeAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	var ws syscall.WaitStatus
+	wpid, err := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil)
+	return err == nil && wpid == 0
+}
+
 // watchAwake says when caffeinate pid, a child of this process (also after a reload), ends.
 func watchAwake(pid int, stderr io.Writer) {
 	why := "unknown"

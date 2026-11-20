@@ -14,12 +14,14 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,7 +196,7 @@ func TestListenAndServeClosesStreams(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	errc := make(chan error, 1)
-	go func() { _, _, err := listenAndServe(ctx, func() {}, ln, cfg, nil); errc <- err }()
+	go func() { _, _, err := listenAndServe(ctx, func() {}, ln, cfg, new(atomic.Int64), nil, nil); errc <- err }()
 	res, err := http.Get("http://" + ln.Addr().String() + "/v1/events")
 	if err != nil {
 		t.Fatal(err)
@@ -228,17 +230,29 @@ type reloadRun struct {
 
 func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRun {
 	t.Helper()
-	return startReloadRunLists(t, fire, execErr, func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil })
+	return startReloadRunWith(t, fire, execErr, nil, nil)
 }
 
 func startReloadRunLists(t *testing.T, fire <-chan struct{}, execErr error, lists func() (json.RawMessage, error)) *reloadRun {
 	t.Helper()
+	return startReloadRunWith(t, fire, execErr, func(c *serve.Config) { c.Lists = lists }, nil)
+}
+
+// startReloadRunWith is startReloadRun with cfg changed by tweak and args (nil: dev serve).
+func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak func(*serve.Config), args func() ([]string, error)) *reloadRun {
+	t.Helper()
+	if args == nil {
+		args = func() ([]string, error) { return []string{"dev", "serve"}, nil }
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := serve.Config{Version: "v1.0.0", Now: time.Now, Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler(),
-		Lists: lists}
+		Lists: func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil }}
+	if tweak != nil {
+		tweak(&cfg)
+	}
 	r := &reloadRun{addr: ln.Addr().String(), watches: make(chan struct{}, 10), execs: make(chan []string, 10),
 		errc: make(chan error, 1), stderr: &syncBuffer{}}
 	watch, exec := watchReload, execReload
@@ -277,7 +291,7 @@ func startReloadRunLists(t *testing.T, fire <-chan struct{}, execErr error, list
 	t.Cleanup(stop)
 	o := selfreload.Options{Own: "v1.0.0"}
 	go func() {
-		r.errc <- serveReloading(ctx, ln, cfg, o, func() []string { return []string{"dev", "serve"} }, r.stderr, r.stderr)
+		r.errc <- serveReloading(ctx, ln, cfg, o, args, r.stderr, r.stderr)
 	}()
 	return r
 }
@@ -429,27 +443,31 @@ func TestServeReloadStopWins(t *testing.T) {
 
 func TestReexecArgs(t *testing.T) {
 	base := []string{"dev", "serve"}
+	bound := netip.MustParseAddrPort("100.1.2.3:8417")
 	for _, tc := range []struct {
 		args []string
 		addr string
 		own  bool
 		want []string
+		err  bool
 	}{
-		{base, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
-		{base, "100.1.2.3:0", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
-		{base, "100.1.2.3:8417", true, base},
-		{base, "", false, base},
-		{[]string{"dev", "serve", "--"}, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417", "--"}},
+		{base, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}, false},
+		{base, "100.1.2.3:0", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}, false},
+		{base, "100.1.2.3:8417", true, base, false},
+		{base, "", false, base, false},
+		{base, "100.1.2.3:8417", false, nil, true},
+		{[]string{"dev", "serve", "--"}, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417", "--"}, false},
 	} {
-		if got := reexecArgs(tc.args, tc.addr, "100.1.2.3:8417", tc.own); !slices.Equal(got, tc.want) {
-			t.Errorf("%q --addr %q own %v: %q, want %q", tc.args, tc.addr, tc.own, got, tc.want)
+		got, err := reexecArgs(tc.args, tc.addr, bound, tc.own)
+		if !slices.Equal(got, tc.want) || (err != nil) != tc.err {
+			t.Errorf("%q --addr %q own %v: %q %v, want %q, error %v", tc.args, tc.addr, tc.own, got, err, tc.want, tc.err)
 		}
 	}
 	if !slices.Equal(base, []string{"dev", "serve"}) {
 		t.Errorf("args changed: %q", base)
 	}
-	if !ownIP(netip.MustParseAddr("127.0.0.1")) || ownIP(netip.MustParseAddr("192.0.2.1")) {
-		t.Error("ownIP: loopback must be this Mac's, 192.0.2.1 (TEST-NET-1) not")
+	if !ownIP(netip.MustParseAddr("127.0.0.2")) || ownIP(netip.MustParseAddr("192.0.2.1")) {
+		t.Error("ownIP: any loopback must be this Mac's, 192.0.2.1 (TEST-NET-1) not")
 	}
 }
 
@@ -510,6 +528,108 @@ func TestReexecMarker(t *testing.T) {
 		if r, c := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff {
 			t.Errorf("%q: %v %d, want %v %d", tc.v, r, c, tc.reloaded, tc.caff)
 		}
+	}
+}
+
+// heldWithoutShutdown fires the Ready and checks it is held before any shutdown: the page's stream stays open, no
+// exec, a held line naming why, and it watches again.
+func heldWithoutShutdown(t *testing.T, r *reloadRun, fire chan struct{}, why string) {
+	t.Helper()
+	res, err := http.Get("http://" + r.addr + "/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body := bufio.NewReader(res.Body)
+	if line, err := body.ReadString('\n'); err != nil || line != "event: board\n" {
+		t.Fatalf("first line %q %v", line, err)
+	}
+	close(fire)
+	select {
+	case <-r.watches:
+	case <-time.After(5 * time.Second):
+		t.Fatal("not watching again after the held reload")
+	}
+	if !strings.Contains(r.stderr.String(), "held: "+why) {
+		t.Errorf("stderr %q, want held: %s", r.stderr.String(), why)
+	}
+	stream := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, body); stream <- err }()
+	select {
+	case err := <-stream:
+		t.Errorf("stream ended (%v): a held reload must not shut down", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	select {
+	case <-r.execs:
+		t.Error("exec'd while held")
+	default:
+	}
+}
+
+// A phone action running when the Ready comes holds the reload before any shutdown.
+func TestServeReloadHeldByAction(t *testing.T) {
+	fire, held, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	r := startReloadRunWith(t, fire, errors.New("exec called"), func(c *serve.Config) {
+		c.Done = func(string, int, string) error { close(held); <-release; return nil }
+	}, nil)
+	<-r.watches
+	done := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, "http://"+r.addr+"/v1/done", strings.NewReader(`{"boss":"b","id":1,"text":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Dev-Page", "1")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			done <- 0
+			return
+		}
+		_ = res.Body.Close()
+		done <- res.StatusCode
+	}()
+	<-held
+	heldWithoutShutdown(t, r, fire, "a phone action is still running")
+	close(release)
+	if code := <-done; code != http.StatusOK {
+		t.Errorf("action: %d, want 200", code)
+	}
+	r.end(t)
+}
+
+// An --addr whose ip is gone holds the reload before any shutdown: the new process could not bind it.
+func TestServeReloadHeldByGoneAddr(t *testing.T) {
+	fire := make(chan struct{})
+	r := startReloadRunWith(t, fire, errors.New("exec called"), nil, func() ([]string, error) {
+		return nil, errors.New("100.1.2.3 is no longer this Mac's address")
+	})
+	<-r.watches
+	heldWithoutShutdown(t, r, fire, "100.1.2.3 is no longer this Mac's address")
+	r.end(t)
+}
+
+// awakeAlive: a running child is alive; one that exited is reaped and dead; no pid is dead.
+func TestAwakeAlive(t *testing.T) {
+	run := exec.Command("sleep", "5")
+	if err := run.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = run.Process.Kill(); _ = run.Wait() }()
+	if !awakeAlive(run.Process.Pid) {
+		t.Error("running child: not alive")
+	}
+	ended := exec.Command("true")
+	if err := ended.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for awakeAlive(ended.Process.Pid) {
+		if time.Now().After(deadline) {
+			t.Fatal("exited child still alive")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if awakeAlive(0) {
+		t.Error("pid 0 alive")
 	}
 }
 

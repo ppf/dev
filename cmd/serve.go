@@ -73,7 +73,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			switch {
-			case reloaded && pid > 0:
+			case reloaded && awakeAlive(pid):
 				caffeinate.Store(int64(pid))
 				go watchAwake(pid, cmd.ErrOrStderr())
 			case awake:
@@ -99,7 +99,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(),
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
 			bound := ln.Addr().(*net.TCPAddr).AddrPort()
-			args := func() []string { return reexecArgs(os.Args, addr, bound.String(), ownIP(bound.Addr())) }
+			args := func() ([]string, error) { return reexecArgs(os.Args, addr, bound, ownIP(bound.Addr())) }
 			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir), o, args, out, stderr)
 		},
 	}
@@ -301,21 +301,28 @@ func reexecMarker(v string, pid int) (bool, int) {
 	return true, n
 }
 
-// reexecArgs is args with --addr pinned to bound (before a "--"), so the new process binds there, not a fresh pick;
-// not pinned when bound's ip is no longer this Mac's (own false): the new process could not bind it.
-func reexecArgs(args []string, addr, bound string, own bool) []string {
-	if addr == bound || !own {
-		return args
+// reexecArgs is args with --addr pinned to bound (before a "--"), so the new process binds there, not a fresh pick.
+// Once bound's ip is no longer this Mac's (own false) the new process could not bind it: picked, it picks afresh;
+// given by --addr, an error (the reload waits).
+func reexecArgs(args []string, addr string, bound netip.AddrPort, own bool) ([]string, error) {
+	switch {
+	case !own && addr != "":
+		return nil, fmt.Errorf("%s is no longer this Mac's address: restart dev serve with another --addr", bound.Addr())
+	case !own || addr == bound.String():
+		return args, nil
 	}
 	i := slices.Index(args, "--")
 	if i < 0 {
 		i = len(args)
 	}
-	return slices.Concat(args[:i], []string{"--addr", bound}, args[i:])
+	return slices.Concat(args[:i], []string{"--addr", bound.String()}, args[i:]), nil
 }
 
-// ownIP: ip is one of this Mac's interface addresses.
+// ownIP: ip is loopback or one of this Mac's interface addresses.
 func ownIP(ip netip.Addr) bool {
+	if ip.IsLoopback() {
+		return true
+	}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return false
@@ -338,51 +345,83 @@ var (
 
 // serveReloading serves on ln until ctx ends or SIGINT/SIGTERM; when o.Exe holds a new release it shuts down and
 // re-execs into it (same pid) with args(). Not a tmux pane, it takes no part in the canary: it reloads after its own
-// checks even when that version's canary pane died. Requests still open 5 s into the shutdown hold the reload (it
-// serves again and watches again), as does ErrNotNow (kill switch on, the file changed since checked); an exec that
-// fails serves again and watches no more. The socket stays bound throughout: only the exec closes it.
-func serveReloading(ctx context.Context, ln net.Listener, cfg serve.Config, o selfreload.Options, args func() []string, out, stderr io.Writer) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+// checks even when that version's canary pane died. A phone action still running (on any server so far) or args()
+// failing holds the reload before the shutdown, as do requests still open 5 s into it and ErrNotNow (kill switch on,
+// the file changed since checked): it serves again and watches again. An exec that fails serves again and watches no
+// more. The socket stays bound throughout: only the exec closes it.
+func serveReloading(parent context.Context, ln net.Listener, cfg serve.Config, o selfreload.Options, args func() ([]string, error), out, stderr io.Writer) error {
+	var actions atomic.Int64
+	lastHeld := ""
+	hold := func(version, why string) bool {
+		if why != "" && why != lastHeld {
+			fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: %s\n", version, why)
+		}
+		lastHeld = why
+		return why != ""
+	}
+	mayGo := func(r selfreload.Ready) bool {
+		why := ""
+		if actions.Load() > 0 {
+			why = "a phone action is still running"
+		} else if _, err := args(); err != nil {
+			why = err.Error()
+		}
+		return !hold(r.Version, why)
+	}
 	watching := true
 	for {
+		ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 		tl, ok := ln.(*net.TCPListener)
 		if !ok {
+			stop()
 			return fmt.Errorf("dev serve: %T is no TCP listener", ln)
 		}
 		keep, err := tl.File() // close-on-exec
 		if err != nil {
+			stop()
 			return err
 		}
 		wctx, stopWatch := context.WithCancel(ctx)
-		var ready <-chan selfreload.Ready
+		var watch func() <-chan selfreload.Ready
 		if watching {
-			ready = watchReload(wctx, o)
+			watch = func() <-chan selfreload.Ready { return watchReload(wctx, o) }
 		}
-		r, reload, err := listenAndServe(ctx, stop, ln, cfg, ready)
+		r, reload, err := listenAndServe(ctx, stop, ln, cfg, &actions, watch, mayGo)
 		stopWatch()
-		if !reload || ctx.Err() != nil {
+		if !reload || ctx.Err() != nil || (err != nil && !errors.Is(err, context.DeadlineExceeded)) {
+			stop()
 			_ = keep.Close()
 			return err
 		}
-		if err != nil {
-			fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: requests still open (%v)\n", r.Version, err)
-		} else {
+		var a []string
+		if err == nil && actions.Load() == 0 {
+			a, err = args()
+		}
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			hold(r.Version, "requests still open 5 s into the shutdown")
+		case err != nil:
+			hold(r.Version, err.Error())
+		case actions.Load() > 0:
+			hold(r.Version, "a phone action is still running")
+		default:
+			stop() // a signal from here on ends the process: the exec can't be called off
 			fmt.Fprintf(out, "↻ dev serve: reloading into %s\n", r.Version)
 			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d", os.Getpid(), caffeinate.Load())); err != nil {
 				return err
 			}
-			err = execReload(r, args())
+			err = execReload(r, a)
 			if uerr := os.Unsetenv(envServeReexec); uerr != nil {
 				return uerr
 			}
 			if errors.Is(err, selfreload.ErrNotNow) {
-				fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: %v\n", r.Version, err)
+				hold(r.Version, err.Error())
 			} else {
 				fmt.Fprintf(stderr, "❌ reload: %v: dev serve stays on %s; restart it to update\n", err, o.Own)
 				watching = false
 			}
 		}
+		stop()
 		ln, err = net.FileListener(keep)
 		if cerr := keep.Close(); err == nil {
 			err = cerr
@@ -393,18 +432,32 @@ func serveReloading(ctx context.Context, ln net.Listener, cfg serve.Config, o se
 	}
 }
 
-// listenAndServe serves on ln until ctx ends (false; stop then restores the signals' default), or ready gives one
-// (it, true), then shuts down. A reload's shutdown that times out leaves the open requests running and returns its
-// error with the Ready; a stop during that shutdown wins over the reload.
-func listenAndServe(ctx context.Context, stop func(), ln net.Listener, cfg serve.Config, ready <-chan selfreload.Ready) (selfreload.Ready, bool, error) {
+// listenAndServe serves on ln until ctx ends (false; stop then restores the signals' default), or a Ready from watch
+// that mayGo lets through (it, true; one it holds watches again), then shuts down. actions counts the requests
+// running that change something (not GET or HEAD). A reload's shutdown that times out leaves the open requests
+// running and returns its error with the Ready; a stop during that shutdown wins over the reload.
+func listenAndServe(ctx context.Context, stop func(), ln net.Listener, cfg serve.Config, actions *atomic.Int64,
+	watch func() <-chan selfreload.Ready, mayGo func(selfreload.Ready) bool) (selfreload.Ready, bool, error) {
 	// Shutdown waits for open requests: the pages' event streams end when it starts
 	base, closeStreams := context.WithCancel(context.Background())
 	defer closeStreams()
-	srv := &http.Server{Handler: serve.Handler(cfg), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+	h := serve.Handler(cfg)
+	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			actions.Add(1)
+			defer actions.Add(-1)
+		}
+		h.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: counted, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, BaseContext: func(net.Listener) context.Context { return base }}
 	srv.RegisterOnShutdown(closeStreams)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
+	var ready <-chan selfreload.Ready
+	if watch != nil {
+		ready = watch()
+	}
 	var r selfreload.Ready
 	reload := false
 wait:
@@ -416,10 +469,14 @@ wait:
 			stop() // a second Ctrl-C kills it
 			break wait
 		case r, reload = <-ready:
-			if reload {
+			switch {
+			case !reload:
+				ready = nil // closed: the watch ended
+			case !mayGo(r):
+				reload, ready = false, watch()
+			default:
 				break wait
 			}
-			ready = nil // closed: the watch ended
 		}
 	}
 	shut, cancel := context.WithTimeout(context.Background(), shutdownWait)
