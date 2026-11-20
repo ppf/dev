@@ -29,6 +29,8 @@ func Handler() http.Handler {
 			w.Header().Set("Content-Type", t)
 		}
 		w.Header().Set("Content-Security-Policy", csp)
+		// A reload after an upgrade gets the new files
+		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	})
 }

@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"cmp"
+	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -171,5 +175,56 @@ func TestPairMessage(t *testing.T) {
 		if got := pairMessage(netip.MustParseAddrPort(tc.addr), "1234 5678", "HINT"); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.addr, got, tc.want)
 		}
+	}
+}
+
+// Stopping dev serve with a page's event stream open ends the stream and returns at once, not after Shutdown's timeout.
+func TestListenAndServeClosesStreams(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := serve.Config{Now: time.Now, Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler(),
+		Lists: func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil }}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	errc := make(chan error, 1)
+	go func() { errc <- listenAndServe(ctx, ln, cfg) }()
+	res, err := http.Get("http://" + ln.Addr().String() + "/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if line, err := bufio.NewReader(res.Body).ReadString('\n'); err != nil || line != "event: board\n" {
+		t.Fatalf("first line %q %v", line, err)
+	}
+	start := time.Now()
+	stop()
+	select {
+	case err := <-errc:
+		if err != nil || time.Since(start) > 2*time.Second {
+			t.Errorf("listenAndServe: %v after %s, want nil at once", err, time.Since(start))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("listenAndServe still running")
+	}
+}
+
+// A warning repeated within a minute is written once, again after it.
+func TestUnrepeated(t *testing.T) {
+	var out strings.Builder
+	now := time.Unix(0, 0)
+	u := &unrepeated{w: &out, now: func() time.Time { return now }}
+	for _, step := range []struct {
+		after time.Duration
+		line  string
+	}{{0, "a\n"}, {time.Second, "a\n"}, {time.Second, "b\n"}, {time.Minute, "a\n"}} {
+		now = now.Add(step.after)
+		if n, err := fmt.Fprint(u, step.line); err != nil || n != len(step.line) {
+			t.Fatalf("write %q: %d %v", step.line, n, err)
+		}
+	}
+	if out.String() != "a\nb\na\n" {
+		t.Errorf("written %q, want a, b, then a again a minute on", out.String())
 	}
 }

@@ -1,5 +1,6 @@
 // Command fakeserve serves the phone page with fake /v1 endpoints over an invented board, on loopback, to try the
-// page in a browser before dev serve exists: go run ./internal/serve/web/testdata/fakeserve
+// page in a browser before dev serve exists: go run ./internal/serve/web/testdata/fakeserve. POST /fake/mac changes
+// an item, /fake/version {"version"} names a new dev serve version, /fake/unpair drops the page's session.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ppf/dev/internal/serve/web"
 	"github.com/ppf/dev/internal/todo"
@@ -43,14 +45,24 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, map[string]any{"ok": true, "version": "fake"})
+		s.mu.Lock()
+		v := s.board["version"]
+		s.mu.Unlock()
+		reply(w, 200, map[string]any{"ok": true, "version": v})
 	})
 	mux.HandleFunc("GET /v1/board", s.serveBoard)
+	mux.HandleFunc("GET /v1/events", s.events)
 	mux.HandleFunc("POST /v1/answer", s.act(s.answer))
 	mux.HandleFunc("POST /v1/done", s.act(s.done))
 	mux.HandleFunc("POST /v1/start", s.act(s.start))
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("POST /fake/mac", s.mac)
+	mux.HandleFunc("POST /fake/version", s.version)
+	mux.HandleFunc("POST /fake/unpair", func(http.ResponseWriter, *http.Request) {
+		s.mu.Lock()
+		s.unpaired = true
+		s.mu.Unlock()
+	})
 	log.Printf("fakeserve on http://%s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
 }
@@ -72,12 +84,11 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 401, "pair this phone first: run dev serve pair on the Mac")
 		return
 	}
-	b, err := json.Marshal(s.board)
+	b, etag, err := s.read()
 	if err != nil {
 		refuse(w, 500, err.Error())
 		return
 	}
-	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(b))
 	w.Header().Set("ETag", etag)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
@@ -85,6 +96,63 @@ func (s *server) serveBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(b)
+}
+
+// read is the board and its ETag; the caller holds the lock.
+func (s *server) read() ([]byte, string, error) {
+	b, err := json.Marshal(s.board)
+	return b, fmt.Sprintf(`"%x"`, sha256.Sum256(b)), err
+}
+
+// events is dev serve's stream, checked every 200 ms: "board" with the ETag at once and on a change, "ping" every
+// 15 s; it ends once unpaired.
+func (s *server) events(w http.ResponseWriter, r *http.Request) {
+	last, beat := "", time.Now()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for first := true; ; first = false {
+		s.mu.Lock()
+		unpaired := s.unpaired
+		_, etag, _ := s.read()
+		s.mu.Unlock()
+		switch {
+		case unpaired && first:
+			refuse(w, 401, "pair this phone first: run dev serve pair on the Mac")
+			return
+		case unpaired:
+			return
+		case first:
+			w.Header().Set("Content-Type", "text/event-stream")
+		}
+		if etag != last {
+			last = etag
+			fmt.Fprintf(w, "event: board\ndata: %s\n\n", etag)
+		}
+		if time.Since(beat) >= 15*time.Second {
+			beat = time.Now()
+			fmt.Fprint(w, "event: ping\ndata: \n\n")
+		}
+		if http.NewResponseController(w).Flush() != nil {
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// version names a new dev serve version, as an upgrade and restart would.
+func (s *server) version(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Version string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		refuse(w, 400, "bad JSON: "+err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.board["version"] = req.Version
+	s.mu.Unlock()
 }
 
 type request struct {

@@ -41,6 +41,7 @@ a { color: var(--blue); }
 #line:not(:empty)::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; vertical-align: 1px; }
 #line.down { color: var(--red); font-weight: 600; }
 #line.down::before { background: var(--red); }
+#line .reload { font: inherit; font-weight: 600; color: var(--blue); background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
 .quiet { color: var(--muted); font-size: 14px; }
 .note { background: var(--card); box-shadow: var(--shadow); border-radius: 7px; padding: 9px 12px; margin: 0 0 12px; }
 .err { color: var(--red); font-size: 14.5px; margin: 6px 0; }
