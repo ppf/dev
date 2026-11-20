@@ -661,7 +661,12 @@ window.addEventListener('hashchange', () => {
   if (r === 'pair') window.scrollTo(0, 0);
 });
 document.getElementById('shade').addEventListener('click', closeSheet);
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && route().name === 'item') closeSheet(); });
+document.addEventListener('keydown', e => {
+  if (route().name !== 'item') return;
+  if (e.key === 'Escape') return closeSheet();
+  if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  document.querySelectorAll('.opts .opt')[Number(e.key) - 1]?.click();
+});
 wide.addEventListener('change', render);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, POLL_MS);
