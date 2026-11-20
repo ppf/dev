@@ -547,10 +547,9 @@ function item(boss, id) {
   const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close),
     el('p', { class: 'sh-text', id: 'sheet-text' }, it.text)];
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
-  if (desktop(list)) {
-    if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
-    out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
-  } else if (answerable(list, it)) out.push(...answerForm(list, it));
+  if (answerable(list, it)) out.push(...answerForm(list, it));
+  else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
+  if (desktop(list)) out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
   const acts = [], hints = [];
   const act = (label, cls, run, hint) => {
