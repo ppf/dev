@@ -242,15 +242,17 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 // start marks a To do card that is no ask started, as dev todo start leaves it; a late start goes again wherever it sits.
 func (s *server) start(req request, it map[string]any) (int, string) {
 	options, _ := it["options"].([]any)
+	a, _ := it["assignee"].(map[string]any)
+	mine := a["kind"] == "you"
 	switch {
 	case req.Text != it["text"]:
 		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)
-	case req.Boss == sidebar.Manager:
-		return 409, "the manager's own list isn't started: ask it in its session"
+	case req.Boss == sidebar.Manager && !mine:
+		return 409, fmt.Sprintf("item %d on the manager's own list isn't yours: ask the manager in its session", req.ID)
 	case it["start_late"] != true && (it["column"] != "todo" || len(options) > 0):
 		return 409, fmt.Sprintf("item %d is %v: not a To do card to start", req.ID, it["column"])
 	}
-	if a, _ := it["assignee"].(map[string]any); a["kind"] == "you" {
+	if mine {
 		it["status"], it["status_on"] = todo.StatusStarting, req.Boss
 	}
 	it["column"], it["assignee"] = "progress", map[string]any{"kind": "boss", "name": req.Boss, "running": true}

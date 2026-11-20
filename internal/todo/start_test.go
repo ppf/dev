@@ -101,6 +101,13 @@ func TestStartShapes(t *testing.T) {
 	if _, _, err := s.Start(sh, "b", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
 		t.Errorf("start of an item the boss took up meanwhile: %v", err)
 	}
+	sh = placed(t, s, live, 2, now)
+	if err := s.Replace(2, Item{Link: "https://github.com/o/r/pull/9"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Start(sh, "b", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
+		t.Errorf("start of an item replaced meanwhile (same text and assignee): %v", err)
+	}
 	// A late start whose PR moved since (in Review) is sent again
 	if _, err := s.Add(Item{Text: "c"}, now); err != nil {
 		t.Fatal(err)
@@ -113,9 +120,6 @@ func TestStartShapes(t *testing.T) {
 	sh.Column = sidebar.ColumnReview
 	if _, _, err := s.Start(sh, "c", "boss-x", late); err != nil {
 		t.Errorf("a late start in Review: %v", err)
-	}
-	if _, _, err := s.Start(placed(t, s, live, 9, now), "a", "boss-x", now); err == nil || !strings.Contains(err.Error(), "no open item 9") {
-		t.Errorf("start of no item: %v", err)
 	}
 }
 
@@ -134,7 +138,7 @@ func TestStartLines(t *testing.T) {
 	got := l.StartReminder(false, "1m ago", nil, now)
 	for _, want := range []string{
 		"\n1. mine (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)",
-		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself, dev todo doing <n>, or start a worker on it and link it with --replaces <n> --on <worker>)",
+		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself, --replaces <n> --on boss takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)",
 		"\n3. lost (on gone, session gone) (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)",
 		"\n4. runs (on busy) (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)",
 	} {

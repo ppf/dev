@@ -398,7 +398,8 @@ func AnswerPage(id int, text, answer string) Note {
 }
 
 // Started is the note asking a boss to start item it on its own list, worded by whose it is (the user's, the boss's own
-// parked one, a gone worker's); with closed, the list of that closed boss, sent to the Manager.
+// parked one, a linked worker's, gone by its status or still running); with closed, the list of that closed boss, sent
+// to the Manager.
 func Started(boss string, it todo.Shown, closed bool) Note {
 	id, text := it.ID, it.Text
 	n := Note{Kind: Start, Key: fmt.Sprintf("start %s %d", boss, id)}
@@ -408,10 +409,13 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 		n.Text = fmt.Sprintf(`%s #%d "%s": %s is closed: reopen it (dev boss %s --background), its start list asks it to start #%d`,
 			boss, id, text, boss, strings.TrimPrefix(boss, "boss-"), id)
 	case todo.OnBoss(it.On, it.Session):
-		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself (dev todo doing %d), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
+		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself (dev todo add --replaces %d --on boss takes the start), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, id, id)
-	case it.Session != nil:
+	case it.Session != nil && it.Status == todo.StatusGone:
 		n.Text = fmt.Sprintf(marked+`its worker %s is gone: start a fresh one on it and link it with dev todo add --replaces %d --on <worker>`,
+			id, text, it.Session.Name, id)
+	case it.Session != nil:
+		n.Text = fmt.Sprintf(marked+`it is on %s: see what it does, or start a fresh worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, it.Session.Name, id)
 	default:
 		n.Text = fmt.Sprintf(marked+`start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+

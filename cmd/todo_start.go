@@ -14,6 +14,7 @@ import (
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -26,14 +27,14 @@ func newTodoStartCmd(boss *string) *cobra.Command {
 		Short: "Ask for To do item n on a dev boss's list to be started, as the user: its boss, or the manager for a closed boss",
 		Long: `Ask, as the user, for open item n on the list of dev boss session <boss> to be started, while it is a To do card
 (placed as dev todo --json places it) and no ask: the user's own, the boss's own parked one (--on boss), one whose
-worker is gone, or a closed boss's one on a session. The boss's inbox gets "you were asked to start #<n> \"<text>\"", worded by whose it is, and it starts
+worker is gone, or a closed boss's one on a session or its own. The boss's inbox gets "you were asked to start #<n> \"<text>\"", worded by whose it is, and it starts
 a worker on it and links it (dev todo add --replaces <n> --on <worker>), or does a parked one itself. A closed boss's
 item goes to the manager, which reopens that boss; refused when no manager takes it (none runs, or its inbox is off), as
 for a live boss with its inbox off. The item reads starting (the user's own; the others keep their word, In progress)
 until that --replaces (or a set), and dev todo --json marks it start_late after 10 minutes. A second start is refused
 until then, and sent again after. --question refuses it unless item n still reads that text. Refused in a Claude Code
-session ($CLAUDECODE set), as dev todo answer is, for a desktop app boss, which has no dev inbox, and for the manager's
-own list.`,
+session ($CLAUDECODE set), as dev todo answer is, for a desktop app boss, which has no dev inbox, and on the manager's
+own list for any but the user's own item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -71,12 +72,10 @@ type notStarted struct{ error }
 func (e notStarted) Unwrap() error { return e.error }
 
 // startItem marks item id of boss name's list started while it reads text and sits in To do (placed as the boards
-// place it, from the live sessions; a late start wherever it sits) and sends its note to the boss, or the manager for a closed boss: the receiver's
-// name. A note queued for a boss not resting says so on warn. The manager's own list isn't started.
+// place it, from the live sessions; a late start wherever it sits) and sends its note to the boss, or the manager for
+// a closed boss: the receiver's name. A note queued for a boss not resting says so on warn. On the manager's own list
+// only the user's own item starts.
 func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer) (string, error) {
-	if name == inbox.Manager {
-		return "", notStarted{errors.New("the manager's own list isn't started: ask it in its session")}
-	}
 	s, to, closed, err := startReceiver(c, name)
 	if err != nil {
 		return "", err
@@ -85,6 +84,9 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 	sh, err := placed(c, s, name, id, closed, now, warn)
 	if err != nil {
 		return "", err
+	}
+	if name == inbox.Manager && sh.Assignee.Kind != sidebar.AssigneeYou {
+		return "", notStarted{fmt.Errorf("item %d on the manager's own list isn't yours: ask the manager in its session", id)}
 	}
 	it, prev, err := s.Start(sh, text, to.Name, now)
 	if err != nil {
@@ -101,7 +103,7 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 	return to.Name, nil
 }
 
-// placed is open item id of s, boss name's list, placed as the boards place it; none: just its id. When the sessions
+// placed is open item id of s, boss name's list, placed as the boards place it. When the sessions
 // can't be read, an item linked to one isn't placed but refused, as its worker may run.
 func placed(c *tmux.Client, s todo.Store, name string, id int, closed bool, now time.Time, warn io.Writer) (todo.Shown, error) {
 	l, err := s.Read(now)
@@ -110,8 +112,7 @@ func placed(c *tmux.Client, s todo.Store, name string, id int, closed bool, now 
 	}
 	i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done })
 	if i < 0 {
-		// Start says so, refused
-		return todo.Shown{ID: id}, nil
+		return todo.Shown{}, notStarted{fmt.Errorf("no open item %d", id)}
 	}
 	l.Items = l.Items[i : i+1]
 	live, err := liveSessions(c, warn)

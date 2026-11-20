@@ -14,7 +14,7 @@ import (
 
 // The user starts their own item from a shell: its live boss gets "you were asked to start" and the item reads
 // starting until a --replaces; a second start is refused. The boss's parked item and a gone worker's start too, a live
-// worker's and the manager's own list don't. A closed boss's item goes to the manager, refused while none runs.
+// worker's and the manager's own item don't. A closed boss's item goes to the manager, refused while none runs.
 func TestTodoStart(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
@@ -122,7 +122,7 @@ func TestTodoStart(t *testing.T) {
 	// The stub took one paste: the boss gets these at its Stop
 	reason := inboxAtStop(t, s, pane)
 	for _, want := range []string{
-		`- you were asked to start #3 "Park the idea": while it still reads so and is marked started on your list, it is your own parked item: do it yourself (dev todo doing 3), or start a worker on it and link it with dev todo add --replaces 3 --on <worker>`,
+		`- you were asked to start #3 "Park the idea": while it still reads so and is marked started on your list, it is your own parked item: do it yourself (dev todo add --replaces 3 --on boss takes the start), or start a worker on it and link it with dev todo add --replaces 3 --on <worker>`,
 		`- you were asked to start #4 "Fix the login": while it still reads so and is marked started on your list, its worker w-old is gone: start a fresh one on it and link it with dev todo add --replaces 4 --on <worker>`,
 	} {
 		if !strings.Contains(reason, want) {
@@ -130,7 +130,6 @@ func TestTodoStart(t *testing.T) {
 		}
 	}
 	refused(user, "item 5 is in In progress (w-busy), not To do: only a To do card starts", "todo", "start", "boss-a", "5", "--question", "Ship it")
-	refused(user, "the manager's own list isn't started", "todo", "start", "manager", "1", "--question", "x")
 	out, _ = dev(user, "todo", "--all", "--json")
 	for id, want := range map[int]string{3: "idle boss-a progress", 4: "gone w-old progress", 5: "idle w-busy progress"} {
 		if got := placedAs(t, out, "boss-a", id); got != want {
@@ -150,6 +149,19 @@ func TestTodoStart(t *testing.T) {
 	logged(mlog, `- you were asked to start boss-a #2 "Write the notes": boss-a is closed: reopen it (dev boss a --background), its start list asks it to start #2`)
 	if j := listed(); !strings.Contains(j, `"status":"starting","status_on":"manager"`) {
 		t.Errorf("❌ --all --json after a closed boss's start:\n%s", j)
+	}
+	// The manager's own list: the user's item starts, the manager's own doesn't
+	mgr := []string{"TMUX_PANE=" + mpane, "CLAUDECODE=1"}
+	for _, argv := range [][]string{{"Read the plan"}, {"--on", "boss", "Tidy the lists"}} {
+		if _, err := dev(mgr, append([]string{"todo", "add"}, argv...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused(user, "item 2 on the manager's own list isn't yours: ask the manager in its session", "todo", "start", "manager", "2", "--question", "Tidy the lists")
+	out, err = dev(user, "todo", "start", "manager", "1", "--question", "Read the plan")
+	check(t, "start the user's item on the manager's list", out, "#1 sent to manager\n")
+	if err != nil {
+		t.Fatal(err)
 	}
 	// A closed boss's item on a running worker is To do: it goes to the manager too
 	out, err = dev(user, "todo", "start", "boss-a", "5", "--question", "Ship it")
