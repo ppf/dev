@@ -411,8 +411,9 @@ function lanes(xs) {
   // Within a lane by status, as the boards sort it (sidebar.Statuses); sort is stable
   const rank = x => known.indexOf(lane(x.it));
   return GROUPS.map(g => {
-    const xs2 = xs.filter(x => g.statuses.includes(lane(x.it))).sort((a, b) => rank(a) - rank(b));
-    return { ...g, xs: g.key === 'yours' || g.key === 'decide' ? xs2.sort((a, b) => urgency(a.it) - urgency(b.it)) : xs2 };
+    const got = xs.filter(x => g.statuses.includes(lane(x.it))).sort((a, b) => rank(a) - rank(b));
+    if (hot(g)) got.sort((a, b) => urgency(a.it) - urgency(b.it));
+    return { ...g, xs: got };
   });
 }
 
@@ -426,7 +427,8 @@ function head(l, tag) {
   let meta = null;
   if (l.key === 'progress') {
     const n = s => l.xs.filter(x => x.it.status === s).length;
-    meta = el('span', { class: 'meta' }, n('blocked') > 0 && [el('b', null, n('blocked') + ' blocked'), ' · '], n('working') + ' working');
+    const blocked = n('blocked');
+    meta = el('span', { class: 'meta' }, blocked > 0 && [el('b', null, blocked + ' blocked'), ' · '], n('working') + ' working');
   }
   return el(tag, { class: 'ch', 'data-f': 'lane:' + l.key }, l.title, el('span', { class: 'cnt' }, l.xs.length), meta);
 }
