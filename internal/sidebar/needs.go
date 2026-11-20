@@ -794,9 +794,10 @@ func (m Model) openLines(r NeedRow, w int) (lines []string, opts []int) {
 	vis := 1 + ansi.StringWidth(truncate(r.label(), max(1, min(12, w/3)))) + 2 + 1 + 1
 	r.Updated = 0 // its age mark belongs to the one-line row
 	lines = []string{m.needLine(r, w, true)}
-	if text := strings.Split(ansi.Wrap(r.Text, max(1, w-vis-1), ""), "\n"); len(text) > 1 {
+	if text := strings.Split(ansi.Wrap(Tag(r.Quiet, r.Text), max(1, w-vis-1), ""), "\n"); len(text) > 1 {
 		first := r
-		first.Text = text[0]
+		// Its tag is in the wrapped text already
+		first.Text, first.Quiet = text[0], false
 		lines = []string{m.needLine(first, w, true)}
 		for _, t := range text[1:] {
 			lines = append(lines, cardLine(strings.Repeat(" ", vis)+t, vis+ansi.StringWidth(t), w, true))

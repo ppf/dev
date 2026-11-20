@@ -76,7 +76,7 @@ export type Delivered = { at: number; isDelivered: boolean; why: string }
 export type View = { composing: string; details: Record<string, boolean>; unsent: Record<string, string>; idleOpen: boolean }
 
 /** One item of `dev todo --json`: `on` who does it when not the person, `session` the worker `on` named when added (its `local_…` id or tmux session name, and name), `link` e.g. its PR; `done` true for a ticked item still listed. */
-export type TodoItem = { id: number; text: string; on?: string; session?: { id: string; name: string }; link?: string; done: boolean; options?: string[]; context?: string[]; answer?: string; status?: string; status_on?: string }
+export type TodoItem = { id: number; text: string; on?: string; session?: { id: string; name: string }; link?: string; done: boolean; options?: string[]; context?: string[]; answer?: string; status?: string; status_on?: string; quiet?: boolean }
 
 /** An item waiting on the person on a tmux boss's list (`dev todo --all --json`): `options` set for an ask ("label | detail"), `context` its lines under the question, `answer` once answered (`done`), `statusOn` whom a start went to, `startedAt` when (unix seconds), `startLate` once no one took it up (`start_late`). */
 export type FleetItem = { boss: string; id: number; text: string; done: boolean; options: string[]; context: string[]; answer?: string; status?: string; statusOn?: string; startedAt?: number; startLate?: boolean }

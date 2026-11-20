@@ -2052,6 +2052,14 @@ test("a desktop boss's ask shows its context lines and each option by label with
   await ui.unmount()
 })
 
+test('a test item (dev todo --quiet) says TEST and counts in neither number', async ($, on) => {
+  const ask = { id: 3, text: 'Try?', done: false, status: 'decide', quiet: true, options: ['A', 'B'] }
+  await start($, on, ok(WORKERS), { todo: todoRan([ask as TodoItem]) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await todoRows(ui)).toEqual(['TO DO 0 to decide · 0 yours updated 12m', '☐ TEST Try? decide', '  A · B — answer in the chat'])
+  await ui.unmount()
+})
+
 test('an option splits as dev reads it: the label, the detail after " | ", the mark either side', () => {
   const cases: [string, { label: string; detail: string; isRec: boolean }][] = [
     ['Merge', { label: 'Merge', detail: '', isRec: false }],

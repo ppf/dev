@@ -248,7 +248,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 	return cmd
 }
 
-const quietHelp = "a test item: a TEST tag on the boards, left out of every count, the boss above not told; kept by --replaces"
+const quietHelp = "a test item: a TEST tag on the boards, left out of their counts, the boss above not told; kept by --replaces"
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
 	var question, via string

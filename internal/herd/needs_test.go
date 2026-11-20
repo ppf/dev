@@ -1127,3 +1127,21 @@ func TestNeedOpenBoard(t *testing.T) {
 		t.Errorf("opened %q, want %q", opened, want)
 	}
 }
+
+// A test item on the board's own list is left out of TO DO's tally and shows after its TEST tag.
+func TestNeedsQuiet(t *testing.T) {
+	m := needsBoard(t, new([]listAnswer))
+	before := m.tally()
+	m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: 9, Text: "Test", Status: sidebar.StatusYours, Quiet: true})
+	if got := m.tally(); got != before {
+		t.Errorf("tally = %+v, want %+v", got, before)
+	}
+	i := slices.IndexFunc(m.listRows(), func(r needRow) bool { return r.ID == 9 })
+	if i < 0 {
+		t.Fatal("no row #9")
+	}
+	r := m.listRows()[i]
+	if lines, _ := m.needLines(r, 12, 80, false); !r.Quiet || !strings.Contains(ansi.Strip(lines[0]), "TEST Test") {
+		t.Errorf("row #9 quiet %v: %q", r.Quiet, ansi.Strip(lines[0]))
+	}
+}
