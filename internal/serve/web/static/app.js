@@ -437,7 +437,7 @@ function card(x) {
   const old = !x.done && it.added && Date.now() / 1000 - it.added > DAY && mine;
   const startBtn = !x.done && startable(list, it) && el('button', { class: 'start', type: 'button', 'data-f': h + '/start', disabled: !state.reachable || state.pending[k],
     onclick: e => { e.currentTarget.disabled = true; start(list, it); } }, 'Start');
-  const when = x.done ? it.done_at : it.added;
+  const at = x.done ? it.done_at : it.added;
   return el('article', { class: 'card' + (it.status === 'decide' && !x.done ? ' ask' : '') + (mine ? ' mine' : '') + (x.done ? ' done' : ''),
     vars: { '--c': STATUS_COLOUR[it.status] || 'var(--grey)' } },
   m.band && el('div', { class: 'band', vars: { '--bb': TONES[m.band[1]][0], '--bf': TONES[m.band[1]][1] } }, m.band[0]),
@@ -451,23 +451,23 @@ function card(x) {
     m.chips.map(([text, tone]) => el('span', { class: 'chip' + (tone ? ' ' + tone : '') }, text)),
     !x.done && !answerable(list, it) && it.options?.length > 0 && el('span', { class: 'chip' }, it.options.length + ' options'),
     !x.done && it.until && due(it.until), prChip(it),
-    when && el('span', { class: 'age' + (old ? ' old' : '') }, age(when)),
+    at && el('span', { class: 'age' + (old ? ' old' : '') }, age(at)),
     startBtn, assignee(x)));
 }
 
 // filters are the Project and Assignee chips; the Assignee ones toggle, several at once, ME first.
 function filters(projects, all) {
-  const f = state.filter, redraw = render;
+  const f = state.filter;
   const seg = (label, kids) => el('div', { class: 'filter' }, el('span', { class: 'flabel' }, label), el('div', { class: 'seg', role: 'group', 'aria-label': label }, kids));
   const ws = whos(all), shown = state.allWho ? ws : ws.slice(0, WHO_SHOWN);
   return el('div', { class: 'filters' },
     seg('Project', [['', 'All'], ...projects.map(p => [p, p])].map(([v, text]) =>
-      el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => { f.project = v; redraw(); } },
+      el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => { f.project = v; render(); } },
         v && el('span', { class: 'sw', vars: { '--h': hue(v) } }), text))),
     seg('Assignee', [shown.map(([who, n]) => el('button', { type: 'button', class: 'who', 'data-f': 'who:' + who, 'aria-pressed': String(f.who.includes(who)),
-      onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; redraw(); } },
+      onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; render(); } },
     avatar(who, ''), who === ME ? 'Me' : who, el('span', { class: 'n' }, String(n)))),
-    ws.length > shown.length && el('button', { type: 'button', 'data-f': 'who:more', onclick: () => { state.allWho = true; redraw(); } }, '+' + (ws.length - shown.length))]));
+    ws.length > shown.length && el('button', { type: 'button', 'data-f': 'who:more', onclick: () => { state.allWho = true; render(); } }, '+' + (ws.length - shown.length))]));
 }
 
 const hidden = n => n > 0 && n + ' hidden by the filters';

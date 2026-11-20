@@ -36,7 +36,10 @@ function cards(board) {
 }
 
 // columnOf is the card's column; one the Mac didn't name is In progress, as an unknown status is on the boards.
-const columnOf = x => x.done ? 'done' : COLUMNS.some(c => c.key === x.it.column) ? x.it.column : 'progress';
+function columnOf(x) {
+  if (x.done) return 'done';
+  return COLUMNS.some(c => c.key === x.it.column) ? x.it.column : 'progress';
+}
 
 // whoOf is the card's assignee: ME, or a session's name.
 function whoOf(x) {
