@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -272,16 +273,34 @@ func TestTakeMovesFinished(t *testing.T) {
 	}
 }
 
-// A finished item's assignee is as stored: the user's own, its worker's, else its list's boss (a person's); a quiet
+// A finished item's assignee is a live card's of its stored shape (the ticked row's, ColumnDone), never running, so
+// {kind, name} on the wire: the user's own, the boss's own, its worker's, else its list's boss (a person's); a quiet
 // one stays quiet.
 func TestFinishedAssignee(t *testing.T) {
-	items := []Item{{ID: 1, Quiet: true}, {ID: 2, On: "boss-a"}, {ID: 3, On: "w", Session: &Session{ID: "w", Name: "w"}}, {ID: 4, On: "Carl"}}
-	var got []string
+	items := []Item{{ID: 1, Quiet: true}, {ID: 2, On: "boss-a"}, {ID: 3, On: "w", Session: &Session{ID: "w", Name: "w"}},
+		{ID: 4, On: "Carl"}, {ID: 5, On: Boss}}
+	l := List{}
+	for _, it := range items {
+		l.Items = append(l.Items, Shown{ID: it.ID, On: it.On, Session: it.Session, Done: true})
+	}
+	// Workers unread: the live card goes by its stored shape alone, as a finished one does
+	l.SetStatus(Owner{Name: "boss-a", Unread: true})
+	var got, live []string
 	for _, f := range shownFinished(items, "boss-a") {
 		got = append(got, fmt.Sprintf("%d %s %s", f.ID, f.Assignee.Kind, f.Assignee.Name))
+		i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.ID == f.ID })
+		a := l.Items[i].Assignee
+		live = append(live, fmt.Sprintf("%d %s %s", f.ID, a.Kind, a.Name))
+		data, err := json.Marshal(f.Assignee)
+		if err != nil || strings.Contains(string(data), "running") {
+			t.Errorf("#%d: %s %v", f.ID, data, err)
+		}
 	}
-	if want := []string{"1 you ", "2 you ", "3 worker w", "4 boss boss-a"}; !slices.Equal(got, want) {
+	if want := []string{"1 you ", "2 you ", "3 worker w", "4 boss boss-a", "5 boss boss-a"}; !slices.Equal(got, want) {
 		t.Errorf("assignees = %q, want %q", got, want)
+	}
+	if !slices.Equal(got, live) {
+		t.Errorf("finished %q, live ticked cards %q: they disagree", got, live)
 	}
 	if f := shownFinished(items[:1], ""); !f[0].Quiet {
 		t.Error("a quiet item's finished entry isn't quiet")
