@@ -165,11 +165,16 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			stderr := cmd.ErrOrStderr()
 			it.On = todo.Clean(it.On)
 			waiting := cmd.Flags().Changed("waiting-for")
+			// A desktop app boss's list has no name: its own is its session id
+			own := s.Boss()
+			if own == "" {
+				_, own, _ = todoBoss(*boss)
+			}
 			switch {
 			case it.On != "" && waiting:
 				return errors.New("--on or --waiting-for, not both")
 			case waiting:
-				if it.On, err = waitingFor(todo.Clean(person), s.Boss(), *boss, stderr); err != nil {
+				if it.On, err = waitingFor(todo.Clean(person), own, *boss, stderr); err != nil {
 					return err
 				}
 			case strings.EqualFold(it.On, todo.Me):
@@ -185,7 +190,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				}
 				if w, ok := todo.Match(it.On, ws); ok {
 					it.On, it.Session = w.Name, &w
-				} else if s.Boss() != "" && strings.EqualFold(it.On, s.Boss()) {
+				} else if own != "" && strings.EqualFold(it.On, own) {
 					fmt.Fprintf(stderr, "on %s: this list's own boss, so your own task, as --on boss\n", it.On)
 					it.On = todo.Boss
 				} else {
@@ -223,7 +228,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone); boss, or this boss's own name: the boss's own task; me: the user's own (with --replaces, gives it back)")
+	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone); boss, or this boss's own name: the boss's own task; me: the user's own (with --replaces, gives it back); any other name: a person, as --waiting-for")
 	cmd.Flags().StringVar(&person, "waiting-for", "", "the person it waits for, no session (a reviewer, a teammate)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
@@ -879,14 +884,14 @@ func printItem(out io.Writer, prefix string, it todo.Shown, now time.Time) {
 	}
 }
 
-// todoLine is an item as text at now: number, ☐ (◌ waiting on someone, ☑ ticked), text, who it waits on, link, why
+// todoLine is an item as text at now: number, ☐ (◌ waiting on someone else than the boss, ☑ ticked), text, who it waits on, link, why
 // to re-check it.
 func todoLine(it todo.Shown, now time.Time) string {
 	box := "☐"
 	switch {
 	case it.Done:
 		box = "☑"
-	case it.On != "":
+	case it.On != "" && !todo.OnBoss(it.On, it.Session):
 		box = "◌"
 	}
 	parts := []string{strconv.Itoa(it.ID), box, it.Text}

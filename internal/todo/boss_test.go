@@ -62,6 +62,9 @@ func TestOnBoss(t *testing.T) {
 	if err := s.Done([]int{1}, now); err != nil {
 		t.Errorf("the boss ticks its own: %v", err)
 	}
+	if Own(Boss, nil, "boss") {
+		t.Error("on boss on a boss session named boss reads as the user's")
+	}
 }
 
 // The boss reads its own item as its own; a parked one (not doing) is never unchanged, one it works on is.

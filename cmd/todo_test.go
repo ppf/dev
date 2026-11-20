@@ -309,7 +309,18 @@ func TestTodoOnBossWaitingFor(t *testing.T) {
 	if got := run(t, "", "todo", "add", "--replaces", "2", "--on", "boss"); got != "replaced 2 · to do 2\n" {
 		t.Errorf("--replaces --on boss: %q", got)
 	}
-	if got := run(t, "", "todo"); got != "1\t◌\tParked idea\tboss's own\n2\t◌\tReview\tboss's own\n" {
+	if got := run(t, "", "todo", "add", "--replaces", "2", "--waiting-for", "Ola"); got != "replaced 2 · to do 2, 1 on others\n" {
+		t.Errorf("--replaces --waiting-for: %q", got)
+	}
+	// Its own session id, also named by --boss, is the boss's own
+	out, stderr, err = execute(t, "", "todo", "add", "--replaces", "2", "--on", "local_boss")
+	if err != nil || out != "replaced 2 · to do 2\n" || !strings.Contains(stderr, "on local_boss: this list's own boss, so your own task, as --on boss\n") {
+		t.Errorf("--on its own id: %q, %q, %v", out, stderr, err)
+	}
+	if _, _, err := execute(t, "", "todo", "add", "x", "--boss", "local_boss", "--waiting-for", "local_boss"); err == nil || !strings.Contains(err.Error(), "not a person") {
+		t.Errorf("--boss local_boss --waiting-for its own id: %v", err)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\tParked idea\tboss's own\n2\t☐\tReview\tboss's own\n" {
 		t.Errorf("dev todo = %q", got)
 	}
 	var l struct {
