@@ -26,7 +26,7 @@ func newTodoDoingCmd(boss *string) *cobra.Command {
 		Long: `Mark an open item in progress, with a short line of what is done now; --stop ends it.
 The user: dev todo doing <boss> <n> ["text"] --question <the item's text>, only on their own item that is no ask:
 the boss's inbox gets "the user is on #<n> \"<item>\": <text>" (for a closed boss's list, the manager's), so no worker
-is started on it; a newer line replaces one still queued. No one running, or a desktop app boss: marked, no one told.
+is started on it; a newer line replaces one still queued. No one running, or a desktop app boss: changed, no one told.
 Refused in a Claude Code session ($CLAUDECODE set), as dev todo start is.
 A boss: dev todo doing <n> ["text"] in its own session, only on its own items (--on boss); no one is told.
 A tick, --stop or an --on change ends it; a --replaces keeps it.`,

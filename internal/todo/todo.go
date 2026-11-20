@@ -612,8 +612,8 @@ func sameSession(a, b *Session) bool {
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
 // DoneOn, Context and PartOf it doesn't set, Quiet once set, and Doing while On stays; On Me gives it back to the user, On Boss
-// without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a PartOf
-// checkPartOf refuses.
+// without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a new PartOf
+// checkPartOf refuses (one restated is kept as it is).
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
