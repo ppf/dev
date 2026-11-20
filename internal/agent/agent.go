@@ -510,7 +510,7 @@ type codexPane struct {
 
 // CodexPane finds the pane of the Codex session a hook reports on: the only pane running codex whose
 // directory is the hook's cwd. Codex runs hooks in its shared app-server daemon, whose TMUX_PANE is the
-// pane that started it, so the hook's environment can't say. ok=false: no tmux server, no such pane
+// pane that started it, so the hook's environment can't say. ok=false: no tmux server or session, no such pane
 // (e.g. Codex's background memory agent) or several in that directory. A missing cwd is an error.
 func CodexPane(c *tmux.Client, input []byte) (pane string, ok bool, err error) {
 	var hook struct {
@@ -531,7 +531,7 @@ func CodexPane(c *tmux.Client, input []byte) (pane string, ok bool, err error) {
 		return "", false, fmt.Errorf("agent: hook cwd: %w", err)
 	}
 	panes, err := tmux.Query[codexPane](c, "list-panes", "-a", "-f", "#{m:codex*,#{pane_current_command}}")
-	if tmux.IsNoServer(err) {
+	if tmux.IsNoServer(err) || tmux.IsNoSession(err) {
 		return "", false, nil
 	}
 	if err != nil {

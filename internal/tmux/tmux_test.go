@@ -98,6 +98,25 @@ func TestIsNoServer(t *testing.T) {
 	}
 }
 
+func TestIsNoSession(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{&Error{Stderr: "no current target"}, true},
+		{fmt.Errorf("wrapped: %w", &Error{Stderr: "no current target"}), true},
+		{&Error{Stderr: "no server running on /tmp/tmux-501/default"}, false},
+		{&Error{Stderr: "can't find session: =nope:"}, false},
+		{errors.New("no current target"), false},
+		{nil, false},
+	}
+	for _, tt := range tests {
+		if got := IsNoSession(tt.err); got != tt.want {
+			t.Errorf("IsNoSession(%v) = %v, want %v", tt.err, got, tt.want)
+		}
+	}
+}
+
 func TestSessionTarget(t *testing.T) {
 	if got := SessionTarget("dev-a"); got != "=dev-a:" {
 		t.Errorf("SessionTarget = %q", got)
