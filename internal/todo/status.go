@@ -140,9 +140,9 @@ func (o Owner) bossName() string { return cmp.Or(o.Name, Boss) }
 func OnBoss(on string, session *Session) bool { return on == Boss && session == nil }
 
 // Own reports an item on no one, or unlinked (no session) on boss itself: an older dev filed --on <own name> as a
-// person; its status is the user's, and the user ticks or answers it.
+// person; its status is the user's, and the user ticks or answers it. On Boss is the boss's, even for a boss named boss.
 func Own(on string, session *Session, boss string) bool {
-	return on == "" || session == nil && boss != "" && strings.EqualFold(on, boss)
+	return on == "" || session == nil && boss != "" && on != Boss && strings.EqualFold(on, boss)
 }
 
 // worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's

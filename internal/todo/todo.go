@@ -168,12 +168,12 @@ func (l List) MarkGone(workers func() ([]Session, error)) error {
 	return nil
 }
 
-// Open counts the items not ticked, and of them those waiting on someone else.
+// Open counts the items not ticked, and of them those waiting on someone else: not the boss's own (OnBoss).
 func (l List) Open() (n, on int) {
 	for _, it := range l.Items {
 		if !it.Done {
 			n++
-			if it.On != "" {
+			if it.On != "" && !OnBoss(it.On, it.Session) {
 				on++
 			}
 		}
@@ -596,9 +596,14 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	return id, err
 }
 
+// sameSession reports a and b linking the same session, or none.
+func sameSession(a, b *Session) bool {
+	return a == nil && b == nil || a != nil && b != nil && a.ID == b.ID
+}
+
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user. An id that isn't one is an error, as is an ask's
-// new text over MaxQuestion.
+// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user, On Boss without a Session to its boss. An id
+// that isn't one is an error, as is an ask's new text over MaxQuestion.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
@@ -631,7 +636,7 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 			return err
 		}
 		f.Items[i] = it
-		if it.Text == old.Text && it.Link == old.Link && it.On == old.On {
+		if it.Text == old.Text && it.Link == old.Link && it.On == old.On && sameSession(it.Session, old.Session) {
 			return s.keepTold(old, it)
 		}
 		return nil
@@ -1024,6 +1029,8 @@ func (l List) lines(limit int, now time.Time) string {
 		switch {
 		case it.Gone:
 			b.WriteString(" (on " + it.On + ", session gone)")
+		case OnBoss(it.On, it.Session):
+			b.WriteString(" (yours to do, --on boss)")
 		case it.On != "":
 			b.WriteString(" (on " + it.On + ")")
 		}
