@@ -38,16 +38,18 @@ func setStatuses(c *tmux.Client, lists []bossList, now time.Time, withNow bool, 
 // todoBoss reads it) from its workers on the desktop board (desktopOwner).
 func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 	if s.Boss() == "" {
-		// Only an item on someone reads the workers: the board polls this every 2 s
-		if !slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return !it.Done && it.On != "" }) {
+		// Only an item on someone but the boss itself reads the workers (a ticked one too, for its assignee): the board
+		// polls this every 2 s
+		if !slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return it.On != "" && !todo.OnBoss(it.On, it.Session) }) {
 			l.SetStatus(todo.Owner{})
 			return
 		}
 		o, unreadIDs := desktopOwner(boss, stderr)
 		l.SetStatus(o)
+		// An item on a worker whose record wasn't read is placed as with no workers read: no status
 		for i, it := range l.Items {
 			if it.Session != nil && slices.Contains(unreadIDs, it.Session.ID) {
-				l.Items[i].Status, l.Items[i].StatusOn, l.Items[i].Now = "", "", ""
+				todo.List{Items: l.Items[i : i+1]}.SetStatus(todo.Owner{Unread: true})
 			}
 		}
 		return

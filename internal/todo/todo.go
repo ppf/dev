@@ -43,6 +43,9 @@ const UntilLayout = "2006-01-02 15:04"
 // Me is the --on that gives an item back to the user.
 const Me = "me"
 
+// Boss is the --on of an item its list's boss does itself, stored without a session.
+const Boss = "boss"
+
 // Session is the boss's worker an item is on: its tmux session name or desktop app session id (local_…), and
 // the name its board shows.
 type Session struct {
@@ -68,6 +71,14 @@ type Item struct {
 	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
 	Started *Started `json:"started,omitempty"` // the user asked to start it (dev todo start), until a --replaces or set
 	Quiet   bool     `json:"quiet,omitempty"`   // a test item (--quiet): counted nowhere, the boss above not told
+	Doing   *Doing   `json:"doing,omitempty"`   // someone works on it now: the user on their own, the boss on its own
+	PartOf  int      `json:"part_of,omitempty"` // the id of its other half, a task split between two assignees
+}
+
+// Doing is what an item's doer said it does now, and since when, unix seconds.
+type Doing struct {
+	Text string `json:"text"`
+	At   int64  `json:"at"`
 }
 
 // Started is when the user asked to start an item, unix seconds, and To, the boss that note went to.
@@ -129,6 +140,12 @@ type Shown struct {
 	// Now is what its worker is doing now (its sidebar.Session.Doing), once SetStatus ran; "" for none
 	Now   string `json:"now,omitempty"`
 	Quiet bool   `json:"quiet,omitempty"`
+	// PRState is its linked GitHub PR's state at the last lookup: open, merged or closed; "" for none (not looked up,
+	// another link, ticked)
+	PRState string `json:"pr_state,omitempty"`
+	Doing   *Doing `json:"doing,omitempty"`
+	PartOf  int    `json:"part_of,omitempty"`
+	Placement
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
@@ -495,12 +512,13 @@ func (s Store) Read(now time.Time) (List, error) {
 	}
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
 		if !sh.Done {
 			sh.Check = check(it, facts[it.key()], now)
+			sh.PRState = prState(it, facts[it.key()])
 			sh.StartLate = it.Started != nil && now.Sub(time.Unix(it.Started.At, 0)) >= StartLate
 		}
 		l.Items = append(l.Items, sh)

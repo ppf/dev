@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,6 +84,7 @@ func TestTodoDesktopStatus(t *testing.T) {
 	run(t, "", "todo", "add", "Staging", "--on", "Marek")
 	run(t, "", "todo", "add", "Answer Vince")
 	run(t, "", "todo", "add", "Broken", "--on", "local_broken")
+	run(t, "", "todo", "add", "Parked", "--on", todo.Boss)
 	if err := os.Remove(filepath.Join(org, "local_w.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +106,39 @@ func TestTodoDesktopStatus(t *testing.T) {
 		return got
 	}
 	got := statuses()
-	want := map[string]string{"Fix W": "gone W", "Run": "working Busy", "Pick": "blocked Asks", "Staging": "waiting Marek", "Answer Vince": "yours ", "Broken": " "}
+	want := map[string]string{"Fix W": "gone W", "Run": "working Busy", "Pick": "blocked Asks", "Staging": "waiting Marek", "Answer Vince": "yours ", "Broken": " ", "Parked": "idle boss"}
 	for text, w := range want {
 		if got[text] != w {
 			t.Errorf("%s = %q, want %q", text, got[text], w)
+		}
+	}
+	// Placed as the board model's table: the desktop boss, which has no name, as boss; an unread record's worker in progress
+	var l struct {
+		Items []struct {
+			Text       string         `json:"text"`
+			Column     string         `json:"column"`
+			Assignee   *todo.Assignee `json:"assignee"`
+			WaitingFor string         `json:"waiting_for"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil {
+		t.Fatal(err)
+	}
+	placed := map[string]string{}
+	for _, it := range l.Items {
+		placed[it.Text] = fmt.Sprintf("%s %+v %s", it.Column, *it.Assignee, it.WaitingFor)
+	}
+	for text, w := range map[string]string{
+		"Fix W":        "todo {Kind:boss Name:boss Running:true} ",
+		"Run":          "progress {Kind:worker Name:Busy Running:true} ",
+		"Pick":         "progress {Kind:worker Name:Asks Running:true} ",
+		"Staging":      "waiting {Kind:boss Name:boss Running:true} Marek",
+		"Answer Vince": "todo {Kind:you Name: Running:false} ",
+		"Broken":       "progress {Kind:worker Name:local_broken Running:false} ",
+		"Parked":       "todo {Kind:boss Name:boss Running:true} ",
+	} {
+		if placed[text] != w {
+			t.Errorf("%s placed %q, want %q", text, placed[text], w)
 		}
 	}
 	// A live file it can't read: a running worker would read stopped
