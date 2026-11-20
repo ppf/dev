@@ -788,6 +788,7 @@ func TestPromptAskRules(t *testing.T) {
 			"never ask your own decisions with AskUserQuestion or only as chat text",
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
+			"dev todo note decided|said|risk",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",

@@ -105,7 +105,9 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`In a roll-up, or when idle with nothing pending (never mid-task), you may propose one or two improvements to the ` +
 	`project, only ones really worth doing and grounded in what you saw coordinating (repeated worker friction, flaky ` +
 	`tests, recurring review findings, missing tooling, rough UX the user hit): one line each with why and a rough size. ` +
-	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined.`
+	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined. ` +
+	`Put decisions, what the user told you and open risks in one-line dev todo notes (dev todo note decided|said|risk, see --help) in the same turn: ` +
+	`they come back after a /clear or a resume, as your list does.`
 
 // bossBriefAsk is the dev-agents skill's brief line for a boss, in place of a worker's "end your turn with the question
 // as text": a boss's turn-ending question reaches only the manager, which can't answer it, not the user's list.
