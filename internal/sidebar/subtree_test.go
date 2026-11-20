@@ -510,3 +510,32 @@ func TestSubtreeClosedLists(t *testing.T) {
 		t.Errorf("TO DO %+v, roll-up %d need you · %d decide · %d to do", c, r.Questions, r.Decide, r.ToDo)
 	}
 }
+
+// A test item counts nowhere: not in the roll-ups, nor TO DO's tally; it alone doesn't make its boss need you,
+// and its row's text shows after a TEST tag, the row after it untagged.
+func TestQuietCountsNowhere(t *testing.T) {
+	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
+	list := NeedList{Boss: "b", Items: []NeedItem{
+		{ID: 1, Text: "test?", Options: []string{"x", "y"}, Status: StatusDecide, Quiet: true}, {ID: 2, Text: "test", Status: StatusYours, Quiet: true},
+		{ID: 3, Text: "real", Status: StatusYours},
+	}}
+	counts := NeedCounts([]NeedList{list})
+	if counts["b"] != (ListCount{Plain: 1}) {
+		t.Errorf("counts = %+v, want 1 plain", counts["b"])
+	}
+	if r := Subtree(ss, counts)["b"]; r.Rank == RankNeedsYou || r.Decide != 0 {
+		t.Errorf("roll-up %+v: a test ask needs no one", r)
+	}
+	rows := NeedRows(ss, []NeedList{list}, "")
+	if c := Count(rows); c != (Tally{ToDo: 1}) {
+		t.Errorf("TO DO = %+v, want 1 to do", c)
+	}
+	for _, r := range rows {
+		if r.Quiet != (r.ID != 3) {
+			t.Errorf("row #%d quiet = %v", r.ID, r.Quiet)
+		}
+		if got := ansi.Strip(Tag(r.Quiet, r.Text)); got != map[int]string{1: "TEST test?", 2: "TEST test", 3: "real"}[r.ID] {
+			t.Errorf("row #%d shows %q", r.ID, got)
+		}
+	}
+}

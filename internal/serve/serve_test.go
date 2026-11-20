@@ -15,7 +15,8 @@ import (
 )
 
 const lists = `[{"boss":"boss-a","items":[{"id":1,"text":"Merge?","done":false,"options":["Merge","Wait"],"status":"decide"},` +
-	`{"id":2,"text":"Read","done":false,"status":"yours"},{"id":3,"text":"Fix","done":false,"on":"w","status":"working","status_on":"w"}],"updated":1,"stale":false}]`
+	`{"id":2,"text":"Read","done":false,"status":"yours"},{"id":3,"text":"Fix","done":false,"on":"w","status":"working","status_on":"w"},` +
+	`{"id":4,"text":"Test?","done":false,"options":["A","B"],"status":"decide","quiet":true},{"id":5,"text":"Test","done":false,"status":"yours","quiet":true}],"updated":1,"stale":false}]`
 
 func noGuard(h http.Handler) http.Handler { return h }
 
@@ -40,7 +41,7 @@ func get(t *testing.T, h http.Handler, path, inm string) *httptest.ResponseRecor
 	return w
 }
 
-// The board counts decide and yours, keeps its ETag while only the clock moves, answers 304 to it, and a new one
+// The board counts decide and yours, test items left out, keeps its ETag while only the clock moves, answers 304 to it, and a new one
 // when a list changes.
 func TestBoardETag(t *testing.T) {
 	now, l := time.Unix(1700000000, 0), lists

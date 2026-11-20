@@ -67,6 +67,7 @@ type Item struct {
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
 	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
 	Started *Started `json:"started,omitempty"` // the user asked to start it (dev todo start), until a --replaces or set
+	Quiet   bool     `json:"quiet,omitempty"`   // a test item (--quiet): counted nowhere, the boss above not told
 }
 
 // Started is when the user asked to start an item, unix seconds, and To, the boss that note went to.
@@ -126,7 +127,8 @@ type Shown struct {
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
 	// Now is what its worker is doing now (its sidebar.Session.Doing), once SetStatus ran; "" for none
-	Now string `json:"now,omitempty"`
+	Now   string `json:"now,omitempty"`
+	Quiet bool   `json:"quiet,omitempty"`
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
@@ -493,7 +495,7 @@ func (s Store) Read(now time.Time) (List, error) {
 	}
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	for _, it := range f.Items {
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
@@ -552,7 +554,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn and Context it doesn't set; On Me gives it back to the user. An id that isn't one is an error, as is an ask's
+// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user. An id that isn't one is an error, as is an ask's
 // new text over MaxQuestion.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
@@ -570,7 +572,7 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 			it.On, it.Session = old.On, old.Session
 		}
 		it.Text, it.Link, it.Until = cmp.Or(it.Text, old.Text), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
-		it.DoneOn = cmp.Or(it.DoneOn, old.DoneOn)
+		it.DoneOn, it.Quiet = cmp.Or(it.DoneOn, old.DoneOn), it.Quiet || old.Quiet
 		if it.Options == nil {
 			it.Options = old.Options
 		}

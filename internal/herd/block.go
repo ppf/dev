@@ -421,7 +421,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 	} else {
 		right = ""
 	}
-	text := strings.Join(strings.Fields(r.Text), " ")
+	text := sidebar.Tag(r.Quiet, strings.Join(strings.Fields(r.Text), " "))
 	if selected {
 		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
 		lines = []string{pre + parts[0]}

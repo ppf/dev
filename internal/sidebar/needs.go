@@ -62,6 +62,7 @@ type NeedItem struct {
 	// Started is when the user asked to start it (dev todo start), unix seconds; StartLate once no one took it up in time
 	Started   *struct{ At int64 } `json:"started"`
 	StartLate bool                `json:"start_late"`
+	Quiet     bool                `json:"quiet"` // a test item (dev todo add --quiet): counted nowhere
 }
 
 // Own reports an open item that is the user's: one with a status that names no one, or starting (naming whom the
@@ -76,7 +77,9 @@ func NeedCounts(needs []NeedList) map[string]ListCount {
 	for _, l := range needs {
 		c := ListCount{Unread: l.Error != "", Closed: l.Closed}
 		for _, it := range l.Items {
-			c.Add(it.Done, it.Status)
+			if !it.Quiet {
+				c.Add(it.Done, it.Status)
+			}
 		}
 		out[l.Boss] = c
 	}
@@ -118,17 +121,27 @@ type NeedRow struct {
 	// StartedAt is when the user asked to start the list item, unix seconds (0: not asked); StartLate once no one took it up
 	StartedAt int64
 	StartLate bool
+	Quiet     bool // a test item: Count leaves it out, its text shows after a TEST tag (Tag)
+}
+
+// Tag is text after a muted TEST tag when quiet: a test item's, on every board.
+func Tag(quiet bool, text string) string {
+	if !quiet {
+		return text
+	}
+	return muted + "TEST" + reset + " " + text
 }
 
 // Tally is what TO DO's rows count, as its header, the sidebar's and the roll lines (Rollup) say it: the sessions
 // that need the user, the asks to decide, the user's own plain items.
 type Tally struct{ NeedYou, Decide, ToDo int }
 
-// Count tallies rows.
+// Count tallies rows, test items left out.
 func Count(rows []NeedRow) Tally {
 	var t Tally
 	for _, r := range rows {
 		switch {
+		case r.Quiet:
 		case r.Kind == NeedDialog || r.Kind == NeedAsk:
 			t.NeedYou++
 		case r.Status == StatusDecide:
@@ -447,7 +460,7 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 			}
 			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
 			row.Until, row.On, row.Status, row.StatusOn, row.Context = it.Until, it.On, it.Status, it.StatusOn, it.Context
-			row.StartedAt, row.StartLate = 0, it.StartLate
+			row.StartedAt, row.StartLate, row.Quiet = 0, it.StartLate, it.Quiet
 			if it.Started != nil {
 				row.StartedAt = it.Started.At
 			}
@@ -753,7 +766,7 @@ func (m Model) needLine(r NeedRow, w int, selected bool) string {
 	} else {
 		age = ""
 	}
-	text := truncate(r.Text, room)
+	text := truncate(Tag(r.Quiet, r.Text), room)
 	line := " " + muted + project + reset + "  " + mark + " " + text
 	width := vis + ansi.StringWidth(text)
 	if age != "" {

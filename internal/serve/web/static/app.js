@@ -357,6 +357,7 @@ function label(list, it) {
 function card(x) {
   const { list, it } = x, b = band(it), h = itemHash(list.boss, it.id), k = key(list.boss, it.id);
   const lab = label(list, it);
+  if (it.quiet) lab.append(el('span', { class: 'chip' }, 'TEST'));
   // The status word where neither the band nor the column says it
   if (!(it.start_late || ['decide', 'yours', 'check', 'blocked', 'gone'].includes(it.status))) lab.append(el('span', { class: 'st' }, statusOf(it)));
   const old = it.added && Date.now() / 1000 - it.added > DAY && own(list, it);
@@ -622,7 +623,7 @@ function render() {
   if (!state.reachable) {
     line.append((state.problem || 'unreachable') + (state.asOf ? ' · as of ' + hhmm(state.asOf) : ''));
   } else if (b && r.name !== 'pair') {
-    const c = b.counts || {}, all = openItems();
+    const c = b.counts || {}, all = openItems().filter(x => !x.it.quiet);
     const n = (count, what, cls) => el('span', { class: cls || false }, el('b', null, String(count)), what);
     tally.append(n(c.decide || 0, 'to decide', c.decide ? 'on' : ''), n(c.yours || 0, 'yours'), n(all.filter(onWorker).length, 'on workers'), n(all.length, 'open'));
     line.append('live · updated ' + hhmm(state.asOf));
