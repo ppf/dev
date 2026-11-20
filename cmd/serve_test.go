@@ -194,7 +194,7 @@ func TestListenAndServeClosesStreams(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	errc := make(chan error, 1)
-	go func() { _, _, err := listenAndServe(ctx, ln, cfg, nil); errc <- err }()
+	go func() { _, _, err := listenAndServe(ctx, func() {}, ln, cfg, nil); errc <- err }()
 	res, err := http.Get("http://" + ln.Addr().String() + "/v1/events")
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,8 @@ func startReloadRunLists(t *testing.T, fire <-chan struct{}, execErr error, list
 		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid())+" 0" {
 			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
 		}
-		if _, err := http.Get("http://" + r.addr + "/v1/health"); err == nil {
+		// The socket stays bound, so a connection waits unanswered
+		if _, err := (&http.Client{Timeout: 200 * time.Millisecond}).Get("http://" + r.addr + "/v1/health"); err == nil {
 			t.Error("still serving at exec")
 		}
 		r.execs <- args
@@ -275,7 +276,9 @@ func startReloadRunLists(t *testing.T, fire <-chan struct{}, execErr error, list
 	r.stop = stop
 	t.Cleanup(stop)
 	o := selfreload.Options{Own: "v1.0.0"}
-	go func() { r.errc <- serveReloading(ctx, ln, cfg, o, []string{"dev", "serve"}, 0, r.stderr, r.stderr) }()
+	go func() {
+		r.errc <- serveReloading(ctx, ln, cfg, o, func() []string { return []string{"dev", "serve"} }, r.stderr, r.stderr)
+	}()
 	return r
 }
 
@@ -427,20 +430,75 @@ func TestServeReloadStopWins(t *testing.T) {
 func TestReexecArgs(t *testing.T) {
 	base := []string{"dev", "serve"}
 	for _, tc := range []struct {
+		args []string
 		addr string
+		own  bool
 		want []string
 	}{
-		{"", []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
-		{"100.1.2.3:0", []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
-		{"100.1.2.3:8417", base},
+		{base, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
+		{base, "100.1.2.3:0", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
+		{base, "100.1.2.3:8417", true, base},
+		{base, "", false, base},
+		{[]string{"dev", "serve", "--"}, "", true, []string{"dev", "serve", "--addr", "100.1.2.3:8417", "--"}},
 	} {
-		if got := reexecArgs(base, tc.addr, "100.1.2.3:8417"); !slices.Equal(got, tc.want) {
-			t.Errorf("--addr %q: %q, want %q", tc.addr, got, tc.want)
+		if got := reexecArgs(tc.args, tc.addr, "100.1.2.3:8417", tc.own); !slices.Equal(got, tc.want) {
+			t.Errorf("%q --addr %q own %v: %q, want %q", tc.args, tc.addr, tc.own, got, tc.want)
 		}
 	}
 	if !slices.Equal(base, []string{"dev", "serve"}) {
 		t.Errorf("args changed: %q", base)
 	}
+	if !ownIP(netip.MustParseAddr("127.0.0.1")) || ownIP(netip.MustParseAddr("192.0.2.1")) {
+		t.Error("ownIP: loopback must be this Mac's, 192.0.2.1 (TEST-NET-1) not")
+	}
+}
+
+// A request still open after the shutdown wait holds the reload: no exec, it serves again, the request finishes,
+// and it watches again.
+func TestServeReloadHeldByOpenRequest(t *testing.T) {
+	wait := shutdownWait
+	shutdownWait = 200 * time.Millisecond
+	t.Cleanup(func() { shutdownWait = wait })
+	fire, held, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r := startReloadRunLists(t, fire, errors.New("exec called"), func() (json.RawMessage, error) {
+		once.Do(func() { close(held); <-release })
+		return json.RawMessage(`[]`), nil
+	})
+	<-r.watches
+	done := make(chan int, 1)
+	go func() {
+		res, err := http.Get("http://" + r.addr + "/v1/board")
+		if err != nil {
+			done <- 0
+			return
+		}
+		_ = res.Body.Close()
+		done <- res.StatusCode
+	}()
+	<-held
+	close(fire)
+	select {
+	case <-r.watches:
+	case <-time.After(5 * time.Second):
+		t.Fatal("not watching again after the held reload")
+	}
+	if v := r.health(t); v != "v1.0.0" {
+		t.Errorf("health %q, want v1.0.0", v)
+	}
+	close(release)
+	if code := <-done; code != http.StatusOK {
+		t.Errorf("held request: %d, want 200", code)
+	}
+	select {
+	case <-r.execs:
+		t.Error("exec'd with a request open")
+	default:
+	}
+	if !strings.Contains(r.stderr.String(), "held: requests still open") {
+		t.Errorf("stderr %q, want the held line", r.stderr.String())
+	}
+	r.end(t)
 }
 
 func TestReexecMarker(t *testing.T) {

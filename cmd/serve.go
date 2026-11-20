@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,15 +68,16 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
 			// After a reload the caffeinate started before it still waits on this pid
-			reloaded, caffeinate := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
+			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
 			if err := os.Unsetenv(envServeReexec); err != nil {
 				return err
 			}
 			switch {
-			case reloaded && caffeinate > 0:
-				go watchAwake(caffeinate, cmd.ErrOrStderr())
-			case awake && !reloaded:
-				if caffeinate, err = keepAwake(out, cmd.ErrOrStderr()); err != nil {
+			case reloaded && pid > 0:
+				caffeinate.Store(int64(pid))
+				go watchAwake(pid, cmd.ErrOrStderr())
+			case awake:
+				if err := keepAwake(out, cmd.ErrOrStderr()); err != nil {
 					return err
 				}
 			}
@@ -96,7 +98,9 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			stderr := cmd.ErrOrStderr()
 			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(),
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
-			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir), o, reexecArgs(os.Args, addr, ln.Addr().String()), caffeinate, out, stderr)
+			bound := ln.Addr().(*net.TCPAddr).AddrPort()
+			args := func() []string { return reexecArgs(os.Args, addr, bound.String(), ownIP(bound.Addr())) }
+			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir), o, args, out, stderr)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "the ip:port to listen on: loopback, tailnet or private LAN")
@@ -297,69 +301,102 @@ func reexecMarker(v string, pid int) (bool, int) {
 	return true, n
 }
 
-// reexecArgs is args with --addr pinned to the bound address: the new process binds there, not a fresh pick.
-func reexecArgs(args []string, addr, bound string) []string {
-	if addr == bound {
+// reexecArgs is args with --addr pinned to bound (before a "--"), so the new process binds there, not a fresh pick;
+// not pinned when bound's ip is no longer this Mac's (own false): the new process could not bind it.
+func reexecArgs(args []string, addr, bound string, own bool) []string {
+	if addr == bound || !own {
 		return args
 	}
-	return append(slices.Clip(args), "--addr", bound)
+	i := slices.Index(args, "--")
+	if i < 0 {
+		i = len(args)
+	}
+	return slices.Concat(args[:i], []string{"--addr", bound}, args[i:])
 }
+
+// ownIP: ip is one of this Mac's interface addresses.
+func ownIP(ip netip.Addr) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(addrs, func(a net.Addr) bool {
+		n, ok := a.(*net.IPNet)
+		return ok && n.IP.Equal(net.IP(ip.AsSlice()))
+	})
+}
+
+// caffeinate is the running caffeinate's pid (0: none), handed to the process a reload execs.
+var caffeinate atomic.Int64
 
 // Test seams
 var (
-	watchReload = selfreload.Watch
-	execReload  = selfreload.Exec
+	watchReload  = selfreload.Watch
+	execReload   = selfreload.Exec
+	shutdownWait = 5 * time.Second
 )
 
-// serveReloading serves on ln until ctx ends; when o.Exe holds a new release it shuts down and re-execs into it
-// (same pid) with args. Not a tmux pane, it takes no part in the canary: it reloads after its own checks even when
-// that version's canary pane died. An exec that fails serves again on ln's address and watches no more; ErrNotNow
-// (kill switch on, the file changed since checked) serves again and watches again. caffeinate (0: none) is
-// handed to the new process.
-func serveReloading(ctx context.Context, ln net.Listener, cfg serve.Config, o selfreload.Options, args []string, caffeinate int, out, stderr io.Writer) error {
+// serveReloading serves on ln until ctx ends or SIGINT/SIGTERM; when o.Exe holds a new release it shuts down and
+// re-execs into it (same pid) with args(). Not a tmux pane, it takes no part in the canary: it reloads after its own
+// checks even when that version's canary pane died. Requests still open 5 s into the shutdown hold the reload (it
+// serves again and watches again), as does ErrNotNow (kill switch on, the file changed since checked); an exec that
+// fails serves again and watches no more. The socket stays bound throughout: only the exec closes it.
+func serveReloading(ctx context.Context, ln net.Listener, cfg serve.Config, o selfreload.Options, args func() []string, out, stderr io.Writer) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	watching := true
 	for {
+		tl, ok := ln.(*net.TCPListener)
+		if !ok {
+			return fmt.Errorf("dev serve: %T is no TCP listener", ln)
+		}
+		keep, err := tl.File() // close-on-exec
+		if err != nil {
+			return err
+		}
 		wctx, stopWatch := context.WithCancel(ctx)
 		var ready <-chan selfreload.Ready
 		if watching {
 			ready = watchReload(wctx, o)
 		}
-		r, reload, err := listenAndServe(ctx, ln, cfg, ready)
+		r, reload, err := listenAndServe(ctx, stop, ln, cfg, ready)
 		stopWatch()
-		if !reload {
+		if !reload || ctx.Err() != nil {
+			_ = keep.Close()
 			return err
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "⚠ dev serve: open requests didn't end within 5 s, closed them: reloading anyway (%v)\n", err)
-		}
-		fmt.Fprintf(out, "↻ dev serve: reloading into %s\n", r.Version)
-		if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d", os.Getpid(), caffeinate)); err != nil {
-			return err
-		}
-		err = execReload(r, args)
-		if uerr := os.Unsetenv(envServeReexec); uerr != nil {
-			return uerr
-		}
-		addr := ln.Addr().String()
-		var lerr error
-		if ln, lerr = net.Listen("tcp", addr); lerr != nil {
-			return fmt.Errorf("reload into %s failed (%w) and listening again on %s failed: %w", r.Version, err, addr, lerr)
-		}
-		if errors.Is(err, selfreload.ErrNotNow) {
-			fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: %v\n", r.Version, err)
+			fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: requests still open (%v)\n", r.Version, err)
 		} else {
-			fmt.Fprintf(stderr, "❌ reload: %v: dev serve stays on %s; restart it to update\n", err, o.Own)
-			watching = false
+			fmt.Fprintf(out, "↻ dev serve: reloading into %s\n", r.Version)
+			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d", os.Getpid(), caffeinate.Load())); err != nil {
+				return err
+			}
+			err = execReload(r, args())
+			if uerr := os.Unsetenv(envServeReexec); uerr != nil {
+				return uerr
+			}
+			if errors.Is(err, selfreload.ErrNotNow) {
+				fmt.Fprintf(stderr, "⚠ dev serve: reload into %s held: %v\n", r.Version, err)
+			} else {
+				fmt.Fprintf(stderr, "❌ reload: %v: dev serve stays on %s; restart it to update\n", err, o.Own)
+				watching = false
+			}
+		}
+		ln, err = net.FileListener(keep)
+		if cerr := keep.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return fmt.Errorf("serve again after the reload: %w", err)
 		}
 	}
 }
 
-// listenAndServe serves on ln until ctx ends or SIGINT/SIGTERM (false), or ready gives one (it, true), then shuts
-// down. A shutdown for a reload that times out closes the open requests and returns its error with the Ready; a stop
-// during that shutdown wins over the reload.
-func listenAndServe(ctx context.Context, ln net.Listener, cfg serve.Config, ready <-chan selfreload.Ready) (selfreload.Ready, bool, error) {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+// listenAndServe serves on ln until ctx ends (false; stop then restores the signals' default), or ready gives one
+// (it, true), then shuts down. A reload's shutdown that times out leaves the open requests running and returns its
+// error with the Ready; a stop during that shutdown wins over the reload.
+func listenAndServe(ctx context.Context, stop func(), ln net.Listener, cfg serve.Config, ready <-chan selfreload.Ready) (selfreload.Ready, bool, error) {
 	// Shutdown waits for open requests: the pages' event streams end when it starts
 	base, closeStreams := context.WithCancel(context.Background())
 	defer closeStreams()
@@ -385,16 +422,13 @@ wait:
 			ready = nil // closed: the watch ended
 		}
 	}
-	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shut, cancel := context.WithTimeout(context.Background(), shutdownWait)
 	defer cancel()
 	err := srv.Shutdown(shut)
 	if reload && ctx.Err() != nil {
 		reload = false
 	}
 	if err != nil {
-		if reload {
-			_ = srv.Close()
-		}
 		return r, reload, fmt.Errorf("shutdown: %w", err)
 	}
 	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {

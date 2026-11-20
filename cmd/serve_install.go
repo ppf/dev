@@ -75,12 +75,13 @@ func launchEnv(getenv func(string) string) map[string]string {
 
 // keepAwake holds a no-sleep assertion until this process exits: caffeinate -s, which macOS honours on mains
 // power only; on battery it says the Mac may sleep.
-func keepAwake(out, stderr io.Writer) (int, error) {
+func keepAwake(out, stderr io.Writer) error {
 	c := exec.Command("/usr/bin/caffeinate", "-s", "-w", strconv.Itoa(os.Getpid()))
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // a Ctrl-C ends dev serve, and -w then ends caffeinate
 	if err := c.Start(); err != nil {
-		return 0, fmt.Errorf("--awake: %w", err)
+		return fmt.Errorf("--awake: %w", err)
 	}
+	caffeinate.Store(int64(c.Process.Pid))
 	go watchAwake(c.Process.Pid, stderr)
 	ps, err := exec.Command("/usr/bin/pmset", "-g", "ps").Output()
 	if err != nil {
@@ -88,7 +89,7 @@ func keepAwake(out, stderr io.Writer) (int, error) {
 	} else if serve.OnBattery(string(ps)) {
 		fmt.Fprintln(out, "⚠ on battery: the Mac may sleep and the phone page stop answering until it is on mains power")
 	}
-	return c.Process.Pid, nil
+	return nil
 }
 
 // watchAwake says when caffeinate pid, a child of this process (also after a reload), ends.
@@ -104,5 +105,6 @@ func watchAwake(pid int, stderr io.Writer) {
 	if err != nil {
 		why = err.Error()
 	}
+	caffeinate.CompareAndSwap(int64(pid), 0) // a reload after this starts a new one
 	fmt.Fprintf(stderr, "⚠ --awake: caffeinate ended (%s): the Mac may sleep\n", why)
 }
