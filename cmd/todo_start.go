@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -46,23 +47,11 @@ Code session ($CLAUDECODE set), as dev todo answer is, and for a desktop app bos
 			if err != nil {
 				return fmt.Errorf("item number %q: %w", args[1], err)
 			}
-			c := tmux.New()
-			s, to, closed, err := startReceiver(c, name)
+			to, err := startItem(tmux.New(), name, id, question, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			it, prev, err := s.Start(id, question, to.Name, time.Now())
-			if err != nil {
-				return err
-			}
-			queued, err := to.Send(c, control.RealClock, inbox.Started(name, id, it.Text, closed))
-			switch {
-			case !queued:
-				return errors.Join(fmt.Errorf("#%d not sent to %s: %w", id, to.Name, err), s.Unstart(id, it.Started.At, prev, time.Now()))
-			case err != nil:
-				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, to.Name, err)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "#%d sent to %s\n", id, to.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "#%d sent to %s\n", id, to)
 			return nil
 		},
 	}
@@ -72,13 +61,39 @@ Code session ($CLAUDECODE set), as dev todo answer is, and for a desktop app bos
 	return cmd
 }
 
+// notStarted is a start refused before the list was touched: no receiver for it.
+type notStarted struct{ error }
+
+func (e notStarted) Unwrap() error { return e.error }
+
+// startItem marks the user's own item id of boss name's list started while it reads text and sends its note to the
+// boss, or the manager for a closed boss: the receiver's name. A note queued for a boss not resting says so on warn.
+func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer) (string, error) {
+	s, to, closed, err := startReceiver(c, name)
+	if err != nil {
+		return "", err
+	}
+	it, prev, err := s.Start(id, text, to.Name, time.Now())
+	if err != nil {
+		return "", err
+	}
+	queued, err := to.Send(c, control.RealClock, inbox.Started(name, id, it.Text, closed))
+	switch {
+	case !queued:
+		return "", errors.Join(fmt.Errorf("#%d not sent to %s: %w", id, to.Name, err), s.Unstart(id, it.Started.At, prev, time.Now()))
+	case err != nil:
+		fmt.Fprintf(warn, "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, to.Name, err)
+	}
+	return to.Name, nil
+}
+
 // startReceiver is the list of dev boss name and the boss a start of its item goes to: name while its session runs,
 // else, for a closed boss's list (closed), the manager.
 func startReceiver(c *tmux.Client, name string) (s todo.Store, to inbox.Boss, closed bool, err error) {
 	pane, err := control.BossPane(c, name)
 	if err == nil {
 		if to, err = inbox.Recipient(c, name); err != nil {
-			return s, to, false, err
+			return s, to, false, notStarted{err}
 		}
 		s, err = todo.ForPane(c, pane)
 		return s, to, false, err
@@ -88,13 +103,13 @@ func startReceiver(c *tmux.Client, name string) (s todo.Store, to inbox.Boss, cl
 	case cerr != nil:
 		return s, to, false, errors.Join(err, cerr)
 	case !ok:
-		return s, to, false, err
+		return s, to, false, notStarted{err}
 	case name == inbox.Manager:
-		return s, to, true, errors.New("the manager is closed: dev boss reopens it")
+		return s, to, true, notStarted{errors.New("the manager is closed: dev boss reopens it")}
 	}
 	to, err = inbox.Recipient(c, inbox.Manager)
 	if err != nil {
-		return s, to, true, fmt.Errorf("%s is closed and no manager takes it (%w): dev boss %s reopens it", name, err, strings.TrimPrefix(name, "boss-"))
+		return s, to, true, notStarted{fmt.Errorf("%s is closed and no manager takes it (%w): dev boss %s reopens it", name, err, strings.TrimPrefix(name, "boss-"))}
 	}
 	return s, to, true, nil
 }

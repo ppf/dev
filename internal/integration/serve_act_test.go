@@ -262,4 +262,29 @@ func TestServeAnswerDone(t *testing.T) {
 		!slices.ContainsFunc(lists[i].Items, func(it actItem) bool { return it.ID == 5 && !it.Done }) {
 		t.Errorf("❌ the filler left: %+v", lists)
 	}
+
+	// Start: the page's request marks the item starting and notes boss-a; a second, a changed text, and a closed boss
+	// with no manager are refused as 409, not 500
+	code, body = post("v1/start", `{"boss":"boss-a","id":5,"text":"Other"}`, true)
+	refused("start of changed text", code, body, `is \"Keep me\" now, not \"Other\"`)
+	_, etag, _ = board("")
+	if code, body := post("v1/start", `{"boss":"boss-a","id":5,"text":"Keep me"}`, true); code != http.StatusOK {
+		t.Fatalf("❌ page start: %d %s", code, body)
+	}
+	lists = changed(etag)
+	if i := slices.IndexFunc(lists, func(l actList) bool { return l.Boss == "boss-a" }); i < 0 ||
+		!slices.ContainsFunc(lists[i].Items, func(it actItem) bool { return it.ID == 5 && it.Status == "starting" }) {
+		t.Errorf("❌ board after the page's start: %+v", lists)
+	}
+	code, body = post("v1/start", `{"boss":"boss-a","id":5,"text":"Keep me"}`, true)
+	refused("second start on the page", code, body, "already sent to boss-a")
+	code, body = post("v1/start", `{"boss":"boss-b","id":2,"text":"Ship it?"}`, true)
+	refused("start under a closed boss with no manager", code, body, "boss-b is closed and no manager takes it")
+	bt, err = b.Box.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bt.String(), `you were asked to start #5 "Keep me"`) {
+		t.Errorf("❌ boss-a's notes after the start: %s", bt)
+	}
 }

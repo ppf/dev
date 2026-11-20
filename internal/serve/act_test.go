@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,10 @@ func actHandler(calls *[]call, err error) http.Handler {
 		},
 		Done: func(boss string, id int, text string) error {
 			*calls = append(*calls, call{boss, id, text, ""})
+			return err
+		},
+		Start: func(boss string, id int, text string) error {
+			*calls = append(*calls, call{boss, id, text, "start"})
 			return err
 		},
 		Guard: noGuard,
@@ -54,8 +59,11 @@ func TestActOK(t *testing.T) {
 	if w := post(h, "/v1/done", `{"boss":"boss-a","id":2,"text":"Read"}`, true); w.Code != http.StatusOK {
 		t.Errorf("done = %d %s", w.Code, w.Body)
 	}
-	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}}
-	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] || calls[2] != want[2] {
+	if w := post(h, "/v1/start", `{"boss":"boss-a","id":3,"text":"Write the notes"}`, true); w.Code != http.StatusOK {
+		t.Errorf("start = %d %s", w.Code, w.Body)
+	}
+	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}, {"boss-a", 3, "Write the notes", "start"}}
+	if !slices.Equal(calls, want) {
 		t.Errorf("calls = %+v, want %+v", calls, want)
 	}
 }
@@ -69,6 +77,9 @@ func TestActRefused(t *testing.T) {
 	}{
 		{"no header", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, false, http.StatusForbidden},
 		{"no header, done", "/v1/done", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
+		{"no header, start", "/v1/start", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
+		{"desktop boss, start", "/v1/start", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
+		{"no text, start", "/v1/start", `{"boss":"b","id":1}`, true, http.StatusBadRequest},
 		{"no JSON", "/v1/answer", `option=A`, true, http.StatusBadRequest},
 		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, true, http.StatusBadRequest},
 		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, true, http.StatusBadRequest},
@@ -96,6 +107,11 @@ func TestActErrors(t *testing.T) {
 	w := post(actHandler(&calls, stale), "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A"}`, true)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "answered already: Merge") {
 		t.Errorf("refused = %d %s", w.Code, w.Body)
+	}
+	again := Refused{Code: http.StatusConflict, Err: errors.New(`item 1: already sent to boss-a 2m ago`)}
+	w = post(actHandler(&calls, again), "/v1/start", `{"boss":"b","id":1,"text":"T"}`, true)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already sent to boss-a") {
+		t.Errorf("start refused = %d %s", w.Code, w.Body)
 	}
 	logged := captureLog(t)
 	w = post(actHandler(&calls, errors.New("boom")), "/v1/done", `{"boss":"b","id":1,"text":"T"}`, true)
