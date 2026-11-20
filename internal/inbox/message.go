@@ -422,7 +422,7 @@ func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note 
 	}
 	switch {
 	case stop:
-		n.Text += ": no longer, it is back in to do"
+		n.Text += ": no longer on it"
 	case doing != "":
 		n.Text += ": " + doing
 	}

@@ -349,8 +349,8 @@ func TestPartOfRetarget(t *testing.T) {
 	}
 }
 
-// A link whose other half is ticked, stored on either side, gives way to a new one; restating it is refused; an ask
-// replaced keeps its doing.
+// A link whose other half is ticked, stored on either side, gives way to a new one, and only that link; restating it
+// keeps it quietly; an ask replaced keeps its doing.
 func TestPartOfTickedHalf(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
@@ -365,8 +365,8 @@ func TestPartOfTickedHalf(t *testing.T) {
 	if err := s.Done([]int{2}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Replace(1, Item{PartOf: 2}, now); err == nil || !strings.Contains(err.Error(), "no open item 2") {
-		t.Errorf("restate a link to a ticked half: %v", err)
+	if err := s.Replace(1, Item{Text: "a2", PartOf: 2}, now); err != nil {
+		t.Errorf("restate a link to a ticked half: %v, want kept quietly", err)
 	}
 	if id, err := s.Add(Item{Text: "c", PartOf: 1}, now); err != nil || id != 4 {
 		t.Fatalf("link to 1, its old half ticked: %d, %v", id, err)
@@ -383,5 +383,29 @@ func TestPartOfTickedHalf(t *testing.T) {
 	}
 	if f, _ := s.read(); f.Items[2].Doing == nil {
 		t.Errorf("an ask replaced: doing dropped")
+	}
+}
+
+// A new link leaves an unrelated one with a ticked half shown as it is.
+func TestPartOfOthersKept(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b", PartOf: 1}, {Text: "c"}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Done([]int{2}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "d", PartOf: 3}, now); err != nil {
+		t.Fatal(err)
+	}
+	got := map[int]int{}
+	for _, it := range read(t, s, now).Items {
+		got[it.ID] = it.PartOf
+	}
+	if got[1] != 2 || got[2] != 1 || got[3] != 4 {
+		t.Errorf("part_of = %v, want 1⇄2 kept beside 3⇄4", got)
 	}
 }

@@ -94,6 +94,6 @@ func TestTodoDoing(t *testing.T) {
 	}
 	_, mlog := open("manager")
 	out, _ = must(user, "todo", "doing", "boss-a", "3", "--stop", "--question", "Write the notes")
-	check(t, "stop on a closed boss", out, "#3 back in to do, manager told\n")
-	logged(mlog, `- the user is on boss-a #3 "Write the notes": no longer, it is back in to do (boss-a is closed)`)
+	check(t, "stop on a closed boss", out, "#3 stopped, manager told\n")
+	logged(mlog, `- the user is on boss-a #3 "Write the notes": no longer on it (boss-a is closed)`)
 }

@@ -19,7 +19,8 @@ type Placement struct {
 	NeedsYou   bool     `json:"needs_you,omitempty"`
 }
 
-// place is its placement on o's list, the first that holds (Status's order, with the column's own branches):
+// place is its placement on o's list, the first that holds (Status's order, with the column's own branches; the user's
+// doing on a closed boss's list wins over a moved PR, its word still check):
 //   - ticked: done, whose it was;
 //   - started (dev todo start), whoever's: in progress, the list's boss's; a late start needs the user;
 //   - its boss closed: in progress while the user is on their own (Doing), else review when its PR moved (needing the

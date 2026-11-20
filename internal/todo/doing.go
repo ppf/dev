@@ -84,13 +84,14 @@ func (f *file) unlinkGone() {
 	}
 }
 
-// dropDoneLinks clears the links a ticked half still shown is in: it links nothing new.
-func (f *file) dropDoneLinks() {
+// dropDoneLinks clears the links of ids whose other half is ticked, still shown: it links nothing new.
+func (f *file) dropDoneLinks(ids ...int) {
 	done := func(id int) bool {
 		return slices.ContainsFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done != 0 })
 	}
 	for i, it := range f.Items {
-		if it.PartOf != 0 && (it.Done != 0 || done(it.PartOf)) {
+		mine := slices.Contains(ids, it.ID) || slices.Contains(ids, it.PartOf)
+		if it.PartOf != 0 && mine && (it.Done != 0 || done(it.PartOf)) {
 			f.Items[i].PartOf = 0
 		}
 	}

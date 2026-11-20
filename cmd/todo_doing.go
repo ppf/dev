@@ -23,7 +23,7 @@ func newTodoDoingCmd(boss *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doing [<boss>] <n> [text] [--stop]",
 		Short: "Mark item n in progress with what is done now: the user on their own item (tells its boss), a boss on its own",
-		Long: `Mark an open item in progress, with a short line of what is done now; --stop ends it, back in to do.
+		Long: `Mark an open item in progress, with a short line of what is done now; --stop ends it.
 The user: dev todo doing <boss> <n> ["text"] --question <the item's text>, only on their own item that is no ask:
 the boss's inbox gets "the user is on #<n> \"<item>\": <text>" (for a closed boss's list, the manager's), so no worker
 is started on it; a newer line replaces one still queued. No one running, or a desktop app boss: marked, no one told.
@@ -65,7 +65,7 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 		},
 	}
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise (the user's form)")
-	cmd.Flags().BoolVar(&stop, "stop", false, "end it: the item is back in to do")
+	cmd.Flags().BoolVar(&stop, "stop", false, "end it")
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button: allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
 	return cmd
@@ -82,7 +82,7 @@ func toldOr(told string) string {
 // doingDone is what a doing change did.
 func doingDone(stop bool) string {
 	if stop {
-		return "back in to do"
+		return "stopped"
 	}
 	return "in progress"
 }
@@ -150,7 +150,7 @@ func userDoing(c *tmux.Client, name string, id int, question, text string, stop 
 		return "", err
 	}
 	if strings.HasPrefix(name, "local_") {
-		fmt.Fprintf(warn, "⚠ dev todo: #%d marked, no one told: a desktop app boss has no dev inbox\n", id)
+		fmt.Fprintf(warn, "⚠ dev todo: #%d %s, no one told: a desktop app boss has no dev inbox\n", id, doingDone(stop))
 		return "", nil
 	}
 	recipient := name
@@ -162,7 +162,7 @@ func userDoing(c *tmux.Client, name string, id int, question, text string, stop 
 	case err != nil && running(c, recipient) && !errors.Is(err, inbox.ErrInboxOff):
 		return "", notTold{fmt.Errorf("#%d %s, not sent to %s (tell it yourself): %w", id, doingDone(stop), recipient, err)}
 	case err != nil:
-		fmt.Fprintf(warn, "⚠ dev todo: #%d marked, no one told: %v\n", id, err)
+		fmt.Fprintf(warn, "⚠ dev todo: #%d %s, no one told: %v\n", id, doingDone(stop), err)
 		return "", nil
 	}
 	now := ""

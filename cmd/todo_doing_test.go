@@ -63,7 +63,7 @@ func TestTodoDoingDesktop(t *testing.T) {
 	if err != nil || out != "#1 in progress, no one told\n" || !strings.Contains(stderr, "no dev inbox") {
 		t.Errorf("user doing on a desktop boss = %q %q, %v", out, stderr, err)
 	}
-	if out, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--stop", "--question", "mine"); err != nil || out != "#1 back in to do, no one told\n" {
+	if out, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--stop", "--question", "mine"); err != nil || out != "#1 stopped, no one told\n" {
 		t.Errorf("user stop = %q, %v", out, err)
 	}
 }

@@ -697,7 +697,7 @@ func TestAddUserDoing(t *testing.T) {
 	}{
 		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, false), `the user is on #4 "Send the cert": mailing ops`},
 		{UserDoing("boss-a", 4, "Send the cert", "", false, false), `the user is on #4 "Send the cert"`},
-		{UserDoing("boss-a", 4, "Send the cert", "", true, false), `the user is on #4 "Send the cert": no longer, it is back in to do`},
+		{UserDoing("boss-a", 4, "Send the cert", "", true, false), `the user is on #4 "Send the cert": no longer on it`},
 		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, true), `the user is on boss-a #4 "Send the cert": mailing ops (boss-a is closed)`},
 	} {
 		if got := tt.note.String(); got != tt.want {
@@ -735,7 +735,7 @@ func TestRestoreKeepsNewerDoing(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := b.Take()
-	if len(got.Notes) != 2 || got.Notes[0].Kind != Answered || got.Notes[1].Text != `#4 "a": no longer, it is back in to do` {
+	if len(got.Notes) != 2 || got.Notes[0].Kind != Answered || got.Notes[1].Text != `#4 "a": no longer on it` {
 		t.Errorf("after restore: %+v, want the answer, then only the stop", got.Notes)
 	}
 }

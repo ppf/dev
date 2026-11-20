@@ -589,7 +589,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			f.Next = 1
 		}
 		if it.PartOf != 0 {
-			f.dropDoneLinks()
+			f.dropDoneLinks(it.PartOf)
 		}
 		if err := f.checkPartOf(0, it.PartOf); err != nil {
 			return err
@@ -641,12 +641,11 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		if it.On == old.On && sameSession(it.Session, old.Session) && !(len(old.Options) == 0 && len(it.Options) > 0) {
 			it.Doing = old.Doing
 		}
-		linked := (it.PartOf == old.PartOf || it.PartOf == partner(f.Items, id)) && f.open(it.PartOf)
-		if it.PartOf == 0 || linked {
+		if it.PartOf == 0 || it.PartOf == old.PartOf || it.PartOf == partner(f.Items, id) {
 			it.PartOf = old.PartOf
 		} else {
 			// A new other half: the link stored on its old one goes; a refusal below writes nothing
-			f.dropDoneLinks()
+			f.dropDoneLinks(id, it.PartOf)
 			f.unlink(id)
 			if err := f.checkPartOf(id, it.PartOf); err != nil {
 				return err
