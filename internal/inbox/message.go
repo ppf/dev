@@ -339,6 +339,9 @@ func Peer(c *tmux.Client, pane string) (name, socket string, err error) {
 	return v.Name, v.Socket, nil
 }
 
+// ErrInboxOff is Recipient refusing a boss whose inbox is off.
+var ErrInboxOff = errors.New("its inbox off: it can't get messages")
+
 // Recipient is the boss session name, with its inbox on, a message goes to.
 func Recipient(c *tmux.Client, name string) (Boss, error) {
 	// display-message prints nothing for a missing session, without failing
@@ -356,7 +359,7 @@ func Recipient(c *tmux.Client, name string) (Boss, error) {
 	case v.Herd == "":
 		return Boss{}, fmt.Errorf("%s is not a boss session (dev boss)", name)
 	case v.Off == "off":
-		return Boss{}, fmt.Errorf("%s has its inbox off: it can't get messages", name)
+		return Boss{}, fmt.Errorf("%s has %w", name, ErrInboxOff)
 	}
 	b, _, err := v.boss()
 	return b, err

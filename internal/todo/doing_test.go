@@ -280,3 +280,41 @@ func TestDoingDoneOnAndRestate(t *testing.T) {
 		t.Errorf("after --on me and the restated link: %+v / %+v, want doing kept, the link stored on 3 only", f.Items[1], f.Items[2])
 	}
 }
+
+// The user on their item ends a start asked for it; a replace into an ask ends doing; a ticked half still shown links
+// nothing.
+func TestDoingStartAskTicked(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b"}, {Text: "c"}, {Text: "d", PartOf: 3}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.Start(1, "a", "boss-x", now); err != nil {
+		t.Fatal(err)
+	}
+	if it, err := s.SetDoing(1, "a", true, &Doing{Text: "mine after all"}, now); err != nil || it.Started != nil {
+		t.Errorf("doing after a start: %+v, %v; want the start ended", it.Started, err)
+	}
+	if _, err := s.SetDoing(2, "b", true, &Doing{}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(2, Item{Text: "b?", Options: []string{"x", "y"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{4}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "e", PartOf: 3}, now); err != nil {
+		t.Errorf("link to 3 while its ticked half shows: %v", err)
+	}
+	for _, it := range read(t, s, now).Items {
+		if it.ID == 3 && it.PartOf != 5 {
+			t.Errorf("3's partner = %d, want the open 5 over the ticked 4", it.PartOf)
+		}
+	}
+	if f, _ := s.read(); f.Items[1].Doing != nil {
+		t.Errorf("replaced into an ask: doing %+v, want none", f.Items[1].Doing)
+	}
+}

@@ -634,8 +634,8 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		if it.Context == nil {
 			it.Context = old.Context
 		}
-		// Its doer goes on unless another one takes it
-		if it.On == old.On && sameSession(it.Session, old.Session) {
+		// Its doer goes on unless another one takes it or it becomes an ask
+		if it.On == old.On && sameSession(it.Session, old.Session) && len(it.Options) == 0 {
 			it.Doing = old.Doing
 		}
 		if it.PartOf == 0 || it.PartOf == old.PartOf || it.PartOf == partner(f.Items, id) {

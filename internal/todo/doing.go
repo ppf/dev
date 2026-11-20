@@ -11,7 +11,7 @@ import (
 const MaxDoing = 100
 
 // SetDoing sets what open item id's doer does now (d), or ends it (d nil). user: the user on their own item, not an ask,
-// only while it still reads text; else the boss on its own (OnBoss). Anyone else's item, and ending what isn't set,
+// only while it still reads text, ending a start asked for it; else the boss on its own (OnBoss). Anyone else's item, and ending what isn't set,
 // are refused.
 func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time) (Item, error) {
 	var it Item
@@ -40,7 +40,11 @@ func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time)
 			return fmt.Errorf("item %d isn't marked doing", id)
 		}
 		if d != nil {
+			// The user does it: no worker is to be started on it
 			d.At = now.Unix()
+			if user {
+				p.Started = nil
+			}
 		}
 		p.Doing = d
 		it = *p
@@ -61,7 +65,8 @@ func (f *file) checkPartOf(id, partner int) error {
 		return fmt.Errorf("--part-of %d: no open item %d", partner, partner)
 	}
 	for _, it := range f.Items {
-		if it.ID == id {
+		// A ticked half still shown is done: it links nothing
+		if it.ID == id || it.Done != 0 {
 			continue
 		}
 		if (it.ID == partner && it.PartOf != 0) || it.PartOf == partner || (id != 0 && it.PartOf == id) {
@@ -80,12 +85,19 @@ func (f *file) unlinkGone() {
 	}
 }
 
-// partner is the id of the item linked to id from its side (--part-of id), 0 for none.
+// partner is the id of the item linked to id from its side (--part-of id), an open one before a ticked one; 0 for none.
 func partner(items []Item, id int) int {
-	if i := slices.IndexFunc(items, func(it Item) bool { return it.PartOf == id }); i >= 0 {
-		return items[i].ID
+	found := 0
+	for _, it := range items {
+		switch {
+		case it.PartOf != id:
+		case it.Done == 0:
+			return it.ID
+		case found == 0:
+			found = it.ID
+		}
 	}
-	return 0
+	return found
 }
 
 // tick ticks it at at: what its doer did ends.
