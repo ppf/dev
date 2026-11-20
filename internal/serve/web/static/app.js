@@ -588,13 +588,13 @@ function board() {
   hues = new Map(projects.map((p, i) => [p, HUES[i % HUES.length]]));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
   const ls = lanes(all.filter(shown)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
-  const out = [filters(projects), wide.matches ? columns(ls) : stack(ls), ...listErrors()];
+  const out = [...listErrors(), filters(projects), wide.matches ? columns(ls) : stack(ls)];
   if (!all.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
 }
 
 function listErrors() {
-  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error));
+  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
 function facts(x) {

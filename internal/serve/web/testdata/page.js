@@ -125,5 +125,8 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await settle();
   run('render()');
   check('a short text: a title only', JSON.stringify(sheet()) === JSON.stringify([['sh-text', text, 'sheet-text']]));
+  run("state.board = { lists: [{ boss: 'boss-a', error: 'list not read: todo x: bad', items: [] }] }");
+  const top = run('board()')[0];
+  check('a list read error shows first, without the server prefix', top.className === 'err' && top.children.join('') === 'boss-a: its list could not be read: todo x: bad');
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
