@@ -148,6 +148,7 @@ type Model struct {
 	tickList   func(boss string, id int, text string) (string, error)             // dev todo done
 	startList  func(boss string, id int, text string) (string, error)             // dev todo start
 	openItem   func(client, boss string, id int, text string) error               // dev todo show
+	openBoard  func(client string, bosses []string) error                         // dev todo board
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -197,7 +198,7 @@ func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
 	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true,
-		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed, startList: sidebar.StartNeed, openItem: sidebar.OpenItem}
+		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed, startList: sidebar.StartNeed, openItem: sidebar.OpenItem, openBoard: sidebar.OpenBoard}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).

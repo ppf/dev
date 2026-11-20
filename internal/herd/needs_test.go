@@ -231,7 +231,7 @@ func TestNeedsRender(t *testing.T) {
 		!strings.Contains(lines[8], "Reply   Go to session") {
 		t.Errorf("focused, ask selected:\n%s", strings.Join(lines[:8], "\n"))
 	}
-	if hint := lines[len(lines)-1]; !strings.Contains(hint, "1-9 answer  m reply  g/⏎ go  t fold to do  esc cards") {
+	if hint := lines[len(lines)-1]; !strings.Contains(hint, "1-9 answer  m reply  g/⏎ go  t fold to do  esc cards  b board") {
 		t.Errorf("hint = %q", hint)
 	}
 }
@@ -1089,5 +1089,32 @@ func TestNeedOpenItem(t *testing.T) {
 	dialog.openItem = func(string, string, int, string) error { t.Error("space opened a session's row"); return nil }
 	if dialog, cmd := keys(dialog, " "); cmd != nil || !strings.Contains(dialog.msg.text, "space opens a list item") {
 		t.Errorf("space on a dialog: cmd %v msg %q", cmd != nil, dialog.msg.text)
+	}
+}
+
+// b opens the board of TO DO's lists: every boss's on the manager's board, this boss's and those under it on a boss's.
+func TestNeedOpenBoard(t *testing.T) {
+	var answered []listAnswer
+	m := selectKind(t, needsBoard(t, &answered), sidebar.NeedPlain)
+	m.snap.client = "/dev/ttys001"
+	var opened [][]string
+	m.openBoard = func(client string, bosses []string) error {
+		opened = append(opened, append([]string{client}, bosses...))
+		return nil
+	}
+	press := func(m Model) {
+		t.Helper()
+		_, cmd := keys(m, "b")
+		if cmd == nil {
+			t.Fatal("b ran nothing")
+		}
+		cmd()
+	}
+	m.snap.name = sidebar.Manager
+	press(m)
+	m.snap.name, m.snap.bosses = "boss-dev", []string{"boss-noc"}
+	press(m)
+	if want := [][]string{{"/dev/ttys001"}, {"/dev/ttys001", "boss-dev", "boss-noc"}}; !slices.EqualFunc(opened, want, slices.Equal) {
+		t.Errorf("opened %q, want %q", opened, want)
 	}
 }

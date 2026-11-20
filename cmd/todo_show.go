@@ -139,8 +139,12 @@ func showPopup(c *tmux.Client, client string, m itemview.Model, boss string, id 
 		return err
 	}
 	command := tmux.ShellJoin(self, "todo", "show", "--client", client, "--question", text, "--", boss, strconv.Itoa(id))
-	_, err = c.Run("display-popup", "-c", client, "-E", "-B", "-w", strconv.Itoa(w), "-h", strconv.Itoa(h),
-		"-e", showGuard+"=1", "--", command)
+	return popup(c, client, strconv.Itoa(w), strconv.Itoa(h), showGuard, command)
+}
+
+// popup runs command in a borderless popup on client, w by h (cells or a percentage), guard set in its environment.
+func popup(c *tmux.Client, client, w, h, guard, command string) error {
+	_, err := c.Run("display-popup", "-c", client, "-E", "-B", "-w", w, "-h", h, "-e", guard+"=1", "--", command)
 	// display-popup exits with the view's status, and the view, or the error that stopped it (Execute waits for a key),
 	// showed in the popup
 	if e, ok := errors.AsType[*tmux.Error](err); ok && e.Stderr == "" {
