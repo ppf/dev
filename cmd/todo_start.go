@@ -14,7 +14,6 @@ import (
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -85,7 +84,7 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 	if err != nil {
 		return "", err
 	}
-	if name == inbox.Manager && sh.Assignee.Kind != sidebar.AssigneeYou {
+	if name == inbox.Manager && !todo.Own(sh.On, sh.Session, name) {
 		return "", notStarted{fmt.Errorf("item %d on the manager's own list isn't yours: ask the manager in its session", id)}
 	}
 	it, prev, err := s.Start(sh, text, to.Name, now)

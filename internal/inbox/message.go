@@ -409,12 +409,12 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 		n.Text = fmt.Sprintf(`%s #%d "%s": %s is closed: reopen it (dev boss %s --background), its start list asks it to start #%d`,
 			boss, id, text, boss, strings.TrimPrefix(boss, "boss-"), id)
 	case todo.OnBoss(it.On, it.Session):
-		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself (dev todo add --replaces %d --on boss takes the start), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
+		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself and tick it when done (dev todo done %d), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, id, id)
 	case it.Session != nil && it.Status == todo.StatusGone:
 		n.Text = fmt.Sprintf(marked+`its worker %s is gone: start a fresh one on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, it.Session.Name, id)
-	case it.Session != nil:
+	case it.Session != nil && it.Status != "":
 		n.Text = fmt.Sprintf(marked+`it is on %s: see what it does, or start a fresh worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, it.Session.Name, id)
 	default:

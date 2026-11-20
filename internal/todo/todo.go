@@ -1049,7 +1049,7 @@ func (l List) lines(limit int, now time.Time) string {
 		switch {
 		case it.Started == nil:
 		case OnBoss(it.On, it.Session):
-			b.WriteString(" (the user asked to start it: do it yourself, --replaces <n> --on boss takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)")
+			b.WriteString(" (the user asked to start it: do it yourself and tick it when done, or start a worker on it and link it with --replaces <n> --on <worker>)")
 		case it.Session != nil && it.Gone:
 			b.WriteString(" (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)")
 		case it.Session != nil:

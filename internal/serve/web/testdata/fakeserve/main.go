@@ -242,8 +242,7 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 // start marks a To do card that is no ask started, as dev todo start leaves it; a late start goes again wherever it sits.
 func (s *server) start(req request, it map[string]any) (int, string) {
 	options, _ := it["options"].([]any)
-	a, _ := it["assignee"].(map[string]any)
-	mine := a["kind"] == "you"
+	mine := it["on"] == nil || it["on"] == ""
 	switch {
 	case req.Text != it["text"]:
 		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)

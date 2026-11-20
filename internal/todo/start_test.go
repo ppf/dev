@@ -108,6 +108,9 @@ func TestStartShapes(t *testing.T) {
 	if _, _, err := s.Start(sh, "b", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
 		t.Errorf("start of an item replaced meanwhile (same text and assignee): %v", err)
 	}
+	if _, _, err := s.Start(Shown{ID: 9}, "a", "boss-x", now); err == nil || !strings.Contains(err.Error(), "no open item 9") {
+		t.Errorf("start of no item: %v", err)
+	}
 	// A late start whose PR moved since (in Review) is sent again
 	if _, err := s.Add(Item{Text: "c"}, now); err != nil {
 		t.Fatal(err)
@@ -138,7 +141,7 @@ func TestStartLines(t *testing.T) {
 	got := l.StartReminder(false, "1m ago", nil, now)
 	for _, want := range []string{
 		"\n1. mine (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)",
-		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself, --replaces <n> --on boss takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)",
+		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself and tick it when done, or start a worker on it and link it with --replaces <n> --on <worker>)",
 		"\n3. lost (on gone, session gone) (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)",
 		"\n4. runs (on busy) (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)",
 	} {
