@@ -103,5 +103,8 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   run('load()');
   await settle();
   check('paired again elsewhere reopens the stream', !run('state.unpaired') && ctx.streams.length === streams + 1 && !es().closed);
+  run("state.board = { lists: [{ boss: 'boss-a', error: 'list not read: todo x: bad', items: [] }] }");
+  const top = run('board()')[0];
+  check('a list read error shows first, without the server prefix', top.className === 'err' && top.children.join('') === 'boss-a: its list could not be read: todo x: bad');
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
