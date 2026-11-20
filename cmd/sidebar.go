@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -20,7 +21,11 @@ func newSidebarCmd() *cobra.Command {
 			if pane == "" {
 				return errors.New("Must run inside tmux")
 			}
-			return sidebar.Run(tmux.New(), pane)
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("sidebar: binary path for reload: %w", err)
+			}
+			return sidebar.Run(tmux.New(), pane, exe, os.Args)
 		},
 	}
 	cmd.AddCommand(newSidebarToggleCmd(), newSidebarEnsureCmd(), newCloseWorktreeCmd(), newExitedCmd())

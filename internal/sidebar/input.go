@@ -4,8 +4,6 @@ import (
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/ppf/dev/internal/tmux"
 )
 
 // handleKey runs a key on the focused sidebar: j/k/↑/↓ move (wrapping), ⏎ switch, q back,
@@ -16,7 +14,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if target == "" {
 		target = current
 	}
-	m.answerErr = nil
+	m.answerErr, m.reloadErr = nil, nil
 	if m.needMode {
 		return m.handleNeedsKey(k)
 	}
@@ -29,18 +27,18 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.moveSelection(client, target, -1), nil
 	case "enter":
 		if target == current {
-			return m, runAction(c, client, func() error { return focusContent(c, client, current) })
+			return m, m.runAction(client, func() error { return focusContent(c, client, current) })
 		}
 		from := Origin{Session: current, Pane: m.pane}
-		return m, runAction(c, client, func() error { return switchTo(c, client, target, from) })
+		return m, m.runAction(client, func() error { return switchTo(c, client, target, from) })
 	case "q":
-		return m, runAction(c, client, func() error { return focusContent(c, client, current) })
+		return m, m.runAction(client, func() error { return focusContent(c, client, current) })
 	case "d", "+":
-		return m, runAction(c, client, func() error { return OpenPicker(c, client) })
+		return m, m.runAction(client, func() error { return OpenPicker(c, client) })
 	case "x":
-		return m, runAction(c, client, func() error { return Close(c, client, current, target) })
+		return m, m.runAction(client, func() error { return Close(c, client, current, target) })
 	case "r":
-		return m, runAction(c, client, func() error { return rename(c, client, target) })
+		return m, m.runAction(client, func() error { return rename(c, client, target) })
 	case "o":
 		return m, m.openPR(client, target)
 	case "ctrl+c":
@@ -60,7 +58,7 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	f := m.render()
 	for _, l := range f.links {
 		if ms.Y == l.line && ms.X >= l.from && ms.X < l.to {
-			return m, runAction(c, client, func() error { return m.prs.open(l.url) })
+			return m, m.runAction(client, func() error { return m.prs.open(l.url) })
 		}
 	}
 	for _, h := range f.needs {
@@ -79,10 +77,10 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 	session, exact, ok := rowAt(f.rows, ms.Y)
 	if buttonZone(ms.X, m.snap.width) {
 		if ms.Y == f.header {
-			return m, runAction(c, client, func() error { return OpenPicker(c, client) })
+			return m, m.runAction(client, func() error { return OpenPicker(c, client) })
 		}
 		if ok && exact {
-			return m, runAction(c, client, func() error { return Close(c, client, current, session) })
+			return m, m.runAction(client, func() error { return Close(c, client, current, session) })
 		}
 	}
 	if !ok || ms.Y < f.header {
@@ -92,10 +90,10 @@ func (m Model) handleMouse(ms tea.MouseMsg) (tea.Model, tea.Cmd) {
 		showMessage(c, client, "❌ "+err.Error())
 	}
 	if session == current {
-		return m, runAction(c, client, func() error { return focusContent(c, client, current) })
+		return m, m.runAction(client, func() error { return focusContent(c, client, current) })
 	}
 	from := Origin{Session: current, Pane: m.pane}
-	return m, runAction(c, client, func() error { return switchTo(c, client, session, from) })
+	return m, m.runAction(client, func() error { return switchTo(c, client, session, from) })
 }
 
 // openPR opens target's PR in the browser, or says why there is none.
@@ -106,7 +104,7 @@ func (m Model) openPR(client, target string) tea.Cmd {
 	}
 	switch {
 	case pr.Number != 0:
-		return runAction(m.c, client, func() error { return m.prs.open(pr.URL) })
+		return m.runAction(client, func() error { return m.prs.open(pr.URL) })
 	case pr.Err != "":
 		showMessage(m.c, client, "❌ "+pr.Err)
 	default:
@@ -129,17 +127,6 @@ func (m Model) moveSelection(client, target string, dir int) Model {
 		showMessage(m.c, client, "❌ "+err.Error())
 	}
 	return m
-}
-
-// runAction runs fn as a command, off the update loop since display-popup blocks until the popup closes,
-// and flashes its error on client.
-func runAction(c *tmux.Client, client string, fn func() error) tea.Cmd {
-	return func() tea.Msg {
-		if err := fn(); err != nil {
-			showMessage(c, client, "❌ "+err.Error())
-		}
-		return nil
-	}
 }
 
 // move returns the session dir rows away from selected in order, wrapping; an unknown selection

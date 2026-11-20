@@ -371,7 +371,7 @@ func (m Model) gotoBoard(board string) (tea.Model, tea.Cmd) {
 	c, client := m.c, m.client()
 	from := Origin{Session: m.snap.current, Pane: m.pane}
 	m.needMode = false
-	return m, runAction(c, client, func() error { return focusBoard(c, client, board, from) })
+	return m, m.runAction(client, func() error { return focusBoard(c, client, board, from) })
 }
 
 // focusBoard switches client to board's session and focuses its previews pane, asking it to focus TO DO
@@ -574,10 +574,10 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		client, open := m.client(), m.openItem
-		return m, runAction(m.c, client, func() error { return open(client, row.Boss, row.ID, row.Text) })
+		return m, m.runAction(client, func() error { return open(client, row.Boss, row.ID, row.Text) })
 	case "b":
 		client, open := m.client(), m.openBoard
-		return m, runAction(m.c, client, func() error { return open(client, nil) })
+		return m, m.runAction(client, func() error { return open(client, nil) })
 	case "d":
 		if row.Kind != NeedPlain {
 			showMessage(m.c, m.client(), "d ticks a plain item")
@@ -623,10 +623,10 @@ func (m Model) openNeed(row NeedRow) (tea.Model, tea.Cmd) {
 		showMessage(c, client, "❌ "+err.Error())
 	}
 	if row.Session == current {
-		return m, runAction(c, client, func() error { return focusContent(c, client, current) })
+		return m, m.runAction(client, func() error { return focusContent(c, client, current) })
 	}
 	from := Origin{Session: current, Pane: m.pane}
-	return m, runAction(c, client, func() error { return switchTo(c, client, row.Session, from) })
+	return m, m.runAction(client, func() error { return switchTo(c, client, row.Session, from) })
 }
 
 func (m Model) enterNeeds() Model {
