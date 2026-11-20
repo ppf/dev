@@ -401,13 +401,12 @@ function pick(list, it, value) {
   location.hash = itemHash(list.boss, it.id);
 }
 
-const initials = (name, proj) => name.replace(/^boss-/, '').replace(new RegExp('^' + proj.replace(/\W/g, '\\$&') + '-'), '')
-  .split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => [...w][0].toUpperCase()).join('') || [...name][0].toUpperCase();
+const initials = name => name.replace(/^boss-/, '').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => [...w][0].toUpperCase()).join('') || [...name][0].toUpperCase();
 
 // avatar is an assignee's round mark: ME for the user, a session's initials, dashed while it doesn't run.
-function avatar(who, proj, running = true) {
+function avatar(who, running = true) {
   if (who === ME) return el('span', { class: 'av me', 'aria-hidden': 'true' }, 'ME');
-  return el('span', { class: 'av' + (running ? '' : ' off'), 'aria-hidden': 'true', vars: { '--a': AVATARS[hash(who) % AVATARS.length] } }, initials(who, proj));
+  return el('span', { class: 'av' + (running ? '' : ' off'), 'aria-hidden': 'true', vars: { '--a': AVATARS[hash(who) % AVATARS.length] } }, initials(who));
 }
 
 // assignee is the card's avatar and name, at its foot's end.
@@ -415,7 +414,7 @@ function assignee(x) {
   const who = whoOf(x), running = who === ME || x.done || !x.it.assignee || !!x.it.assignee.running; // running is left out when false
   const name = who === ME ? 'You' : who;
   return el('span', { class: 'asg' + (running ? '' : ' off'), title: 'assignee: ' + name + (running ? '' : ' (not running)') },
-    avatar(who, project(x.list), running), el('span', null, name));
+    avatar(who, running), el('span', null, name));
 }
 
 function prChip(it) {
@@ -456,17 +455,17 @@ function card(x) {
 }
 
 // filters are the Project and Assignee chips; the Assignee ones toggle, several at once, ME first.
-function filters(projects, all) {
+function filters(projects, ws) {
   const f = state.filter;
   const seg = (label, kids) => el('div', { class: 'filter' }, el('span', { class: 'flabel' }, label), el('div', { class: 'seg', role: 'group', 'aria-label': label }, kids));
-  const ws = whos(all), shown = state.allWho ? ws : ws.slice(0, WHO_SHOWN);
+  const shown = state.allWho ? ws : ws.slice(0, WHO_SHOWN);
   return el('div', { class: 'filters' },
     seg('Project', [['', 'All'], ...projects.map(p => [p, p])].map(([v, text]) =>
       el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => { f.project = v; render(); } },
         v && el('span', { class: 'sw', vars: { '--h': hue(v) } }), text))),
     seg('Assignee', [shown.map(([who, n]) => el('button', { type: 'button', class: 'who', 'data-f': 'who:' + who, 'aria-pressed': String(f.who.includes(who)),
       onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; render(); } },
-    avatar(who, ''), who === ME ? 'Me' : who, el('span', { class: 'n' }, String(n)))),
+    avatar(who), who === ME ? 'Me' : who, el('span', { class: 'n' }, String(n)))),
     ws.length > shown.length && el('button', { type: 'button', 'data-f': 'who:more', onclick: () => { state.allWho = true; render(); } }, '+' + (ws.length - shown.length))]));
 }
 
@@ -515,11 +514,14 @@ function board() {
   const all = cards(state.board);
   const projects = [...new Set(all.map(x => project(x.list)))].sort();
   if (!projects.includes(state.filter.project)) state.filter.project = '';
+  // A pressed assignee whose cards are gone has no chip left to unpress
+  const ws = whos(all);
+  state.filter.who = state.filter.who.filter(w => ws.some(([k]) => k === w));
   hues = new Map(projects.map((p, i) => [p, HUES[i % HUES.length]]));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
   const ls = lanes(all.filter(x => matches(x, state.filter))).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
-  const out = [...listErrors(), filters(projects, all), wide.matches ? columns(ls) : stack(ls)];
-  if (!all.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
+  const out = [...listErrors(), filters(projects, ws), wide.matches ? columns(ls) : stack(ls)];
+  if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
 }
 
@@ -655,6 +657,7 @@ function render() {
   const line = document.getElementById('line'), top = document.getElementById('tally');
   line.className = state.reachable ? '' : 'down';
   line.replaceChildren();
+  const focused = top.contains(document.activeElement) && document.activeElement.dataset.f;
   top.replaceChildren();
   if (!state.reachable) {
     line.append((state.problem || 'unreachable') + (state.asOf ? ' · as of ' + hhmm(state.asOf) : ''));
@@ -665,6 +668,7 @@ function render() {
     const need = el('button', { type: 'button', class: 'need' + (t.need ? ' on' : ''), 'aria-pressed': String(f.needs), 'data-f': 'needs',
       onclick: () => { f.needs = !f.needs; render(); } }, el('b', null, String(t.need)), 'need you');
     top.append(need, n(t.mine, 'mine'), n(t.open, 'open'));
+    if (focused) need.focus({ preventScroll: true });
     line.append('live · updated ' + hhmm(state.asOf));
     if (state.newVersion) line.append(' · ', el('button', { class: 'reload', type: 'button', onclick: reload }, 'New version: reload'));
   }

@@ -80,8 +80,9 @@ function checkBand(it, now) {
   return [text, c.kind === 'unchanged' ? 'amber' : 'soft-red'];
 }
 
-// matches is whether x passes filter f: {project, who: assignee keys (none: anyone), needs: only what needs the user}.
-const matches = (x, f) => (!f.project || project(x.list) === f.project) && (!f.who.length || f.who.includes(whoOf(x))) && (!f.needs || needsYou(x));
+// matches is whether x passes filter f: {project, who: assignee keys (none: anyone), needs: only what needs the user, as
+// the tally counts it}.
+const matches = (x, f) => (!f.project || project(x.list) === f.project) && (!f.who.length || f.who.includes(whoOf(x))) && (!f.needs || (needsYou(x) && !x.it.quiet));
 
 // tally counts the open cards, test items left out: what needs the user, the user's, all.
 function tally(xs) {
