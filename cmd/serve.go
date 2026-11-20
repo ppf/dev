@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/serve/web"
 	"github.com/ppf/dev/internal/sidebar"
@@ -202,7 +203,7 @@ func bind(addr string) (netip.AddrPort, serve.Kind, error) {
 func serveConfig(stderr io.Writer, dir string) serve.Config {
 	auth := &serve.Auth{Dir: dir, Now: time.Now}
 	return serve.Config{
-		Version:     buildVersion(),
+		Version:     selfreload.Version(),
 		Now:         time.Now,
 		Lists:       boardLists(tmux.New(), &unrepeated{w: stderr, now: time.Now}, time.Now),
 		ManagerRuns: func() bool { return running(tmux.New(), sidebar.Manager) },

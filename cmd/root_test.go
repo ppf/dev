@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ppf/dev/internal/open"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -364,7 +365,7 @@ func TestVersionFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != buildVersion()+"\n" || strings.TrimSpace(out) == "" {
-		t.Fatalf("--version = %q, want %q", out, buildVersion()+"\n")
+	if out != selfreload.Version()+"\n" || strings.TrimSpace(out) == "" {
+		t.Fatalf("--version = %q, want %q", out, selfreload.Version()+"\n")
 	}
 }
