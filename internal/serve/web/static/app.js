@@ -589,13 +589,13 @@ function board() {
   hues = new Map(projects.map((p, i) => [p, HUES[i % HUES.length]]));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
   const ls = lanes(all.filter(shown)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
-  const out = [filters(projects), wide.matches ? columns(ls) : stack(ls), ...listErrors()];
+  const out = [...listErrors(), filters(projects), wide.matches ? columns(ls) : stack(ls)];
   if (!all.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
 }
 
 function listErrors() {
-  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error));
+  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
 function facts(x) {
@@ -649,8 +649,11 @@ function item(boss, id) {
   }
   const { list, it } = x, k = key(boss, id);
   state.shown = { k, text: it.text };
-  const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close),
-    el('p', { class: 'sh-text', id: 'sheet-text' }, it.text)];
+  const [title, rest] = lead(it.text);
+  const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close)];
+  // The title, or the body when there is none, names the sheet
+  if (title) out.push(el('p', { class: 'sh-text', id: 'sheet-text' }, title));
+  if (rest) out.push(el('p', { class: 'sh-body', id: !title && 'sheet-text' }, rest));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   if (answerable(list, it)) out.push(...answerForm(list, it));
   else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));

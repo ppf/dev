@@ -5,15 +5,15 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 function node() {
   const n = { children: [], dataset: {}, style: { setProperty() {} }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
     classList: { set: new Set(), toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); }, contains(c) { return this.set.has(c); } },
-    setAttribute() {}, getAttribute() { return null; }, addEventListener() {}, focus() {},
+    attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, addEventListener() {}, focus() {},
     append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
     querySelectorAll() { return []; }, querySelector() { return null; } };
   return n;
 }
 const els = {};
-let version = 'v1', tag = 'A', status = 200;
+let version = 'v1', tag = 'A', status = 200, text = '';
 const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
-  lists: [{ boss: 'boss-a', items: [{ id: 1, text: 'item ' + tag, done: false, status: 'yours' }] }] });
+  lists: [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
 const calls = [];
 const ctx = {
   console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
@@ -104,6 +104,30 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await settle();
   check('paired again elsewhere reopens the stream', !run('state.unpaired') && ctx.streams.length === streams + 1 && !es().closed);
 
+  text = 'Fix the sheet so it reads well. ' + 'The rest of it, read as body text. '.repeat(4).trim();
+  tag = 'F';
+  es().on.board({ data: 'W/"Fv2"' });
+  await settle();
+  ctx.location.hash = '#/item/boss-a/1';
+  run('render()');
+  const sheet = () => els.sheet.children.filter(c => /^sh-(text|body)$/.test(c.className)).map(c => [c.className, c.children[0], c.attrs.id || '']);
+  check('a long text: its first sentence the title, the rest body text', JSON.stringify(sheet()) ===
+    JSON.stringify([['sh-text', 'Fix the sheet so it reads well.', 'sheet-text'], ['sh-body', text.slice(32), '']]));
+  text = 'word '.repeat(40).trim();
+  tag = 'G';
+  es().on.board({ data: 'W/"Gv2"' });
+  await settle();
+  run('render()');
+  check('no break: body text only, naming the sheet', JSON.stringify(sheet()) === JSON.stringify([['sh-body', text, 'sheet-text']]));
+  text = 'Read the plan';
+  tag = 'H';
+  es().on.board({ data: 'W/"Hv2"' });
+  await settle();
+  run('render()');
+  check('a short text: a title only', JSON.stringify(sheet()) === JSON.stringify([['sh-text', text, 'sheet-text']]));
+  run("state.board = { lists: [{ boss: 'boss-a', error: 'list not read: todo x: bad', items: [] }] }");
+  const top = run('board()')[0];
+  check('a list read error shows first, without the server prefix', top.className === 'err' && top.children.join('') === 'boss-a: its list could not be read: todo x: bad');
   const sheetText = () => run("item('boss-x', 4)")[1].children.join('');
   run("state.board = { lists: [{ boss: 'boss-x', error: 'invalid character' }] }");
   check('an item of an unreadable list says the list could not be read', /could not be read: invalid character/.test(sheetText()));

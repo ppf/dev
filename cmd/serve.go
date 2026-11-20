@@ -72,6 +72,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
 			fmt.Fprintln(out, "pair a phone: dev serve pair")
+			// Off the serving path: a hung tmux server must not hold up the page
+			go func() {
+				if _, err := tmux.New().Run("list-sessions"); tmux.IsNoServer(err) {
+					fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev serve: no tmux server running: the board stays empty until it starts")
+				}
+			}()
 			return listenAndServe(cmd.Context(), ln, serveConfig(cmd.ErrOrStderr(), dir))
 		},
 	}

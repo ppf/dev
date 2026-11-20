@@ -331,10 +331,10 @@ func liveSession(name string, rs []paneRow) (sess Session, a agent.Agent, i int,
 }
 
 // Live is each session on c's server with its own state as the boards read it (liveSession), in list-panes order;
-// none without a server.
+// none without a server or a session on it.
 func Live(c *tmux.Client) ([]Session, error) {
 	rows, err := tmux.Query[paneRow](c, "list-panes", "-a")
-	if tmux.IsNoServer(err) {
+	if tmux.IsNoServer(err) || tmux.IsNoSession(err) {
 		return nil, nil
 	}
 	if err != nil {
