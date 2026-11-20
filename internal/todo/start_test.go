@@ -141,7 +141,31 @@ func TestStartShapes(t *testing.T) {
 	if err != nil || it.Doing != nil || it.Started == nil {
 		t.Errorf("a late start of an item marked doing = %+v, %v; want started, doing ended", it, err)
 	}
-	// Its note not sent: start and doing back as they were
+	// Its note not sent: the start back, and doing only while it is on whom it was
+	restart := func(on string) {
+		t.Helper()
+		if err := s.update(now, func(f *file) error {
+			p := &f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
+			p.On, p.Started, p.Doing = on, it.Started, nil
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restart("Marek")
+	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
+		if p.Doing != nil || p.Started == nil || p.Started.At != now.Add(-StartLate).Unix() {
+			t.Errorf("Unstart onto an item moved meanwhile = %+v / %+v, want the late start back, no doing", p.Started, p.Doing)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restart("")
 	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
 		t.Fatal(err)
 	}
