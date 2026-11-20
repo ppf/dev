@@ -291,7 +291,7 @@ func TestDoingStartAskTicked(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := s.Start(1, "a", "boss-x", now); err != nil {
+	if _, _, err := s.Start(placed(t, s, Owner{Name: "boss-x"}, 1, now), "a", "boss-x", now); err != nil {
 		t.Fatal(err)
 	}
 	if it, err := s.SetDoing(1, "a", true, &Doing{Text: "mine after all"}, now); err != nil || it.Started != nil {

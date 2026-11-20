@@ -10,9 +10,9 @@ import (
 // MaxDoing is the longest doing line, in characters: one row under a card.
 const MaxDoing = 100
 
-// SetDoing sets what open item id's doer does now (d), or ends it (d nil). user: the user on their own item, not an ask,
-// only while it still reads text, ending a start asked for it; else the boss on its own (OnBoss). Anyone else's item, and ending what isn't set,
-// are refused.
+// SetDoing sets what open item id's doer does now (d), or ends it (d nil), ending a start asked for it. user: the user
+// on their own item, not an ask, only while it still reads text; else the boss on its own (OnBoss). Anyone else's
+// item, and ending what isn't set, are refused.
 func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time) (Item, error) {
 	var it Item
 	if d != nil {
@@ -40,11 +40,9 @@ func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time)
 			return fmt.Errorf("item %d isn't marked doing", id)
 		}
 		if d != nil {
-			// The user does it: no worker is to be started on it
+			// Its doer is on it: no worker is to be started on it
 			d.At = now.Unix()
-			if user {
-				p.Started = nil
-			}
+			p.Started = nil
 		}
 		p.Doing = d
 		it = *p

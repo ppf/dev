@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/todo"
 )
 
 func TestFromHook(t *testing.T) {
@@ -512,11 +513,32 @@ func TestAddAnswer(t *testing.T) {
 	}
 }
 
+// A start note says what to do by whose the item is: the user's, the boss's own parked one, a gone or running worker's; a closed
+// boss's, whoever's, asks the manager to reopen it.
+func TestStarted(t *testing.T) {
+	gone := &todo.Session{ID: "$5", Name: "fix-login"}
+	for _, tt := range []struct {
+		it     todo.Shown
+		closed bool
+		want   string
+	}{
+		{todo.Shown{ID: 4, Text: "a"}, false, `#4 "a": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces 4 --on <worker>; if it is the user's own to do, say so on the list (dev todo add --replaces 4 --on me "<text, why>")`},
+		{todo.Shown{ID: 4, Text: "a", On: todo.Boss}, false, `#4 "a": while it still reads so and is marked started on your list, it is your own parked item: do it yourself (dev todo doing 4 takes the start), or start a worker on it and link it with dev todo add --replaces 4 --on <worker>`},
+		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone, Status: todo.StatusGone}, false, `#4 "a": while it still reads so and is marked started on your list, its worker fix-login is gone: start a fresh one on it and link it with dev todo add --replaces 4 --on <worker>`},
+		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, false, `#4 "a": while it still reads so and is marked started on your list, it is on fix-login: see what it does, or start a fresh worker on it and link it with dev todo add --replaces 4 --on <worker>`},
+		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, true, `boss-x #4 "a": boss-x is closed: reopen it (dev boss x --background), its start list asks it to start #4`},
+	} {
+		if n := Started("boss-x", tt.it, tt.closed); n.Text != tt.want || n.Kind != Start || n.Key != "start boss-x 4" {
+			t.Errorf("Started(%+v, %v) = %+v, want text %q", tt.it, tt.closed, n, tt.want)
+		}
+	}
+}
+
 // A full inbox drops its oldest notes, never an answer nor a start: its item is ticked already, or waits on it.
 func TestAddCapsKeepsAnswers(t *testing.T) {
 	b := testBox(t)
 	_, _ = b.Add(Answer(1, "a?", "Yes"), time.Time{})
-	_, _ = b.Add(Started("boss-x", 2, "b", false), time.Time{})
+	_, _ = b.Add(Started("boss-x", todo.Shown{ID: 2, Text: "b"}, false), time.Time{})
 	for i := range maxNotes + 3 {
 		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
 	}

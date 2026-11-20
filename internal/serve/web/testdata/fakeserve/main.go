@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/serve/web"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
 )
 
@@ -238,19 +239,27 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// start marks the user's own yours or boss closed item, or one whose start wasn't picked up, starting, sent to its boss.
+// start marks a To do card that is no ask started, as dev todo start leaves it; a late start goes again wherever it sits.
 func (s *server) start(req request, it map[string]any) (int, string) {
+	options, _ := it["options"].([]any)
+	on, _ := it["on"].(string)
+	mine := todo.Own(on, nil, req.Boss) && it["session"] == nil || on == ""
 	switch {
 	case req.Text != it["text"]:
 		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)
-	case it["start_late"] != true && !slices.Contains([]any{todo.StatusYours, todo.StatusBossClosed}, it["status"]):
-		return 409, fmt.Sprintf("item %d is %v: not yours to start", req.ID, it["status"])
+	case req.Boss == sidebar.Manager && !mine:
+		return 409, fmt.Sprintf("item %d on the manager's own list isn't yours: ask the manager in its session", req.ID)
+	case it["start_late"] != true && (it["column"] != "todo" || len(options) > 0):
+		return 409, fmt.Sprintf("item %d is %v: not a To do card to start", req.ID, it["column"])
 	}
-	it["status"], it["status_on"] = todo.StatusStarting, req.Boss
+	if mine {
+		it["status"], it["status_on"] = todo.StatusStarting, req.Boss
+	}
 	it["column"], it["assignee"] = "progress", map[string]any{"kind": "boss", "name": req.Boss, "running": true}
 	it["started"] = map[string]any{"at": time.Now().Unix(), "to": req.Boss}
 	delete(it, "start_late")
 	delete(it, "needs_you")
+	delete(it, "doing")
 	return 200, ""
 }
 

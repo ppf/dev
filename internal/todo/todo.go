@@ -701,10 +701,11 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 	}))
 }
 
-// Start marks the user's own open item id started, its note going to to, only while it still reads text and no start
-// under StartLate old waits; an ask, an item on someone or one started already is an error. A late start is sent again:
-// prev is the start it replaced.
-func (s Store) Start(id int, text, to string, now time.Time) (it Item, prev *Started, err error) {
+// Start marks open item sh.ID started, its note going to to, only while it is as sh was read (text, Added, on, session,
+// doing), and no start under StartLate old waits. sh is the item as read and placed (SetStatus): only a To do card
+// starts, not an ask. A late start is sent again, wherever it sits. A start ends doing. prev is the item before it.
+func (s Store) Start(sh Shown, text, to string, now time.Time) (it, prev Item, err error) {
+	id := sh.ID
 	err = s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
 		if i < 0 {
@@ -716,23 +717,32 @@ func (s Store) Start(id int, text, to string, now time.Time) (it Item, prev *Sta
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, text)
 		case p.Started != nil && now.Sub(time.Unix(p.Started.At, 0)) < StartLate:
 			return fmt.Errorf("item %d: already sent to %s %s ago", id, p.Started.To, wait.Span(now.Sub(time.Unix(p.Started.At, 0))))
-		case !Own(p.On, p.Session, s.boss):
-			return fmt.Errorf("item %d is on %s, not the user's to start", id, p.On)
+		case p.Added != sh.Added || p.On != sh.On || !sameSession(p.Session, sh.Session) || (p.Doing != nil) != (sh.Doing != nil):
+			return fmt.Errorf("item %d changed while it was read: look at the list again", id)
 		case len(p.Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
+		case p.Started == nil && sh.Column != sidebar.ColumnTodo:
+			return fmt.Errorf("item %d is %s, not To do: only a To do card starts", id, sh.where())
 		}
-		prev, p.Started = p.Started, &Started{At: now.Unix(), To: to}
+		// Handed to a session: whoever was on it no longer is
+		prev = *p
+		p.Started, p.Doing = &Started{At: now.Unix(), To: to}, nil
 		it = *p
 		return nil
 	}))
 	return it, prev, err
 }
 
-// Unstart puts back prev in place of item id's start made at at, when its note couldn't be sent.
-func (s Store) Unstart(id int, at int64, prev *Started, now time.Time) error {
+// Unstart puts back prev's start and doing in place of open item id's start made at at, when its note couldn't be
+// sent; doing only while it has none now.
+func (s Store) Unstart(id int, at int64, prev Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
-		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Started != nil && it.Started.At == at }); i >= 0 {
-			f.Items[i].Started = prev
+		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 && it.Started != nil && it.Started.At == at }); i >= 0 {
+			p := &f.Items[i]
+			p.Started = prev.Started
+			if p.Doing == nil {
+				p.Doing = prev.Doing
+			}
 		}
 		return nil
 	})
@@ -1072,7 +1082,15 @@ func (l List) lines(limit int, now time.Time) string {
 		if it.Doing != nil {
 			b.WriteString(doingLine(it))
 		}
-		if it.Started != nil {
+		switch {
+		case it.Started == nil:
+		case OnBoss(it.On, it.Session):
+			b.WriteString(" (the user asked to start it: do it yourself, dev todo doing <n> takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)")
+		case it.Session != nil && it.Gone:
+			b.WriteString(" (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)")
+		case it.Session != nil:
+			b.WriteString(" (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)")
+		default:
 			b.WriteString(" (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)")
 		}
 		if it.Check != nil {
