@@ -22,6 +22,8 @@ type Config struct {
 	Now     func() time.Time
 	// Lists is the JSON dev todo --all --json prints: an array of lists, each with its items' status.
 	Lists func() (json.RawMessage, error)
+	// ManagerRuns is whether the manager's session is open: it takes a closed boss's starts. nil: it isn't.
+	ManagerRuns func() bool
 	// Answer answers ask id of boss's list as the user while it still reads question; Done ticks the user's own item
 	// id while it still reads text; Start asks for that item to be started while it still reads text. Refused tells
 	// the page why not.
@@ -81,10 +83,12 @@ type counts struct {
 
 // board is everything but generated, which the ETag leaves out so an unchanged board answers 304.
 type board struct {
-	Version  string          `json:"version"`
-	Statuses []string        `json:"statuses"`
-	Counts   counts          `json:"counts"`
-	Lists    json.RawMessage `json:"lists"`
+	Version  string   `json:"version"`
+	Statuses []string `json:"statuses"`
+	Counts   counts   `json:"counts"`
+	// ManagerRuns: Start on a closed boss's item needs it
+	ManagerRuns bool            `json:"manager_runs"`
+	Lists       json.RawMessage `json:"lists"`
 }
 
 func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +108,7 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the board couldn't be read: see dev serve's output")
 		return
 	}
-	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists}
+	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns()}
 	for _, l := range statuses {
 		for _, it := range l.Items {
 			switch it.Status {

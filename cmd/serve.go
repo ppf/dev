@@ -23,6 +23,7 @@ import (
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/serve/web"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -194,15 +195,16 @@ func bind(addr string) (netip.AddrPort, serve.Kind, error) {
 func serveConfig(stderr io.Writer, dir string) serve.Config {
 	auth := &serve.Auth{Dir: dir, Now: time.Now}
 	return serve.Config{
-		Version: buildVersion(),
-		Now:     time.Now,
-		Lists:   boardLists(tmux.New(), stderr, time.Now),
-		Answer:  pageAnswer,
-		Done:    pageDone(stderr),
-		Start:   pageStart(stderr),
-		Guard:   auth.Session,
-		Pair:    http.HandlerFunc(auth.Pair),
-		Page:    web.Handler(),
+		Version:     buildVersion(),
+		Now:         time.Now,
+		Lists:       boardLists(tmux.New(), stderr, time.Now),
+		ManagerRuns: func() bool { return running(tmux.New(), sidebar.Manager) },
+		Answer:      pageAnswer,
+		Done:        pageDone(stderr),
+		Start:       pageStart(stderr),
+		Guard:       auth.Session,
+		Pair:        http.HandlerFunc(auth.Pair),
+		Page:        web.Handler(),
 	}
 }
 
