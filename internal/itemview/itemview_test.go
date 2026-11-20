@@ -104,6 +104,8 @@ func TestActions(t *testing.T) {
 	check.Status = sidebar.StatusCheck
 	closed := plain
 	closed.Closed = true
+	note := plain
+	note.Boss = sidebar.Manager
 	for _, c := range []struct {
 		name string
 		it   Item
@@ -114,6 +116,7 @@ func TestActions(t *testing.T) {
 		{"person", person, []string{"g"}},
 		{"check", check, []string{"d", "o", "g"}},
 		{"closed", closed, []string{"d", "o"}},
+		{"manager's own note", note, []string{"d", "o", "g"}},
 	} {
 		var keys []string
 		for _, e := range New(c.it, Actions{}, false).entries {

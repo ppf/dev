@@ -308,7 +308,7 @@ func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 // startNeed asks for the user's own list item to be started through dev todo start: its boss, or the manager for a
 // closed boss's; a second start says when the first went.
 func (m Model) startNeed(r needRow) (tea.Model, tea.Cmd) {
-	if r.Kind != sidebar.NeedPlain || r.Status == sidebar.StatusCheck {
+	if r.Kind != sidebar.NeedPlain || r.Status == sidebar.StatusCheck || r.Boss == Manager {
 		m.msg = info("s starts your own plain item; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
