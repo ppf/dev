@@ -600,8 +600,8 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user, On Boss to its boss. An id that isn't one is an error, as is an ask's
-// new text over MaxQuestion.
+// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user, On Boss to its boss. An id
+// that isn't one is an error, as is an ask's new text over MaxQuestion.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })

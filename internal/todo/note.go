@@ -61,8 +61,8 @@ func (n Note) Check() error {
 }
 
 // AddNote stores n and returns its id (1, 2…, shown as n1), never one used before; a state note replaces the list's
-// earlier one. Over MaxNotes, an over-long text or why, a
-// said note without Until or Item, or an Item that isn't an open item is an error. The list's Updated stays.
+// earlier one. Over MaxNotes, an over-long text or why, a said note without Until or Item, or an Item that isn't an
+// open item is an error. The list's Updated stays.
 func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 	if err := n.Check(); err != nil {
 		return 0, err

@@ -164,10 +164,11 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			}
 			stderr := cmd.ErrOrStderr()
 			it.On = todo.Clean(it.On)
+			waiting := cmd.Flags().Changed("waiting-for")
 			switch {
-			case it.On != "" && cmd.Flags().Changed("waiting-for"):
+			case it.On != "" && waiting:
 				return errors.New("--on or --waiting-for, not both")
-			case cmd.Flags().Changed("waiting-for"):
+			case waiting:
 				if it.On, err = waitingFor(todo.Clean(person), s.Boss(), *boss, stderr); err != nil {
 					return err
 				}
