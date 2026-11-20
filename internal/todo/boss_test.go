@@ -7,18 +7,19 @@ import (
 	"time"
 )
 
-// An item on Boss is stored without a session, kept by a Replace that doesn't name another, given back by --on me;
-// it is the boss's own: open, not on others, not the user's to tick, answer or start.
+// An item on Boss without a session is the boss's own, kept by a Replace that doesn't name another, given back by
+// --on me: open, not on others, not the user's to tick, answer or start. One linked to a worker named boss stays
+// that worker's.
 func TestOnBoss(t *testing.T) {
 	s := store(t)
 	s.boss = "boss-a"
 	now := time.Unix(1_800_000_000, 0)
 	for _, it := range []Item{
-		{Text: "parked", On: Boss, Session: &Session{ID: "x", Name: "x"}},
+		{Text: "parked", On: Boss},
 		{Text: "a person's", On: "Marek"},
 		{Text: "mine"},
 		{Text: "pick?", On: Boss, Options: []string{"Yes", "No"}},
-		{Text: "linked", On: "w", Session: &Session{ID: "w", Name: "w"}},
+		{Text: "linked", On: Boss, Session: &Session{ID: "local_w", Name: Boss}},
 	} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
@@ -34,6 +35,9 @@ func TestOnBoss(t *testing.T) {
 	}
 	if n, on := l.Open(); n != 5 || on != 2 {
 		t.Errorf("Open = %d, %d on others; want 5, 2 (the boss's own not on others)", n, on)
+	}
+	if got, want := nudges(t, s, now), []string{`#5 "linked" (on boss): its session is gone`}; !slices.Equal(got, want) {
+		t.Errorf("nudges = %q, want %q", got, want)
 	}
 	if err := s.DoneText(1, "parked", now); err == nil || !strings.Contains(err.Error(), "is on boss, not the user's to tick") {
 		t.Errorf("tick: %v", err)

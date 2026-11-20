@@ -384,17 +384,18 @@ func (s Store) keepTold(old, it Item) error {
 
 // Nudge is an open item its boss is told once about: Why it may be out of date.
 type Nudge struct {
-	ID   int
-	Text string
-	On   string
-	Why  string
+	ID     int
+	Text   string
+	On     string
+	OnBoss bool // the boss's own (OnBoss), not a worker named boss
+	Why    string
 }
 
 // String is the nudge as its boss is told it: `#5 "Deploy the cache fix after #418 merges" (on Tomas): PR #418 merged 40m ago`.
 func (n Nudge) String() string {
 	on := ""
 	switch {
-	case n.On == Boss:
+	case n.OnBoss:
 		on = " (yours, --on boss)"
 	case n.On != "":
 		on = " (on " + n.On + ")"
@@ -438,7 +439,7 @@ func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell fun
 					fc.Told = map[string]int64{}
 				}
 				fc.Told[reason], told = now.Unix(), true
-				out = append(out, Nudge{ID: it.ID, Text: it.Text, On: it.On, Why: why})
+				out = append(out, Nudge{ID: it.ID, Text: it.Text, On: it.On, OnBoss: OnBoss(it.On, it.Session), Why: why})
 			}
 			for _, c := range moves(it, fc) {
 				if fc.Told[c.Kind] == 0 {

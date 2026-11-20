@@ -119,12 +119,10 @@ func warnLong(stderr io.Writer, text string) {
 	}
 }
 
-// waitingFor is person as an item's on, refused when empty or when it names what --on means otherwise: me, boss,
-// this list's own boss (own), or a session the boss started.
+// waitingFor is person as an item's on, refused when it names what --on means otherwise: me, boss, this list's own
+// boss (own), or a session the boss started.
 func waitingFor(person, own, boss string, stderr io.Writer) (string, error) {
 	switch {
-	case person == "":
-		return "", errors.New("--waiting-for: no person")
 	case strings.EqualFold(person, todo.Me), strings.EqualFold(person, todo.Boss), own != "" && strings.EqualFold(person, own):
 		return "", fmt.Errorf("--waiting-for %s: not a person: the user's own is --on me, your own task --on boss", person)
 	}
@@ -133,7 +131,12 @@ func waitingFor(person, own, boss string, stderr io.Writer) (string, error) {
 		return "", err
 	}
 	if w, ok := todo.Match(person, ws); ok {
-		return "", fmt.Errorf("--waiting-for %s: a session you started: --on %s", person, w.Name)
+		// Its name, unless another worker shares it
+		on := w.Name
+		if m, ok := todo.Match(w.Name, ws); !ok || m.ID != w.ID {
+			on = w.ID
+		}
+		return "", fmt.Errorf("--waiting-for %s: a session you started: --on %s", person, on)
 	}
 	return person, nil
 }
@@ -147,6 +150,15 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 		Short: "Add an item (or put it in place of an open one, --replaces, which may leave out its text); prints its number",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			it.On, person = todo.Clean(it.On), todo.Clean(person)
+			waiting := cmd.Flags().Changed("waiting-for")
+			// Refused before the store: a desktop boss's first call takes over an earlier list
+			switch {
+			case it.On != "" && waiting:
+				return errors.New("--on or --waiting-for, not both")
+			case waiting && person == "":
+				return errors.New("--waiting-for: no person")
+			}
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -163,18 +175,14 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			stderr := cmd.ErrOrStderr()
-			it.On = todo.Clean(it.On)
-			waiting := cmd.Flags().Changed("waiting-for")
 			// A desktop app boss's list has no name: its own is its session id
 			own := s.Boss()
 			if own == "" {
 				_, own, _ = todoBoss(*boss)
 			}
 			switch {
-			case it.On != "" && waiting:
-				return errors.New("--on or --waiting-for, not both")
 			case waiting:
-				if it.On, err = waitingFor(todo.Clean(person), own, *boss, stderr); err != nil {
+				if it.On, err = waitingFor(person, own, *boss, stderr); err != nil {
 					return err
 				}
 			case strings.EqualFold(it.On, todo.Me):
