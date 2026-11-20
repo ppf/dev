@@ -401,7 +401,11 @@ function pick(list, it, value) {
   location.hash = itemHash(list.boss, it.id);
 }
 
-const initials = name => name.replace(/^boss-/, '').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => [...w][0].toUpperCase()).join('') || [...name][0].toUpperCase();
+// initials leave out a session's project, its name's first part (dev-board-7: B7), so a project's sessions differ
+function initials(name) {
+  const parts = name.replace(/^boss-/, '').split(/[\s._-]+/).filter(Boolean);
+  return (parts.length > 1 ? parts.slice(1) : parts).slice(0, 2).map(w => [...w][0].toUpperCase()).join('') || [...name][0].toUpperCase();
+}
 
 // avatar is an assignee's round mark: ME for the user, a session's initials, dashed while it doesn't run.
 function avatar(who, running = true) {
@@ -458,7 +462,7 @@ function card(x) {
 function filters(projects, ws) {
   const f = state.filter;
   const seg = (label, kids) => el('div', { class: 'filter' }, el('span', { class: 'flabel' }, label), el('div', { class: 'seg', role: 'group', 'aria-label': label }, kids));
-  const shown = state.allWho ? ws : ws.slice(0, WHO_SHOWN);
+  const shown = state.allWho ? ws : ws.filter(([who], i) => i < WHO_SHOWN || f.who.includes(who)); // a pressed chip stays shown
   return el('div', { class: 'filters' },
     seg('Project', [['', 'All'], ...projects.map(p => [p, p])].map(([v, text]) =>
       el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => { f.project = v; render(); } },
@@ -482,7 +486,7 @@ function head(l, tag) {
   return el(tag, { class: 'ch', 'data-f': 'lane:' + l.key }, el('span', { class: 'tt' }, l.title, el('span', { class: 'cnt' }, l.xs.length)), meta);
 }
 
-const hot = l => l.xs.some(needsYou);
+const hot = l => l.xs.some(x => needsYou(x) && !x.it.quiet);
 
 function body(l) {
   return [el('div', { class: 'stack', 'data-k': l.key }, l.xs.map(card)),
@@ -531,7 +535,7 @@ function listErrors() {
 
 function facts(x) {
   const { list, it } = x;
-  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', owner(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
+  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', whoOf(x) === ME ? 'you' : whoOf(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
   if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now) rows.push(['Now', it.now]);
@@ -643,6 +647,7 @@ function sheet(r) {
   s.classList.toggle('on', on);
   document.getElementById('shade').hidden = !on;
   document.getElementById('view').inert = on; // the board behind takes no tap or Tab
+  document.getElementById('top').inert = on;
   document.documentElement.classList.toggle('locked', on);
   if (on && !was) s.focus({ preventScroll: true });
   else if (!on && was) {

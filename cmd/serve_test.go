@@ -75,6 +75,13 @@ func TestBoardGolden(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A ticked item past the 5 s it stays in the list: finished
+	if _, err := s.Add(todo.Item{Text: "Ship the notes"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{5}, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	b, err := todo.ForPane(c, tmux.SessionTarget("boss-b"))
 	if err != nil {
 		t.Fatal(err)

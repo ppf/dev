@@ -100,8 +100,18 @@
           }
         }
       ],
-      "updated": 1700000000,
-      "stale": false
+      "updated": 1699999940,
+      "stale": false,
+      "finished": [
+        {
+          "id": 5,
+          "text": "Ship the notes",
+          "assignee": {
+            "kind": "you"
+          },
+          "done_at": 1699999940
+        }
+      ]
     },
     {
       "boss": "boss-b",

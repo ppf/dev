@@ -10,7 +10,7 @@ const COLUMNS = [
   { key: 'review', title: 'Review' },
   { key: 'done', title: 'Done' },
 ];
-const ME = 'me'; // the user, as an assignee filter's key
+const ME = ':me'; // the user, as an assignee filter's key: no session name holds a colon
 const WORKER_WORDS = ['working', 'idle', 'waiting'];
 
 // The project is the boss's name without boss-: the board has no project of its own.
@@ -102,11 +102,14 @@ function whos(xs) {
 function lanes(xs) {
   return COLUMNS.map(c => {
     const got = xs.filter(x => columnOf(x) === c.key);
-    got.sort(c.key === 'done' ? (a, b) => (b.it.done_at || 0) - (a.it.done_at || 0)
+    got.sort(c.key === 'done' ? (a, b) => doneAt(b) - doneAt(a)
       : (a, b) => needsYou(b) - needsYou(a) || (c.key === 'todo' && (whoOf(b) === ME) - (whoOf(a) === ME)) || urgency(a.it, b.it));
     return { ...c, xs: got };
   });
 }
+
+// doneAt is when a card was ticked; one still in its list's items (ticked under 5 s ago) has none yet: the newest.
+const doneAt = x => x.it.done_at || Infinity;
 
 // urgency orders by the soonest due first, then the oldest.
 const urgency = (a, b) => (!a.until - !b.until) || (a.until || 0) - (b.until || 0) || (a.added || 0) - (b.added || 0);

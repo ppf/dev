@@ -1,7 +1,9 @@
 package web
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -60,17 +62,17 @@ const say = (name, got, want) => { if (JSON.stringify(got) !== JSON.stringify(wa
 func TestModelRows(t *testing.T) {
 	runModel(t, rows+`
 const WANT = {
-  '0 ticked': ['done', 'me', null, '', [], '', false],
+  '0 ticked': ['done', ME, null, '', [], '', false],
   '1 started': ['progress', 'boss-dev', ['starting · boss-dev', 'blue'], '', [], '', false],
   '1 start late': ['progress', 'boss-dev', ['start not picked up', 'red'], '', [], '', true],
-  '2a closed, PR moved': ['review', 'me', ['PR #18 merged 2m', 'green'], '', [['needs you', 'red'], ['boss closed', '']], '', true],
-  '2b closed, own': ['todo', 'me', null, '', [['boss closed', '']], '', false],
+  '2a closed, PR moved': ['review', ME, ['PR #18 merged 2m', 'green'], '', [['needs you', 'red'], ['boss closed', '']], '', true],
+  '2b closed, own': ['todo', ME, null, '', [['boss closed', '']], '', false],
   '2c closed, on a session': ['todo', 'boss-shop', null, '', [['boss closed', '']], '', false],
   '2d closed, on a person': ['waiting', 'boss-shop', null, '', [['waiting for Carl · no one follows up', 'amber'], ['boss closed', '']], '', false],
-  '3a ask': ['todo', 'me', null, '', [['decide', 'red']], '', true],
-  '3b own, doing': ['progress', 'me', null, '', [], 'sending the cert', false],
-  '3c own, PR moved': ['review', 'me', ['PR #243 approved 1m', 'green'], '', [['needs you', 'red']], '', true],
-  '3d own': ['todo', 'me', null, '', [], '', false],
+  '3a ask': ['todo', ME, null, '', [['decide', 'red']], '', true],
+  '3b own, doing': ['progress', ME, null, '', [], 'sending the cert', false],
+  '3c own, PR moved': ['review', ME, ['PR #243 approved 1m', 'green'], '', [['needs you', 'red']], '', true],
+  '3d own': ['todo', ME, null, '', [], '', false],
   '4a boss, PR moved': ['review', 'boss-dev', ['PR #7 merged', 'green'], '', [], '', false],
   '4b boss, doing': ['progress', 'boss-dev', null, '', [], 'writing notes', false],
   '4c boss': ['todo', 'boss-dev', null, '', [], '', false],
@@ -98,7 +100,7 @@ const fin = { boss: 'boss-dev', items: [{ id: 1, text: 'open #1', column: 'todo'
   finished: [{ id: 1, text: 'finished #1', on: 'dev-web', assignee: worker('dev-web'), done_at: t - 30 }] };
 const xs = cards({ lists: [fin] });
 say('finished: a done card beside an open one of the same id', xs.map(x => [x.it.text, x.done, columnOf(x), whoOf(x)]),
-  [['open #1', false, 'todo', 'me'], ['finished #1', true, 'done', 'dev-web']]);
+  [['open #1', false, 'todo', ME], ['finished #1', true, 'done', 'dev-web']]);
 say('finished: no marks', marks(xs[1], now), { band: null, word: '', chips: [], line: '', red: false });
 say('no lists: no cards', cards({}), []);
 `)
@@ -120,13 +122,40 @@ say('needs you and Me', names({ needs: true, who: [ME] }), ['2a closed, PR moved
 const quiet = { list: live, it: { id: 9, text: 'test', quiet: true, column: 'todo', assignee: you, needs_you: true }, done: false };
 say('tally: done and test items left out', tally([...all, quiet]), { need: 5, mine: 6, open: ROWS.length - 1 });
 say('tally: needs you is what the needs filter shows', tally(all).need, names({ needs: true }).length);
-say('whos: Me first, then by count, then by name', whos(all).slice(0, 5), [['me', 7], ['boss-dev', 8], ['boss-shop', 2], ['dev-ssl', 2], ['dev-api', 1]]);
-say('whos: Me with no card of its own', whos([card('10a working')]), [['me', 0], ['dev-web', 1]]);
+say('whos: Me first, then by count, then by name', whos(all).slice(0, 5), [[ME, 7], ['boss-dev', 8], ['boss-shop', 2], ['dev-ssl', 2], ['dev-api', 1]]);
+say('whos: Me with no card of its own', whos([card('10a working')]), [[ME, 0], ['dev-web', 1]]);
 const ls = lanes(all);
 say('lanes: the five columns in order', ls.map(l => l.key), ['todo', 'progress', 'waiting', 'review', 'done']);
 say('To do: needs you, then mine, then sessions\'', ls[0].xs.map(x => x.it.text), ['3a ask', '2b closed, own', '3d own', '2c closed, on a session', '4c boss', '6 gone']);
 say('In progress: needs you first', ls[1].xs.slice(0, 2).map(x => x.it.text), ['1 start late', '7 blocked']);
 const done = lanes([{ list: live, it: { id: 1, text: 'older', done_at: t - 99 }, done: true }, { list: live, it: { id: 2, text: 'newer', done_at: t - 9 }, done: true }]);
 say('Done: newest first', done[4].xs.map(x => x.it.text), ['newer', 'older']);
+const ticked = lanes([{ list: live, it: { id: 1, text: 'older', done_at: t - 99 }, done: true }, { list: live, it: { id: 3, text: 'just ticked', done: true }, done: true }]);
+say('Done: one ticked under 5 s ago (no done_at yet) first', ticked[4].xs.map(x => x.it.text), ['just ticked', 'older']);
+say('a session named me is no user', whoOf({ list: live, it: { id: 1, assignee: worker('me') }, done: false }), 'me');
+`)
+}
+
+// The page's model reads /v1/board as the Go side writes it (cmd's TestBoardGolden): a renamed or dropped field there
+// lands a card in the wrong column, with the wrong assignee or marks.
+func TestModelReadsGolden(t *testing.T) {
+	golden, err := os.ReadFile(filepath.Join("..", "testdata", "board.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runModel(t, `
+const board = `+string(golden)+`;
+const got = cards(board).map(x => [x.it.text, columnOf(x), whoOf(x), marks(x).red, x.done]);
+const want = [
+  ['Merge #148 now or after the release?', 'todo', ME, true, false],
+  ['Read the plan', 'todo', ME, false, false],
+  ['Send the invoice', 'waiting', 'boss-a', false, false],
+  ['Fix the login', 'progress', 'a-fix', false, false],
+  ['Ship the notes', 'done', ME, false, true],
+];
+if (JSON.stringify(got) !== JSON.stringify(want)) console.log('golden board: ' + JSON.stringify(got));
+const sent = cards(board).find(x => x.it.text === 'Send the invoice');
+if (marks(sent).chips[0]?.[0] !== 'waiting for alice') console.log('waiting_for not read: ' + JSON.stringify(marks(sent)));
+if (lanes(cards(board))[4].xs[0]?.it.done_at !== 1699999940) console.log('done_at not read');
 `)
 }

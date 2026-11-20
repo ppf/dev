@@ -59,9 +59,9 @@ a { color: var(--blue); }
 .seg .n { font-size: 11.5px; color: var(--muted); }
 .sw { width: 9px; height: 9px; border-radius: 2px; background: var(--h); display: inline-block; flex: none; }
 
-/* the board: the five columns side by side from 900 px (160 px each), wrapping below it */
+/* the board: the five columns side by side from 900 px (150 px each, room for a scrollbar), wrapping below it */
 .board { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
-.col { flex: 1 1 160px; min-width: 160px; max-width: 340px; background: var(--col); border-radius: 10px; padding: 8px 8px 6px; max-height: calc(100vh - 150px); display: flex; flex-direction: column; }
+.col { flex: 1 1 150px; min-width: 150px; max-width: 340px; background: var(--col); border-radius: 10px; padding: 8px 8px 6px; max-height: calc(100vh - 150px); display: flex; flex-direction: column; }
 .col.hot { box-shadow: inset 0 3px 0 var(--hot); }
 /* title and count on one line, the meta wrapping under them: never clipped */
 .ch { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; min-width: 0; margin: 2px 4px 8px; font-size: 13.5px; font-weight: 700; list-style: none; }
@@ -81,7 +81,7 @@ a { color: var(--blue); }
 .card.mine:hover { box-shadow: inset 3px 0 0 var(--ink), var(--lift); }
 .card.done { opacity: .8; }
 .card.done:hover { box-shadow: var(--shadow); transform: none; }
-.card.done .title { text-decoration: line-through; color: var(--muted); }
+.card.done .title { text-decoration: line-through; color: var(--muted); display: block; -webkit-line-clamp: none; } /* no sheet to read the rest in */
 .card:has(.title:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
 .band { margin: -7px -9px 6px; padding: 2px 9px; border-radius: 7px 7px 0 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; background: var(--bb); color: var(--bf); }
 .clab { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; min-width: 0; }
