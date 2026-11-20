@@ -69,6 +69,9 @@ A brief for work that ends in a PR or a task comment also says what needs no que
 
 > Unless this project's rules say otherwise, don't ask before pushing your branch, opening the PR, replying to comments on it, or posting a short comment on the task that you checked is correct. End your turn on a question only for a real decision (merging, anything destructive, any other external action such as mail or chat to a person or a release, an unclear goal), with your recommended answer. Write PR bodies, replies and comments by the project's writing rules; where it sets none: short, clear, fairly casual, correct spelling.
 When a brief passes on a user's remark about facts or their reading of them (what a system can do, what a requirement means, what was agreed), word it "check this against the sources, then apply", never a bare "apply"; the worker reports what confirms, contradicts or is unknown, and says what a resulting change removes from the deliverable.
+Every brief to a worker also says how it knows it is done and when to stop:
+
+> Done when: <checks you can run yourself: tests, a build, a script, a file that exists; for research or mockups: the result file and what it must contain>. If blocked, or the same error comes twice with nothing changed: stop and say what you tried, don't guess. Your final note quotes the output of those checks (short: the passing line, not the whole log).
 <!-- /boss-core:brief -->
 
 <!-- boss-core:probe -->
