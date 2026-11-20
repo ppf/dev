@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 func TestNotes(t *testing.T) {
@@ -144,18 +146,108 @@ func TestNoteItemNumberReuse(t *testing.T) {
 	}
 }
 
-func TestNoteIDAfterDrop(t *testing.T) {
+// An id isn't used again while the file lives, the highest dropped or all; an older file's notes count too.
+func TestNoteIDNotReused(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
-	for range 2 {
-		if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil {
+	add := func() int {
+		t.Helper()
+		id, err := s.AddNote(Note{Kind: NoteRisk, Text: "r"}, now)
+		if err != nil {
 			t.Fatal(err)
 		}
+		return id
 	}
+	add()
+	add()
 	if err := s.DropNote(2, now); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := s.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil || id != 2 {
-		t.Errorf("id after dropping the highest = %d, %v, want 2", id, err)
+	if id := add(); id != 3 {
+		t.Errorf("id after dropping the highest = %d, want 3", id)
+	}
+	for _, id := range []int{1, 3} {
+		if err := s.DropNote(id, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if id := add(); id != 4 {
+		t.Errorf("id after dropping all = %d, want 4", id)
+	}
+	// A file written before NextNote: ids go on after its highest
+	if err := s.locked(func() error {
+		return s.write(file{Notes: []Note{{ID: 9, Kind: NoteRisk, Text: "old"}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if id := add(); id != 10 {
+		t.Errorf("id after an older file's highest = %d, want 10", id)
+	}
+}
+
+// A boss with notes and no open items is closed and its name opened again: the notes are still there after every
+// read and write a start makes, also when the list sat under the earlier key (session id and creation time).
+func TestNotesSurviveBossRestart(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Now()
+	boss := func(id, created string) Store {
+		t.Helper()
+		s, err := ForPane(tmux.NewFake(func([]string) (string, error) {
+			return tmux.FormatRow("/tmp/tmux-1/default", "boss-p", "1", id, created), nil
+		}), "%1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	first := boss("$1", "1700000000")
+	if _, err := first.Add(Item{Text: "ship"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.AddNote(Note{Kind: NoteDecided, Text: "CSV only", Item: 1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute)
+	again := boss("$2", "1700000100")
+	if again != first {
+		t.Fatalf("restarted boss's store %v, want %v", again, first)
+	}
+	// What a start does: read the list, take what ticked, look PRs up, and a changed list
+	if _, err := again.Read(later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.TakeTicked(later, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := again.Lookup(later, 0, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func() error{
+		func() error { return again.Clear(later) },
+		func() error { return again.Set([]string{"next"}, later) },
+		func() error { _, err := again.Add(Item{Text: "more"}, later); return err },
+	} {
+		if err := change(); err != nil {
+			t.Fatal(err)
+		}
+		n, err := again.Notes(later)
+		if err != nil || len(n) != 1 || n[0].Text != "CSV only" || !n[0].ItemDone {
+			t.Fatalf("notes = %+v, %v: want the done note kept", n, err)
+		}
+	}
+	// A note-only list under the earlier key moves to the name's key
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	old, err := open("/tmp/tmux-1/default-$7-1700000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.AddNote(Note{Kind: NoteRisk, Text: "flaky"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := boss("$7", "1700000000").Notes(now); err != nil || len(n) != 1 || n[0].Text != "flaky" {
+		t.Errorf("notes under the earlier key = %+v, %v: want them moved", n, err)
 	}
 }

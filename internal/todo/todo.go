@@ -88,6 +88,8 @@ type file struct {
 	Boss    string   `json:"boss,omitempty"`
 	Ticked  []Ticked `json:"ticked,omitempty"`
 	Notes   []Note   `json:"notes,omitempty"`
+	// NextNote is the id the next note gets: never reused while the file lives
+	NextNote int `json:"next_note,omitempty"`
 }
 
 // List is a list as its boards show it, for dev todo --json: items waiting on the user first, then those

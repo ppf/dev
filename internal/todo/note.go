@@ -58,7 +58,7 @@ func (n Note) Check() error {
 	return nil
 }
 
-// AddNote stores n and returns its id (1, 2…, shown as n1: the next after the highest). Over MaxNotes, an over-long text or why, a
+// AddNote stores n and returns its id (1, 2…, shown as n1), never one used before. Over MaxNotes, an over-long text or why, a
 // said note without Until or Item, or an Item that isn't an open item is an error. The list's Updated stays.
 func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 	if err := n.Check(); err != nil {
@@ -76,11 +76,12 @@ func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 		case n.Item != 0 && !f.hasOpen(n.Item):
 			return fmt.Errorf("no open item %d", n.Item)
 		}
-		n.ID, n.Added = 1, now.Unix()
+		n.ID, n.Added = max(f.NextNote, 1), now.Unix()
+		// A file an earlier dev wrote has no NextNote: after its highest
 		for _, o := range f.Notes {
 			n.ID = max(n.ID, o.ID+1)
 		}
-		f.Notes = append(f.Notes, n)
+		f.Notes, f.NextNote = append(f.Notes, n), n.ID+1
 		id = n.ID
 		return s.write(f)
 	})

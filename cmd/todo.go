@@ -396,7 +396,7 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			if text != "" && len(ids) != 1 {
 				return errors.New("--text ticks one item")
 			}
-			s, _, err := listStore(*boss, cmd.ErrOrStderr())
+			s, _, err := listStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -433,7 +433,7 @@ desktop app boss every tick, is in the boss's next reminder. A desktop app boss 
 on stderr; the list still prints.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, closed, err := listStore(*boss, cmd.ErrOrStderr())
+			s, closed, err := listStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -491,7 +491,7 @@ that changes the work, it needs an end (--until or --item); risk: an open risk t
 standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, _, err := listStore(*boss, cmd.ErrOrStderr())
+			s, _, err := listStore(*boss, false, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -560,7 +560,7 @@ func newTodoNoteDropCmd(boss *string) *cobra.Command {
 		Short: "Remove note n (n3 or 3)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.Atoi(strings.TrimPrefix(args[0], "n"))
+			id, err := strconv.Atoi(strings.TrimPrefix(strings.ToLower(args[0]), "n"))
 			if err != nil {
 				return fmt.Errorf("note number %q: %w", args[0], err)
 			}
@@ -706,8 +706,8 @@ func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 
 // listStore is todoStore, else, for a --boss closed on this server with open items, its list by its file: closed
 // reports it; one not read adds its error. Any other --boss keeps todoStore's error, a live session that is no boss too.
-func listStore(boss string, stderr io.Writer) (s todo.Store, closed bool, err error) {
-	s, err = todoStore(boss, true, stderr)
+func listStore(boss string, adopt bool, stderr io.Writer) (s todo.Store, closed bool, err error) {
+	s, err = todoStore(boss, adopt, stderr)
 	if err == nil || boss == "" || strings.HasPrefix(boss, "local_") {
 		return s, false, err
 	}

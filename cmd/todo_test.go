@@ -190,10 +190,10 @@ func TestStateSideSessionsTodo(t *testing.T) {
 	}
 }
 
-// A desktop boss without a list takes over a stopped session's list on its first dev todo, not at start or on
-// --json; a running session's list stays. Resume and /clear bring its list; startup and compaction nothing.
-func TestTodoDesktopTakeOver(t *testing.T) {
-	todoEnv(t)
+// desktopSessions writes app records and live session files: local_boss and local_running run, local_old and local_gone
+// don't, all in project /p.
+func desktopSessions(t *testing.T) {
+	t.Helper()
 	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
 	home := os.Getenv("HOME")
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
@@ -217,6 +217,13 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A desktop boss without a list takes over a stopped session's list on its first dev todo, not at start or on
+// --json; a running session's list stays. Resume and /clear bring its list; startup and compaction nothing.
+func TestTodoDesktopTakeOver(t *testing.T) {
+	todoEnv(t)
+	desktopSessions(t)
 	run(t, "", "todo", "--boss", "local_running", "set", "running's own")
 	run(t, "", "todo", "--boss", "local_old", "set", "old open item")
 	// A session whose own Claude isn't among the running ones takes over nothing, and says so
@@ -559,5 +566,36 @@ func TestTodoNote(t *testing.T) {
 	}
 	if got := run(t, "", "todo"); got != "1\t☐\tMerge #4\n" {
 		t.Errorf("notes changed the list: %q", got)
+	}
+}
+
+// Printing notes takes no list over; the first add of a note does, as a first dev todo add does.
+func TestTodoNotePrintAdoptsNothing(t *testing.T) {
+	todoEnv(t)
+	desktopSessions(t)
+	run(t, "", "todo", "--boss", "local_old", "set", "old open item")
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
+	if got := run(t, "", "todo", "note"); got != "no notes\n" {
+		t.Errorf("note = %q", got)
+	}
+	if _, _, err := execute(t, "", "todo", "note", "drop", "1"); err == nil {
+		t.Error("drop of a missing note: want an error")
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "todo", "desktop-local_boss.json")); err == nil {
+		t.Error("print or a refused drop made local_boss a list")
+	}
+	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
+		t.Errorf("local_old's list = %q, want it kept", got)
+	}
+}
+
+// Note ids are not reused after a drop, and drop takes n1 or N1.
+func TestTodoNoteIDs(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "note", "risk", "a")
+	run(t, "", "todo", "note", "risk", "b")
+	run(t, "", "todo", "note", "drop", "N2")
+	if got := run(t, "", "todo", "note", "risk", "c"); got != "noted n3\n" {
+		t.Errorf("after dropping the highest = %q, want n3", got)
 	}
 }
