@@ -3,8 +3,10 @@ package cmd
 import (
 	"flag"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -106,23 +108,56 @@ func TestServePair(t *testing.T) {
 	t.Cleanup(func() { hasTerminal = orig })
 	t.Setenv("CLAUDECODE", "1")
 	hasTerminal = func() bool { return true }
-	if _, _, err := execute(t, "", "serve", "pair", "--addr", "127.0.0.1:8417"); err == nil || !strings.Contains(err.Error(), "Claude Code session") {
+	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "Claude Code session") {
 		t.Errorf("in Claude Code: %v, want refused", err)
 	}
 	t.Setenv("CLAUDECODE", "")
 	hasTerminal = func() bool { return false }
-	if _, _, err := execute(t, "", "serve", "pair", "--addr", "127.0.0.1:8417"); err == nil || !strings.Contains(err.Error(), "outside a terminal") {
+	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "outside a terminal") {
 		t.Errorf("no terminal: %v, want refused", err)
 	}
 	hasTerminal = func() bool { return true }
-	out, _, err := execute(t, "", "serve", "pair", "--addr", "127.0.0.1:8417")
-	if err != nil || !regexp.MustCompile(`^open http://127\.0\.0\.1:8417/ on the phone and enter the code \d{4} \d{4} \(valid 5 minutes, once\)\n$`).MatchString(out) {
-		t.Errorf("pair: %q %v", out, err)
+	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
+		t.Errorf("no server: %v, want not running", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	ln := srv.Listener
+	dir, err := authDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forget, err := serve.RecordAddr(dir, ln.Addr().(*net.TCPAddr).AddrPort())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := execute(t, "", "serve", "pair")
+	loop := regexp.MustCompile(`^dev serve listens on 127\.0\.0\.1 only: a phone can't reach it\. .*\nOn this Mac: open http://127\.0\.0\.1:\d+/ and enter the code \d{4} \d{4} \(valid 5 minutes, once\)\n$`)
+	if err != nil || !loop.MatchString(out) || strings.Contains(out, "on the phone") {
+		t.Errorf("pair on loopback: %q %v", out, err)
+	}
+	forget()
+	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
+		t.Errorf("forgotten: %v, want not running", err)
 	}
 	if out, _, err := execute(t, "", "serve", "unpair"); err != nil || out != "no paired devices\n" {
 		t.Errorf("unpair: %q %v", out, err)
 	}
 	if _, _, err := execute(t, "", "serve", "unpair", "phone"); err == nil || !strings.Contains(err.Error(), `no paired device named "phone"`) {
 		t.Errorf("unpair phone: %v", err)
+	}
+}
+
+// pairMessage names a URL for the phone only when the bound address is not loopback.
+func TestPairMessage(t *testing.T) {
+	for _, tc := range []struct{ addr, want string }{
+		{"192.168.1.89:8417", "open http://192.168.1.89:8417/ on the phone and enter the code 1234 5678 (valid 5 minutes, once)\n"},
+		{"100.101.102.103:8417", "open http://100.101.102.103:8417/ on the phone and enter the code 1234 5678 (valid 5 minutes, once)\n"},
+		{"127.0.0.1:8417", "dev serve listens on 127.0.0.1 only: a phone can't reach it. HINT\nOn this Mac: open http://127.0.0.1:8417/ and enter the code 1234 5678 (valid 5 minutes, once)\n"},
+		{"[::1]:8417", "dev serve listens on ::1 only: a phone can't reach it. HINT\nOn this Mac: open http://[::1]:8417/ and enter the code 1234 5678 (valid 5 minutes, once)\n"},
+	} {
+		if got := pairMessage(netip.MustParseAddrPort(tc.addr), "1234 5678", "HINT"); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.addr, got, tc.want)
+		}
 	}
 }

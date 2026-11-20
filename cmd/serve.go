@@ -52,6 +52,12 @@ address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too:
 			if err != nil {
 				return err
 			}
+			forget, err := serve.RecordAddr(dir, netip.AddrPortFrom(ap.Addr(), uint16(ln.Addr().(*net.TCPAddr).Port)))
+			if err != nil {
+				_ = ln.Close()
+				return err
+			}
+			defer forget()
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
 			if awake {
@@ -62,7 +68,7 @@ address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too:
 			if kind == serve.LAN {
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
-			fmt.Fprintln(out, "pair a phone: dev serve pair --addr "+ln.Addr().String())
+			fmt.Fprintln(out, "pair a phone: dev serve pair")
 			return listenAndServe(cmd.Context(), ln, serveConfig(cmd.ErrOrStderr(), dir))
 		},
 	}
@@ -78,14 +84,14 @@ address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too:
 }
 
 func newServePairCmd() *cobra.Command {
-	var addr string
 	cmd := &cobra.Command{
 		Use:   "pair",
 		Short: "Print a one-time code that pairs a phone with dev serve",
 		Long: fmt.Sprintf(`Print the URL to open on the phone and a one-time code to enter there, valid %d minutes and once (5 wrong
 codes or a new dev serve pair void it): the running
-dev serve then sets the phone's session cookie. The URL is dev serve's default bind, or --addr as dev serve was
-given it. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
+dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on; when that is
+loopback only, a phone can't reach it, so pair says so and how to restart dev serve. Errors when dev serve is not
+running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			switch {
@@ -94,11 +100,11 @@ given it. Refused in a Claude Code session ($CLAUDECODE set) and outside a termi
 			case !hasTerminal():
 				return errors.New("refused outside a terminal: run dev serve pair in a shell")
 			}
-			ap, _, err := bind(addr)
+			dir, err := authDir()
 			if err != nil {
 				return err
 			}
-			dir, err := authDir()
+			ap, err := serve.ServedAddr(dir)
 			if err != nil {
 				return err
 			}
@@ -106,12 +112,28 @@ given it. Refused in a Claude Code session ($CLAUDECODE set) and outside a termi
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "open http://%s/ on the phone and enter the code %s (valid %d minutes, once)\n", ap, code, int(serve.CodeTTL.Minutes()))
+			_, err = fmt.Fprint(cmd.OutOrStdout(), pairMessage(ap, code, restartHint()))
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", "", "the ip:port dev serve listens on, when not its default")
 	return cmd
+}
+
+// pairMessage tells where to open the page: the phone's URL when ap is reachable from it, else why not and restartHint.
+func pairMessage(ap netip.AddrPort, code, restartHint string) string {
+	ttl := int(serve.CodeTTL.Minutes())
+	if ap.Addr().IsLoopback() {
+		return fmt.Sprintf("dev serve listens on %s only: a phone can't reach it. %s\nOn this Mac: open http://%s/ and enter the code %s (valid %d minutes, once)\n", ap.Addr(), restartHint, ap, code, ttl)
+	}
+	return fmt.Sprintf("open http://%s/ on the phone and enter the code %s (valid %d minutes, once)\n", ap, code, ttl)
+}
+
+// restartHint is how to restart dev serve so a phone can reach it: its default bind when this Mac has one, else --addr.
+func restartHint() string {
+	if ap, _, err := bind(""); err == nil {
+		return fmt.Sprintf("Restart it with dev serve (it listens on %s by default) or dev serve --addr <tailnet or private LAN ip:port>.", ap)
+	}
+	return "Restart it with dev serve --addr <tailnet or private LAN ip:port>."
 }
 
 func newServeUnpairCmd() *cobra.Command {
