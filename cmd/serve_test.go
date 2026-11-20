@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,10 +16,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -189,7 +194,7 @@ func TestListenAndServeClosesStreams(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	errc := make(chan error, 1)
-	go func() { errc <- listenAndServe(ctx, ln, cfg) }()
+	go func() { _, _, err := listenAndServe(ctx, ln, cfg, nil); errc <- err }()
 	res, err := http.Get("http://" + ln.Addr().String() + "/v1/events")
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +213,180 @@ func TestListenAndServeClosesStreams(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("listenAndServe still running")
 	}
+}
+
+// reloadRun is serveReloading on a loopback port with its watch and exec stubbed: the first watch gives a Ready
+// once fire is closed; exec answers with execErr after checking what it is handed.
+type reloadRun struct {
+	addr    string
+	watches chan struct{} // one per watch started
+	execs   chan []string // the args of each exec
+	errc    chan error
+	stderr  *syncBuffer
+	stop    func()
+}
+
+func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRun {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := serve.Config{Version: "v1.0.0", Now: time.Now, Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler(),
+		Lists: func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil }}
+	r := &reloadRun{addr: ln.Addr().String(), watches: make(chan struct{}, 10), execs: make(chan []string, 10),
+		errc: make(chan error, 1), stderr: &syncBuffer{}}
+	watch, exec := watchReload, execReload
+	t.Cleanup(func() { watchReload, execReload = watch, exec })
+	first := true
+	watchReload = func(ctx context.Context, _ selfreload.Options) <-chan selfreload.Ready {
+		r.watches <- struct{}{}
+		ch := make(chan selfreload.Ready, 1)
+		gives := fire
+		if !first {
+			gives = nil
+		}
+		first = false
+		go func() {
+			defer close(ch)
+			select {
+			case <-gives:
+				ch <- selfreload.Ready{Version: "v2.0.0"}
+			case <-ctx.Done():
+			}
+		}()
+		return ch
+	}
+	execReload = func(rd selfreload.Ready, args []string) error {
+		if rd.Version != "v2.0.0" {
+			t.Errorf("exec into %q", rd.Version)
+		}
+		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid()) {
+			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
+		}
+		if _, err := http.Get("http://" + r.addr + "/v1/health"); err == nil {
+			t.Error("still serving at exec")
+		}
+		r.execs <- args
+		return execErr
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	r.stop = stop
+	t.Cleanup(stop)
+	o := selfreload.Options{Own: "v1.0.0"}
+	go func() { r.errc <- serveReloading(ctx, ln, cfg, o, []string{"dev", "serve"}, io.Discard, r.stderr) }()
+	return r
+}
+
+// health is /v1/health's version, retried for a second while the listener comes back.
+func (r *reloadRun) health(t *testing.T) string {
+	t.Helper()
+	var err error
+	for range 20 {
+		var res *http.Response
+		if res, err = http.Get("http://" + r.addr + "/v1/health"); err == nil {
+			var h struct{ Version string }
+			derr := json.NewDecoder(res.Body).Decode(&h)
+			_ = res.Body.Close()
+			if derr != nil {
+				t.Fatalf("health: %v", derr)
+			}
+			return h.Version
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("health: %v", err)
+	return ""
+}
+
+func (r *reloadRun) end(t *testing.T) {
+	t.Helper()
+	r.stop()
+	select {
+	case err := <-r.errc:
+		if err != nil {
+			t.Errorf("serveReloading: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveReloading still running")
+	}
+	if v := os.Getenv(envServeReexec); v != "" {
+		t.Errorf("%s=%q left set", envServeReexec, v)
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// A new release ends the page's event stream and shuts down before the exec; a failed exec serves again on the
+// same address on the old version, says so and watches no more.
+func TestServeReloadExecFails(t *testing.T) {
+	fire := make(chan struct{})
+	r := startReloadRun(t, fire, errors.New("exec format error"))
+	<-r.watches
+	res, err := http.Get("http://" + r.addr + "/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body := bufio.NewReader(res.Body)
+	if line, err := body.ReadString('\n'); err != nil || line != "event: board\n" {
+		t.Fatalf("first line %q %v", line, err)
+	}
+	close(fire)
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatalf("stream: %v, want it ended", err)
+	}
+	if args := <-r.execs; !slices.Equal(args, []string{"dev", "serve"}) {
+		t.Errorf("exec args %q", args)
+	}
+	if v := r.health(t); v != "v1.0.0" {
+		t.Errorf("health %q after the failed exec, want v1.0.0", v)
+	}
+	if !strings.Contains(r.stderr.String(), "❌ reload: exec format error: dev serve stays on v1.0.0") {
+		t.Errorf("stderr %q, want the ❌ line", r.stderr.String())
+	}
+	select {
+	case <-r.watches:
+		t.Error("watching again after a failed exec")
+	case <-time.After(100 * time.Millisecond):
+	}
+	r.end(t)
+}
+
+// Exec refusing (kill switch on, file changed) serves again and watches again.
+func TestServeReloadNotNow(t *testing.T) {
+	fire := make(chan struct{})
+	r := startReloadRun(t, fire, selfreload.ErrNotNow)
+	<-r.watches
+	close(fire)
+	<-r.execs
+	if v := r.health(t); v != "v1.0.0" {
+		t.Errorf("health %q, want v1.0.0", v)
+	}
+	select {
+	case <-r.watches:
+	case <-time.After(5 * time.Second):
+		t.Fatal("not watching again after ErrNotNow")
+	}
+	if strings.Contains(r.stderr.String(), "❌") {
+		t.Errorf("stderr %q: ErrNotNow is no failure", r.stderr.String())
+	}
+	r.end(t)
 }
 
 // A warning repeated within a minute is written once, again after it.
