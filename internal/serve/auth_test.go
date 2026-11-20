@@ -133,7 +133,7 @@ func TestPair(t *testing.T) {
 		t.Fatalf("pair: %d %s", w.Code, w.Body)
 	}
 	c := w.Result().Cookies()[0]
-	if c.Name != cookieName || len(c.Value) != 64 || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != "/" || c.MaxAge <= 0 || c.Secure {
+	if c.Name != "dev_session_8417" || len(c.Value) != 64 || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != "/" || c.MaxAge <= 0 || c.Secure {
 		t.Errorf("cookie %+v", c)
 	}
 	if w := s.do(http.MethodGet, "/v1/board", "", c, false); w.Code != 200 || !strings.Contains(w.Body.String(), `"decide": 1`) {
@@ -157,6 +157,23 @@ func TestPair(t *testing.T) {
 	}
 }
 
+// Cookies ignore the port, so a second dev serve on the host must not read or replace this one's session.
+func TestCookiePerPort(t *testing.T) {
+	s := newAuthed(t)
+	c := s.pair(s.code(t), "phone").Result().Cookies()[0]
+	other := &http.Cookie{Name: "dev_session_8418", Value: c.Value}
+	refused(t, "a cookie named for another port", s.do(http.MethodGet, "/v1/board", "", other, false), 401, "isn't paired")
+}
+
+// A Host without a numeric port (a proxy, a hostile header) gets the plain name, a valid cookie name.
+func TestCookieNameHost(t *testing.T) {
+	for host, want := range map[string]string{"h:8417": "dev_session_8417", "[::1]:8417": "dev_session_8417", "h": "dev_session", "h:8 4": "dev_session", "h:;": "dev_session"} {
+		if got := cookieName(&http.Request{Host: host}); got != want {
+			t.Errorf("%q: %q, want %q", host, got, want)
+		}
+	}
+}
+
 // Each refusal answers its status with a sentence.
 func TestAuthRefusals(t *testing.T) {
 	s := newAuthed(t)
@@ -164,7 +181,7 @@ func TestAuthRefusals(t *testing.T) {
 	refused(t, "no code pending", s.pair("12345678", "p"), 401, "no pairing code is pending")
 	code := s.code(t)
 	c := s.pair(code, "phone").Result().Cookies()[0]
-	wrong := &http.Cookie{Name: cookieName, Value: strings.Repeat("0", 64)}
+	wrong := &http.Cookie{Name: "dev_session_8417", Value: strings.Repeat("0", 64)}
 	refused(t, "board with a wrong cookie", s.do(http.MethodGet, "/v1/board", "", wrong, false), 401, "isn't paired")
 	for _, path := range []string{"/v1/answer", "/v1/done"} {
 		refused(t, path+" without cookie", s.do(http.MethodPost, path, actBody, nil, true), 401, "isn't paired")
