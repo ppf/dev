@@ -72,6 +72,10 @@ type Session struct {
 	Wait     wait.Wait // its planned wait (dev agent wait-until); zero when none
 	Resume   bool      // a rate limit stopped it and dev resumes it (@dev_resume_at)
 	Note     string    // its latest boss inbox note (@dev_boss_note), "<kind>: <text>"
+	// Transcript is its agent's transcript (@agent_transcript), "" when unknown; Doing what it is doing now, as
+	// dev todo --json's now says it (set by dev todo, not Live)
+	Transcript string
+	Doing      string
 
 	ID        string // tmux session id ($N)
 	Boss      bool   // a dev boss session (OptHerd)

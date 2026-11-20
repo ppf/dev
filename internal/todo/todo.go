@@ -125,6 +125,8 @@ type Shown struct {
 	// Status and StatusOn are what Owner.Status says, once SetStatus ran
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
+	// Now is what its worker is doing now (its sidebar.Session.Doing), once SetStatus ran; "" for none
+	Now string `json:"now,omitempty"`
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.

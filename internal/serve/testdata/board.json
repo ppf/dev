@@ -63,6 +63,16 @@
           "added": 1700000000,
           "status": "waiting",
           "status_on": "alice"
+        },
+        {
+          "id": 4,
+          "text": "Fix the login",
+          "on": "a-fix",
+          "done": false,
+          "added": 1700000000,
+          "status": "working",
+          "status_on": "a-fix",
+          "now": "Test ~/src/login.go"
         }
       ],
       "updated": 1700000000,

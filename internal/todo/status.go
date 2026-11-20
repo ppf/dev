@@ -150,9 +150,16 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	return o.Workers[i], true
 }
 
-// SetStatus sets each item's Status and StatusOn (Owner.Status).
+// SetStatus sets each item's Status and StatusOn (Owner.Status), and Now for an item on a live worker.
 func (l List) SetStatus(o Owner) {
 	for i, it := range l.Items {
 		l.Items[i].Status, l.Items[i].StatusOn = o.Status(it)
+		l.Items[i].Now = ""
+		switch l.Items[i].Status {
+		case StatusWorking, StatusWaiting, StatusBlocked, StatusIdle:
+			if w, ok := o.worker(it); ok {
+				l.Items[i].Now = w.Doing
+			}
+		}
 	}
 }

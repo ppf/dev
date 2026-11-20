@@ -205,7 +205,7 @@ func serveConfig(stderr io.Writer, dir string) serve.Config {
 	}
 }
 
-// boardLists is dev todo --all --json's lists, a list error's home folder shown as ~: the board leaves the Mac.
+// boardLists is dev todo --all --json's lists, the home folder in a list's error and an item's now shown as ~: the board leaves the Mac.
 func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (json.RawMessage, error) {
 	return func() (json.RawMessage, error) {
 		home, err := os.UserHomeDir()
@@ -216,8 +216,12 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 		if err != nil {
 			return nil, err
 		}
+		scrub := func(s string) string { return strings.ReplaceAll(s, filepath.Clean(home)+"/", "~/") }
 		for i := range lists {
-			lists[i].Error = strings.ReplaceAll(lists[i].Error, filepath.Clean(home)+"/", "~/")
+			lists[i].Error = scrub(lists[i].Error)
+			for j := range lists[i].Items {
+				lists[i].Items[j].Now = scrub(lists[i].Items[j].Now)
+			}
 		}
 		return json.Marshal(lists)
 	}

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -23,6 +25,9 @@ func setStatuses(c *tmux.Client, lists []bossList, stderr io.Writer) {
 	for _, bl := range lists {
 		o := todo.OwnerOf(live, bl.Boss, bl.Closed)
 		o.Unread = o.Unread || err != nil
+		for i := range o.Workers {
+			o.Workers[i].Doing = doing(o.Workers[i], time.Now(), stderr)
+		}
 		bl.SetStatus(o)
 	}
 }
@@ -40,7 +45,7 @@ func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 		l.SetStatus(o)
 		for i, it := range l.Items {
 			if it.Session != nil && slices.Contains(unreadIDs, it.Session.ID) {
-				l.Items[i].Status, l.Items[i].StatusOn = "", ""
+				l.Items[i].Status, l.Items[i].StatusOn, l.Items[i].Now = "", "", ""
 			}
 		}
 		return
@@ -96,7 +101,7 @@ func desktopOwner(boss string, stderr io.Writer) (todo.Owner, []string) {
 // user, working and stuck work, waiting and rate-limited wait (as a planned wait or a rate-limit resume), and review
 // ready, idle and stopped rest. ID is its app session id, which its linked items name.
 func desktopSession(w desktop.Worker) sidebar.Session {
-	s := sidebar.Session{Name: cmp.Or(w.Name, w.Title, w.ID), ID: w.ID, Agent: "Claude"}
+	s := sidebar.Session{Name: cmp.Or(w.Name, w.Title, w.ID), ID: w.ID, Agent: "Claude", Doing: w.StatusText}
 	switch w.Status {
 	case desktop.StatusNeedsYou, desktop.StatusBlocked:
 		s.Deciding = true
@@ -106,6 +111,31 @@ func desktopSession(w desktop.Worker) sidebar.Session {
 		s.Resume = true
 	}
 	return s
+}
+
+// doing is what tmux worker s is doing now, as the boss board's card says it: working, its tool call's description
+// (else the tool); waiting, its planned wait, else what its reply's WAITING marker names; "" otherwise. A transcript
+// not written yet says nothing.
+func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
+	rank := s.Rank()
+	switch {
+	case rank == sidebar.RankWaiting && s.Wait.Held():
+		return s.Wait.Text(now)
+	case rank != sidebar.RankWorking && rank != sidebar.RankWaiting || s.Transcript == "":
+		return ""
+	}
+	t, err := desktop.ReadTail(s.Transcript)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintln(stderr, "⚠ dev todo: "+s.Name+"'s transcript not read: "+err.Error())
+		}
+		return ""
+	}
+	what := cmp.Or(t.ToolDescription, t.Tool)
+	if rank == sidebar.RankWaiting {
+		_, what, _ = desktop.Marker(t.Lines)
+	}
+	return strings.Join(strings.Fields(what), " ")
 }
 
 // liveSessions is sidebar.Live's sessions; a failure is reported on stderr.

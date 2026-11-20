@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"flag"
 	"io"
 	"net"
@@ -27,6 +28,11 @@ func TestBoardGolden(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	transcript := filepath.Join(home, "a-fix.jsonl")
+	call := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Bash","input":{"description":"Test ` + home + `/src/login.go"}}]}}`
+	if err := os.WriteFile(transcript, []byte(call+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	c := tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-sessions":
@@ -34,15 +40,18 @@ func TestBoardGolden(t *testing.T) {
 		case "display-message":
 			return tmux.FormatRow("/tmp/tmux-1/default", strings.Trim(args[3], "=:"), "1", "$1", "1700000000"), nil
 		case "list-panes":
-			// boss-a live: every field 0 but its name and id
-			var row []string
-			for _, f := range strings.Split(args[len(args)-1], tmux.Sep) {
-				row = append(row, map[string]string{"#{session_name}": "boss-a", "#{session_id}": "$1"}[f])
-				if row[len(row)-1] == "" {
-					row[len(row)-1] = "0"
+			// boss-a live: every field 0 but its name and id; its worker a-fix working, its transcript under home
+			rows := ""
+			for _, set := range []map[string]string{{"#{session_name}": "boss-a", "#{session_id}": "$1"},
+				{"#{session_name}": "a-fix", "#{session_id}": "$2", "#{pane_id}": "%2", "#{window_index}": "1", "#{@agent_state}": "working",
+					"#{@dev_started_by}": "boss-a", "#{@agent_transcript}": transcript}} {
+				var row []string
+				for _, f := range strings.Split(args[len(args)-1], tmux.Sep) {
+					row = append(row, cmp.Or(set[f], "0"))
 				}
+				rows += tmux.FormatRow(row[:len(row)-1]...)
 			}
-			return tmux.FormatRow(row[:len(row)-1]...), nil
+			return rows, nil
 		}
 		return "", nil
 	})
@@ -55,6 +64,7 @@ func TestBoardGolden(t *testing.T) {
 		{Text: "Merge #148 now or after the release?", Options: []string{"Merge now | CI green (Recommended)", "After the release"}, Context: []string{"Release is Friday", "~/memo.md"}},
 		{Text: "Read the plan", Link: "https://example.com/plan", Until: 1700086400},
 		{Text: "Send the invoice", On: "alice"},
+		{Text: "Fix the login", On: "a-fix"},
 	} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
@@ -84,7 +94,7 @@ func TestBoardGolden(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("board %d: %s", w.Code, w.Body)
 	}
-	// The unreadable list's error names its file under ~, not the home folder
+	// The unreadable list's error names its file under ~, as a-fix's now does its file, not the home folder
 	got := w.Body.String()
 	golden := filepath.Join("..", "internal", "serve", "testdata", "board.json")
 	if *update {

@@ -365,6 +365,7 @@ function card(x) {
     b && el('div', { class: 'band', vars: { '--bb': b[1], '--bf': b[2] } }, b[0]),
     lab,
     el('a', { class: 'title', href: h, 'data-f': h }, it.text),
+    it.now && el('div', { class: 'now', title: it.now }, it.now),
     answerable(list, it) && el('div', { class: 'quick' }, choices(it).map((c, i) =>
       el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': h + '/' + c.value, onclick: () => pick(list, it, c.value) },
         el('span', { class: 'k' }, String(i + 1)), c.label, c.detail && el('small', null, c.detail)))),

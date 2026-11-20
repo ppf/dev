@@ -108,6 +108,19 @@ func TestSetStatus(t *testing.T) {
 	}
 }
 
+// SetStatus gives an item on a live worker its Doing as Now, and none to the user's own, a person's or a gone worker's,
+// clearing what an earlier SetStatus set.
+func TestSetStatusNow(t *testing.T) {
+	o := Owner{Name: "boss-x", Workers: []sidebar.Session{{Name: "fix-a", ID: "$2", Agent: "Claude", State: "working", Doing: "Run the tests"}}}
+	l := List{Items: []Shown{{ID: 1, On: "fix-a"}, {ID: 2, Now: "stale"}, {ID: 3, On: "Ola"}, {ID: 4, On: "fix-b", Session: &Session{ID: "$9", Name: "fix-b"}}}}
+	l.SetStatus(o)
+	for i, want := range []string{"Run the tests", "", "", ""} {
+		if l.Items[i].Now != want {
+			t.Errorf("item %d (%s): Now = %q, want %q", i+1, l.Items[i].Status, l.Items[i].Now, want)
+		}
+	}
+}
+
 // The desktop board's mod orders and words statuses as Statuses does.
 func TestModStatuses(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "mods", "dev-board", "hooks", "register.tsx"))
