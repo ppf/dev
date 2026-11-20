@@ -60,6 +60,8 @@ func OwnerOf(live []sidebar.Session, boss string, closed bool) Owner {
 //   - its boss closed: check when its linked PR moved (sidebar.Check.Event), else boss closed, naming whom it's on;
 //   - on no one, or unlinked on the list's own boss (an older dev filed --on <own name> as a person): decide for an
 //     ask, else check when its PR moved, else yours; an ask handed to someone goes by whom it's on, as below;
+//   - on the boss itself (--on boss): check when its PR moved, else working while it says it does it (Doing), else
+//     idle, naming the boss (boss for a desktop app boss's, which has no name);
 //   - on a linked session o didn't start, or no longer listed: gone;
 //   - on a worker asking the user (sidebar.Rank: a dialog, a turn ended on a question), or resting after a failed
 //     turn: blocked;
@@ -93,22 +95,29 @@ func (o Owner) Status(it Shown) (status, on string) {
 			return StatusCheck, ""
 		}
 		return StatusYours, ""
+	case OnBoss(it.On, it.Session):
+		switch {
+		case moved:
+			return StatusCheck, o.bossName()
+		case it.Doing != nil:
+			return StatusWorking, o.bossName()
+		}
+		return StatusIdle, o.bossName()
 	case o.Unread:
 		return "", ""
 	}
 	w, worker := o.worker(it)
-	rank := w.Rank()
 	switch {
 	case !worker && it.Session != nil:
 		return StatusGone, it.Session.Name
-	case worker && (rank == sidebar.RankNeedsYou || rank == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed):
+	case worker && blocked(w):
 		return StatusBlocked, w.Name
 	case moved:
 		return StatusCheck, cmp.Or(w.Name, it.On)
 	case !worker:
 		return StatusWaiting, it.On
 	}
-	switch rank {
+	switch w.Rank() {
 	case sidebar.RankWorking:
 		return StatusWorking, w.Name
 	case sidebar.RankWaiting:
@@ -116,6 +125,19 @@ func (o Owner) Status(it Shown) (status, on string) {
 	}
 	return StatusIdle, w.Name
 }
+
+// blocked reports worker w waiting on the user (sidebar.Rank: a dialog, a turn ended on a question), or resting after
+// a failed turn.
+func blocked(w sidebar.Session) bool {
+	rank := w.Rank()
+	return rank == sidebar.RankNeedsYou || rank == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed
+}
+
+// bossName is o's session name, Boss for a desktop app boss's (no name).
+func (o Owner) bossName() string { return cmp.Or(o.Name, Boss) }
+
+// OnBoss reports an item its list's boss does itself: on Boss, linked to no session.
+func OnBoss(on string, session *Session) bool { return on == Boss && session == nil }
 
 // Own reports an item on no one, or unlinked (no session) on boss itself: an older dev filed --on <own name> as a
 // person; its status is the user's, and the user ticks or answers it.
@@ -152,14 +174,15 @@ func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	return o.Workers[i], true
 }
 
-// SetStatus sets each item's Status and StatusOn (Owner.Status), and Now for an item on a live worker.
+// SetStatus sets each item's Status and StatusOn (Owner.Status), its Placement (Owner.place), and Now for an item on a live worker.
 func (l List) SetStatus(o Owner) {
 	for i, it := range l.Items {
 		l.Items[i].Status, l.Items[i].StatusOn = o.Status(it)
+		l.Items[i].Placement = o.place(it)
 		l.Items[i].Now = ""
 		switch l.Items[i].Status {
 		case StatusWorking, StatusWaiting, StatusBlocked, StatusIdle, StatusCheck:
-			if w, ok := o.worker(it); ok && !Own(it.On, it.Session, o.Name) {
+			if w, ok := o.worker(it); ok && !Own(it.On, it.Session, o.Name) && !OnBoss(it.On, it.Session) {
 				l.Items[i].Now = w.Doing
 				if o.Doing != nil {
 					l.Items[i].Now = o.Doing(w)

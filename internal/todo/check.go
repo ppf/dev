@@ -129,6 +129,22 @@ func check(it Item, f fact, now time.Time) *sidebar.Check {
 	return nil
 }
 
+// A linked PR's state as Shown.PRState gives it.
+const (
+	PROpen   = "open"
+	PRMerged = "merged"
+	PRClosed = "closed"
+)
+
+// prState is the state of the GitHub PR open item it links to, as its last lookup saw it (gh's OPEN, MERGED, CLOSED
+// in lower case); "" before one, or for another link.
+func prState(it Item, f fact) string {
+	if lookedUp(it.Link) == 0 || f.Link != it.Link {
+		return ""
+	}
+	return strings.ToLower(f.Last.State)
+}
+
 // Lookup looks up the PRs the open items link to, those not looked up within ttl, at most limit of them (0: all),
 // with view, and keeps what it finds beside the list, not in it, then ticks the --done-on items whose PR it finds so
 // (Ticked): the list's Updated stays the boss's last change. A failed lookup is kept as the item's Err and tried again after ttl; a lookup older than one kept meanwhile is

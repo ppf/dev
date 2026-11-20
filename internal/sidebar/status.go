@@ -58,3 +58,30 @@ var Groups = []StatusGroup{
 func GroupOf(status string) int {
 	return slices.IndexFunc(Groups, func(g StatusGroup) bool { return slices.Contains(g.Statuses, status) })
 }
+
+// A to do item's column on the boards, where its card sits (todo.Owner.place sets it), in board order (Columns).
+const (
+	ColumnTodo     = "todo"
+	ColumnProgress = "progress"
+	ColumnWaiting  = "waiting"
+	ColumnReview   = "review"
+	ColumnDone     = "done"
+)
+
+// Columns is the boards' column order; ColumnTitles their titles.
+var Columns = []string{ColumnTodo, ColumnProgress, ColumnWaiting, ColumnReview, ColumnDone}
+
+var ColumnTitles = map[string]string{
+	ColumnTodo:     "To do",
+	ColumnProgress: "In progress",
+	ColumnWaiting:  "Waiting",
+	ColumnReview:   "Review",
+	ColumnDone:     "Done",
+}
+
+// Whose a card is (todo.Assignee.Kind): the user's, its list's boss's, or a worker's.
+const (
+	AssigneeYou    = "you"
+	AssigneeBoss   = "boss"
+	AssigneeWorker = "worker"
+)

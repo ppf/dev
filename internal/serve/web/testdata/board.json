@@ -4,6 +4,7 @@
  "statuses": [
   "decide",
   "yours",
+  "starting",
   "working",
   "blocked",
   "waiting",
@@ -14,7 +15,9 @@
  ],
  "counts": {
   "decide": 3,
-  "yours": 3
+  "yours": 3,
+  "needs_you": 5,
+  "mine": 9
  },
  "lists": [
   {
@@ -36,7 +39,12 @@
      ],
      "added": 1795103237,
      "done": false,
-     "status": "decide"
+     "status": "decide",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     },
+     "needs_you": true
     },
     {
      "id": 5,
@@ -54,14 +62,23 @@
      ],
      "added": 1795102937,
      "done": false,
-     "status": "decide"
+     "status": "decide",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     },
+     "needs_you": true
     },
     {
      "id": 6,
      "text": "Zadzwonić do księgowej w sprawie faktury korygującej za październik, sprawdzić czy przelew z dwudziestego wpłynął na konto firmowe, a potem przygotować zestawienie godzin dla klienta z Gdańska razem z notatką o zmianie stawki od grudnia; pamiętać o załącznikach źródłowych",
      "added": 1795100237,
      "done": false,
-     "status": "yours"
+     "status": "yours",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     }
     },
     {
      "id": 7,
@@ -69,7 +86,11 @@
      "added": 1795096637,
      "done": false,
      "status": "yours",
-     "until": 1795190237
+     "until": 1795190237,
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     }
     },
     {
      "id": 8,
@@ -79,17 +100,157 @@
       "id": "$9",
       "name": "garden-sensor"
      },
-     "link": "https://example.invalid/garden/pull/12",
+     "link": "https://github.com/example/garden/pull/12",
      "added": 1795099837,
      "done": false,
-     "status": "working",
-     "status_on": "garden-sensor"
+     "status": "idle",
+     "status_on": "garden-sensor",
+     "column": "review",
+     "assignee": {
+      "kind": "worker",
+      "name": "garden-sensor",
+      "running": true
+     },
+     "pr_state": "open"
     },
     {
      "id": 9,
      "text": "Old item already ticked",
      "done": true,
-     "added": 1795094837
+     "added": 1795094837,
+     "column": "done",
+     "assignee": {
+      "kind": "you"
+     }
+    },
+    {
+     "id": 10,
+     "text": "Write the planting calendar for spring",
+     "on": "boss",
+     "added": 1795100837,
+     "done": false,
+     "status": "idle",
+     "status_on": "boss-garden",
+     "column": "todo",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-garden",
+      "running": true
+     }
+    },
+    {
+     "id": 11,
+     "text": "Merge the watering docs",
+     "on": "boss",
+     "added": 1795099837,
+     "done": false,
+     "status": "working",
+     "status_on": "boss-garden",
+     "doing": {
+      "text": "reading the review comments",
+      "at": 1795103537
+     },
+     "column": "progress",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-garden",
+      "running": true
+     }
+    },
+    {
+     "id": 12,
+     "text": "Order the drip hoses from the shop",
+     "added": 1795101437,
+     "done": false,
+     "status": "yours",
+     "doing": {
+      "text": "comparing two shops",
+      "at": 1795103637
+     },
+     "part_of": 13,
+     "column": "progress",
+     "assignee": {
+      "kind": "you"
+     }
+    },
+    {
+     "id": 13,
+     "text": "Fit the drip hoses to the beds",
+     "on": "garden-drip",
+     "session": {
+      "id": "$11",
+      "name": "garden-drip"
+     },
+     "added": 1795101437,
+     "done": false,
+     "status": "working",
+     "status_on": "garden-drip",
+     "now": "Read beds.md",
+     "part_of": 12,
+     "column": "progress",
+     "assignee": {
+      "kind": "worker",
+      "name": "garden-drip",
+      "running": true
+     }
+    },
+    {
+     "id": 14,
+     "text": "Prune the apple trees",
+     "added": 1795102937,
+     "done": false,
+     "status": "starting",
+     "status_on": "boss-garden",
+     "started": {
+      "at": 1795103717,
+      "to": "boss-garden"
+     },
+     "column": "progress",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-garden",
+      "running": true
+     }
+    },
+    {
+     "id": 15,
+     "text": "API tests: resume after the rate limit",
+     "on": "garden-api",
+     "session": {
+      "id": "$12",
+      "name": "garden-api"
+     },
+     "added": 1795102037,
+     "done": false,
+     "status": "waiting",
+     "status_on": "garden-api",
+     "now": "waits till 21:40",
+     "column": "waiting",
+     "assignee": {
+      "kind": "worker",
+      "name": "garden-api",
+      "running": true
+     }
+    }
+   ],
+   "finished": [
+    {
+     "id": 3,
+     "text": "Live updates over /v1/events",
+     "on": "garden-live",
+     "assignee": {
+      "kind": "worker",
+      "name": "garden-live"
+     },
+     "done_at": 1795100237
+    },
+    {
+     "id": 2,
+     "text": "Read the plan for the closed column",
+     "assignee": {
+      "kind": "you"
+     },
+     "done_at": 1795103237
     }
    ]
   },
@@ -105,7 +266,14 @@
      "added": 1795098837,
      "done": false,
      "status": "waiting",
-     "status_on": "Ola"
+     "status_on": "Ola",
+     "column": "waiting",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-kitchen",
+      "running": true
+     },
+     "waiting_for": "Ola"
     },
     {
      "id": 2,
@@ -118,7 +286,14 @@
      "added": 1795098837,
      "done": false,
      "status": "blocked",
-     "status_on": "kitchen-menu"
+     "status_on": "kitchen-menu",
+     "column": "progress",
+     "assignee": {
+      "kind": "worker",
+      "name": "kitchen-menu",
+      "running": true
+     },
+     "needs_you": true
     },
     {
      "id": 3,
@@ -131,7 +306,13 @@
      "added": 1795098837,
      "done": false,
      "status": "idle",
-     "status_on": "kitchen-timer"
+     "status_on": "kitchen-timer",
+     "column": "progress",
+     "assignee": {
+      "kind": "worker",
+      "name": "kitchen-timer",
+      "running": true
+     }
     },
     {
      "id": 4,
@@ -144,7 +325,13 @@
      "added": 1795098837,
      "done": false,
      "status": "gone",
-     "status_on": "kitchen-fridge"
+     "status_on": "kitchen-fridge",
+     "column": "todo",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-kitchen",
+      "running": true
+     }
     },
     {
      "id": 5,
@@ -157,7 +344,12 @@
      },
      "added": 1795098837,
      "done": false,
-     "status": "check"
+     "status": "check",
+     "column": "review",
+     "assignee": {
+      "kind": "you"
+     },
+     "needs_you": true
     },
     {
      "id": 6,
@@ -171,14 +363,23 @@
      "text": "Pay the plumber",
      "added": 1795098837,
      "done": false,
-     "status": "yours"
+     "status": "yours",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     }
     },
     {
      "id": 8,
      "text": "On a worker whose boss's workers weren't read",
      "on": "kitchen-oven",
      "added": 1795098837,
-     "done": false
+     "done": false,
+     "column": "progress",
+     "assignee": {
+      "kind": "worker",
+      "name": "kitchen-oven"
+     }
     }
    ]
   },
@@ -196,7 +397,12 @@
      ],
      "added": 1795103537,
      "done": false,
-     "status": "decide"
+     "status": "decide",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     },
+     "needs_you": true
     }
    ]
   },
@@ -215,7 +421,44 @@
      },
      "added": 1795013837,
      "done": false,
-     "status": "boss closed"
+     "status": "boss closed",
+     "column": "todo",
+     "assignee": {
+      "kind": "you"
+     }
+    },
+    {
+     "id": 3,
+     "text": "Bump the lock firmware to 7.2",
+     "on": "shed-lock",
+     "session": {
+      "id": "$20",
+      "name": "shed-lock"
+     },
+     "added": 1794803837,
+     "done": false,
+     "status": "boss closed",
+     "status_on": "shed-lock",
+     "column": "todo",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-shed"
+     }
+    },
+    {
+     "id": 4,
+     "text": "Get a quote for the roof from Carl",
+     "on": "Carl",
+     "added": 1794783837,
+     "done": false,
+     "status": "boss closed",
+     "status_on": "Carl",
+     "column": "waiting",
+     "assignee": {
+      "kind": "boss",
+      "name": "boss-shed"
+     },
+     "waiting_for": "Carl"
     }
    ]
   },

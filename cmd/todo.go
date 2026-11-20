@@ -71,7 +71,7 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), and now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait)), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, doing {text, at}: who does it says what they do now, part_of: the id of its other half), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
@@ -626,7 +626,7 @@ type bossList struct {
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	now := time.Now()
-	lists, err := todoAll(c, stderr, now, asJSON, false)
+	lists, err := todoAll(c, stderr, now, asJSON, false, asJSON)
 	if err != nil {
 		return err
 	}
@@ -649,9 +649,9 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 }
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
-// board), else its gone marked.
-func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow bool) ([]bossList, error) {
-	all, err := todo.All(c, now, nil, true)
+// board), else its gone marked; with finished, the lists with only finished items too (todo.All).
+func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, finished bool) ([]bossList, error) {
+	all, err := todo.All(c, now, nil, true, finished)
 	if err != nil {
 		return nil, err
 	}

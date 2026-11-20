@@ -6,7 +6,7 @@ function node() {
   const n = { children: [], dataset: {}, style: { setProperty() {} }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
     classList: { set: new Set(), toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); }, contains(c) { return this.set.has(c); } },
     attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, addEventListener() {}, focus() {},
-    append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
+    contains() { return false; }, append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
     querySelectorAll() { return []; }, querySelector() { return null; } };
   return n;
 }
@@ -14,15 +14,15 @@ const els = {};
 let version = 'v1', tag = 'A', status = 200, text = '';
 const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
   lists: [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
-const calls = [];
+const calls = [], media = { matches: false, addEventListener() {} };
 const ctx = {
   console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
-    createElement: () => node(), addEventListener() {}, querySelectorAll: () => [] },
+    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [] },
   window: { addEventListener() {}, scrollTo() {} },
   location: { hash: '#/', reloads: 0, reload() { this.reloads++; } },
-  matchMedia: () => ({ matches: false, addEventListener() {} }),
+  matchMedia: () => media,
   CSS: { escape: s => s },
   sessionStorage: { m: {}, getItem(k) { return this.m[k] ?? null; }, setItem(k, v) { this.m[k] = v; } },
   fetch: async (p, opts) => {
@@ -43,7 +43,7 @@ const ctx = {
 const res = (code, data, etag = '') => ({ status: code, ok: code >= 200 && code < 300, headers: { get: () => etag }, text: async () => data ? JSON.stringify(data) : '' });
 ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ['live.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(process.argv[2], f), 'utf8'), ctx, { filename: f });
+for (const f of ['live.js', 'model.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(process.argv[2], f), 'utf8'), ctx, { filename: f });
 const run = code => vm.runInContext(code, ctx);
 const settle = () => new Promise(r => setTimeout(r, 20));
 const boards = () => calls.filter(c => c === '/v1/board').length;
@@ -137,5 +137,23 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('an open sheet shows the read error', /could not be read/.test(drawn()));
   run("state.board = { lists: [{ boss: 'boss-x', items: [] }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
   check('an open sheet redraws once the list reads again', /no longer open/.test(drawn()));
+
+  // The fakeserve board, every kind of card, on the phone and the wide screen
+  ctx.fixture = JSON.parse(fs.readFileSync(path.join(process.argv[2], '..', 'testdata', 'board.json'), 'utf8'));
+  run('state.board = fixture; state.filter = { project: "", who: [], needs: false }');
+  const walk = (n, f, out = []) => { if (n && typeof n === 'object') { if (f(n)) out.push(n); (n.children || []).forEach(c => walk(c, f, out)); } return out; };
+  const drawnCards = () => run('board()').flatMap(n => walk(n, c => /^card\b/.test(c.className || '')));
+  const lanes = () => run('board()').flatMap(n => walk(n, c => c.tag === 'section' || c.tag === 'details'));
+  const cardCount = run('cards(state.board).length');
+  check('phone: every card drawn', drawnCards().length === cardCount);
+  media.matches = true;
+  check('wide: five columns in order', JSON.stringify(lanes().map(c => c.attrs['data-k'])) === JSON.stringify(['todo', 'progress', 'waiting', 'review', 'done']));
+  check('wide: every card drawn', drawnCards().length === cardCount);
+  check('wide: finished cards have no sheet link', drawnCards().filter(c => /\bdone\b/.test(c.className)).every(c => !walk(c, x => x.tag === 'a').length));
+  run("state.filter.needs = true");
+  check('needs you: only those cards, as many as the tally', drawnCards().length === run('tally(cards(state.board)).need'));
+  run("state.filter = { project: '', who: ['gone-worker'], needs: false }; board()");
+  check('a pressed assignee with no card left is dropped', run('state.filter.who.length') === 0 && drawnCards().length === cardCount);
+  media.matches = false;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });

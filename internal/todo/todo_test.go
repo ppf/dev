@@ -743,7 +743,7 @@ func TestAll(t *testing.T) {
 			}
 		}
 	}
-	all, err := All(c, now, nil, false)
+	all, err := All(c, now, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,9 @@
   ],
   "counts": {
     "decide": 1,
-    "yours": 1
+    "yours": 1,
+    "needs_you": 1,
+    "mine": 2
   },
   "manager_runs": true,
   "lists": [
@@ -45,7 +47,12 @@
             "~/memo.md"
           ],
           "added": 1700000000,
-          "status": "decide"
+          "status": "decide",
+          "column": "todo",
+          "assignee": {
+            "kind": "you"
+          },
+          "needs_you": true
         },
         {
           "id": 2,
@@ -54,7 +61,11 @@
           "done": false,
           "until": 1700086400,
           "added": 1700000000,
-          "status": "yours"
+          "status": "yours",
+          "column": "todo",
+          "assignee": {
+            "kind": "you"
+          }
         },
         {
           "id": 3,
@@ -63,7 +74,14 @@
           "done": false,
           "added": 1700000000,
           "status": "waiting",
-          "status_on": "alice"
+          "status_on": "alice",
+          "column": "waiting",
+          "assignee": {
+            "kind": "boss",
+            "name": "boss-a",
+            "running": true
+          },
+          "waiting_for": "alice"
         },
         {
           "id": 4,
@@ -73,11 +91,27 @@
           "added": 1700000000,
           "status": "working",
           "status_on": "a-fix",
-          "now": "Test ~/src/login.go in ~"
+          "now": "Test ~/src/login.go in ~",
+          "column": "progress",
+          "assignee": {
+            "kind": "worker",
+            "name": "a-fix",
+            "running": true
+          }
         }
       ],
-      "updated": 1700000000,
-      "stale": false
+      "updated": 1699999940,
+      "stale": false,
+      "finished": [
+        {
+          "id": 5,
+          "text": "Ship the notes",
+          "assignee": {
+            "kind": "you"
+          },
+          "done_at": 1699999940
+        }
+      ]
     },
     {
       "boss": "boss-b",
