@@ -525,7 +525,7 @@ func TestStarted(t *testing.T) {
 		{todo.Shown{ID: 4, Text: "a"}, false, `#4 "a": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces 4 --on <worker>; if it is the user's own to do, say so on the list (dev todo add --replaces 4 --on me "<text, why>")`},
 		{todo.Shown{ID: 4, Text: "a", On: todo.Boss}, false, `#4 "a": while it still reads so and is marked started on your list, it is your own parked item: do it yourself and tick it when done (dev todo done 4), or start a worker on it and link it with dev todo add --replaces 4 --on <worker>`},
 		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone, Status: todo.StatusGone}, false, `#4 "a": while it still reads so and is marked started on your list, its worker fix-login is gone: start a fresh one on it and link it with dev todo add --replaces 4 --on <worker>`},
-		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone, Status: todo.StatusIdle}, false, `#4 "a": while it still reads so and is marked started on your list, it is on fix-login: see what it does, or start a fresh worker on it and link it with dev todo add --replaces 4 --on <worker>`},
+		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, false, `#4 "a": while it still reads so and is marked started on your list, it is on fix-login: see what it does, or start a fresh worker on it and link it with dev todo add --replaces 4 --on <worker>`},
 		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, true, `boss-x #4 "a": boss-x is closed: reopen it (dev boss x --background), its start list asks it to start #4`},
 	} {
 		if n := Started("boss-x", tt.it, tt.closed); n.Text != tt.want || n.Kind != Start || n.Key != "start boss-x 4" {

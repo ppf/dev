@@ -414,7 +414,7 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 	case it.Session != nil && it.Status == todo.StatusGone:
 		n.Text = fmt.Sprintf(marked+`its worker %s is gone: start a fresh one on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, it.Session.Name, id)
-	case it.Session != nil && it.Status != "":
+	case it.Session != nil:
 		n.Text = fmt.Sprintf(marked+`it is on %s: see what it does, or start a fresh worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, it.Session.Name, id)
 	default:
