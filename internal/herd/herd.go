@@ -57,6 +57,12 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`feature or piece of work gets a fresh worker (dev agent start with a new worktree name); prompt an existing one of ` +
 	`yours only with changes to its current work (fixes, review findings, changes to the same feature or PR), never with ` +
 	`unrelated or merely related work. When unsure, delegate. ` +
+	`For a feature request (not a fix), write a five-line contract file (goal, constraints, deliverable, done when, first ` +
+	`visible step with a wall-clock guess, never human-day sizes) and put it to the user as a dev todo ask, the file as the ` +
+	`last --context line, before starting its workers; research or a mockup for it may come first. A later remark on a ` +
+	`feature whose contract is picked updates the file: tick the old ask and ask anew, showing the scope change; ` +
+	`prompt the running worker with it only after the pick, as one change. When a worker's plan grows past its contract ` +
+	`(more slices than the first step, or more than one PR), stop it after the first step and ask before the rest. ` +
 	`Pass --model and --effort on every dev agent start of a Claude worker, chosen by the table in the dev-agents skill ` +
 	`(Model and effort): without them it runs the user's default, their most expensive setup. Ask the user with dev todo ` +
 	`ask before every use of ultracode, a word that makes a worker run a workflow of many agents (the rule is ` +
@@ -137,7 +143,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`only printed and stays the user's (not in your --mine list, its news doesn't reach you): say so when you name it. When ` +
 	`the user asks you to take one over, adopt it with ` + "`dev boss <project> --background --adopt`" + ` (only a boss ` +
 	`with no parent), then read ` + "`dev todo --all`" + ` for what it had before. Hand a boss work with ` +
-	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. An item on your list that a boss does gets ` + "`dev todo add --on boss-<project>`" + `: your board shows its live ` +
+	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. A feature request goes to its boss as the user's own words plus "contract first"; don't scope it yourself. An item on your list that a boss does gets ` + "`dev todo add --on boss-<project>`" + `: your board shows its live ` +
 	`state, or that it's gone. A brief you hand a boss says, in ` +
 	`place of a worker's "end your turn with the question as text": "` + bossBriefAsk + `" Close one of your bosses only when the user asks, ` +
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
