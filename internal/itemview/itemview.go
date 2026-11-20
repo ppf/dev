@@ -1,5 +1,5 @@
 // Package itemview is one to do item in a box: its text, context, options or actions, facts and keys. It draws and
-// takes keys only; its host (dev todo show, in a tmux popup) shows it and closes it once Done.
+// takes keys and clicks only; its host (dev todo show, in a tmux popup) shows it and closes it once Done.
 package itemview
 
 import (
@@ -343,8 +343,8 @@ cut:
 }
 
 // Click runs a left click at row y of the box drawn w×h: on an option or action it does what that line's key does
-// (as j/k to it then ⏎); one while the own-words field is open leaves the field (its text kept) unless it's on the
-// field's own line.
+// (as j/k to it then ⏎), elsewhere nothing; while the own-words field is open, one on another line of the list leaves
+// the field (its text kept) and runs that line. None while an action is under way.
 func (m Model) Click(y, w, h int, now time.Time) (Model, tea.Cmd) {
 	_, at := m.render(w, h, now)
 	if y < 0 || y >= len(at) || at[y] < 0 || m.busy != "" {

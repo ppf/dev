@@ -609,3 +609,45 @@ func TestClickItemView(t *testing.T) {
 		t.Error("❌ second click beside the view kept it open")
 	}
 }
+
+// In a scrolled column a click opens the card it shows, under "↑ n more"; releases and drags do nothing; the wheel
+// stops at the column's ends and does nothing over the item view.
+func TestClickScrolledAndIgnored(t *testing.T) {
+	m, _ := board(t, fixture(12), 90, 28)
+	m = keys(t, m, "j", "j", "j", "j") // top 2: ↑ 2 more, then alpha #11
+	m = clickOn(t, m, "☐ alpha #11")
+	if m.item == nil || m.card != 2 || !strings.Contains(plain(m), "alpha #11 · Yours") {
+		t.Fatalf("❌ click under ↑ 2 more: card %d\n%s", m.card, plain(m))
+	}
+	// A press beside the view over a card closes it; that click's release doesn't open the card
+	x, y := at(t, m, "↑ 2 more")
+	m = press(t, m, tea.MouseButtonLeft, x, y+1)
+	if m.item != nil {
+		t.Fatal("❌ press beside the view left it open")
+	}
+	for _, a := range []tea.MouseAction{tea.MouseActionRelease, tea.MouseActionMotion} {
+		next, _ := m.mouse(tea.MouseMsg{X: x, Y: y + 1, Button: tea.MouseButtonLeft, Action: a}, clock.Add(time.Hour))
+		if b := next.(Model); b.item != nil || b.card != m.card || b.col != m.col {
+			t.Errorf("❌ left %v over a card acted: view open %v card %d", a, b.item != nil, b.card)
+		}
+	}
+
+	m, _ = board(t, fixture(12), 90, 28)
+	x, y = at(t, m, "For you")
+	m = press(t, m, tea.MouseButtonWheelUp, x, y+3)
+	if m.card != 0 || m.top != 0 {
+		t.Errorf("❌ wheel up on the first card: card %d top %d", m.card, m.top)
+	}
+	for range 20 {
+		m = press(t, m, tea.MouseButtonWheelDown, x, y+3)
+	}
+	if m.card != 12 {
+		t.Errorf("❌ wheel down past the end: card %d, want 12", m.card)
+	}
+	m = keys(t, m, "enter")
+	open := m.card
+	m = press(t, m, tea.MouseButtonWheelUp, x, y+3)
+	if m.item == nil || m.card != open {
+		t.Errorf("❌ wheel over the item view: view open %v card %d", m.item != nil, m.card)
+	}
+}

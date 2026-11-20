@@ -1,5 +1,5 @@
 // Package kanban is the to do board as columns by status group (sidebar.Groups), the item view (itemview) drawn
-// over it. It draws and takes keys only; its host (dev todo board, in a full-window tmux popup) loads the lists and
+// over it. It draws and takes keys and clicks only; its host (dev todo board, in a full-window tmux popup) loads the lists and
 // runs the actions.
 package kanban
 
@@ -209,14 +209,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, cmd
 }
 
-// updateItem passes msg to the item view; once it's done the board reads the lists again (an action changed them)
-// and says what went, or closes after a switch to a session.
+// updateItem passes msg to the item view and settles it.
 func (m Model) updateItem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	v, cmd := m.item.Update(msg)
 	return m.settle(v, cmd)
 }
 
-// settle takes the item view after a key or click: kept while open, else as updateItem says.
+// settle takes the item view after a key or click: kept while open; once done the board reads the lists again (an
+// action changed them) and says what went, or closes after a switch to a session.
 func (m Model) settle(v itemview.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	if !v.Done {
 		m.item = &v
@@ -274,10 +274,10 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// mouse runs a click or the wheel. With the item view open a left click on it does what its line's key does, one
-// beside it closes it as esc does. Else a click on a card selects and opens it, on a column's head or a gap selects
-// the column, on "↑ n more" or "+n more" pages it, on a project shows that project; the wheel moves the selection
-// in the column under it (selecting that column first), the column scrolling with it.
+// mouse runs a click or the wheel. With the item view open a left click on it is the view's (Click), one beside it
+// closes it as esc does. Else a click on a card selects and opens it, on a column's head, rule or empty part selects
+// the column, on "↑ n more" or "+n more" pages it, on a project shows that project; the wheel moves the selection in
+// the column under it (selecting that column first), the column scrolling with it.
 func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 	left := ms.Action == tea.MouseActionPress && ms.Button == tea.MouseButtonLeft
 	wheel := ms.Button == tea.MouseButtonWheelUp || ms.Button == tea.MouseButtonWheelDown
