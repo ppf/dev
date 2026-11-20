@@ -45,6 +45,7 @@ func main() {
 	mux.HandleFunc("GET /v1/board", s.serveBoard)
 	mux.HandleFunc("POST /v1/answer", s.act(s.answer))
 	mux.HandleFunc("POST /v1/done", s.act(s.done))
+	mux.HandleFunc("POST /v1/start", s.act(s.start))
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("POST /fake/mac", s.mac)
 	log.Printf("fakeserve on http://%s", *addr)
@@ -163,6 +164,18 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 		return 409, fmt.Sprintf("item %d is %v: not yours to tick", req.ID, it["status"])
 	}
 	it["done"] = true
+	return 200, ""
+}
+
+// start marks the user's own yours or boss closed item starting, sent to its boss.
+func (s *server) start(req request, it map[string]any) (int, string) {
+	switch {
+	case req.Text != it["text"]:
+		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)
+	case !slices.Contains([]any{todo.StatusYours, todo.StatusBossClosed}, it["status"]):
+		return 409, fmt.Sprintf("item %d is %v: not yours to start", req.ID, it["status"])
+	}
+	it["status"], it["status_on"] = todo.StatusStarting, req.Boss
 	return 200, ""
 }
 
