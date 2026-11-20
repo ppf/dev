@@ -701,10 +701,10 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 	}))
 }
 
-// Start marks open item sh.ID started, its note going to to, only while it is as sh was read (text, Added, on, doing), and no
-// start under StartLate old waits. sh is the item as read and placed (SetStatus): only a To do card starts, not an
-// ask. A late start is sent again, wherever it sits: prev is the start it replaced. A start ends doing.
-func (s Store) Start(sh Shown, text, to string, now time.Time) (it Item, prev *Started, err error) {
+// Start marks open item sh.ID started, its note going to to, only while it is as sh was read (text, Added, on, session,
+// doing), and no start under StartLate old waits. sh is the item as read and placed (SetStatus): only a To do card
+// starts, not an ask. A late start is sent again, wherever it sits. A start ends doing. prev is the item before it.
+func (s Store) Start(sh Shown, text, to string, now time.Time) (it, prev Item, err error) {
 	id := sh.ID
 	err = s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
@@ -725,18 +725,19 @@ func (s Store) Start(sh Shown, text, to string, now time.Time) (it Item, prev *S
 			return fmt.Errorf("item %d is %s, not To do: only a To do card starts", id, sh.where())
 		}
 		// Handed to a session: whoever was on it no longer is
-		prev, p.Started, p.Doing = p.Started, &Started{At: now.Unix(), To: to}, nil
+		prev = *p
+		p.Started, p.Doing = &Started{At: now.Unix(), To: to}, nil
 		it = *p
 		return nil
 	}))
 	return it, prev, err
 }
 
-// Unstart puts back prev in place of item id's start made at at, when its note couldn't be sent.
-func (s Store) Unstart(id int, at int64, prev *Started, now time.Time) error {
+// Unstart puts back prev's start and doing in place of item id's start made at at, when its note couldn't be sent.
+func (s Store) Unstart(id int, at int64, prev Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Started != nil && it.Started.At == at }); i >= 0 {
-			f.Items[i].Started = prev
+			f.Items[i].Started, f.Items[i].Doing = prev.Started, prev.Doing
 		}
 		return nil
 	})

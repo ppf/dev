@@ -259,6 +259,7 @@ func (s *server) start(req request, it map[string]any) (int, string) {
 	it["started"] = map[string]any{"at": time.Now().Unix(), "to": req.Boss}
 	delete(it, "start_late")
 	delete(it, "needs_you")
+	delete(it, "doing")
 	return 200, ""
 }
 

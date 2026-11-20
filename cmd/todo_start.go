@@ -102,8 +102,8 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 	return to.Name, nil
 }
 
-// placed is open item id of s, boss name's list, placed as the boards place it. When the sessions
-// can't be read, an item linked to one isn't placed but refused, as its worker may run.
+// placed is open item id of s, boss name's list, placed as the boards place it. When the sessions can't be read, an
+// item linked to one on a live boss's list isn't placed but refused, as its worker may run.
 func placed(c *tmux.Client, s todo.Store, name string, id int, closed bool, now time.Time, warn io.Writer) (todo.Shown, error) {
 	l, err := s.Read(now)
 	if err != nil {

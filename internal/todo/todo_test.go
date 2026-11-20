@@ -963,7 +963,7 @@ func TestStart(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
 	o := Owner{Name: "boss-x"}
-	start := func(id int, text, to string, at time.Time) (Item, *Started, error) {
+	start := func(id int, text, to string, at time.Time) (Item, Item, error) {
 		return s.Start(placed(t, s, o, id, at), text, to, at)
 	}
 	for _, it := range []Item{{Text: "a"}, {Text: "b", On: "Marek"}, {Text: "c?", Options: []string{"x", "y"}}} {
@@ -988,7 +988,7 @@ func TestStart(t *testing.T) {
 		t.Errorf("a changed item's start: %v, want Refused", err)
 	}
 	it, prev, err := start(1, "a", "boss-x", now)
-	if err != nil || prev != nil || it.Started == nil || *it.Started != (Started{At: now.Unix(), To: "boss-x"}) {
+	if err != nil || prev.Started != nil || it.Started == nil || *it.Started != (Started{At: now.Unix(), To: "boss-x"}) {
 		t.Fatalf("Start = %+v, %v", it, err)
 	}
 	if _, _, err := start(1, "a", "manager", now.Add(2*time.Minute)); err == nil || err.Error() != "item 1: already sent to boss-x 2m ago" {
@@ -1001,19 +1001,19 @@ func TestStart(t *testing.T) {
 		t.Errorf("at StartLate: %+v", sh)
 	}
 	it, prev, err = start(1, "a", "manager", now.Add(StartLate))
-	if err != nil || *it.Started != (Started{At: now.Add(StartLate).Unix(), To: "manager"}) || *prev != (Started{At: now.Unix(), To: "boss-x"}) {
+	if err != nil || *it.Started != (Started{At: now.Add(StartLate).Unix(), To: "manager"}) || *prev.Started != (Started{At: now.Unix(), To: "boss-x"}) {
 		t.Errorf("a late start sent again = %+v, %+v, %v", it, prev, err)
 	}
 	if r := read(t, s, now).StartReminder(false, "1m ago", nil, now); !strings.Contains(r, "1. a (the user asked to start it: start a worker") {
 		t.Errorf("StartReminder doesn't name the start: %s", r)
 	}
-	if err := s.Unstart(1, now.Unix(), nil, now); err != nil || read(t, s, now).Items[0].Started.To != "manager" {
+	if err := s.Unstart(1, now.Unix(), Item{}, now); err != nil || read(t, s, now).Items[0].Started.To != "manager" {
 		t.Errorf("Unstart of another start changed it: %v", err)
 	}
-	if err := s.Unstart(1, now.Add(StartLate).Unix(), prev, now); err != nil || *read(t, s, now).Items[0].Started != *prev {
+	if err := s.Unstart(1, now.Add(StartLate).Unix(), prev, now); err != nil || *read(t, s, now).Items[0].Started != *prev.Started {
 		t.Errorf("Unstart didn't put back the earlier start: %v", err)
 	}
-	if err := s.Unstart(1, now.Unix(), nil, now); err != nil || read(t, s, now).Items[0].Started != nil {
+	if err := s.Unstart(1, now.Unix(), Item{}, now); err != nil || read(t, s, now).Items[0].Started != nil {
 		t.Errorf("Unstart: %v", err)
 	}
 	if _, _, err := start(1, "a", "boss-x", now); err != nil {

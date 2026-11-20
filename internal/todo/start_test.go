@@ -71,7 +71,7 @@ func TestStartShapes(t *testing.T) {
 			}
 			// Late: sent again, though it sits In progress
 			late := now.Add(StartLate)
-			if _, prev, err := s.Start(placed(t, s, tt.owner, 1, late), tt.it.Text, "manager", late); err != nil || prev == nil {
+			if _, prev, err := s.Start(placed(t, s, tt.owner, 1, late), tt.it.Text, "manager", late); err != nil || prev.Started == nil {
 				t.Errorf("late start: %v, prev %v", err, prev)
 			}
 		})
@@ -137,8 +137,22 @@ func TestStartShapes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if it, _, err := s.Start(placed(t, s, live, id, now), "d", "boss-x", now); err != nil || it.Doing != nil || it.Started == nil {
+	it, prev, err := s.Start(placed(t, s, live, id, now), "d", "boss-x", now)
+	if err != nil || it.Doing != nil || it.Started == nil {
 		t.Errorf("a late start of an item marked doing = %+v, %v; want started, doing ended", it, err)
+	}
+	// Its note not sent: start and doing back as they were
+	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
+		if p.Doing == nil || p.Doing.Text != "on it" || p.Started == nil || p.Started.At != now.Add(-StartLate).Unix() {
+			t.Errorf("after Unstart = %+v / %+v, want the late start and doing back", p.Started, p.Doing)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	// The boss on its started parked item takes the start
 	if id, err = s.Add(Item{Text: "e", On: Boss}, now); err != nil {
