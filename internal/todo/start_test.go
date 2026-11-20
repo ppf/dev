@@ -141,6 +141,7 @@ func TestStartShapes(t *testing.T) {
 	if err != nil || it.Doing != nil || it.Started == nil {
 		t.Errorf("a late start of an item marked doing = %+v, %v; want started, doing ended", it, err)
 	}
+	// Its note not sent: the start and doing back
 	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +149,43 @@ func TestStartShapes(t *testing.T) {
 		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
 		if p.Doing == nil || p.Doing.Text != "on it" || p.Started == nil || p.Started.At != now.Add(-StartLate).Unix() {
 			t.Errorf("after Unstart = %+v / %+v, want the late start and doing back", p.Started, p.Doing)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Given to someone else while its note was sent: the undo leaves it as given
+	other, err := s.Add(Item{Text: "f"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == other })].Doing = &Doing{Text: "mine", At: now.Unix()}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sh = placed(t, s, live, other, now)
+	if err := s.update(now, func(f *file) error {
+		f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == other })].Started = &Started{At: now.Add(-StartLate).Unix(), To: "boss-x"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	given, givenPrev, err := s.Start(sh, "f", "boss-x", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(other, Item{On: "Marek"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Unstart(other, given.Started.At, givenPrev, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == other })]
+		if p.Doing != nil || p.Started != nil || p.On != "Marek" {
+			t.Errorf("Unstart onto an item given to Marek meanwhile = %+v / %+v on %q, want it as given", p.Started, p.Doing, p.On)
 		}
 		return nil
 	}); err != nil {
