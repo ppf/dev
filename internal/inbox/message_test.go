@@ -87,7 +87,7 @@ func TestMessageRefusals(t *testing.T) {
 	}
 }
 
-// 6 messages per thread, the first included; 10 per hour per sender, over a rolling hour.
+// 6 messages per thread, the first included; 20 per hour per sender, over a rolling hour.
 // A reply the recipient check refuses stores nothing: no cap used, the thread not ended.
 func TestMessageReplyUnreachable(t *testing.T) {
 	s := messages(t)
@@ -113,12 +113,12 @@ func TestMessageCaps(t *testing.T) {
 	if _, err := s.Reply("boss-a", "m6", "7", false, now, nil); err == nil || err.Error() != "thread m1 holds 6 messages, the cap: ask the user instead" {
 		t.Errorf("7th in a thread = %v", err)
 	}
-	// boss-a sent 3 of them: 7 more within the hour, then refused
-	for i := range 7 {
+	// boss-a sent 3 of them: 17 more within the hour (the 20th is accepted), then refused
+	for i := range 17 {
 		sent(t)(s.Post("boss-a", "boss-c", "n"+strconv.Itoa(i), false, now.Add(time.Duration(i)*time.Minute)))
 	}
-	if _, err := s.Post("boss-a", "boss-c", "11th", false, now.Add(10*time.Minute)); err == nil || err.Error() != "boss-a sent 10 messages in the last hour, the cap: ask the user instead" {
-		t.Errorf("11th in an hour = %v", err)
+	if _, err := s.Post("boss-a", "boss-c", "21st", false, now.Add(10*time.Minute)); err == nil || err.Error() != "boss-a sent 20 messages in the last hour, the cap: ask the user instead" {
+		t.Errorf("21st in an hour = %v", err)
 	}
 	sent(t)(s.Post("boss-b", "boss-c", "another sender", false, now.Add(10*time.Minute)))
 	// The first three left the hour

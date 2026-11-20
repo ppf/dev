@@ -27,7 +27,7 @@ const (
 	// ThreadCap is the most messages a thread holds, its first one included.
 	ThreadCap = 6
 	// hourCap is the most messages a boss sends in an hour.
-	hourCap = 10
+	hourCap = 20
 	// maxMessage is the longest message, in runes.
 	maxMessage = 1000
 	// keepThreads is how long a thread stays after its last message.
