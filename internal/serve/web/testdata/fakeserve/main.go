@@ -45,7 +45,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, map[string]any{"ok": true, "version": "fake"})
+		s.mu.Lock()
+		v := s.board["version"]
+		s.mu.Unlock()
+		reply(w, 200, map[string]any{"ok": true, "version": v})
 	})
 	mux.HandleFunc("GET /v1/board", s.serveBoard)
 	mux.HandleFunc("GET /v1/events", s.events)

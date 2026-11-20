@@ -1,5 +1,5 @@
 'use strict';
-// The phone page: reads /v1/board when /v1/events says it changed, else every 5 s, while visible; answers, ticks and
+// The phone page: reads /v1/board when /v1/events says it changed and at its pings, else every 5 s, while visible; answers, ticks and
 // starts through /v1. List content stays in memory only: no service worker; sessionStorage keeps only when this tab
 // last reloaded itself for a new version.
 
@@ -201,7 +201,7 @@ async function load() {
       if (!sameVersion(res.data.version)) return;
       state.board = res.data;
       state.etag = res.etag;
-      // The stream named another board while this read was on its way, as one changed back
+      // The stream named another board mid-read (one changed back): read again
       if (live.tag !== asked && live.tag && live.tag !== state.etag) setTimeout(load);
       dropStalePicks();
       const r = route();

@@ -30,6 +30,13 @@ func TestScriptsParse(t *testing.T) {
 	}
 }
 
+// The page on a stub DOM: stream, reads per event and ping, a mid-read change, version reload, 401 to Pair and back.
+func TestPageLive(t *testing.T) {
+	if out, err := exec.Command(node(t), "testdata/page.js", "static").CombinedOutput(); err != nil || len(out) > 0 {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
 // A new version reloads the page once; typed words or a pick, or a reload of its own a minute ago, offer it instead.
 func TestVersionStep(t *testing.T) {
 	const cases = `
