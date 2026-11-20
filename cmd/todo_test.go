@@ -517,3 +517,47 @@ func TestTodoDoneOn(t *testing.T) {
 		t.Errorf("second reminder = %s, want the tick told once", got)
 	}
 }
+
+// note adds, prints and drops; a refusal leaves the notes as they were.
+func TestTodoNote(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "set", "Merge #4")
+	if got := run(t, "", "todo", "note"); got != "no notes\n" {
+		t.Errorf("no notes = %q", got)
+	}
+	if got := run(t, "", "todo", "note", "decided", "CSV only", "--why", "parser reads CSV", "--item", "1"); got != "noted n1\n" {
+		t.Errorf("decided = %q", got)
+	}
+	run(t, "", "todo", "note", "said", "no merges to acme", "--until", "2099-01-01")
+	got := run(t, "", "todo", "note")
+	for _, want := range []string{"Your notes (2 of 12", " n1 ", "decided: CSV only (why: parser reads CSV) #1", " n2 ", "said: no merges to acme (until 2099-01-02 00:00)", "dev todo note drop <n>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notes = %q, want %q", got, want)
+		}
+	}
+	for _, args := range [][]string{
+		{"todo", "note", "said", "no end"},
+		{"todo", "note", "risk", strings.Repeat("x", 201)},
+		{"todo", "note", "risk", "x", "--item", "9"},
+		{"todo", "note", "drop", "7"},
+		{"todo", "note", "drop", "x"},
+		{"todo", "note", "said", "x", "--until", "2000-01-01"},
+		{"todo", "note", "said", "x", "--until", "soon"},
+	} {
+		if _, _, err := execute(t, "", args...); err == nil {
+			t.Errorf("dev %s: want an error", strings.Join(args, " "))
+		}
+	}
+	if got := run(t, "", "todo", "note"); !strings.Contains(got, "(2 of 12") {
+		t.Errorf("refused notes were stored: %q", got)
+	}
+	if got := run(t, "", "todo", "note", "drop", "n1"); got != "dropped n1\n" {
+		t.Errorf("drop = %q", got)
+	}
+	if got := run(t, "", "todo", "note"); strings.Contains(got, "n1 ") || !strings.Contains(got, "n2 ") {
+		t.Errorf("after drop = %q", got)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\tMerge #4\n" {
+		t.Errorf("notes changed the list: %q", got)
+	}
+}

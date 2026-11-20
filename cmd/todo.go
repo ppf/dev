@@ -37,7 +37,8 @@ session without a list takes over, on its first dev todo, add or done (not --jso
 worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
 and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.
 A decision for the user goes on the list with dev todo ask and its options; the user answers it with dev todo answer,
-which ticks it and tells the boss. --all prints every dev boss's list on this tmux server.`,
+which ticks it and tells the boss. dev todo note keeps the boss's decisions, what the user said and open risks beside the list.
+--all prints every dev boss's list on this tmux server.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if all {
@@ -72,7 +73,7 @@ which ticks it and tells the boss. --all prints every dev boss's list on this tm
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, and status_on: its worker or person, or the boss a start went to), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
 	return cmd
 }
 
@@ -476,6 +477,103 @@ var viewPR = sidebar.ViewPR
 func baseline(s todo.Store, stderr io.Writer) {
 	if err := s.Lookup(time.Now(), todo.LookupTTL, 0, viewPR); err != nil {
 		fmt.Fprintln(stderr, "⚠ dev todo: its PR not looked up: "+err.Error())
+	}
+}
+
+func newTodoNoteCmd(boss *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "note",
+		Short: "Print the boss's notes: decisions with their why, what the user said, open risks",
+		Long: fmt.Sprintf(`Notes are short dated lines a boss keeps with its list, outliving its /clear and its session: dev todo note
+decided|said|risk "<text>" adds one, dev todo note drop <n> removes one, without a subcommand they are printed.
+At most %d notes of at most %d characters each. decided: a choice, --why says why; said: what the user told the boss
+that changes the work, it needs an end (--until or --item); risk: an open risk to watch. Not actions (dev todo add), not
+standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, _, err := listStore(*boss, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			notes, err := s.Notes(now)
+			if err != nil {
+				return err
+			}
+			text := todo.NotesText(notes, now)
+			if text == "" {
+				text = "no notes"
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), text)
+			return err
+		},
+	}
+	cmd.AddCommand(newTodoNoteDropCmd(boss))
+	for _, kind := range []string{todo.NoteDecided, todo.NoteSaid, todo.NoteRisk} {
+		cmd.AddCommand(newTodoNoteAddCmd(boss, kind))
+	}
+	return cmd
+}
+
+func newTodoNoteAddCmd(boss *string, kind string) *cobra.Command {
+	var n todo.Note
+	var until string
+	cmd := &cobra.Command{
+		Use:   kind + ` "<text>"`,
+		Short: "Add a " + kind + " note; prints its number",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n.Kind, n.Text, n.Why = kind, todo.Clean(args[0]), todo.Clean(n.Why)
+			now := time.Now()
+			if until != "" {
+				t, err := todo.ParseUntil(until, now)
+				if err != nil {
+					return err
+				}
+				n.Until = t.Unix()
+			}
+			// Refused before the store: a desktop boss's first call takes over an earlier list
+			if err := n.Check(); err != nil {
+				return err
+			}
+			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			id, err := s.AddNote(n, now)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "noted n%d\n", id)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&n.Why, "why", "", "why, one line")
+	cmd.Flags().StringVar(&until, "until", "", `drop it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
+	cmd.Flags().IntVar(&n.Item, "item", 0, "tie it to open item n: flagged once n is done or its list is replaced")
+	return cmd
+}
+
+func newTodoNoteDropCmd(boss *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "drop <n>",
+		Short: "Remove note n (n3 or 3)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := strconv.Atoi(strings.TrimPrefix(args[0], "n"))
+			if err != nil {
+				return fmt.Errorf("note number %q: %w", args[0], err)
+			}
+			s, err := todoStore(*boss, false, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if err := s.DropNote(id, time.Now()); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "dropped n%d\n", id)
+			return err
+		},
 	}
 }
 
