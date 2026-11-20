@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/serve"
 )
 
 // The user's doing refuses a Claude Code session (not a board's button), no --question, --boss, a bad number, a
@@ -75,5 +80,21 @@ func TestTodoAddPartOf(t *testing.T) {
 	}
 	if _, _, err := execute(t, "", "todo", "add", "x", "--part-of", "1"); err == nil || !strings.Contains(err.Error(), "already linked") {
 		t.Errorf("second link: %v", err)
+	}
+}
+
+// The page's doing: no list and no session is 404, an item not the user's 409; no tmux server reached.
+func TestPageDoing(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("CLAUDECODE", "1")
+	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
+	var ref serve.Refused
+	if err := pageDoing(io.Discard)("boss-nope", 1, "x", "y", false); !errors.As(err, &ref) || ref.Code != http.StatusNotFound {
+		t.Errorf("no list: %v, want 404", err)
+	}
+	if err := pageDoing(io.Discard)("local_boss", 1, "theirs", "y", false); !errors.As(err, &ref) || ref.Code != http.StatusConflict || !strings.Contains(err.Error(), "not the user's") {
+		t.Errorf("not the user's: %v, want 409", err)
 	}
 }

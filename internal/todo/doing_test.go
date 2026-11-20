@@ -250,3 +250,33 @@ func TestDoingLines(t *testing.T) {
 		}
 	}
 }
+
+// A --done-on tick ends doing too; --on me on the user's item keeps it; restating a link from its other side keeps it.
+func TestDoingDoneOnAndRestate(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	pr := "https://github.com/o/r/pull/9"
+	for _, it := range []Item{{Text: "a", Link: pr, DoneOn: "merged"}, {Text: "b"}, {Text: "c", PartOf: 2}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, text := range map[int]string{1: "a", 2: "b"} {
+		if _, err := s.SetDoing(id, text, true, &Doing{Text: "on it"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Replace(2, Item{On: Me, PartOf: 3}, now); err != nil {
+		t.Fatalf("restate the link from 2: %v", err)
+	}
+	if err := s.Lookup(now, 0, 0, func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "MERGED"}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := s.read()
+	if f.Items[0].Done == 0 || f.Items[0].Doing != nil {
+		t.Errorf("--done-on tick: %+v, want ticked, no doing", f.Items[0])
+	}
+	if f.Items[1].Doing == nil || f.Items[1].PartOf != 0 || f.Items[2].PartOf != 2 {
+		t.Errorf("after --on me and the restated link: %+v / %+v, want doing kept, the link stored on 3 only", f.Items[1], f.Items[2])
+	}
+}

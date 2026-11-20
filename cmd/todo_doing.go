@@ -29,7 +29,7 @@ the boss's inbox gets "the user is on #<n> \"<item>\": <text>" (for a closed bos
 is started on it; a newer line replaces one still queued. No one running, or a desktop app boss: marked, no one told.
 Refused in a Claude Code session ($CLAUDECODE set), as dev todo start is.
 A boss: dev todo doing <n> ["text"] in its own session, only on its own items (--on boss); no one is told.
-A tick, --stop or an --on change ends it.`,
+A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := strconv.Atoi(args[0]); err == nil {
@@ -105,6 +105,11 @@ func doingOf(text string, stop bool) *todo.Doing {
 	return &todo.Doing{Text: text}
 }
 
+// noList is a doing refused before the list was read: no such list.
+type noList struct{ error }
+
+func (e noList) Unwrap() error { return e.error }
+
 // bossDoing is dev todo doing <n> [text] in a boss's own session: its own item, no one told.
 func bossDoing(cmd *cobra.Command, boss string, args []string, stop bool) error {
 	id, _ := strconv.Atoi(args[0])
@@ -125,11 +130,12 @@ func bossDoing(cmd *cobra.Command, boss string, args []string, stop bool) error 
 
 // userDoing marks the user's own item id of boss name's list, while it reads question, as theirs in progress with text,
 // or ends it (stop), and tells the boss, or the manager for a closed boss: the one told, "" for no one (none running,
-// its inbox off, a desktop app boss), said on warn.
+// its inbox off, a desktop app boss), said on warn. A running one whose inbox couldn't take the note is an error, as
+// it could start a worker on the item.
 func userDoing(c *tmux.Client, name string, id int, question, text string, stop bool, warn io.Writer) (string, error) {
 	s, closed, err := listStore(name, false, warn)
 	if err != nil {
-		return "", err
+		return "", noList{err}
 	}
 	it, err := s.SetDoing(id, question, true, doingOf(text, stop), time.Now())
 	if err != nil {
@@ -155,8 +161,7 @@ func userDoing(c *tmux.Client, name string, id int, question, text string, stop 
 	queued, err := to.Send(c, control.RealClock, inbox.UserDoing(name, id, it.Text, now, stop, closed))
 	switch {
 	case !queued:
-		fmt.Fprintf(warn, "⚠ dev todo: #%d marked, %s not told: %v\n", id, to.Name, err)
-		return "", nil
+		return "", fmt.Errorf("#%d marked, not sent to %s (tell it yourself): %w", id, to.Name, err)
 	case err != nil:
 		fmt.Fprintf(warn, "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, to.Name, err)
 	}

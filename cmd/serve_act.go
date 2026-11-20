@@ -68,7 +68,7 @@ func pageDoing(stderr io.Writer) func(boss string, id int, text, doing string, s
 	return func(boss string, id int, text, doing string, stop bool) error {
 		c := tmux.New()
 		_, err := userDoing(c, boss, id, text, doing, stop, stderr)
-		if err != nil && !errors.As(err, new(todo.Refused)) && !running(c, boss) {
+		if errors.As(err, new(noList)) && !running(c, boss) {
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		}
 		return refused(err)

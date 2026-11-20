@@ -245,7 +245,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context not given")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --part-of not given, and its doing line unless --on changes")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
 	return cmd

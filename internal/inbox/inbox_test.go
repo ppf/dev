@@ -709,6 +709,7 @@ func TestAddUserDoing(t *testing.T) {
 		UserDoing("boss-a", 4, "a", "first", false, false),
 		UserDoing("boss-a", 5, "b", "other item", false, false),
 		UserDoing("boss-a", 4, "a", "second", false, false),
+		UserDoing("boss-b", 4, "a", "closed one", false, true),
 	} {
 		if added, err := b.Add(n, time.Time{}); !added || err != nil {
 			t.Fatalf("Add = %v, %v", added, err)
@@ -718,7 +719,7 @@ func TestAddUserDoing(t *testing.T) {
 		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
 	}
 	bt, _ := b.Take()
-	if len(bt.Notes) != maxNotes || bt.Notes[0].Text != `#4 "a": second` || bt.Notes[1].Text != `#5 "b": other item` {
-		t.Errorf("got %d notes, first %+v, %+v; want #4's second line in its place, #5 beside it, both kept", len(bt.Notes), bt.Notes[0], bt.Notes[1])
+	if len(bt.Notes) != maxNotes || bt.Notes[0].Text != `#4 "a": second` || bt.Notes[1].Text != `#5 "b": other item` || bt.Notes[2].Text != `boss-b #4 "a": closed one (boss-b is closed)` {
+		t.Errorf("got %d notes, first %+v, %+v, %+v; want #4's second line in its place, #5 and boss-b's #4 beside it, all kept", len(bt.Notes), bt.Notes[0], bt.Notes[1], bt.Notes[2])
 	}
 }

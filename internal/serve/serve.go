@@ -33,7 +33,7 @@ type Config struct {
 	Done   func(boss string, id int, text string) error
 	Start  func(boss string, id int, text string) error
 	// Doing marks the user's own item id in progress with doing, or ends it (stop), while it still reads text, and tells
-	// its boss.
+	// its boss (the manager for a closed one).
 	Doing func(boss string, id int, text, doing string, stop bool) error
 	// Guard wraps every /v1 call but health and pair, on every bind: Auth.Session. Required.
 	Guard func(http.Handler) http.Handler

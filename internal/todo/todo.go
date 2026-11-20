@@ -638,7 +638,7 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		if it.On == old.On && sameSession(it.Session, old.Session) {
 			it.Doing = old.Doing
 		}
-		if it.PartOf == 0 || it.PartOf == old.PartOf {
+		if it.PartOf == 0 || it.PartOf == old.PartOf || it.PartOf == partner(f.Items, id) {
 			it.PartOf = old.PartOf
 		} else if err := f.checkPartOf(id, it.PartOf); err != nil {
 			return err
