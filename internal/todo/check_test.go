@@ -302,7 +302,7 @@ func TestAllClosed(t *testing.T) {
 	}
 	// boss-plain's session is open, though no boss any more
 	sessions = []string{"boss-live", "boss-plain"}
-	all, err := All(c, now, nil, true)
+	all, err := All(c, now, nil, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestAllClosed(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("All = %q, want %q", got, want)
 	}
-	if all, err := All(c, now, nil, false); err != nil || len(all) != 1 {
+	if all, err := All(c, now, nil, false, false); err != nil || len(all) != 1 {
 		t.Errorf("without closed: %d lists, %v", len(all), err)
 	}
 }

@@ -626,7 +626,7 @@ type bossList struct {
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	now := time.Now()
-	lists, err := todoAll(c, stderr, now, asJSON, false)
+	lists, err := todoAll(c, stderr, now, asJSON, false, asJSON)
 	if err != nil {
 		return err
 	}
@@ -649,9 +649,9 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 }
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
-// board), else its gone marked.
-func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow bool) ([]bossList, error) {
-	all, err := todo.All(c, now, nil, true)
+// board), else its gone marked; with finished, the lists with only finished items too (todo.All).
+func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, finished bool) ([]bossList, error) {
+	all, err := todo.All(c, now, nil, true, finished)
 	if err != nil {
 		return nil, err
 	}
