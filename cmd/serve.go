@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/serve/web"
 	"github.com/ppf/dev/internal/sidebar"
@@ -72,6 +73,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
 			fmt.Fprintln(out, "pair a phone: dev serve pair")
+			// Off the serving path: a hung tmux server must not hold up the page
+			go func() {
+				if _, err := tmux.New().Run("list-sessions"); tmux.IsNoServer(err) {
+					fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev serve: no tmux server running: the board stays empty until it starts")
+				}
+			}()
 			return listenAndServe(cmd.Context(), ln, serveConfig(cmd.ErrOrStderr(), dir))
 		},
 	}
@@ -196,7 +203,7 @@ func bind(addr string) (netip.AddrPort, serve.Kind, error) {
 func serveConfig(stderr io.Writer, dir string) serve.Config {
 	auth := &serve.Auth{Dir: dir, Now: time.Now}
 	return serve.Config{
-		Version:     buildVersion(),
+		Version:     selfreload.Version(),
 		Now:         time.Now,
 		Lists:       boardLists(tmux.New(), &unrepeated{w: stderr, now: time.Now}, time.Now),
 		ManagerRuns: func() bool { return running(tmux.New(), sidebar.Manager) },
@@ -216,7 +223,7 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 		if err != nil {
 			return nil, err
 		}
-		lists, err := todoAll(c, stderr, now(), true, true)
+		lists, err := todoAll(c, stderr, now(), true, true, true)
 		if err != nil {
 			return nil, err
 		}

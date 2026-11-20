@@ -3,6 +3,7 @@ package kanban
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,23 @@ func TestColumnsQuiet(t *testing.T) {
 	m, _ := board(t, ls, 200, 55)
 	if out := plain(m); !strings.Contains(out, "1 to decide · 2 yours · 6 open") || !strings.Contains(out, "TEST") {
 		t.Errorf("❌ quiet items counted or untagged:\n%s", out)
+	}
+}
+
+// A list with only finished items (dev todo --all --json's, items empty) adds no card to any column: a guard, as the
+// popup doesn't ask for them (kanbanLists).
+func TestColumnsFinishedOnly(t *testing.T) {
+	m, _ := board(t, fixture(2), 200, 55)
+	with, _ := board(t, append(fixture(2), List{Boss: "boss-gamma", Items: []todo.Shown{}}, List{Boss: "boss-shut", Closed: true, Items: []todo.Shown{}}), 200, 55)
+	count := func(m Model) []int {
+		var n []int
+		for _, c := range m.columns() {
+			n = append(n, len(c))
+		}
+		return n
+	}
+	if got, want := count(with), count(m); !slices.Equal(got, want) {
+		t.Errorf("❌ cards per column = %v, want %v", got, want)
 	}
 }
 

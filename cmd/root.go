@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"runtime/debug"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/picker"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/worktree"
 )
@@ -27,7 +27,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		ValidArgsFunction: completeArgs,
-		Version:           buildVersion(),
+		Version:           selfreload.Version(),
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.RunE = func(cmd *cobra.Command, args []string) error {
@@ -44,24 +44,6 @@ func newRootCmd() *cobra.Command {
 		newResurrectCmd(), newCompactCmd(), newAgentCmd(), newStatuslineCmd(), newHerdCmd(), newPtyWrapCmd(), newQuestionCmd(),
 		newDeliveredCmd(), newDesktopCmd(), newTodoCmd(), newServeCmd())
 	return root
-}
-
-// buildVersion is the module version; a "(devel)" build adds the vcs revision when stamped.
-func buildVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
-	}
-	v := info.Main.Version
-	if v != "(devel)" {
-		return v
-	}
-	for _, s := range info.Settings {
-		if s.Key == "vcs.revision" && s.Value != "" {
-			return v + " " + s.Value
-		}
-	}
-	return v
 }
 
 // worktreeArg is the optional second argument of `dev <project> [worktree]`: "" when absent.

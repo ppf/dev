@@ -102,15 +102,20 @@ type file struct {
 	Notes   []Note   `json:"notes,omitempty"`
 	// NextNote is the id the next note gets: never reused while the file lives
 	NextNote int `json:"next_note,omitempty"`
+	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
+	dropped []Item
+	pruned  time.Time
 }
 
 // List is a list as its boards show it, for dev todo --json: items waiting on the user first, then those
 // waiting on someone else, each group in the order added; a ticked item stays in place, done, for doneShown.
-// Updated is the last change, unix seconds (0: never); Stale is a list unchanged for an hour.
+// Updated is the last change, unix seconds (0: never); Stale is a list unchanged for an hour. Finished are the ticked
+// items that left it, ticked within a day, newest first, at most 50.
 type List struct {
-	Items   []Shown `json:"items"`
-	Updated int64   `json:"updated"`
-	Stale   bool    `json:"stale"`
+	Items    []Shown    `json:"items"`
+	Updated  int64      `json:"updated"`
+	Stale    bool       `json:"stale"`
+	Finished []Finished `json:"finished,omitempty"`
 }
 
 // Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never); Added when it was added or
@@ -252,11 +257,17 @@ func (s Store) take(from Store) (taken bool, err error) {
 				return nil
 			}
 			taken = true
-			if err := os.Rename(from.path, s.path); err != nil {
+			if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
 				return err
 			}
-			// Its checks go with it, under its lock, which guards them too
-			return ignoreMissing(os.Rename(from.checksPath(), s.checksPath()))
+			// Its checks and finished items go first, under its lock, which guards them too: a retry still finds the list
+			if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
+				return err
+			}
+			if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
+				return err
+			}
+			return os.Rename(from.path, s.path)
 		})
 	})
 	return taken, err
@@ -372,8 +383,9 @@ type BossList struct {
 // All is each dev boss session's list with items on c's server, by session name, only the bosses keep takes (nil
 // takes all); none without a server. A list it can't read comes with its error, the others still read; a boss
 // closed since list-sessions is left out. With closed, the lists with open items of the bosses closed on this server
-// follow (Closed), each open item checked as boss closed unless its PR moved.
-func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed bool) ([]BossList, error) {
+// follow (Closed), each open item checked as boss closed unless its PR moved. With finished, a list with only
+// finished items (List.Finished) comes too, closed or not.
+func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed, finished bool) ([]BossList, error) {
 	type boss struct {
 		Name string `tmux:"session_name"`
 		Herd string `tmux:"@dev_herd"`
@@ -403,7 +415,7 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed bool
 			lists = append(lists, BossList{Boss: sess.Name, Err: err, List: List{Items: []Shown{}, Stale: true}})
 			continue
 		}
-		if len(l.Items) > 0 {
+		if len(l.Items) > 0 || finished && len(l.Finished) > 0 {
 			lists = append(lists, BossList{Boss: sess.Name, List: l})
 		}
 	}
@@ -423,7 +435,7 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed bool
 	if socket == "" {
 		return lists, nil
 	}
-	gone, err := closedLists(socket, live, now)
+	gone, err := closedLists(socket, live, now, finished)
 	if err != nil {
 		return nil, err
 	}
@@ -434,8 +446,9 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed bool
 // comes with its error. live holds the key (sessionKey) of each session on it: a session by a list's name, boss or not,
 // isn't closed. A list's boss is the name it stored, only a boss's name (boss-<project>, manager) whose key is its
 // file's: not another server's whose socket starts alike. An older dev's list stored none: its boss is its file's
-// key (legacyBoss). A list it can't read is named by its file.
-func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList, error) {
+// key (legacyBoss). A list it can't read is named by its file. With finished, a list with only ticked or finished
+// items comes too.
+func closedLists(socket string, live map[string]bool, now time.Time, finished bool) ([]BossList, error) {
 	probe, err := open(socket + "-x")
 	if err != nil {
 		return nil, err
@@ -457,6 +470,8 @@ func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList
 		var l List
 		if err == nil {
 			name = cmp.Or(f.Boss, legacyBoss(key))
+			// Read names the boss on its finished items
+			s.boss = name
 			l, err = s.Read(now)
 		}
 		if (name != sidebar.Manager && !strings.HasPrefix(name, "boss-")) || sessionKey(name) != key {
@@ -467,7 +482,7 @@ func closedLists(socket string, live map[string]bool, now time.Time) ([]BossList
 			out = append(out, BossList{Boss: name, Err: err, Closed: true, Store: s, List: List{Items: []Shown{}, Stale: true}})
 			continue
 		}
-		if n, _ := l.Open(); n == 0 {
+		if n, _ := l.Open(); n == 0 && !(finished && (len(l.Items) > 0 || len(l.Finished) > 0)) {
 			continue
 		}
 		for i, it := range l.Items {
@@ -510,7 +525,16 @@ func (s Store) Read(now time.Time) (List, error) {
 	if err != nil {
 		return List{Items: []Shown{}}, err
 	}
+	// After the list: an item a writer moves meanwhile is in both, shown as still listed
+	done, err := s.readDone(false)
+	if err != nil {
+		return List{Items: []Shown{}}, err
+	}
+	done = slices.DeleteFunc(done, func(d Item) bool {
+		return slices.ContainsFunc(f.Items, func(it Item) bool { return sameItem(it, d) })
+	})
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
+	l.Finished = shownFinished(finished(append(done, f.dropped...), now), s.boss)
 	for _, it := range f.Items {
 		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
 		for _, o := range it.Options {
@@ -533,6 +557,7 @@ func (s Store) Read(now time.Time) (List, error) {
 func (s Store) Set(texts []string, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		f.endItems()
+		f.keepTicked(now)
 		f.Items = make([]Item, len(texts))
 		for i, t := range texts {
 			f.Items[i] = Item{ID: i + 1, Text: t, Added: now.Unix()}
@@ -841,13 +866,14 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 func (s Store) Clear(now time.Time) error {
 	return s.update(now, func(f *file) error {
 		f.endItems()
+		f.keepTicked(now)
 		f.Items, f.Next, f.Ticked = nil, 1, nil
 		return nil
 	})
 }
 
 // prune ticks the open items whose Until has come, as at Until, keeping them in Ticked, drops the items ticked
-// over doneShown ago and the notes whose Until has come, and marks the notes whose item is gone.
+// over doneShown ago, into dropped, and the notes whose Until has come, and marks the notes whose item is gone.
 func (f *file) prune(now time.Time) {
 	for i, it := range f.Items {
 		if it.Done == 0 && it.Until != 0 && now.Unix() >= it.Until {
@@ -855,8 +881,13 @@ func (f *file) prune(now time.Time) {
 			f.tell(Ticked{ID: it.ID, Text: it.Text})
 		}
 	}
+	f.pruned = now
 	f.Items = slices.DeleteFunc(f.Items, func(it Item) bool {
-		return it.Done != 0 && now.Sub(time.Unix(it.Done, 0)) >= doneShown
+		gone := it.Done != 0 && now.Sub(time.Unix(it.Done, 0)) >= doneShown
+		if gone {
+			f.dropped = append(f.dropped, it)
+		}
+		return gone
 	})
 	f.Notes = slices.DeleteFunc(f.Notes, func(n Note) bool { return n.Until != 0 && now.Unix() >= n.Until })
 	f.settleNotes()
@@ -926,10 +957,16 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 	})
 }
 
-// write writes f, with its boss's name when known; its caller holds the file's lock.
+// write writes f, with its boss's name when known, its dropped items kept first: a failed write keeps them twice, never
+// none. Its caller holds the file's lock.
 func (s Store) write(f file) error {
 	if s.boss != "" {
 		f.Boss = s.boss
+	}
+	if len(f.dropped) > 0 {
+		if err := s.keepDone(f.dropped, f.pruned); err != nil {
+			return err
+		}
 	}
 	data, err := json.Marshal(f)
 	if err != nil {

@@ -48,6 +48,7 @@ const state = {
   opener: '', // the open sheet's hash: closing it focuses its card
   shown: null, // the open item as last drawn, {k, text}: when a poll finds it gone, its sheet closes
   version: '', // dev serve's version this page loaded with
+  seen: '', // the version the last board named
   newVersion: false, // a newer one is out: the line offers a reload
 };
 
@@ -209,7 +210,7 @@ async function load() {
       if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
         return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
       }
-    }
+    } else if (state.newVersion && !sameVersion(state.seen)) return; // a held reload, no longer busy
   }
   render();
 }
@@ -222,6 +223,7 @@ function sameVersion(v) {
   } catch {}
   const step = versionStep(state.version, v, busy(), last, Date.now());
   if (!state.version) state.version = v;
+  state.seen = v;
   state.newVersion = step === 'offer';
   if (step !== 'reload') return true;
   reload();
@@ -296,7 +298,8 @@ function reconnect() {
   connect();
 }
 
-const unread = boss => !!state.board?.lists?.find(l => l.boss === boss)?.error;
+const listError = boss => state.board?.lists?.find(l => l.boss === boss)?.error;
+const unread = boss => !!listError(boss);
 
 // go shows hash, with note on it when given.
 function go(hash, note = '') {
@@ -588,13 +591,13 @@ function board() {
   hues = new Map(projects.map((p, i) => [p, HUES[i % HUES.length]]));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
   const ls = lanes(all.filter(shown)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
-  const out = [filters(projects), wide.matches ? columns(ls) : stack(ls), ...listErrors()];
+  const out = [...listErrors(), filters(projects), wide.matches ? columns(ls) : stack(ls)];
   if (!all.length) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
 }
 
 function listErrors() {
-  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error));
+  return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
 function facts(x) {
@@ -643,12 +646,16 @@ function item(boss, id) {
   const close = el('button', { class: 'close', type: 'button', onclick: closeSheet }, 'Close');
   if (!x) {
     state.shown = null;
-    return [el('div', { class: 'sh-head' }, el('span'), close), el('p', { class: 'quiet', id: 'sheet-text' }, 'This item is no longer open.')];
+    const err = listError(boss);
+    return [el('div', { class: 'sh-head' }, el('span'), close), el('p', { class: 'quiet', id: 'sheet-text' }, err ? boss + "'s list could not be read: " + err : 'This item is no longer open.')];
   }
   const { list, it } = x, k = key(boss, id);
   state.shown = { k, text: it.text };
-  const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close),
-    el('p', { class: 'sh-text', id: 'sheet-text' }, it.text)];
+  const [title, rest] = lead(it.text);
+  const out = [el('div', { class: 'sh-head' }, el('span', null, project(list) + ' #' + it.id + ' · ', statusWord(it)), close)];
+  // The title, or the body when there is none, names the sheet
+  if (title) out.push(el('p', { class: 'sh-text', id: 'sheet-text' }, title));
+  if (rest) out.push(el('p', { class: 'sh-body', id: !title && 'sheet-text' }, rest));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   if (answerable(list, it)) out.push(...answerForm(list, it));
   else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
@@ -696,7 +703,7 @@ function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && find(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], state.reachable].join('\n') : '';
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;
