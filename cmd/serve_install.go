@@ -74,7 +74,7 @@ func launchEnv(getenv func(string) string) map[string]string {
 }
 
 // keepAwake holds a no-sleep assertion until this process exits: caffeinate -s, which macOS honours on mains
-// power only; on battery it says the Mac may sleep. It returns caffeinate's pid.
+// power only; on battery it says the Mac may sleep.
 func keepAwake(out, stderr io.Writer) (int, error) {
 	c := exec.Command("/usr/bin/caffeinate", "-s", "-w", strconv.Itoa(os.Getpid()))
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // a Ctrl-C ends dev serve, and -w then ends caffeinate
