@@ -789,6 +789,7 @@ func TestPromptAskRules(t *testing.T) {
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
 			"dev todo note decided|said|risk",
+			"write a five-line contract file", "stop it after the first step and ask before the rest",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
@@ -796,7 +797,7 @@ func TestPromptAskRules(t *testing.T) {
 			"Plain to do items (not asks) aren't questions", "only the user's own pick or words answer it",
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
-			"for you the source is the boss", "Checks a plugin or hook asks for: run those that read only dev's own state"}},
+			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {

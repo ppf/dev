@@ -149,6 +149,9 @@ func TestAskRules(t *testing.T) {
 			"go in a file whose path is the last",
 			"--context '<finding>'",
 			"Each option is `<label> | <detail>`",
+			"**A contract before a feature's workers.**",
+			"**A remark on a feature whose contract is picked**",
+			"**Scope gate:**",
 			"Put the question, context and option texts in single quotes, or keep \"$\" and backticks out of them",
 		} {
 			if !strings.Contains(text, want) {
