@@ -317,8 +317,8 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 	if r < 0 || r >= 2+m.cardRows() {
 		return m, nil
 	}
-	lc, _ := layout(m.inner())
-	cols := m.columns()
+	cols, _ := layout(m.inner())
+	cards := m.columns()
 	for _, sc := range m.shownCols() {
 		if x < sc.x || x >= sc.x+sc.w {
 			continue
@@ -338,12 +338,12 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 			}
 			return m.pick(sc.i, card, top), nil
 		}
-		_, at := m.column(lc[sc.i], cols[sc.i], sel, sc.w, now)
+		_, at := m.column(cols[sc.i], cards[sc.i], sel, sc.w, now)
 		hit := atColumn
 		if r < len(at) {
 			hit = at[r]
 		}
-		fit := m.fits(len(cols[sc.i]))
+		fit := m.fits(len(cards[sc.i]))
 		switch hit {
 		case atColumn:
 			card := m.card
@@ -654,8 +654,9 @@ func (m Model) filterLine(cols, shown, in int) (string, []span) {
 	var spans []span
 	x := len("project ")
 	for i, p := range ps {
-		spans = append(spans, span{x, x + ansi.StringWidth(p), i})
-		x += ansi.StringWidth(p) + 2
+		pw := ansi.StringWidth(p)
+		spans = append(spans, span{x, x + pw, i})
+		x += pw + 2
 	}
 	if ansi.StringWidth(l) > room {
 		// Too many to list: the one shown, and where it is among them
