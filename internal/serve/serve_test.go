@@ -193,3 +193,23 @@ func TestPage(t *testing.T) {
 		t.Errorf("/v1/board unpaired: %d, want 401", w.Code)
 	}
 }
+
+// The board counts what needs the user and the user's cards, test and ticked items left out.
+func TestBoardCounts(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	l := `[{"boss":"boss-a","items":[` +
+		`{"id":1,"text":"Merge?","options":["A","B"],"status":"decide","assignee":{"kind":"you"},"needs_you":true},` +
+		`{"id":2,"text":"Read","status":"yours","assignee":{"kind":"you"}},` +
+		`{"id":3,"text":"Fix","on":"w","status":"blocked","assignee":{"kind":"worker","name":"w","running":true},"needs_you":true},` +
+		`{"id":4,"text":"Park","on":"boss","status":"idle","assignee":{"kind":"boss","name":"boss-a","running":true}},` +
+		`{"id":5,"text":"Test","status":"decide","quiet":true,"assignee":{"kind":"you"},"needs_you":true},` +
+		`{"id":6,"text":"Ticked","done":true,"assignee":{"kind":"you"}}]}]`
+	w := get(t, handler(&now, &l), "/v1/board", "")
+	var b struct{ Counts counts }
+	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if want := (counts{Decide: 1, Yours: 1, NeedsYou: 2, Mine: 2}); b.Counts != want {
+		t.Errorf("counts %+v, want %+v", b.Counts, want)
+	}
+}
