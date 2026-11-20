@@ -23,9 +23,11 @@ type Config struct {
 	// Lists is the JSON dev todo --all --json prints: an array of lists, each with its items' status.
 	Lists func() (json.RawMessage, error)
 	// Answer answers ask id of boss's list as the user while it still reads question; Done ticks the user's own item
-	// id while it still reads text. Refused tells the page why not.
+	// id while it still reads text; Start asks for that item to be started while it still reads text. Refused tells
+	// the page why not.
 	Answer func(boss string, id int, question, answer string) error
 	Done   func(boss string, id int, text string) error
+	Start  func(boss string, id int, text string) error
 	// Guard wraps every /v1 call but health and pair, on every bind: Auth.Session. Required.
 	Guard func(http.Handler) http.Handler
 	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.
@@ -43,6 +45,7 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("GET /v1/board", cfg.Guard(http.HandlerFunc(cfg.board)))
 	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
+	mux.Handle("POST /v1/start", cfg.Guard(fromPage(http.HandlerFunc(cfg.start))))
 	mux.Handle("POST /v1/pair", cfg.Pair)
 	if cfg.Page != nil {
 		mux.Handle("GET /", cfg.Page) // the page's own files sit beside it

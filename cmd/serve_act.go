@@ -53,6 +53,16 @@ func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 	}
 }
 
+func pageStart(stderr io.Writer) func(boss string, id int, text string) error {
+	return func(boss string, id int, text string) error {
+		_, err := startItem(tmux.New(), boss, id, text, stderr)
+		if errors.As(err, new(notStarted)) {
+			return serve.Refused{Code: http.StatusConflict, Err: err}
+		}
+		return refused(err)
+	}
+}
+
 // running is whether boss's session is on c's server.
 func running(c *tmux.Client, boss string) bool {
 	_, err := c.Run("has-session", "-t", tmux.SessionTarget(boss))

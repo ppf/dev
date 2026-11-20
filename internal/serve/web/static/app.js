@@ -1,10 +1,10 @@
 'use strict';
-// The phone page: reads /v1/board every 5 s while visible, answers and ticks through /v1. List content stays in
+// The phone page: reads /v1/board every 5 s while visible, answers, ticks and starts through /v1. List content stays in
 // memory only: no storage, no service worker.
 
 const POLL_MS = 5000;
 const TIMEOUT_MS = 4000;
-const TICKABLE = ['yours', 'check', 'boss closed'];
+const TICKABLE = ['yours', 'starting', 'check', 'boss closed'];
 const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
 // sidebar.Groups: the board's columns. "For you" on the phone is the first two.
 const GROUPS = [
@@ -66,7 +66,7 @@ const key = (boss, id) => boss + '/' + id;
 const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
 // The project is the boss's name without boss-: the board has no project of its own.
 const project = l => l.boss.startsWith('local_') ? 'desktop' : l.boss.replace(/^boss-/, '');
-// A desktop app boss's list is read here, never answered or ticked: the Mac refuses it.
+// A desktop app boss's list is read here, never answered, ticked or started: the Mac refuses it.
 const desktop = l => l.boss.startsWith('local_');
 // own is whether the item is the user's, as todo.Own has it.
 const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.toLowerCase());
@@ -74,7 +74,9 @@ const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
 const onWorker = ({ list, it }) => !own(list, it) && (!!it.session || ON_WORKER.includes(it.status));
 const held = it => it.status === 'decide' || it.status === 'yours';
 const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
+const startable = (l, it) => !desktop(l) && own(l, it) && !it.options?.length && (['yours', 'boss closed'].includes(it.status) || !!it.start_late);
 const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
+const receiver = l => l.closed ? 'the manager' : l.boss;
 
 // An option is a string "label | detail", ending " (Recommended)" for the pick the boss recommends, either side of
 // " | " (as todo.Split reads it), or an object. An answer names the label.
@@ -217,7 +219,7 @@ async function post(path, body, k) {
     return go('#/pair', 'Not sent: pair this phone again, then try again.');
   }
   if (!res.ok) {
-    state.errors[k] = (res.status === 409 ? 'Already answered or changed on your Mac: ' : '') + errorOf(res);
+    state.errors[k] = (res.status === 409 && path !== '/v1/start' ? 'Already answered or changed on your Mac: ' : '') + errorOf(res);
     onBoard(k, state.errors[k]);
     return load();
   }
@@ -238,6 +240,13 @@ async function tick(list, it) {
   const k = key(list.boss, it.id);
   if (await post('/v1/done', { boss: list.boss, id: it.id, text: it.text }, k)) {
     leave(k, 'Ticked: ' + it.text);
+  }
+}
+
+async function start(list, it) {
+  const k = key(list.boss, it.id);
+  if (await post('/v1/start', { boss: list.boss, id: it.id, text: it.text }, k)) {
+    leave(k, 'Start sent: ' + it.text);
   }
 }
 
@@ -450,9 +459,16 @@ function item(boss, id) {
     out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));
   } else if (answerable(list, it)) out.push(...answerForm(list, it));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
-  if (tickable(list, it)) {
-    const b = el('button', { class: 'btn primary', type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { b.disabled = true; tick(list, it); } }, 'Tick as done');
-    out.push(el('div', { class: 'acts' }, b), el('p', { class: 'hint' }, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.'));
+  const acts = [], hints = [];
+  const act = (label, cls, run, hint) => {
+    const b = el('button', { class: 'btn ' + cls, type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { acts.forEach(a => { a.disabled = true; }); run(list, it); } }, label);
+    acts.push(b);
+    hints.push(hint);
+  };
+  if (startable(list, it)) act('Start', '', start, 'Start asks ' + receiver(list) + ' on your Mac to start a worker on it.');
+  if (tickable(list, it)) act('Tick as done', 'primary', tick, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.');
+  if (acts.length) {
+    out.push(el('div', { class: 'acts' }, acts), el('p', { class: 'hint' }, hints.join(' ')));
   } else if (!own(list, it)) {
     out.push(el('p', { class: 'hint' }, onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
   }

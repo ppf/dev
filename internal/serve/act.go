@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Refused is an answer or tick the list or its boss refused: Code is the HTTP status, Err the reason the page shows.
+// Refused is an answer, tick or start the list or its boss refused: Code is the HTTP status, Err the reason the page shows.
 type Refused struct {
 	Code int
 	Err  error
@@ -17,7 +17,7 @@ type Refused struct {
 
 func (r Refused) Error() string { return r.Err.Error() }
 
-// maxAct caps an answer's or tick's body.
+// maxAct caps an answer's, tick's or start's body.
 const maxAct = 64 << 10
 
 type answerReq struct {
@@ -38,7 +38,7 @@ type doneReq struct {
 func fromPage(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Dev-Page") != "1" {
-			writeError(w, http.StatusForbidden, "answers and ticks come from the page only")
+			writeError(w, http.StatusForbidden, "answers, ticks and starts come from the page only")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -65,6 +65,14 @@ func (cfg Config) done(w http.ResponseWriter, r *http.Request) {
 	act(w, cfg.Done(req.Boss, req.ID, req.Text))
 }
 
+func (cfg Config) start(w http.ResponseWriter, r *http.Request) {
+	var req doneReq
+	if !decode(w, r, &req, req.check) {
+		return
+	}
+	act(w, cfg.Start(req.Boss, req.ID, req.Text))
+}
+
 func (req *answerReq) check() string {
 	if (strings.TrimSpace(req.Option) == "") == (strings.TrimSpace(req.Text) == "") {
 		return "send an option or your own words, one of them"
@@ -74,7 +82,7 @@ func (req *answerReq) check() string {
 
 func (req *doneReq) check() string { return item(req.Boss, req.ID, req.Text) }
 
-// item is what's wrong with an answer's or tick's item as the page names it, "" for nothing: the text is required,
+// item is what's wrong with an answer's, tick's or start's item as the page names it, "" for nothing: the text is required,
 // as item numbers restart once a list empties.
 func item(boss string, id int, text string) string {
 	switch {
@@ -104,7 +112,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any, check func() string) 
 	return true
 }
 
-// act answers what an answer or tick did; any other error is logged, not sent: a refusal quotes list text, which
+// act answers what an answer, tick or start did; any other error is logged, not sent: a refusal quotes list text, which
 // stays out of the log.
 func act(w http.ResponseWriter, err error) {
 	var ref Refused

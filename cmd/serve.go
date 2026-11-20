@@ -176,6 +176,7 @@ func serveConfig(stderr io.Writer, dir string) serve.Config {
 		Lists:   boardLists(tmux.New(), stderr, time.Now),
 		Answer:  pageAnswer,
 		Done:    pageDone(stderr),
+		Start:   pageStart(stderr),
 		Guard:   auth.Session,
 		Pair:    http.HandlerFunc(auth.Pair),
 		Page:    web.Handler(),
