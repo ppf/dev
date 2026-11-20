@@ -813,7 +813,7 @@ func TestOwnNameItem(t *testing.T) {
 	if _, err := s.Add(Item{Text: "e", On: "boss-a"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Start(4, "e", "boss-a", now); err != nil {
+	if _, _, err := s.Start(placed(t, s, Owner{Name: "boss-a"}, 4, now), "e", "boss-a", now); err != nil {
 		t.Errorf("own name: not started: %v", err)
 	}
 	other := store(t)
@@ -945,10 +945,28 @@ func TestContext(t *testing.T) {
 	}
 }
 
+// placed is open item id of s placed on o's list as startItem places it, without its start; just its id when none.
+func placed(t *testing.T, s Store, o Owner, id int, now time.Time) Shown {
+	t.Helper()
+	l := read(t, s, now)
+	i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.ID == id && !it.Done })
+	if i < 0 {
+		return Shown{ID: id}
+	}
+	l.Items = l.Items[i : i+1]
+	l.Items[0].Started, l.Items[0].StartLate = nil, false
+	l.SetStatus(o)
+	return l.Items[0]
+}
+
 // Start marks the user's own open item once, while its text holds; Read says when it is late; --replaces clears it.
 func TestStart(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
+	o := Owner{Name: "boss-x"}
+	start := func(id int, text, to string, at time.Time) (Item, *Started, error) {
+		return s.Start(placed(t, s, o, id, at), text, to, at)
+	}
 	for _, it := range []Item{{Text: "a"}, {Text: "b", On: "Marek"}, {Text: "c?", Options: []string{"x", "y"}}} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
@@ -959,22 +977,22 @@ func TestStart(t *testing.T) {
 		text, want string
 	}{
 		{1, "other", "look at the list again"},
-		{2, "b", "on Marek, not the user's to start"},
+		{2, "b", "is in Waiting (Marek), not To do: only a To do card starts"},
 		{3, "c?", "is a question"},
 		{9, "a", "no open item 9"},
 	} {
-		if _, _, err := s.Start(tt.id, tt.text, "boss-x", now); err == nil || !strings.Contains(err.Error(), tt.want) {
+		if _, _, err := start(tt.id, tt.text, "boss-x", now); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("start %d %q: %v, want %q", tt.id, tt.text, err, tt.want)
 		}
 	}
-	if _, _, err := s.Start(1, "other", "boss-x", now); !errors.As(err, new(Refused)) {
+	if _, _, err := start(1, "other", "boss-x", now); !errors.As(err, new(Refused)) {
 		t.Errorf("a changed item's start: %v, want Refused", err)
 	}
-	it, prev, err := s.Start(1, "a", "boss-x", now)
+	it, prev, err := start(1, "a", "boss-x", now)
 	if err != nil || prev != nil || it.Started == nil || *it.Started != (Started{At: now.Unix(), To: "boss-x"}) {
 		t.Fatalf("Start = %+v, %v", it, err)
 	}
-	if _, _, err := s.Start(1, "a", "manager", now.Add(2*time.Minute)); err == nil || err.Error() != "item 1: already sent to boss-x 2m ago" {
+	if _, _, err := start(1, "a", "manager", now.Add(2*time.Minute)); err == nil || err.Error() != "item 1: already sent to boss-x 2m ago" {
 		t.Errorf("second start: %v", err)
 	}
 	if sh := read(t, s, now.Add(StartLate-time.Second)).Items[0]; sh.Started == nil || sh.StartLate {
@@ -983,7 +1001,7 @@ func TestStart(t *testing.T) {
 	if sh := read(t, s, now.Add(StartLate)).Items[0]; !sh.StartLate {
 		t.Errorf("at StartLate: %+v", sh)
 	}
-	it, prev, err = s.Start(1, "a", "manager", now.Add(StartLate))
+	it, prev, err = start(1, "a", "manager", now.Add(StartLate))
 	if err != nil || *it.Started != (Started{At: now.Add(StartLate).Unix(), To: "manager"}) || *prev != (Started{At: now.Unix(), To: "boss-x"}) {
 		t.Errorf("a late start sent again = %+v, %+v, %v", it, prev, err)
 	}
@@ -999,7 +1017,7 @@ func TestStart(t *testing.T) {
 	if err := s.Unstart(1, now.Unix(), nil, now); err != nil || read(t, s, now).Items[0].Started != nil {
 		t.Errorf("Unstart: %v", err)
 	}
-	if _, _, err := s.Start(1, "a", "boss-x", now); err != nil {
+	if _, _, err := start(1, "a", "boss-x", now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Replace(1, Item{On: "worker"}, now); err != nil {

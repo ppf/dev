@@ -8,7 +8,7 @@ import (
 )
 
 // An item on Boss without a session is the boss's own, kept by a Replace that doesn't name another, given back by
-// --on me: open, not on others, not the user's to tick, answer or start. One linked to a worker named boss stays
+// --on me: open, not on others, not the user's to tick or answer; started, its boss is asked to. One linked to a worker named boss stays
 // that worker's.
 func TestOnBoss(t *testing.T) {
 	s := store(t)
@@ -52,7 +52,7 @@ func TestOnBoss(t *testing.T) {
 	if _, err := s.Answer(4, "pick?", "Yes", 0, now); err == nil || !strings.Contains(err.Error(), "is on boss, not the user's to answer") {
 		t.Errorf("answer: %v", err)
 	}
-	if _, _, err := s.Start(1, "parked", "boss-a", now); err == nil || !strings.Contains(err.Error(), "is on boss, not the user's to start") {
+	if _, _, err := s.Start(placed(t, s, Owner{Name: "boss-a"}, 1, now), "parked", "boss-a", now); err != nil {
 		t.Errorf("start: %v", err)
 	}
 	if err := s.Replace(1, Item{Text: "parked again"}, now); err != nil {

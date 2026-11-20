@@ -18,6 +18,7 @@ import (
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 // Manager is the session of the manager over the bosses: it sees every thread.
@@ -396,17 +397,26 @@ func AnswerPage(id int, text, answer string) Note {
 	return n
 }
 
-// Started is the note asking a boss to start item id, text, on its own list; with closed, the list of that closed boss,
-// sent to the Manager.
-func Started(boss string, id int, text string, closed bool) Note {
+// Started is the note asking a boss to start item it on its own list, worded by whose it is (the user's, the boss's own
+// parked one, a gone worker's); with closed, the list of that closed boss, sent to the Manager.
+func Started(boss string, it todo.Shown, closed bool) Note {
+	id, text := it.ID, it.Text
 	n := Note{Kind: Start, Key: fmt.Sprintf("start %s %d", boss, id)}
-	if closed {
+	const marked = `#%d "%s": while it still reads so and is marked started on your list, `
+	switch {
+	case closed:
 		n.Text = fmt.Sprintf(`%s #%d "%s": %s is closed: reopen it (dev boss %s --background), its start list asks it to start #%d`,
 			boss, id, text, boss, strings.TrimPrefix(boss, "boss-"), id)
-		return n
+	case todo.OnBoss(it.On, it.Session):
+		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself (dev todo doing %d), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
+			id, text, id, id)
+	case it.Session != nil:
+		n.Text = fmt.Sprintf(marked+`its worker %s is gone: start a fresh one on it and link it with dev todo add --replaces %d --on <worker>`,
+			id, text, it.Session.Name, id)
+	default:
+		n.Text = fmt.Sprintf(marked+`start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
+			`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
 	}
-	n.Text = fmt.Sprintf(`#%d "%s": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
-		`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
 	return n
 }
 

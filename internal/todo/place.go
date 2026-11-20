@@ -1,6 +1,10 @@
 package todo
 
-import "github.com/ppf/dev/internal/sidebar"
+import (
+	"cmp"
+
+	"github.com/ppf/dev/internal/sidebar"
+)
 
 // Assignee is whose a card is: Kind sidebar.AssigneeYou, AssigneeBoss or AssigneeWorker; Name its boss's or worker's
 // session name (Boss for a desktop app boss); Running: a worker while live, the boss while live and read.
@@ -127,4 +131,13 @@ func (o Owner) stored(it Shown, own bool) Placement {
 // boss is o as an assignee, running while neither closed nor unread (not among the live sessions, or those unread).
 func (o Owner) boss() Assignee {
 	return Assignee{Kind: sidebar.AssigneeBoss, Name: o.bossName(), Running: !o.Closed && !o.Unread}
+}
+
+// where is its column's title and whom it names, as a refusal says it: "in Waiting (Marek)".
+func (p Placement) where() string {
+	who := cmp.Or(p.WaitingFor, p.Assignee.Name)
+	if who == "" {
+		return "in " + sidebar.ColumnTitles[p.Column]
+	}
+	return "in " + sidebar.ColumnTitles[p.Column] + " (" + who + ")"
 }
