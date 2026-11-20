@@ -247,7 +247,9 @@ func (s *server) start(req request, it map[string]any) (int, string) {
 		return 409, fmt.Sprintf("item %d is %v: not yours to start", req.ID, it["status"])
 	}
 	it["status"], it["status_on"] = todo.StatusStarting, req.Boss
+	it["column"], it["assignee"] = "progress", map[string]any{"kind": "boss", "name": req.Boss, "running": true}
 	delete(it, "start_late")
+	delete(it, "needs_you")
 	return 200, ""
 }
 
@@ -265,14 +267,23 @@ func (s *server) mac(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) recount() {
-	counts := map[string]int{"decide": 0, "yours": 0}
+	counts := map[string]int{"decide": 0, "yours": 0, "needs_you": 0, "mine": 0}
 	for _, l := range s.board["lists"].([]any) {
 		for _, it := range l.(map[string]any)["items"].([]any) {
 			it := it.(map[string]any)
-			if st, ok := it["status"].(string); ok && it["done"] != true && it["quiet"] != true {
+			if it["done"] == true || it["quiet"] == true {
+				continue
+			}
+			if st, ok := it["status"].(string); ok {
 				if _, counted := counts[st]; counted {
 					counts[st]++
 				}
+			}
+			if it["needs_you"] == true {
+				counts["needs_you"]++
+			}
+			if a, ok := it["assignee"].(map[string]any); ok && a["kind"] == "you" {
+				counts["mine"]++
 			}
 		}
 	}

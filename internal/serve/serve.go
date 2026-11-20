@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
 )
 
@@ -84,9 +85,12 @@ func ipHost(next http.Handler) http.Handler {
 	})
 }
 
+// counts are the open items, test items left out: by the old status words, needing the user, the user's.
 type counts struct {
-	Decide int `json:"decide"`
-	Yours  int `json:"yours"`
+	Decide   int `json:"decide"`
+	Yours    int `json:"yours"`
+	NeedsYou int `json:"needs_you"`
+	Mine     int `json:"mine"`
 }
 
 // board is everything but generated, which the ETag leaves out so an unchanged board answers 304.
@@ -126,8 +130,11 @@ func (cfg Config) read() (board, string, error) {
 	}
 	var statuses []struct {
 		Items []struct {
-			Status string `json:"status"`
-			Quiet  bool   `json:"quiet"`
+			Status   string        `json:"status"`
+			Quiet    bool          `json:"quiet"`
+			Done     bool          `json:"done"`
+			NeedsYou bool          `json:"needs_you"`
+			Assignee todo.Assignee `json:"assignee"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(lists, &statuses); err != nil {
@@ -136,8 +143,14 @@ func (cfg Config) read() (board, string, error) {
 	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns()}
 	for _, l := range statuses {
 		for _, it := range l.Items {
-			if it.Quiet {
+			if it.Quiet || it.Done {
 				continue
+			}
+			if it.NeedsYou {
+				b.Counts.NeedsYou++
+			}
+			if it.Assignee.Kind == sidebar.AssigneeYou {
+				b.Counts.Mine++
 			}
 			switch it.Status {
 			case todo.StatusDecide:

@@ -43,7 +43,7 @@ const ctx = {
 const res = (code, data, etag = '') => ({ status: code, ok: code >= 200 && code < 300, headers: { get: () => etag }, text: async () => data ? JSON.stringify(data) : '' });
 ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ['live.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(process.argv[2], f), 'utf8'), ctx, { filename: f });
+for (const f of ['live.js', 'model.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(process.argv[2], f), 'utf8'), ctx, { filename: f });
 const run = code => vm.runInContext(code, ctx);
 const settle = () => new Promise(r => setTimeout(r, 20));
 const boards = () => calls.filter(c => c === '/v1/board').length;

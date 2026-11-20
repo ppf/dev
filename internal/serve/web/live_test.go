@@ -23,7 +23,7 @@ func node(t *testing.T) string {
 // The page's scripts parse.
 func TestScriptsParse(t *testing.T) {
 	bin := node(t)
-	for _, f := range []string{"static/live.js", "static/app.js"} {
+	for _, f := range []string{"static/live.js", "static/model.js", "static/app.js"} {
 		if out, err := exec.Command(bin, "--check", f).CombinedOutput(); err != nil {
 			t.Errorf("%s: %v\n%s", f, err, out)
 		}

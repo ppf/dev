@@ -15,7 +15,9 @@
   ],
   "counts": {
     "decide": 1,
-    "yours": 1
+    "yours": 1,
+    "needs_you": 1,
+    "mine": 2
   },
   "manager_runs": true,
   "lists": [
