@@ -29,20 +29,6 @@ const (
 	minTextBesideName = 20
 )
 
-// statusColours repeat each status word, in the cards' section colours: working gold, waiting green, idle muted.
-var statusColours = map[string]string{
-	sidebar.StatusDecide:     sidebar.Red,
-	sidebar.StatusYours:      "",
-	sidebar.StatusStarting:   sectionColours[workingSection],
-	sidebar.StatusWorking:    sectionColours[workingSection],
-	sidebar.StatusBlocked:    sidebar.Red,
-	sidebar.StatusWaiting:    sectionColours[waitingSection],
-	sidebar.StatusIdle:       sectionColours[restingSection],
-	sidebar.StatusGone:       sidebar.Red,
-	sidebar.StatusCheck:      sidebar.Gold,
-	sidebar.StatusBossClosed: sidebar.Muted,
-}
-
 // groupTitle is group g's title (sidebar.NeedRow.Group) and colour: Needs you for the sessions, Not read for lists.
 func groupTitle(g int) (title, colour string) {
 	switch {
@@ -52,7 +38,7 @@ func groupTitle(g int) (title, colour string) {
 		return "Not read", sidebar.Gold
 	}
 	group := sidebar.Groups[g]
-	return group.Title, statusColours[group.Statuses[0]]
+	return group.Title, sidebar.StatusColours[group.Statuses[0]]
 }
 
 // blockHead is TO DO's header: whose items, the counts (red where the user decides), and the own list's age at the
@@ -334,7 +320,7 @@ func cutsAlike(rows []needRow, w int) bool {
 // mark is the row's mark: ● a dialog, ? a question or ask, ☐ the user's item, ● in its status's colour on a worker,
 // ◌ waiting on others, ○ a check or a closed boss's, ⚠ a list not read.
 func (r needRow) mark() string {
-	colour := statusColours[r.Status]
+	colour := sidebar.StatusColours[r.Status]
 	switch {
 	case r.Kind == sidebar.NeedDialog:
 		return sidebar.Red + "●" + reset
@@ -378,14 +364,14 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 		if r.Closed && named {
 			more = "boss closed"
 		}
-		return with(r.Check.Short(now), more), statusColours[r.Status]
+		return with(r.Check.Short(now), more), sidebar.StatusColours[r.Status]
 	case r.Kind == sidebar.NeedOn && r.Check != nil && r.Check.Kind != sidebar.CheckBossClosed:
 		// A check its status doesn't say (unchanged, a failing lookup, a moved PR on a blocked or gone worker)
-		return with(with(r.Status, who), "⚠ "+r.Check.Short(now)), statusColours[r.Status]
+		return with(with(r.Status, who), "⚠ "+r.Check.Short(now)), sidebar.StatusColours[r.Status]
 	case r.Kind == sidebar.NeedOn || r.Status == sidebar.StatusBossClosed:
-		return with(r.Status, who), statusColours[r.Status]
+		return with(r.Status, who), sidebar.StatusColours[r.Status]
 	case r.Status == sidebar.StatusStarting:
-		text, colour := "sent", statusColours[r.Status]
+		text, colour := "sent", sidebar.StatusColours[r.Status]
 		if who != "" {
 			text = "sent to " + who
 		}
@@ -628,6 +614,9 @@ func (m Model) actionLine(r needRow, in, w int) (string, []optSpan) {
 		spans = append(spans, optSpan{x0: x, x1: min(w, x+ansi.StringWidth(a.word)), key: a.key})
 		x += ansi.StringWidth(a.word)
 		keys = append(keys, a.hint)
+	}
+	if r.opens() {
+		keys = append(keys, "space open")
 	}
 	keys = append(keys, "esc back")
 	tail := strings.Join(keys, " · ")

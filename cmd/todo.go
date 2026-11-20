@@ -73,7 +73,7 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, and status_on: its worker or person, or the boss a start went to), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoShowCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
 	return cmd
 }
 

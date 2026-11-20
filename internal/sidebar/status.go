@@ -21,6 +21,21 @@ const (
 var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusWorking, StatusBlocked, StatusWaiting, StatusIdle, StatusGone,
 	StatusCheck, StatusBossClosed}
 
+// StatusColours are the boards' colours of each status word, the cards' section colours: working gold, waiting
+// green, idle muted.
+var StatusColours = map[string]string{
+	StatusDecide:     Red,
+	StatusYours:      "",
+	StatusStarting:   Gold,
+	StatusWorking:    Gold,
+	StatusBlocked:    Red,
+	StatusWaiting:    Green,
+	StatusIdle:       Muted,
+	StatusGone:       Red,
+	StatusCheck:      Gold,
+	StatusBossClosed: Muted,
+}
+
 // StatusGroup is a block of the boards' TO DO: its title and the statuses it holds, in Statuses order.
 type StatusGroup struct {
 	Title    string

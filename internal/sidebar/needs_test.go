@@ -892,3 +892,38 @@ func TestGroupsCoverStatuses(t *testing.T) {
 		}
 	}
 }
+
+// space opens the list item under the cursor in its popup, with its text to check it by.
+func TestNeedsOpenItem(t *testing.T) {
+	var calls []answerCall
+	m, _ := key(needsModel(&calls), "n")
+	var opened []answerCall
+	m.openItem = func(_, boss string, id int, text string) error {
+		opened = append(opened, answerCall{boss, id, text, ""})
+		return nil
+	}
+	_, cmd := key(m, " ")
+	if cmd == nil {
+		t.Fatal("space opened nothing")
+	}
+	cmd()
+	if !slices.Equal(opened, []answerCall{{"boss-dev", 1, "Merge #148?", ""}}) {
+		t.Errorf("opened %+v", opened)
+	}
+	// A session's row and an unread list's open nothing
+	m.needs = append(m.needs, NeedList{Boss: "boss-x", Error: "list not read"})
+	rows, n := m.needRows(), 0
+	for i, r := range rows {
+		if r.Boss != "" && r.Kind != NeedUnread {
+			continue
+		}
+		n++
+		m.needIdx, m.needKey = i, r.key()
+		if _, cmd := key(m, " "); cmd != nil {
+			t.Errorf("space on %+v ran a command", r)
+		}
+	}
+	if n == 0 || len(opened) != 1 {
+		t.Errorf("checked %d rows, opened %+v", n, opened)
+	}
+}
