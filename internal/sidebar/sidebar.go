@@ -72,10 +72,6 @@ type Session struct {
 	Wait     wait.Wait // its planned wait (dev agent wait-until); zero when none
 	Resume   bool      // a rate limit stopped it and dev resumes it (@dev_resume_at)
 	Note     string    // its latest boss inbox note (@dev_boss_note), "<kind>: <text>"
-	// Transcript is its agent's transcript (@agent_transcript), "" when unknown; Doing what it is doing now, as
-	// dev todo --json's now says it (set by dev todo, not Live)
-	Transcript string
-	Doing      string
 
 	ID        string // tmux session id ($N)
 	Boss      bool   // a dev boss session (OptHerd)
@@ -84,6 +80,8 @@ type Session struct {
 	Root      string // the manager (its name) whose group the row is in, the manager's own row included; "" outside one
 
 	Conversation string  // the agent pane's Claude conversation (@agent_session); "" when none
+	Transcript   string  // the agent's transcript (@agent_transcript); "" when unknown
+	Doing        string  // what it is doing now, as dev todo --json's now says it (set by dev todo, not Live)
 	SpentUSD     float64 // what ended under it (its spent ledger), see Spend
 	SpentErr     string  // why its ledger couldn't be read: its boss's total misses it
 }

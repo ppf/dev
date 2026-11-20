@@ -121,7 +121,7 @@ func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
 	switch {
 	case rank == sidebar.RankWaiting && s.Wait.Held():
 		return s.Wait.Text(now)
-	case rank != sidebar.RankWorking && rank != sidebar.RankWaiting || s.Transcript == "":
+	case rank != sidebar.RankWorking && rank != sidebar.RankWaiting, s.Transcript == "":
 		return ""
 	}
 	t, err := desktop.ReadTail(s.Transcript)
