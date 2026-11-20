@@ -23,6 +23,11 @@ type needRow struct {
 	fold  []sidebar.NeedRow // Waiting on others' fold row: the rows it stands for, shown under it only while open (waitOpen)
 }
 
+// opens reports space opens the row in its popup (dev todo show): a list's read item.
+func (r needRow) opens() bool {
+	return r.fold == nil && r.Boss != "" && r.Kind != sidebar.NeedUnread
+}
+
 // foldSig is the fold row's sig.
 const foldSig = "fold\x00waiting"
 
@@ -208,8 +213,9 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
-// user's item, s start it (dev todo start), g/⏎ go to its session (on Waiting on others' fold row open or fold it), esc
-// or n back to the cards, t fold the block back to the cards, ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
+// user's item, s start it (dev todo start), space open a list item in its popup (dev todo show), g/⏎ go to its session
+// (on Waiting on others' fold row open or fold it), esc or n back to the cards, t fold the block back to the cards,
+// ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if len(rows) == 0 {
@@ -233,6 +239,13 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.todoFolded, m.needMode = true, false
 	case "ctrl+c":
 		return m, tea.Quit
+	case " ":
+		if !r.opens() {
+			m.msg = info("space opens a list item")
+			return m, nil
+		}
+		open, client := m.openItem, m.snap.client
+		return m, m.action(func() error { return open(client, r.Boss, r.ID, r.Text) })
 	case "g", "enter", "d", "s", "m", "i", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		if r.fold != nil {
 			if key == "g" || key == "enter" {

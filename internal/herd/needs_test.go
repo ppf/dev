@@ -1054,3 +1054,40 @@ func TestNeedsAskContextShortPane(t *testing.T) {
 		t.Errorf("tall pane:\n%s", screen)
 	}
 }
+
+// space opens a list item in its popup, with the row's text to check it by; a session's row only says what it does.
+func TestNeedOpenItem(t *testing.T) {
+	var answered []listAnswer
+	m := selectKind(t, needsBoard(t, &answered), sidebar.NeedPlain)
+	m.snap.client = "/dev/ttys001"
+	var opened []string
+	m.openItem = func(client, boss string, id int, text string) error {
+		opened = append(opened, client+" "+boss+" "+strconv.Itoa(id)+" "+text)
+		return nil
+	}
+	row := m.needRows()[m.needIdx]
+	m, cmd := keys(m, " ")
+	if cmd == nil {
+		t.Fatal("space on a list item ran nothing")
+	}
+	cmd()
+	if want := "/dev/ttys001 " + row.Boss + " " + strconv.Itoa(row.ID) + " " + row.Text; !slices.Equal(opened, []string{want}) {
+		t.Errorf("opened %q, want %q", opened, want)
+	}
+	fold := needsBoard(t, &answered)
+	fold.snap.asks = append(fold.snap.asks, todo.BossList{Boss: "boss-noc", List: todo.List{Items: []todo.Shown{
+		{ID: 9, Text: "Review", On: "Carl", Status: sidebar.StatusWaiting, StatusOn: "Carl"}}}})
+	fold.snap.rollUp()
+	fold, _ = keys(fold, "n")
+	fold.needIdx = slices.IndexFunc(fold.needRows(), func(r needRow) bool { return r.fold != nil })
+	fold.needKey = fold.needRows()[fold.needIdx].sig
+	fold.openItem = func(string, string, int, string) error { t.Error("space opened the fold row"); return nil }
+	if fold, cmd := keys(fold, " "); cmd != nil || fold.msg.text != "space opens a list item" {
+		t.Errorf("space on the fold row: cmd %v msg %q", cmd != nil, fold.msg.text)
+	}
+	dialog := selectKind(t, needsBoard(t, &answered), sidebar.NeedDialog)
+	dialog.openItem = func(string, string, int, string) error { t.Error("space opened a session's row"); return nil }
+	if dialog, cmd := keys(dialog, " "); cmd != nil || !strings.Contains(dialog.msg.text, "space opens a list item") {
+		t.Errorf("space on a dialog: cmd %v msg %q", cmd != nil, dialog.msg.text)
+	}
+}

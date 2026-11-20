@@ -102,15 +102,19 @@ func (m Model) bottom() []string {
 	}
 	if m.needMode {
 		rows := m.needRows()
+		open := ""
+		if m.needIdx < len(rows) && rows[m.needIdx].opens() {
+			open = "  space open"
+		}
 		switch {
 		case m.needIdx < len(rows) && rows[m.needIdx].fold != nil:
 			return []string{sidebar.HintRow("j/k move  ⏎ open or fold  t fold to do  esc cards", w)}
 		case m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain:
-			return []string{sidebar.HintRow("j/k move  s start  d tick (stays till ticked)  g/⏎ go  t fold to do  esc cards", w)}
+			return []string{sidebar.HintRow("j/k move  s start  d tick (stays till ticked)"+open+"  g/⏎ go  t fold to do  esc cards", w)}
 		case m.needIdx < len(rows) && (rows[m.needIdx].Kind == sidebar.NeedOn || rows[m.needIdx].Kind == sidebar.NeedUnread || rows[m.needIdx].Closed):
-			return []string{sidebar.HintRow("j/k move  g/⏎ go  t fold to do  esc cards", w)}
+			return []string{sidebar.HintRow("j/k move"+open+"  g/⏎ go  t fold to do  esc cards", w)}
 		}
-		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply  g/⏎ go  t fold to do  esc cards", w)}
+		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply"+open+"  g/⏎ go  t fold to do  esc cards", w)}
 	}
 	pages := ""
 	sel := index(tiles, m.selected)

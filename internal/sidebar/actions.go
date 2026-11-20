@@ -1,11 +1,13 @@
 package sidebar
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ppf/dev/internal/picker"
@@ -44,6 +46,22 @@ func OpenPicker(c *tmux.Client, client string) error {
 		}
 	}
 	return err
+}
+
+// OpenItem opens item id of boss's list in its popup on client (dev todo show), refused unless it still reads text;
+// it returns once the popup closes.
+func OpenItem(client, boss string, id int, text string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	cmd := exec.Command(exe, "todo", "show", "--client", client, "--question", text, "--", boss, strconv.Itoa(id))
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return errors.New(cmp.Or(strings.TrimSpace(stderr.String()), err.Error()))
+	}
+	return nil
 }
 
 // Close closes target for client for good, the one close of every path (the sidebar's x/×, the previews' x,

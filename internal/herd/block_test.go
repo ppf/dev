@@ -143,7 +143,7 @@ func TestBlockBudget(t *testing.T) {
 	}
 	block, _, _ = m.needBlock(gh)
 	all = strings.Join(plain(block), "\n")
-	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Start   Tick      s start · d tick · esc back") {
+	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Start   Tick      s start · d tick · space open · esc back") {
 		t.Errorf("selected row not shown with its actions:\n%s", all)
 	}
 }
