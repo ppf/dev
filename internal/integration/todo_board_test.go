@@ -3,10 +3,13 @@
 package integration
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 // dev todo board draws the lists as columns, opens an item over itself, answers and ticks through it and reads the
@@ -94,6 +97,23 @@ func TestTodoBoard(t *testing.T) {
 	waitFor(t, "the person's item open", func() bool { return strings.Contains(capture(), "a #3 · waiting") })
 	s.T("send-keys", "-t", view, "Escape")
 	waitFor(t, "the item closed", func() bool { return !strings.Contains(capture(), "a #3 · waiting") })
+
+	// A click on a card opens it; one beside the view closes it (SGR mouse reports, as tmux sends them)
+	click := func(s0 string, dx, dy int) {
+		t.Helper()
+		for y, l := range strings.Split(capture(), "\n") {
+			if i := strings.Index(l, s0); i >= 0 {
+				s.T("send-keys", "-t", view, "-l", fmt.Sprintf("\x1b[<0;%d;%dM\x1b[<0;%d;%dm", utf8.RuneCountInString(l[:i])+1+dx, y+1+dy, utf8.RuneCountInString(l[:i])+1+dx, y+1+dy))
+				return
+			}
+		}
+		t.Fatalf("❌ %q not on the board:\n%s", s0, capture())
+	}
+	click("Review of the coupon", 0, 0)
+	waitFor(t, "the person's item open by a click", func() bool { return strings.Contains(capture(), "a #3 · waiting") })
+	time.Sleep(600 * time.Millisecond) // past the double-click guard
+	click("TO DO board", 0, 0)
+	waitFor(t, "the item closed by a click beside it", func() bool { return !strings.Contains(capture(), "a #3 · waiting") })
 	s.T("send-keys", "-t", view, "Escape")
 	waitFor(t, "the board closed", func() bool {
 		_, err := s.Try("capture-pane", "-p", "-t", view)

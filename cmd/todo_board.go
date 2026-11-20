@@ -59,7 +59,7 @@ every 5 seconds and after an action. The previews' and the sidebar's TO DO open 
 				whose = args[0] + " and its workers"
 			}
 			m := kanban.New(whose, func() kanban.Loaded { return kanbanLists(c, args) }, showActions(c, client))
-			_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+			_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 			return err
 		},
 	}

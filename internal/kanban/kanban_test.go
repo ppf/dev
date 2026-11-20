@@ -408,3 +408,250 @@ func TestLongNames(t *testing.T) {
 		t.Errorf("❌ a long project:\n%s", out)
 	}
 }
+
+// at is where s first shows on the board: its cell column and row.
+func at(t *testing.T, m Model, s string) (int, int) {
+	t.Helper()
+	for y, l := range strings.Split(plain(m), "\n") {
+		if i := strings.Index(l, s); i >= 0 {
+			return ansi.StringWidth(l[:i]), y
+		}
+	}
+	t.Fatalf("❌ %q not on the board:\n%s", s, plain(m))
+	return 0, 0
+}
+
+// clock is the clicks' time: a second apart, past the double-click guard.
+var clock = time.Now()
+
+// press is a mouse button at x, y, the action's command run as the program would.
+func press(t *testing.T, m Model, b tea.MouseButton, x, y int) Model {
+	t.Helper()
+	clock = clock.Add(time.Second)
+	next, cmd := m.mouse(tea.MouseMsg{X: x, Y: y, Button: b, Action: tea.MouseActionPress}, clock)
+	m = next.(Model)
+	if cmd != nil && m.item != nil {
+		if msg := cmd(); msg != nil {
+			next, _ = m.Update(msg)
+			m = next.(Model)
+		}
+	}
+	return m
+}
+
+func clickOn(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	x, y := at(t, m, s)
+	return press(t, m, tea.MouseButtonLeft, x, y)
+}
+
+// A click on a card opens it at every layout, the columns scrolled too; one on a head or a gap selects the column.
+func TestClickCard(t *testing.T) {
+	for _, c := range []struct {
+		w     int
+		keys  []string
+		card  string
+		title string
+		col   int
+	}{
+		{200, nil, "Review of the coupon", "beta #1 · waiting", 4},
+		{120, nil, "Review of the coupon", "beta #1 · waiting", 2},
+		{90, nil, "Fix the login", "alpha #2 · working", 1},
+		{60, nil, "alpha #2", "alpha #2 · working", 1},
+		{50, nil, "Own item 1 with", "alpha #11 · Yours", 0},
+		{90, []string{"l", "l", "l"}, "Fix the login", "alpha #2 · working", 1}, // columns 2–4 shown
+		{50, []string{"l", "l"}, "beta #1", "beta #1 · waiting", 2},
+	} {
+		m, _ := board(t, fixture(2), c.w, 40)
+		m = keys(t, m, c.keys...)
+		m = clickOn(t, m, c.card)
+		if m.item == nil || m.col != c.col || !strings.Contains(plain(m), c.title) {
+			t.Errorf("❌ %d wide %v, click on %q: col %d, want %d; view open %v\n%s", c.w, c.keys, c.card, m.col, c.col, m.item != nil, plain(m))
+		}
+	}
+	m, _ := board(t, fixture(2), 120, 40)
+	m = clickOn(t, m, "Waiting on others")
+	if m.item != nil || m.col != 2 || m.card != 0 {
+		t.Errorf("❌ click on a head: col %d card %d, view open %v", m.col, m.card, m.item != nil)
+	}
+	x, y := at(t, m, "Waiting on others")
+	m = press(t, m, tea.MouseButtonLeft, x, y+10) // below its only card
+	if m.item != nil || m.col != 2 {
+		t.Errorf("❌ click under a column's cards: col %d, view open %v", m.col, m.item != nil)
+	}
+	x, _ = at(t, m, "▸ Waiting on others")
+	m = press(t, m, tea.MouseButtonLeft, x-2, y+3) // the rule between two columns
+	if m.item != nil || m.col != 2 {
+		t.Errorf("❌ click on a rule: col %d, view open %v", m.col, m.item != nil)
+	}
+	m = press(t, m, tea.MouseButtonRight, x, y)
+	m = press(t, m, tea.MouseButtonLeft, x, len(strings.Split(plain(m), "\n"))-2) // the keys line
+	if m.item != nil || m.col != 2 {
+		t.Error("❌ a right click or one on the keys acted")
+	}
+}
+
+// The wheel moves the selection in the column under it, the column scrolling with it; "+n more" and "↑ n more" page.
+func TestClickScroll(t *testing.T) {
+	m, _ := board(t, fixture(12), 90, 28)
+	x, y := at(t, m, "For you")
+	for range 4 {
+		m = press(t, m, tea.MouseButtonWheelDown, x, y+3)
+	}
+	if m.card != 4 || m.top != 2 || !strings.Contains(plain(m), "↑ 2 more") || m.item != nil {
+		t.Errorf("❌ 4 wheel downs: card %d top %d\n%s", m.card, m.top, plain(m))
+	}
+	m = press(t, m, tea.MouseButtonWheelUp, x, y+3)
+	if m.card != 3 {
+		t.Errorf("❌ wheel up: card %d", m.card)
+	}
+	wx, wy := at(t, m, "Starting · In progress")
+	m = press(t, m, tea.MouseButtonWheelDown, wx, wy+3)
+	if m.col != 1 || m.card != 0 {
+		t.Errorf("❌ wheel over another column: col %d card %d, want 1 0", m.col, m.card)
+	}
+
+	m, _ = board(t, fixture(12), 90, 28)
+	m = clickOn(t, m, "+10 more")
+	if m.card != 3 || m.top != 3 || m.item != nil || !strings.Contains(plain(m), "↑ 3 more") {
+		t.Errorf("❌ +10 more: card %d top %d\n%s", m.card, m.top, plain(m))
+	}
+	m = clickOn(t, m, "↑ 3 more")
+	if m.card != 2 || m.top != 0 || m.item != nil {
+		t.Errorf("❌ ↑ 3 more: card %d top %d", m.card, m.top)
+	}
+	// "+n more" of a column not selected selects it, paged
+	lists := fixture(0)
+	for i := range 6 {
+		lists[1].Items = append(lists[1].Items, todo.Shown{ID: 20 + i, Text: "Waiting", On: "Dora", Status: sidebar.StatusWaiting})
+	}
+	m, _ = board(t, lists, 90, 28)
+	m = clickOn(t, m, "+4 more")
+	if m.col != 2 || m.card != 3 || m.top != 3 {
+		t.Errorf("❌ +4 more of Waiting on others: col %d card %d top %d", m.col, m.card, m.top)
+	}
+}
+
+// A click on a project shows it, on all shows all; on the cut line it shows the next one, as p does.
+func TestClickFilter(t *testing.T) {
+	lists := append(fixture(2), List{Boss: "boss-日本", Items: []todo.Shown{{ID: 5, Text: "Wide name", Status: sidebar.StatusYours}}})
+	m, _ := board(t, lists, 120, 40)
+	m = clickOn(t, m, "日本")
+	if m.project != "日本" || strings.Contains(plain(m), "beta #1") {
+		t.Errorf("❌ click on 日本: project %q", m.project)
+	}
+	m = clickOn(t, m, "beta")
+	if m.project != "beta" {
+		t.Errorf("❌ click on beta: project %q", m.project)
+	}
+	x, y := at(t, m, "project all")
+	m = press(t, m, tea.MouseButtonLeft, x+len("project "), y)
+	if m.project != "" {
+		t.Errorf("❌ click on all: project %q", m.project)
+	}
+	m = press(t, m, tea.MouseButtonLeft, 2, y) // "project ", not a project
+	if m.project != "" {
+		t.Errorf("❌ click on the label: project %q", m.project)
+	}
+
+	var many []List
+	for i := range 9 {
+		many = append(many, List{Boss: fmt.Sprintf("boss-project-with-a-long-name-%d", i), Items: []todo.Shown{{ID: 1, Text: "x", Status: sidebar.StatusYours}}})
+	}
+	m, _ = board(t, many, 60, 30)
+	if !strings.Contains(plain(m), "(1 of 10, p next)") {
+		t.Fatalf("❌ not the cut filter line:\n%s", plain(m))
+	}
+	m = clickOn(t, m, "p next")
+	if m.project != "project-with-a-long-name-0" {
+		t.Errorf("❌ click on the cut line: project %q", m.project)
+	}
+}
+
+// With the item view open a click on an option answers, one beside the view closes it as esc does; a second press
+// right after the click that opened it does nothing.
+func TestClickItemView(t *testing.T) {
+	for _, h := range []int{40, 16} {
+		m, f := board(t, fixture(2), 120, h)
+		m = clickOn(t, m, "? alpha #1")
+		if m.item == nil {
+			t.Fatalf("❌ %d high: the ask not open:\n%s", h, plain(m))
+		}
+		x, y := at(t, m, "Wait   ")
+		next, _ := m.mouse(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}, clock.Add(100*time.Millisecond))
+		if m := next.(Model); m.item == nil || len(f.answered) != 0 {
+			t.Errorf("❌ %d high: a double click's second press answered %v", h, f.answered)
+		}
+		// A quick click beside it still closes it
+		if next, _ := m.mouse(tea.MouseMsg{X: 1, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}, clock.Add(100*time.Millisecond)); next.(Model).item != nil {
+			t.Errorf("❌ %d high: a quick click beside the view left it open", h)
+		}
+		// A refusal's line makes the view taller: the click still hits
+		m = keys(t, m, "3")
+		if !strings.Contains(plain(m), "#1 has 2 options") {
+			t.Fatalf("❌ %d high: no refusal:\n%s", h, plain(m))
+		}
+		m = clickOn(t, m, "Wait   ")
+		if m.item != nil || len(f.answered) != 1 || f.answered[0] != "boss-alpha#1=Wait" {
+			t.Errorf("❌ %d high: click on Wait answered %v, view open %v\n%s", h, f.answered, m.item != nil, plain(m))
+		}
+	}
+	m, f := board(t, fixture(2), 120, 40)
+	m = clickOn(t, m, "? alpha #1")
+	m = press(t, m, tea.MouseButtonLeft, 1, 1)
+	if m.item != nil || m.Done || len(f.answered) != 0 {
+		t.Errorf("❌ click beside the view: open %v, board done %v", m.item != nil, m.Done)
+	}
+	// Beside it while the own-words field is open: the field closes first, as esc does
+	m = keys(t, m, "enter", "m")
+	m = press(t, m, tea.MouseButtonLeft, 1, 1)
+	if m.item == nil {
+		t.Error("❌ click beside the view closed it while typing")
+	}
+	m = press(t, m, tea.MouseButtonLeft, 1, 1)
+	if m.item != nil {
+		t.Error("❌ second click beside the view kept it open")
+	}
+}
+
+// In a scrolled column a click opens the card it shows, under "↑ n more"; releases and drags do nothing; the wheel
+// stops at the column's ends and does nothing over the item view.
+func TestClickScrolledAndIgnored(t *testing.T) {
+	m, _ := board(t, fixture(12), 90, 28)
+	m = keys(t, m, "j", "j", "j", "j") // top 2: ↑ 2 more, then alpha #11
+	m = clickOn(t, m, "☐ alpha #11")
+	if m.item == nil || m.card != 2 || !strings.Contains(plain(m), "alpha #11 · Yours") {
+		t.Fatalf("❌ click under ↑ 2 more: card %d\n%s", m.card, plain(m))
+	}
+	// A press beside the view over a card closes it; that click's release doesn't open the card
+	x, y := at(t, m, "↑ 2 more")
+	m = press(t, m, tea.MouseButtonLeft, x, y+1)
+	if m.item != nil {
+		t.Fatal("❌ press beside the view left it open")
+	}
+	for _, a := range []tea.MouseAction{tea.MouseActionRelease, tea.MouseActionMotion} {
+		next, _ := m.mouse(tea.MouseMsg{X: x, Y: y + 1, Button: tea.MouseButtonLeft, Action: a}, clock.Add(time.Hour))
+		if b := next.(Model); b.item != nil || b.card != m.card || b.col != m.col {
+			t.Errorf("❌ left %v over a card acted: view open %v card %d", a, b.item != nil, b.card)
+		}
+	}
+
+	m, _ = board(t, fixture(12), 90, 28)
+	x, y = at(t, m, "For you")
+	m = press(t, m, tea.MouseButtonWheelUp, x, y+3)
+	if m.card != 0 || m.top != 0 {
+		t.Errorf("❌ wheel up on the first card: card %d top %d", m.card, m.top)
+	}
+	for range 20 {
+		m = press(t, m, tea.MouseButtonWheelDown, x, y+3)
+	}
+	if m.card != 12 {
+		t.Errorf("❌ wheel down past the end: card %d, want 12", m.card)
+	}
+	m = keys(t, m, "enter")
+	open := m.card
+	m = press(t, m, tea.MouseButtonWheelUp, x, y+3)
+	if m.item == nil || m.card != open {
+		t.Errorf("❌ wheel over the item view: view open %v card %d", m.item != nil, m.card)
+	}
+}
