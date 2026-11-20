@@ -48,6 +48,7 @@ const state = {
   opener: '', // the open sheet's hash: closing it focuses its card
   shown: null, // the open item as last drawn, {k, text}: when a poll finds it gone, its sheet closes
   version: '', // dev serve's version this page loaded with
+  seen: '', // the version the last board named
   newVersion: false, // a newer one is out: the line offers a reload
 };
 
@@ -209,7 +210,7 @@ async function load() {
       if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
         return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
       }
-    }
+    } else if (state.newVersion && !sameVersion(state.seen)) return; // a held reload, no longer busy
   }
   render();
 }
@@ -222,6 +223,7 @@ function sameVersion(v) {
   } catch {}
   const step = versionStep(state.version, v, busy(), last, Date.now());
   if (!state.version) state.version = v;
+  state.seen = v;
   state.newVersion = step === 'offer';
   if (step !== 'reload') return true;
   reload();
