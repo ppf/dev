@@ -294,10 +294,17 @@ func (m Model) bottomRow() string {
 		return errorRow(m.err, m.snap.width)
 	case m.answerErr != nil:
 		return AlertRow(m.answerErr.Error(), m.snap.width)
+	case m.reloadErr != nil:
+		return AlertRow("❌ "+m.reloadErr.Error(), m.snap.width)
+	case m.ready != nil:
+		// Held: above the TO DO hint, since TO DO mode is what holds it
+		return " " + gold + truncate("↻ "+m.ready.Version+" ready: reloads when idle", m.snap.width-1) + reset
 	case m.needMode:
 		return m.needsHint()
 	case m.needsErr != nil:
 		return AlertRow(m.needsErr.Error(), m.snap.width)
+	case m.reloadFlash != "":
+		return " " + green + truncate("↻ dev "+m.reloadFlash, m.snap.width-1) + reset
 	case m.snap.focused && len(m.snap.sessions) > 0:
 		return hint
 	}
