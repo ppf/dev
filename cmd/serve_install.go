@@ -81,10 +81,8 @@ func keepAwake(out, stderr io.Writer) error {
 	if err := c.Start(); err != nil {
 		return fmt.Errorf("--awake: %w", err)
 	}
-	go func() {
-		err := c.Wait()
-		fmt.Fprintf(stderr, "⚠ --awake: caffeinate ended (%v): the Mac may sleep\n", err)
-	}()
+	caffeinate.Store(int64(c.Process.Pid))
+	go watchAwake(c.Process.Pid, stderr)
 	ps, err := exec.Command("/usr/bin/pmset", "-g", "ps").Output()
 	if err != nil {
 		fmt.Fprintf(out, "⚠ --awake: could not read the power source (pmset: %v): on battery the Mac may sleep\n", err)
@@ -92,4 +90,31 @@ func keepAwake(out, stderr io.Writer) error {
 		fmt.Fprintln(out, "⚠ on battery: the Mac may sleep and the phone page stop answering until it is on mains power")
 	}
 	return nil
+}
+
+// awakeAlive: caffeinate pid (0: none) is a running child of this process; a dead one is reaped.
+func awakeAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	var ws syscall.WaitStatus
+	wpid, err := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil)
+	return err == nil && wpid == 0
+}
+
+// watchAwake says when caffeinate pid, a child of this process (also after a reload), ends.
+func watchAwake(pid int, stderr io.Writer) {
+	why := "unknown"
+	p, err := os.FindProcess(pid)
+	if err == nil {
+		var st *os.ProcessState
+		if st, err = p.Wait(); err == nil {
+			why = st.String()
+		}
+	}
+	if err != nil {
+		why = err.Error()
+	}
+	caffeinate.CompareAndSwap(int64(pid), 0) // a reload after this starts a new one
+	fmt.Fprintf(stderr, "⚠ --awake: caffeinate ended (%s): the Mac may sleep\n", why)
 }
