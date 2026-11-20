@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -91,5 +92,18 @@ func TestQueryInNonUTF8Locale(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != (session{Name: "loc", Windows: 1}) {
 		t.Errorf("Query = %+v", got)
+	}
+}
+
+// A server up with no session yet (still reading its config) fails list-panes -a with "no current target": Live
+// reads it as no sessions, as it does no server.
+func TestLiveOnServerWithNoSession(t *testing.T) {
+	s := newServer(t, "")
+	s.T("start-server", ";", "set", "-g", "exit-empty", "off")
+	if _, err := s.Try("list-panes", "-a"); !tmux.IsNoSession(err) {
+		t.Fatalf("list-panes -a on no session: err = %v, want no current target", err)
+	}
+	if got, err := sidebar.Live(s.tmux); got != nil || err != nil {
+		t.Errorf("Live = %v, %v; want none, no error", got, err)
 	}
 }

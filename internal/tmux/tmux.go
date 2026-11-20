@@ -39,6 +39,13 @@ func IsNoServer(err error) bool {
 		strings.Contains(e.Stderr, "error connecting") && strings.Contains(e.Stderr, "No such file or directory"))
 }
 
+// IsNoSession reports a failed tmux call needing a current target on a server with no session (one still reading
+// its config, or kept up by exit-empty off): list-sessions answers it empty, list-panes -a fails.
+func IsNoSession(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	return ok && strings.Contains(e.Stderr, "no current target")
+}
+
 type runner func(args, env []string) (stdout, stderr []byte, err error)
 
 // Client runs tmux commands against one server.

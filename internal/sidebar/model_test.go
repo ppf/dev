@@ -370,3 +370,19 @@ func TestModelCostHidden(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveNoSession(t *testing.T) {
+	failing := func(stderr string) *tmux.Client {
+		return tmux.NewFake(func([]string) (string, error) {
+			return "", &tmux.Error{Stderr: stderr, Err: errors.New("exit status 1")}
+		})
+	}
+	for _, stderr := range []string{"no server running on /tmp/tmux-501/default", "no current target"} {
+		if got, err := Live(failing(stderr)); got != nil || err != nil {
+			t.Errorf("Live on %q = %v, %v; want none, no error", stderr, got, err)
+		}
+	}
+	if _, err := Live(failing("can't find session: =x:")); err == nil {
+		t.Error("Live on another failure: no error")
+	}
+}
