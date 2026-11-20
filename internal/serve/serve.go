@@ -32,6 +32,9 @@ type Config struct {
 	Answer func(boss string, id int, question, answer string) error
 	Done   func(boss string, id int, text string) error
 	Start  func(boss string, id int, text string) error
+	// Doing marks the user's own item id in progress with doing, or ends it (stop), while it still reads text, and tells
+	// its boss (the manager for a closed one).
+	Doing func(boss string, id int, text, doing string, stop bool) error
 	// Guard wraps every /v1 call but health and pair, on every bind: Auth.Session. Required.
 	Guard func(http.Handler) http.Handler
 	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.
@@ -51,8 +54,9 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
 	mux.Handle("POST /v1/start", cfg.Guard(fromPage(http.HandlerFunc(cfg.start))))
+	mux.Handle("POST /v1/doing", cfg.Guard(fromPage(http.HandlerFunc(cfg.doing))))
 	mux.Handle("POST /v1/pair", cfg.Pair)
-	for _, route := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/pair"} { // else "GET /" answers the page's 404
+	for _, route := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/doing", "/v1/pair"} { // else "GET /" answers the page's 404
 		mux.HandleFunc("GET "+route, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Allow", http.MethodPost)
 			writeError(w, http.StatusMethodNotAllowed, "POST only")

@@ -235,7 +235,8 @@ func (s Store) Lookup(now time.Time, ttl time.Duration, limit int, view func(url
 			fc := facts[it.key()]
 			if it.Done == 0 && it.DoneOn != "" && fc.Link == it.Link && reached(it.DoneOn, fc.Last) {
 				// Ticked as written, after the lookups: its doneShown starts there
-				f.Items[i].Done, ticked = now.Add(time.Since(began)).Unix(), true
+				f.Items[i].tick(now.Add(time.Since(began)).Unix())
+				ticked = true
 				f.tell(Ticked{ID: it.ID, Text: it.Text, PR: lookedUp(it.Link), On: it.DoneOn})
 			}
 		}

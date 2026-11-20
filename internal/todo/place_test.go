@@ -95,7 +95,7 @@ func TestReadPRStateDoing(t *testing.T) {
 	s := Store{path: t.TempDir() + "/boss-x.json"}
 	now := time.Unix(1700000000, 0)
 	pr := "https://github.com/o/r/pull/9"
-	for _, it := range []Item{{Text: "a", Link: pr, Doing: &Doing{Text: "on it", At: 5}, PartOf: 2}, {Text: "b", Link: "https://example.com/x"}} {
+	for _, it := range []Item{{Text: "a", Link: pr, Doing: &Doing{Text: "on it", At: 5}}, {Text: "b", Link: "https://example.com/x", PartOf: 1}} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
 		}
@@ -126,8 +126,8 @@ func TestReadPRStateDoing(t *testing.T) {
 	if l, err = s.Read(now); err != nil {
 		t.Fatal(err)
 	}
-	if a, b := l.Items[0], l.Items[1]; a.PRState != PROpen || b.PRState != "" || a.Doing == nil || *a.Doing != (Doing{Text: "on it", At: 5}) || a.PartOf != 2 {
-		t.Errorf("read: a %q %+v part of %d, b %q; want open, its doing, 2, none", a.PRState, a.Doing, a.PartOf, b.PRState)
+	if a, b := l.Items[0], l.Items[1]; a.PRState != PROpen || b.PRState != "" || a.Doing == nil || *a.Doing != (Doing{Text: "on it", At: 5}) || a.PartOf != 2 || b.PartOf != 1 {
+		t.Errorf("read: a %q %+v part of %d, b %q; want open, its doing, 2 (from b's side), none", a.PRState, a.Doing, a.PartOf, b.PRState)
 	}
 }
 

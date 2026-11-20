@@ -339,6 +339,9 @@ func Peer(c *tmux.Client, pane string) (name, socket string, err error) {
 	return v.Name, v.Socket, nil
 }
 
+// ErrInboxOff is Recipient refusing a boss whose inbox is off.
+var ErrInboxOff = errors.New("its inbox off: it can't get messages")
+
 // Recipient is the boss session name, with its inbox on, a message goes to.
 func Recipient(c *tmux.Client, name string) (Boss, error) {
 	// display-message prints nothing for a missing session, without failing
@@ -356,7 +359,7 @@ func Recipient(c *tmux.Client, name string) (Boss, error) {
 	case v.Herd == "":
 		return Boss{}, fmt.Errorf("%s is not a boss session (dev boss)", name)
 	case v.Off == "off":
-		return Boss{}, fmt.Errorf("%s has its inbox off: it can't get messages", name)
+		return Boss{}, fmt.Errorf("%s has %w", name, ErrInboxOff)
 	}
 	b, _, err := v.boss()
 	return b, err
@@ -407,6 +410,25 @@ func Started(boss string, id int, text string, closed bool) Note {
 	}
 	n.Text = fmt.Sprintf(`#%d "%s": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
 		`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
+	return n
+}
+
+// UserDoing is the note telling a boss the user is on its item id, text, themselves, doing what (stop: no longer);
+// with closed, the list of that closed boss, sent to the Manager. A newer one for that item replaces it while queued.
+func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note {
+	n := Note{Kind: UserOn, Key: fmt.Sprintf("doing %s %d", boss, id), Text: fmt.Sprintf(`#%d "%s"`, id, text)}
+	if closed {
+		n.Text = boss + " " + n.Text
+	}
+	switch {
+	case stop:
+		n.Text += ": no longer on it"
+	case doing != "":
+		n.Text += ": " + doing
+	}
+	if closed {
+		n.Text += " (" + boss + " is closed)"
+	}
 	return n
 }
 
