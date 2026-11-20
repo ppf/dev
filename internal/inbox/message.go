@@ -340,6 +340,9 @@ func Peer(c *tmux.Client, pane string) (name, socket string, err error) {
 	return v.Name, v.Socket, nil
 }
 
+// ErrInboxOff is Recipient refusing a boss whose inbox is off.
+var ErrInboxOff = errors.New("its inbox off: it can't get messages")
+
 // Recipient is the boss session name, with its inbox on, a message goes to.
 func Recipient(c *tmux.Client, name string) (Boss, error) {
 	// display-message prints nothing for a missing session, without failing
@@ -357,7 +360,7 @@ func Recipient(c *tmux.Client, name string) (Boss, error) {
 	case v.Herd == "":
 		return Boss{}, fmt.Errorf("%s is not a boss session (dev boss)", name)
 	case v.Off == "off":
-		return Boss{}, fmt.Errorf("%s has its inbox off: it can't get messages", name)
+		return Boss{}, fmt.Errorf("%s has %w", name, ErrInboxOff)
 	}
 	b, _, err := v.boss()
 	return b, err
@@ -398,7 +401,7 @@ func AnswerPage(id int, text, answer string) Note {
 }
 
 // Started is the note asking a boss to start item it on its own list, worded by whose it is (the user's, the boss's own
-// parked one, a linked worker's, gone by its status or still running); with closed, the list of that closed boss, sent
+// parked one, a linked worker's: gone by its status, else named); with closed, the list of that closed boss, sent
 // to the Manager.
 func Started(boss string, it todo.Shown, closed bool) Note {
 	id, text := it.ID, it.Text
@@ -409,7 +412,7 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 		n.Text = fmt.Sprintf(`%s #%d "%s": %s is closed: reopen it (dev boss %s --background), its start list asks it to start #%d`,
 			boss, id, text, boss, strings.TrimPrefix(boss, "boss-"), id)
 	case todo.OnBoss(it.On, it.Session):
-		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself and tick it when done (dev todo done %d), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
+		n.Text = fmt.Sprintf(marked+`it is your own parked item: do it yourself (dev todo doing %d takes the start), or start a worker on it and link it with dev todo add --replaces %d --on <worker>`,
 			id, text, id, id)
 	case it.Session != nil && it.Status == todo.StatusGone:
 		n.Text = fmt.Sprintf(marked+`its worker %s is gone: start a fresh one on it and link it with dev todo add --replaces %d --on <worker>`,
@@ -420,6 +423,25 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 	default:
 		n.Text = fmt.Sprintf(marked+`start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
 			`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
+	}
+	return n
+}
+
+// UserDoing is the note telling a boss the user is on its item id, text, themselves, doing what (stop: no longer);
+// with closed, the list of that closed boss, sent to the Manager. A newer one for that item replaces it while queued.
+func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note {
+	n := Note{Kind: UserOn, Key: fmt.Sprintf("doing %s %d", boss, id), Text: fmt.Sprintf(`#%d "%s"`, id, text)}
+	if closed {
+		n.Text = boss + " " + n.Text
+	}
+	switch {
+	case stop:
+		n.Text += ": no longer on it"
+	case doing != "":
+		n.Text += ": " + doing
+	}
+	if closed {
+		n.Text += " (" + boss + " is closed)"
 	}
 	return n
 }

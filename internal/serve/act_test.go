@@ -29,6 +29,13 @@ func actHandler(calls *[]call, err error) http.Handler {
 			*calls = append(*calls, call{boss, id, text, "start"})
 			return err
 		},
+		Doing: func(boss string, id int, text, doing string, stop bool) error {
+			if stop {
+				doing = "stop"
+			}
+			*calls = append(*calls, call{boss, id, text, "doing " + doing})
+			return err
+		},
 		Guard: noGuard,
 		Pair:  http.NotFoundHandler(),
 	})
@@ -62,7 +69,13 @@ func TestActOK(t *testing.T) {
 	if w := post(h, "/v1/start", `{"boss":"boss-a","id":3,"text":"Write the notes"}`, true); w.Code != http.StatusOK {
 		t.Errorf("start = %d %s", w.Code, w.Body)
 	}
-	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}, {"boss-a", 3, "Write the notes", "start"}}
+	for _, body := range []string{`{"boss":"boss-a","id":4,"text":"Send the cert","doing":"mailing ops"}`, `{"boss":"boss-a","id":4,"text":"Send the cert","stop":true}`} {
+		if w := post(h, "/v1/doing", body, true); w.Code != http.StatusOK {
+			t.Errorf("doing %s = %d %s", body, w.Code, w.Body)
+		}
+	}
+	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}, {"boss-a", 3, "Write the notes", "start"},
+		{"boss-a", 4, "Send the cert", "doing mailing ops"}, {"boss-a", 4, "Send the cert", "doing stop"}}
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls = %+v, want %+v", calls, want)
 	}
@@ -80,6 +93,10 @@ func TestActRefused(t *testing.T) {
 		{"no header, start", "/v1/start", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
 		{"desktop boss, start", "/v1/start", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
 		{"no text, start", "/v1/start", `{"boss":"b","id":1}`, true, http.StatusBadRequest},
+		{"no header, doing", "/v1/doing", `{"boss":"b","id":1,"text":"T","doing":"x"}`, false, http.StatusForbidden},
+		{"no text, doing", "/v1/doing", `{"boss":"b","id":1,"doing":"x"}`, true, http.StatusBadRequest},
+		{"doing and stop", "/v1/doing", `{"boss":"b","id":1,"text":"T","doing":"x","stop":true}`, true, http.StatusBadRequest},
+		{"desktop boss, doing", "/v1/doing", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
 		{"no JSON", "/v1/answer", `option=A`, true, http.StatusBadRequest},
 		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, true, http.StatusBadRequest},
 		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, true, http.StatusBadRequest},
@@ -112,6 +129,11 @@ func TestActErrors(t *testing.T) {
 	w = post(actHandler(&calls, again), "/v1/start", `{"boss":"b","id":1,"text":"T"}`, true)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already sent to boss-a") {
 		t.Errorf("start refused = %d %s", w.Code, w.Body)
+	}
+	other := Refused{Code: http.StatusConflict, Err: errors.New(`item 1 is on fix-login, not the user's`)}
+	w = post(actHandler(&calls, other), "/v1/doing", `{"boss":"b","id":1,"text":"T","doing":"x"}`, true)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "not the user's") {
+		t.Errorf("doing refused = %d %s", w.Code, w.Body)
 	}
 	logged := captureLog(t)
 	w = post(actHandler(&calls, errors.New("boom")), "/v1/done", `{"boss":"b","id":1,"text":"T"}`, true)

@@ -122,7 +122,7 @@ func TestTodoStart(t *testing.T) {
 	// The stub took one paste: the boss gets these at its Stop
 	reason := inboxAtStop(t, s, pane)
 	for _, want := range []string{
-		`- you were asked to start #3 "Park the idea": while it still reads so and is marked started on your list, it is your own parked item: do it yourself and tick it when done (dev todo done 3), or start a worker on it and link it with dev todo add --replaces 3 --on <worker>`,
+		`- you were asked to start #3 "Park the idea": while it still reads so and is marked started on your list, it is your own parked item: do it yourself (dev todo doing 3 takes the start), or start a worker on it and link it with dev todo add --replaces 3 --on <worker>`,
 		`- you were asked to start #4 "Fix the login": while it still reads so and is marked started on your list, its worker w-old is gone: start a fresh one on it and link it with dev todo add --replaces 4 --on <worker>`,
 	} {
 		if !strings.Contains(reason, want) {

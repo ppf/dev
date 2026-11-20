@@ -87,7 +87,7 @@ func TestOnBossLinesAndChecks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := read(t, s, t0).lines(0, t0); got != "\n1. parked (yours to do, --on boss)\n2. doing (yours to do, --on boss)" {
+	if got := read(t, s, t0).lines(0, t0); got != "\n1. parked (yours to do, --on boss)\n2. doing (yours to do, --on boss) (you are on it: on it)" {
 		t.Errorf("lines = %q", got)
 	}
 	later := t0.Add(3 * 24 * time.Hour)

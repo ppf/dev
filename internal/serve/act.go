@@ -34,6 +34,14 @@ type doneReq struct {
 	Text string `json:"text"`
 }
 
+type doingReq struct {
+	Boss  string `json:"boss"`
+	ID    int    `json:"id"`
+	Text  string `json:"text"`
+	Doing string `json:"doing"`
+	Stop  bool   `json:"stop"`
+}
+
 // fromPage refuses a state-changing call without the page's X-Dev-Page: 1 header, which a cross-site form can't send.
 func fromPage(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +79,21 @@ func (cfg Config) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	act(w, cfg.Start(req.Boss, req.ID, req.Text))
+}
+
+func (cfg Config) doing(w http.ResponseWriter, r *http.Request) {
+	var req doingReq
+	if !decode(w, r, &req, req.check) {
+		return
+	}
+	act(w, cfg.Doing(req.Boss, req.ID, req.Text, req.Doing, req.Stop))
+}
+
+func (req *doingReq) check() string {
+	if req.Stop && strings.TrimSpace(req.Doing) != "" {
+		return "send what you do now or stop, not both"
+	}
+	return item(req.Boss, req.ID, req.Text)
 }
 
 func (req *answerReq) check() string {

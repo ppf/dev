@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,31 @@ func TestStartShapes(t *testing.T) {
 	if _, _, err := s.Start(sh, "c", "boss-x", late); err != nil {
 		t.Errorf("a late start in Review: %v", err)
 	}
+	// A start ends doing: handed to a session, the user is no longer on it
+	id, err := s.Add(Item{Text: "d"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		p := &f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
+		p.Started, p.Doing = &Started{At: now.Add(-StartLate).Unix(), To: "boss-x"}, &Doing{Text: "on it", At: now.Unix()}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if it, _, err := s.Start(placed(t, s, live, id, now), "d", "boss-x", now); err != nil || it.Doing != nil || it.Started == nil {
+		t.Errorf("a late start of an item marked doing = %+v, %v; want started, doing ended", it, err)
+	}
+	// The boss on its started parked item takes the start
+	if id, err = s.Add(Item{Text: "e", On: Boss}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Start(placed(t, s, live, id, now), "e", "boss-x", now); err != nil {
+		t.Fatal(err)
+	}
+	if it, err := s.SetDoing(id, "", false, &Doing{Text: "writing it"}, now); err != nil || it.Started != nil {
+		t.Errorf("the boss on its started parked item = %+v, %v; want the start ended", it.Started, err)
+	}
 }
 
 // A boss's start list words a started item by whose it is: the user's, its own parked one, a gone worker's, one on a
@@ -141,7 +167,7 @@ func TestStartLines(t *testing.T) {
 	got := l.StartReminder(false, "1m ago", nil, now)
 	for _, want := range []string{
 		"\n1. mine (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)",
-		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself and tick it when done, or start a worker on it and link it with --replaces <n> --on <worker>)",
+		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself, dev todo doing <n> takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)",
 		"\n3. lost (on gone, session gone) (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)",
 		"\n4. runs (on busy) (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)",
 	} {

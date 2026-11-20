@@ -523,7 +523,7 @@ func TestStarted(t *testing.T) {
 		want   string
 	}{
 		{todo.Shown{ID: 4, Text: "a"}, false, `#4 "a": while it still reads so and is marked started on your list, start a worker on it and link it with dev todo add --replaces 4 --on <worker>; if it is the user's own to do, say so on the list (dev todo add --replaces 4 --on me "<text, why>")`},
-		{todo.Shown{ID: 4, Text: "a", On: todo.Boss}, false, `#4 "a": while it still reads so and is marked started on your list, it is your own parked item: do it yourself and tick it when done (dev todo done 4), or start a worker on it and link it with dev todo add --replaces 4 --on <worker>`},
+		{todo.Shown{ID: 4, Text: "a", On: todo.Boss}, false, `#4 "a": while it still reads so and is marked started on your list, it is your own parked item: do it yourself (dev todo doing 4 takes the start), or start a worker on it and link it with dev todo add --replaces 4 --on <worker>`},
 		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone, Status: todo.StatusGone}, false, `#4 "a": while it still reads so and is marked started on your list, its worker fix-login is gone: start a fresh one on it and link it with dev todo add --replaces 4 --on <worker>`},
 		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, false, `#4 "a": while it still reads so and is marked started on your list, it is on fix-login: see what it does, or start a fresh worker on it and link it with dev todo add --replaces 4 --on <worker>`},
 		{todo.Shown{ID: 4, Text: "a", On: "fix-login", Session: gone}, true, `boss-x #4 "a": boss-x is closed: reopen it (dev boss x --background), its start list asks it to start #4`},
@@ -707,5 +707,57 @@ func TestFromHookTurnEndAsks(t *testing.T) {
 				t.Errorf("Options = %q, want %q", opts, tt.options)
 			}
 		})
+	}
+}
+
+// The user's doing note names the item, what they do, or that they stopped, the closed boss for the manager's; a newer
+// one for the same item replaces the one still queued, others queue beside it, and a full inbox keeps it.
+func TestAddUserDoing(t *testing.T) {
+	for _, tt := range []struct {
+		note Note
+		want string
+	}{
+		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, false), `the user is on #4 "Send the cert": mailing ops`},
+		{UserDoing("boss-a", 4, "Send the cert", "", false, false), `the user is on #4 "Send the cert"`},
+		{UserDoing("boss-a", 4, "Send the cert", "", true, false), `the user is on #4 "Send the cert": no longer on it`},
+		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, true), `the user is on boss-a #4 "Send the cert": mailing ops (boss-a is closed)`},
+	} {
+		if got := tt.note.String(); got != tt.want {
+			t.Errorf("note = %q, want %q", got, tt.want)
+		}
+	}
+	b := testBox(t)
+	for _, n := range []Note{
+		UserDoing("boss-a", 4, "a", "first", false, false),
+		UserDoing("boss-a", 5, "b", "other item", false, false),
+		UserDoing("boss-a", 4, "a", "second", false, false),
+		UserDoing("boss-b", 4, "a", "closed one", false, true),
+	} {
+		if added, err := b.Add(n, time.Time{}); !added || err != nil {
+			t.Fatalf("Add = %v, %v", added, err)
+		}
+	}
+	for i := range maxNotes + 3 {
+		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
+	}
+	bt, _ := b.Take()
+	if len(bt.Notes) != maxNotes || bt.Notes[0].Text != `#4 "a": second` || bt.Notes[1].Text != `#5 "b": other item` || bt.Notes[2].Text != `boss-b #4 "a": closed one (boss-b is closed)` {
+		t.Errorf("got %d notes, first %+v, %+v, %+v; want #4's second line in its place, #5 and boss-b's #4 beside it, all kept", len(bt.Notes), bt.Notes[0], bt.Notes[1], bt.Notes[2])
+	}
+}
+
+// A batch put back after a failed send drops its doing note when a newer one for that item was queued meanwhile.
+func TestRestoreKeepsNewerDoing(t *testing.T) {
+	b := testBox(t)
+	_, _ = b.Add(UserDoing("boss-a", 4, "a", "first", false, false), time.Time{})
+	_, _ = b.Add(Answer(1, "q?", "Yes"), time.Time{})
+	bt, _ := b.Take()
+	_, _ = b.Add(UserDoing("boss-a", 4, "a", "", true, false), time.Time{})
+	if err := b.Restore(bt); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.Take()
+	if len(got.Notes) != 2 || got.Notes[0].Kind != Answered || got.Notes[1].Text != `#4 "a": no longer on it` {
+		t.Errorf("after restore: %+v, want the answer, then only the stop", got.Notes)
 	}
 }
