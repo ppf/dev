@@ -12,7 +12,8 @@
 //   - Exec(Ready, args) error: re-checks the kill switch, that Exe is still the file checked, and the
 //     canary, then syscall.Exec(exe, args) with DEV_RELOADED_TO=<version> (set, not appended). It
 //     returns only on failure: the caller keeps running the old version and says so; it must never exit
-//     to reload. ErrNotNow means "call Watch again".
+//     to reload. Watch's channel is closed by then: after any Exec error, call Watch again to keep
+//     watching (ErrNotNow: refused without trying).
 //   - Kill switch: tmux global option @dev_reload off (read on every check and in Exec), or the
 //     env DEV_NO_RELOAD=1. A missing tmux server isn't "off"; any other tmux error is.
 //   - Canary (Options.Canary with Options.Tmux, panes only; ignored without Tmux): any pane may get
@@ -21,7 +22,7 @@
 //     others' Exec returns ErrNotNow. Watching again, they get Ready only once @dev_reload_ok names the
 //     version, which the canary's new process sets when its Watch (Canary on) has run 30 s, dropping
 //     its claim (a later rollback gets a canary again). A canary whose exec fails drops its claim.
-//     One that dies later holds every other pane on the old version (warned once): unset
+//     One that dies later holds every other pane on the old version (warned after 60 s): unset
 //     @dev_reload_canary_<version> or set @dev_reload_ok to move on.
 //   - DEV_RELOAD_DEVEL=1 (tests, manual swap runs) lifts the release-tag rule, so two local builds swap.
 //
@@ -59,6 +60,8 @@ const (
 	pollEvery   = 10 * time.Second
 	settleAfter = 2 * time.Second
 	canaryOKAt  = 30 * time.Second
+	// canaryOverdue is the polls held by another pane's canary before it is warned: twice canaryOKAt
+	canaryOverdue = int(2 * canaryOKAt / pollEvery)
 )
 
 // checkTimeout bounds `<exe> --version` (a var for tests).
@@ -100,7 +103,8 @@ type watcher struct {
 
 	seen    os.FileInfo // the file as last decided on; nil to decide again
 	target  string      // the version decided on; "" while none
-	waiting string      // the version whose canary wait was warned about
+	waitFor string      // the version held by another pane's canary
+	waited  int         // polls held for waitFor
 
 	mu     sync.Mutex // warned: markOK and the watch loop warn at once
 	warned string     // the last warning
@@ -146,10 +150,8 @@ func (w *watcher) watch(ctx context.Context) <-chan Ready {
 	return out
 }
 
-// markOK tells the other panes this canary's version runs: after canaryOKAt alive, @dev_reload_ok=Own,
-// then drops the claim (so a later rollback to Own gets a canary again); retried each poll on error.
-// Without the claim there is nothing to confirm: a later Watch in the same process never moves the
-// ok mark back from a newer version.
+// markOK sets @dev_reload_ok=Own after canaryOKAt, then drops the claim so a rollback gets a canary again;
+// retried each poll. No claim: no-op, so a later Watch never moves the ok mark back from a newer version.
 func (w *watcher) markOK(ctx context.Context) {
 	for d := canaryOKAt; w.sleep(ctx, d); d = pollEvery {
 		claim, err := w.option(canaryOption(w.o.Own))
@@ -192,7 +194,8 @@ func (w *watcher) step(ctx context.Context) (Ready, bool) {
 	if w.target == "" || !w.mayGo(w.target) {
 		return Ready{}, false
 	}
-	if !w.sleep(ctx, w.stagger(w.o.Stagger)) || w.isOff() || ctx.Err() != nil {
+	// Checked again after the stagger: another pane may have claimed the canary meanwhile
+	if !w.sleep(ctx, w.stagger(w.o.Stagger)) || w.isOff() || ctx.Err() != nil || !w.mayGo(w.target) {
 		return Ready{}, false
 	}
 	return Ready{Version: w.target, w: w}, true
@@ -252,11 +255,16 @@ func (w *watcher) mayGo(v string) bool {
 		w.warn(err)
 		return false
 	}
-	if claim != "" && w.waiting != v {
-		w.waiting = v
+	if claim == "" {
+		return true
+	}
+	if w.waitFor != v {
+		w.waitFor, w.waited = v, 0
+	}
+	if w.waited++; w.waited == canaryOverdue {
 		w.warn(fmt.Errorf("selfreload: waiting for the canary of %s (%s set, %s not yet)", v, canaryOption(v), optOK))
 	}
-	return claim == ""
+	return false
 }
 
 // isOff is the kill switch for Watch: off warns its error and counts as on.

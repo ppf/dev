@@ -410,10 +410,16 @@ func TestCanary(t *testing.T) {
 		if a.opts[canaryOption(newV)] != newV {
 			t.Fatalf("claim not set: %v", a.opts)
 		}
+		for range canaryOverdue - 1 {
+			b.wantNone(t)
+		}
+		if len(b.warns) != 0 {
+			t.Fatalf("warns %v while the canary is on time", b.warns)
+		}
 		b.wantNone(t)
 		b.wantNone(t)
 		if len(b.warns) != 1 || !strings.Contains(b.warns[0].Error(), "waiting for the canary") {
-			t.Fatalf("warns %v, want one canary wait", b.warns)
+			t.Fatalf("warns %v, want one overdue canary wait", b.warns)
 		}
 		a.opts[optOK] = newV
 		rb, ok := b.step(t)
@@ -553,6 +559,18 @@ func TestCanary(t *testing.T) {
 		if _, set := r.opts[optOK]; set {
 			t.Fatal("ok mark set by a pane that isn't the canary")
 		}
+	})
+	t.Run("claimed during the stagger: no Ready", func(t *testing.T) {
+		a := newRig(t).withTmux(true)
+		b := a.clone(t)
+		ra, _ := a.step(t)
+		b.w.stagger = func(d time.Duration) time.Duration {
+			if err := Exec(ra, []string{"dev"}); err != nil {
+				t.Fatal(err)
+			}
+			return d
+		}
+		b.wantNone(t)
 	})
 	t.Run("tmux error holds the pane", func(t *testing.T) {
 		r := newRig(t).withTmux(true)
