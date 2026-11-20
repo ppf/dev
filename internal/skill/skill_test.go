@@ -189,3 +189,11 @@ func TestTodoOwnerRule(t *testing.T) {
 		}
 	}
 }
+
+func TestTodoNoteRule(t *testing.T) {
+	for name, text := range byName {
+		if strings.Contains(text, "dev todo") && !strings.Contains(text, "dev todo note decided|said|risk") {
+			t.Errorf("%s/SKILL.md: dev todo rule without dev todo note", name)
+		}
+	}
+}
