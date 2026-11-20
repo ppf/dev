@@ -582,6 +582,10 @@ func TestClickItemView(t *testing.T) {
 		if m := next.(Model); m.item == nil || len(f.answered) != 0 {
 			t.Errorf("❌ %d high: a double click's second press answered %v", h, f.answered)
 		}
+		// A quick click beside it still closes it
+		if next, _ := m.mouse(tea.MouseMsg{X: 1, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}, clock.Add(100*time.Millisecond)); next.(Model).item != nil {
+			t.Errorf("❌ %d high: a quick click beside the view left it open", h)
+		}
 		// A refusal's line makes the view taller: the click still hits
 		m = keys(t, m, "3")
 		if !strings.Contains(plain(m), "#1 has 2 options") {

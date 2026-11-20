@@ -173,7 +173,7 @@ func (s showModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
 			return s, nil
 		}
-		s.m, cmd = s.m.Click(ms.Y, s.w, s.h, time.Now())
+		s.m, cmd = s.m.Click(ms.X, ms.Y, s.w, s.h, time.Now())
 	} else {
 		s.m, cmd = s.m.Update(msg)
 	}

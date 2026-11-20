@@ -342,12 +342,12 @@ cut:
 	return out, append(append([]int{-1}, at[cut:]...), -1)
 }
 
-// Click runs a left click at row y of the box drawn w×h: on an option or action it does what that line's key does
-// (as j/k to it then ⏎), elsewhere nothing; while the own-words field is open, one on another line of the list leaves
+// Click runs a left click at x, y of the box drawn w×h: on an option or action it does what that line's key does
+// (as j/k to it then ⏎), elsewhere (the border too) nothing; while the own-words field is open, one on another line of the list leaves
 // the field (its text kept) and runs that line. None while an action is under way.
-func (m Model) Click(y, w, h int, now time.Time) (Model, tea.Cmd) {
+func (m Model) Click(x, y, w, h int, now time.Time) (Model, tea.Cmd) {
 	_, at := m.render(w, h, now)
-	if y < 0 || y >= len(at) || at[y] < 0 || m.busy != "" {
+	if x < 1 || x >= min(w, Width)-1 || y < 0 || y >= len(at) || at[y] < 0 || m.busy != "" {
 		return m, nil
 	}
 	if m.typing {

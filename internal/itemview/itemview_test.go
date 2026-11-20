@@ -276,7 +276,7 @@ func row(t *testing.T, m Model, w, h int, s string) int {
 
 // click clicks row y of the box w×h, running the action's command too.
 func click(m Model, y, w, h int) Model {
-	m, cmd := m.Click(y, w, h, now)
+	m, cmd := m.Click(2, y, w, h, now)
 	if cmd != nil {
 		m, _ = m.Update(cmd())
 	}
@@ -290,6 +290,11 @@ func TestClick(t *testing.T) {
 	m := New(ask, r.actions(), false)
 	if m := click(m, row(t, m, Width, 40, "Wait"), Width, 40); !m.Done || !strings.HasSuffix(m.Result, "Wait | after the test") {
 		t.Errorf("click on Wait: done %v result %q", m.Done, m.Result)
+	}
+	for _, x := range []int{0, Width - 1} {
+		if m, cmd := m.Click(x, row(t, m, Width, 40, "Wait"), Width, 40, now); cmd != nil || m.Done {
+			t.Errorf("click on the border at %d beside Wait acted", x)
+		}
 	}
 	for _, s := range []string{"Merge #221 now?", "status", "esc close", "╭─", "╰"} {
 		if m := click(m, row(t, m, Width, 40, s), Width, 40); m.Done || m.sel != 0 || len(r.calls) != 1 {
@@ -319,11 +324,11 @@ func TestClick(t *testing.T) {
 	// Actions: Tick, then a click while it's under way does nothing
 	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply", Status: sidebar.StatusYours}}
 	p := New(plain, r.actions(), false)
-	busy, cmd := p.Click(row(t, p, 60, 40, "Tick"), 60, 40, now)
+	busy, cmd := p.Click(2, row(t, p, 60, 40, "Tick"), 60, 40, now)
 	if cmd == nil || busy.busy != "ticking" {
 		t.Fatalf("click on Tick: busy %q", busy.busy)
 	}
-	if again, cmd2 := busy.Click(row(t, busy, 60, 40, "Start"), 60, 40, now); cmd2 != nil || again.sel != busy.sel {
+	if again, cmd2 := busy.Click(2, row(t, busy, 60, 40, "Start"), 60, 40, now); cmd2 != nil || again.sel != busy.sel {
 		t.Error("a click ran while an action was under way")
 	}
 }

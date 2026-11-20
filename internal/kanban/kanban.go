@@ -30,7 +30,7 @@ const (
 	cardH = 4
 	// refresh is how often the board reads the lists again
 	refresh = 5 * time.Second
-	// doubleClick is how long after a click opened an item the view takes no clicks
+	// doubleClick is how long after a click opened an item the view takes no clicks on it
 	doubleClick = 500 * time.Millisecond
 )
 
@@ -282,15 +282,18 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 	left := ms.Action == tea.MouseActionPress && ms.Button == tea.MouseButtonLeft
 	wheel := ms.Button == tea.MouseButtonWheelUp || ms.Button == tea.MouseButtonWheelDown
 	if m.item != nil {
-		// A double click's second press would land on the view the first opened
-		if !left || now.Sub(m.clicked) < doubleClick {
+		if !left {
 			return m, nil
 		}
 		x, y, bw, rows := m.box(now)
 		if ms.X < x || ms.X >= x+bw || ms.Y < y || ms.Y >= y+len(rows) {
 			return m.updateItem(tea.KeyMsg{Type: tea.KeyEsc})
 		}
-		v, cmd := m.item.Click(ms.Y-y, bw, m.h, now)
+		// A double click's second press would land on the view the first opened
+		if now.Sub(m.clicked) < doubleClick {
+			return m, nil
+		}
+		v, cmd := m.item.Click(ms.X-x, ms.Y-y, bw, m.h, now)
 		return m.settle(v, cmd)
 	}
 	if !left && !wheel {

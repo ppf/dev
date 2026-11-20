@@ -31,12 +31,12 @@ func TestShowClick(t *testing.T) {
 	if y < 0 {
 		t.Fatalf("❌ no Wait line:\n%s", ansi.Strip(s.View()))
 	}
-	for _, ms := range []tea.MouseMsg{{Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}, {Y: y, Button: tea.MouseButtonRight, Action: tea.MouseActionPress}} {
+	for _, ms := range []tea.MouseMsg{{X: 5, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}, {X: 5, Y: y, Button: tea.MouseButtonRight, Action: tea.MouseActionPress}} {
 		if _, cmd := s.Update(ms); cmd != nil {
 			t.Errorf("❌ %v acted", ms)
 		}
 	}
-	s, cmd := s.Update(tea.MouseMsg{Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	s, cmd := s.Update(tea.MouseMsg{X: 5, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if cmd == nil {
 		t.Fatal("❌ left press on Wait ran nothing")
 	}
