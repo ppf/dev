@@ -723,3 +723,19 @@ func TestAddUserDoing(t *testing.T) {
 		t.Errorf("got %d notes, first %+v, %+v, %+v; want #4's second line in its place, #5 and boss-b's #4 beside it, all kept", len(bt.Notes), bt.Notes[0], bt.Notes[1], bt.Notes[2])
 	}
 }
+
+// A batch put back after a failed send drops its doing note when a newer one for that item was queued meanwhile.
+func TestRestoreKeepsNewerDoing(t *testing.T) {
+	b := testBox(t)
+	_, _ = b.Add(UserDoing("boss-a", 4, "a", "first", false, false), time.Time{})
+	_, _ = b.Add(Answer(1, "q?", "Yes"), time.Time{})
+	bt, _ := b.Take()
+	_, _ = b.Add(UserDoing("boss-a", 4, "a", "", true, false), time.Time{})
+	if err := b.Restore(bt); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.Take()
+	if len(got.Notes) != 2 || got.Notes[0].Kind != Answered || got.Notes[1].Text != `#4 "a": no longer, it is back in to do` {
+		t.Errorf("after restore: %+v, want the answer, then only the stop", got.Notes)
+	}
+}

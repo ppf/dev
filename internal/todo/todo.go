@@ -640,8 +640,12 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		}
 		if it.PartOf == 0 || it.PartOf == old.PartOf || it.PartOf == partner(f.Items, id) {
 			it.PartOf = old.PartOf
-		} else if err := f.checkPartOf(id, it.PartOf); err != nil {
-			return err
+		} else {
+			// A new other half: the link stored on its old one goes; a refusal below writes nothing
+			f.unlink(id)
+			if err := f.checkPartOf(id, it.PartOf); err != nil {
+				return err
+			}
 		}
 		if len(it.Options) > 0 && it.Text != old.Text {
 			if err := checkQuestion(it.Text); err != nil {

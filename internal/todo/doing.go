@@ -85,6 +85,15 @@ func (f *file) unlinkGone() {
 	}
 }
 
+// unlink clears the links other items store to id.
+func (f *file) unlink(id int) {
+	for i, it := range f.Items {
+		if it.PartOf == id {
+			f.Items[i].PartOf = 0
+		}
+	}
+}
+
 // partner is the id of the item linked to id from its side (--part-of id), an open one before a ticked one; 0 for none.
 func partner(items []Item, id int) int {
 	found := 0

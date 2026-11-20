@@ -22,8 +22,9 @@ type Placement struct {
 // place is its placement on o's list, the first that holds (Status's order, with the column's own branches):
 //   - ticked: done, whose it was;
 //   - started (dev todo start), whoever's: in progress, the list's boss's; a late start needs the user;
-//   - its boss closed: review when its PR moved (needing the user when theirs), else waiting when on a person the
-//     closed boss no longer follows up, else to do, the user's or the closed boss's (on it or a session);
+//   - its boss closed: review when its PR moved (needing the user when theirs), else in progress when the user is on
+//     their own (Doing), else waiting when on a person the closed boss no longer follows up, else to do, the user's or
+//     the closed boss's (on it or a session);
 //   - the user's own: an ask to do, needing the user; in progress while Doing; review when its PR moved, needing the
 //     user; else to do;
 //   - the boss's own (OnBoss): review when its PR moved, in progress while Doing, else to do;
@@ -62,6 +63,8 @@ func (o Owner) place(it Shown) Placement {
 		switch {
 		case moved:
 			return at(sidebar.ColumnReview, own)
+		case own && it.Doing != nil:
+			return at(sidebar.ColumnProgress, false)
 		case p.WaitingFor != "":
 			return at(sidebar.ColumnWaiting, false)
 		}

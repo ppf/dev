@@ -318,3 +318,33 @@ func TestDoingStartAskTicked(t *testing.T) {
 		t.Errorf("replaced into an ask: doing %+v, want none", f.Items[1].Doing)
 	}
 }
+
+// The user's own item on a closed boss's list is in progress while they are on it, its old word still boss closed.
+func TestDoingClosedBoss(t *testing.T) {
+	l := List{Items: []Shown{{ID: 1, Text: "a", Doing: &Doing{Text: "x"}}, {ID: 2, Text: "b"}}}
+	l.SetStatus(Owner{Name: "boss-x", Closed: true})
+	if a, b := l.Items[0], l.Items[1]; a.Column != sidebar.ColumnProgress || a.Status != StatusBossClosed || b.Column != sidebar.ColumnTodo {
+		t.Errorf("closed: %s %s / %s, want progress, boss closed / todo", a.Column, a.Status, b.Column)
+	}
+}
+
+// A new --part-of from the half that holds no stored link moves the link, as from the other half.
+func TestPartOfRetarget(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b", PartOf: 1}, {Text: "c"}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Replace(1, Item{PartOf: 3}, now); err != nil {
+		t.Fatalf("retarget from 1: %v", err)
+	}
+	got := map[int]int{}
+	for _, it := range read(t, s, now).Items {
+		got[it.ID] = it.PartOf
+	}
+	if got[1] != 3 || got[3] != 1 || got[2] != 0 {
+		t.Errorf("part_of = %v, want 1⇄3, 2 unlinked", got)
+	}
+}

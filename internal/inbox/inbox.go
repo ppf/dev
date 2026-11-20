@@ -615,7 +615,11 @@ func (b Box) Restore(bt Batch) error {
 }
 
 func (s *state) restore(bt Batch) {
-	s.Notes = append(slices.Clone(bt.Notes), s.Notes...)
+	// A doing note queued since is newer than the one restored
+	back := slices.DeleteFunc(slices.Clone(bt.Notes), func(n Note) bool {
+		return n.Kind == UserOn && slices.ContainsFunc(s.Notes, func(q Note) bool { return q.Kind == UserOn && q.Key == n.Key })
+	})
+	s.Notes = append(back, s.Notes...)
 	s.Dropped += bt.Dropped
 	s.PasteNext = s.PasteNext || bt.lost
 }
