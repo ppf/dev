@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"mime"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	cookieAge   = 400 * 24 * time.Hour // browsers' cap
 	maxDevice   = 40
 	codeFile    = "pair.json"
+	addrFile    = "addr.json"
 	sessionFile = "sessions.json"
 )
 
@@ -82,6 +84,46 @@ func NewCode(dir string, now time.Time) (string, error) {
 		return "", err
 	}
 	return code[:4] + " " + code[4:], nil
+}
+
+// RecordAddr writes the address the running dev serve listens on to dir, for dev serve pair; the func removes it
+// unless another dev serve has recorded its own since.
+func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := writeFile(dir, addrFile, ap.String()); err != nil {
+		return nil, err
+	}
+	return func() {
+		var cur string
+		if readFile(dir, addrFile, &cur) == nil && cur == ap.String() {
+			_ = os.Remove(filepath.Join(dir, addrFile))
+		}
+	}, nil
+}
+
+// ServedAddr is the address the running dev serve recorded in dir; an error when none runs (no record, or nothing answers /v1/health there).
+func ServedAddr(dir string) (netip.AddrPort, error) {
+	var s string
+	if err := readFile(dir, addrFile, &s); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return netip.AddrPort{}, errors.New("dev serve is not running: start it first (a dev serve started before this version must be restarted)")
+		}
+		return netip.AddrPort{}, err
+	}
+	ap, err := netip.ParseAddrPort(s)
+	if err != nil {
+		return ap, fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
+	}
+	resp, err := (&http.Client{Timeout: time.Second}).Get("http://" + s + "/v1/health")
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ap, fmt.Errorf("dev serve is not running: it does not answer on %s", s)
+	}
+	return ap, nil
 }
 
 // Unpair drops the session of device, or every session when device is "", and returns the devices dropped.
