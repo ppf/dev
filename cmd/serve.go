@@ -39,7 +39,7 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Serve the board to the phone page over HTTP",
 		Long: fmt.Sprintf(`Serve every dev boss's to do list, as dev todo --all --json has it, to a page on the phone: GET /v1/health,
-GET /v1/board, GET /v1/events (the board changed: an event stream), POST /v1/pair, and POST /v1/answer and /v1/done, which answer and tick as dev todo answer --question and done --text do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
+GET /v1/board, GET /v1/events (the board changed: an event stream), POST /v1/pair, and POST /v1/answer, /v1/done, /v1/start and /v1/doing, which answer, tick, start and mark in progress as dev todo answer --question, done --text, start and doing do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
 address, port %d; --addr takes a loopback, tailnet or private LAN ip:port, never 0.0.0.0, :: or a public
 address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind, loopback too: dev serve pair.`, serve.DefaultPort),
 		Args: cobra.NoArgs,
@@ -231,6 +231,7 @@ func serveConfig(stderr io.Writer, dir string) serve.Config {
 		Answer:      pageAnswer,
 		Done:        pageDone(stderr),
 		Start:       pageStart(stderr),
+		Doing:       pageDoing(stderr),
 		Guard:       auth.Session,
 		Pair:        http.HandlerFunc(auth.Pair),
 		Page:        web.Handler(),

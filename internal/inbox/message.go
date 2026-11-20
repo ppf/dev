@@ -410,6 +410,25 @@ func Started(boss string, id int, text string, closed bool) Note {
 	return n
 }
 
+// UserDoing is the note telling a boss the user is on its item id, text, themselves, doing what (stop: no longer);
+// with closed, the list of that closed boss, sent to the Manager. A newer one for that item replaces it while queued.
+func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note {
+	n := Note{Kind: UserOn, Key: fmt.Sprintf("doing %s %d", boss, id), Text: fmt.Sprintf(`#%d "%s"`, id, text)}
+	if closed {
+		n.Text = boss + " " + n.Text
+	}
+	switch {
+	case stop:
+		n.Text += ": no longer, it is back in to do"
+	case doing != "":
+		n.Text += ": " + doing
+	}
+	if closed {
+		n.Text += " (" + boss + " is closed)"
+	}
+	return n
+}
+
 // Socket is the socket path of the tmux server c reaches.
 func Socket(c *tmux.Client) (string, error) {
 	out, err := c.Run("display-message", "-p", "#{socket_path}")

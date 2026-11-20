@@ -536,6 +536,9 @@ func (s Store) Read(now time.Time) (List, error) {
 	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
 	l.Finished = shownFinished(finished(append(done, f.dropped...), now), s.boss)
 	for _, it := range f.Items {
+		if it.PartOf == 0 {
+			it.PartOf = partner(f.Items, it.ID)
+		}
 		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
@@ -585,6 +588,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 		if len(f.Items) == 0 {
 			f.Next = 1
 		}
+		if err := f.checkPartOf(0, it.PartOf); err != nil {
+			return err
+		}
 		it.ID, it.Done, it.Added = max(f.Next, 1), 0, now.Unix()
 		if it.On == Me {
 			it.On, it.Session = "", nil
@@ -602,8 +608,9 @@ func sameSession(a, b *Session) bool {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user, On Boss without a Session to its boss. An id
-// that isn't one is an error, as is an ask's new text over MaxQuestion.
+// DoneOn, Context and PartOf it doesn't set, Quiet once set, and Doing while On stays; On Me gives it back to the user, On Boss
+// without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a PartOf
+// checkPartOf refuses.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
@@ -626,6 +633,15 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		}
 		if it.Context == nil {
 			it.Context = old.Context
+		}
+		// Its doer goes on unless another one takes it
+		if it.On == old.On && sameSession(it.Session, old.Session) {
+			it.Doing = old.Doing
+		}
+		if it.PartOf == 0 || it.PartOf == old.PartOf {
+			it.PartOf = old.PartOf
+		} else if err := f.checkPartOf(id, it.PartOf); err != nil {
+			return err
 		}
 		if len(it.Options) > 0 && it.Text != old.Text {
 			if err := checkQuestion(it.Text); err != nil {
@@ -651,7 +667,7 @@ func (s Store) Done(ids []int, now time.Time) error {
 			if i < 0 {
 				return fmt.Errorf("no open item %d", id)
 			}
-			f.Items[i].Done = now.Unix()
+			f.Items[i].tick(now.Unix())
 		}
 		return nil
 	})
@@ -672,7 +688,7 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 		case len(f.Items[i].Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
 		}
-		f.Items[i].Done = now.Unix()
+		f.Items[i].tick(now.Unix())
 		return nil
 	}))
 }
@@ -860,7 +876,8 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 				return fmt.Errorf("the user picked %q, not %q", picked, answer)
 			}
 		}
-		p.Done, p.Answer = now.Unix(), answer
+		p.tick(now.Unix())
+		p.Answer = answer
 		it = *p
 		return nil
 	}))
@@ -882,7 +899,7 @@ func (s Store) Clear(now time.Time) error {
 func (f *file) prune(now time.Time) {
 	for i, it := range f.Items {
 		if it.Done == 0 && it.Until != 0 && now.Unix() >= it.Until {
-			f.Items[i].Done = it.Until
+			f.Items[i].tick(it.Until)
 			f.tell(Ticked{ID: it.ID, Text: it.Text})
 		}
 	}
@@ -894,6 +911,7 @@ func (f *file) prune(now time.Time) {
 		}
 		return gone
 	})
+	f.unlinkGone()
 	f.Notes = slices.DeleteFunc(f.Notes, func(n Note) bool { return n.Until != 0 && now.Unix() >= n.Until })
 	f.settleNotes()
 }
@@ -1042,6 +1060,9 @@ func (l List) lines(limit int, now time.Time) string {
 		}
 		if it.DoneOn != "" {
 			b.WriteString(" (done on " + it.DoneOn + ")")
+		}
+		if it.Doing != nil {
+			b.WriteString(doingLine(it))
 		}
 		if it.Started != nil {
 			b.WriteString(" (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)")

@@ -687,3 +687,38 @@ func TestFromHookTurnEndAsks(t *testing.T) {
 		})
 	}
 }
+
+// The user's doing note names the item, what they do, or that they stopped, the closed boss for the manager's; a newer
+// one for the same item replaces the one still queued, others queue beside it, and a full inbox keeps it.
+func TestAddUserDoing(t *testing.T) {
+	for _, tt := range []struct {
+		note Note
+		want string
+	}{
+		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, false), `the user is on #4 "Send the cert": mailing ops`},
+		{UserDoing("boss-a", 4, "Send the cert", "", false, false), `the user is on #4 "Send the cert"`},
+		{UserDoing("boss-a", 4, "Send the cert", "", true, false), `the user is on #4 "Send the cert": no longer, it is back in to do`},
+		{UserDoing("boss-a", 4, "Send the cert", "mailing ops", false, true), `the user is on boss-a #4 "Send the cert": mailing ops (boss-a is closed)`},
+	} {
+		if got := tt.note.String(); got != tt.want {
+			t.Errorf("note = %q, want %q", got, tt.want)
+		}
+	}
+	b := testBox(t)
+	for _, n := range []Note{
+		UserDoing("boss-a", 4, "a", "first", false, false),
+		UserDoing("boss-a", 5, "b", "other item", false, false),
+		UserDoing("boss-a", 4, "a", "second", false, false),
+	} {
+		if added, err := b.Add(n, time.Time{}); !added || err != nil {
+			t.Fatalf("Add = %v, %v", added, err)
+		}
+	}
+	for i := range maxNotes + 3 {
+		_, _ = b.Add(note("w", strings.Repeat("x", i+1)), time.Time{})
+	}
+	bt, _ := b.Take()
+	if len(bt.Notes) != maxNotes || bt.Notes[0].Text != `#4 "a": second` || bt.Notes[1].Text != `#5 "b": other item` {
+		t.Errorf("got %d notes, first %+v, %+v; want #4's second line in its place, #5 beside it, both kept", len(bt.Notes), bt.Notes[0], bt.Notes[1])
+	}
+}

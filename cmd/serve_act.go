@@ -63,6 +63,18 @@ func pageStart(stderr io.Writer) func(boss string, id int, text string) error {
 	}
 }
 
+// pageDoing is dev todo doing --question from the phone page.
+func pageDoing(stderr io.Writer) func(boss string, id int, text, doing string, stop bool) error {
+	return func(boss string, id int, text, doing string, stop bool) error {
+		c := tmux.New()
+		_, err := userDoing(c, boss, id, text, doing, stop, stderr)
+		if err != nil && !errors.As(err, new(todo.Refused)) && !running(c, boss) {
+			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
+		}
+		return refused(err)
+	}
+}
+
 // running is whether boss's session is on c's server.
 func running(c *tmux.Client, boss string) bool {
 	_, err := c.Run("has-session", "-t", tmux.SessionTarget(boss))
