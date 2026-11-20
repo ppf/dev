@@ -92,6 +92,11 @@ func TestRoutes(t *testing.T) {
 	if w := get(t, h, "/x", ""); w.Code != 404 {
 		t.Errorf("/x: %d, want 404", w.Code)
 	}
+	for _, p := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/pair"} {
+		if w := get(t, h, p, ""); w.Code != 405 || w.Header().Get("Allow") != "POST" {
+			t.Errorf("GET %s: %d Allow %q, want 405 POST", p, w.Code, w.Header().Get("Allow"))
+		}
+	}
 }
 
 // A board that can't be read is a 500 with a sentence, not the reason (it may name a list).

@@ -47,6 +47,12 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
 	mux.Handle("POST /v1/start", cfg.Guard(fromPage(http.HandlerFunc(cfg.start))))
 	mux.Handle("POST /v1/pair", cfg.Pair)
+	for _, route := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/pair"} { // else "GET /" answers the page's 404
+		mux.HandleFunc("GET "+route, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Allow", http.MethodPost)
+			writeError(w, http.StatusMethodNotAllowed, "POST only")
+		})
+	}
 	if cfg.Page != nil {
 		mux.Handle("GET /", cfg.Page) // the page's own files sit beside it
 	} else {
