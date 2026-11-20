@@ -250,6 +250,12 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	if got := run(t, "", "todo", "--json"); !strings.Contains(got, `"items": []`) {
 		t.Errorf("--json read: %q, want an empty list (no take-over)", got)
 	}
+	if _, _, err := execute(t, "", "todo", "add", "x", "--waiting-for", "me"); err == nil {
+		t.Error("add --waiting-for me: not refused")
+	}
+	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
+		t.Errorf("local_old after a refused add: %q, want it not taken over", got)
+	}
 	if got := run(t, "", "todo"); got != "1\t☐\told open item\n" {
 		t.Errorf("first dev todo: %q, want local_old's list", got)
 	}
@@ -304,6 +310,19 @@ func TestTodoOnBossWaitingFor(t *testing.T) {
 	} {
 		if _, _, err := execute(t, "", append([]string{"todo", "add", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)
+		}
+	}
+	// A worker --on would read otherwise, or that shares its name, is named by its id
+	org := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Claude", "claude-code-sessions", "acct", "org")
+	for id, title := range map[string]string{"local_b": "Boss", "local_t1": "Twin", "local_t2": "Twin"} {
+		record := `{"sessionId":"` + id + `","title":"` + title + `","createdAt":` + jsonInt(time.Now().UnixMilli()) + `,"spawnedFrom":{"sessionId":"local_boss"}}`
+		if err := os.WriteFile(filepath.Join(org, id+".json"), []byte(record), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for person, want := range map[string]string{"local_b": "--on local_b", "local_t1": "--on local_t1"} {
+		if _, _, err := execute(t, "", "todo", "add", "x", "--waiting-for", person); err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("--waiting-for %s: %v, want it to end %q", person, err, want)
 		}
 	}
 	if got := run(t, "", "todo", "add", "--replaces", "2", "--on", "boss"); got != "replaced 2 · to do 2\n" {

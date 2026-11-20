@@ -131,9 +131,9 @@ func waitingFor(person, own, boss string, stderr io.Writer) (string, error) {
 		return "", err
 	}
 	if w, ok := todo.Match(person, ws); ok {
-		// Its name, unless another worker shares it
+		// Its name, unless another worker shares it or --on reads it as me or boss
 		on := w.Name
-		if m, ok := todo.Match(w.Name, ws); !ok || m.ID != w.ID {
+		if m, ok := todo.Match(w.Name, ws); !ok || m.ID != w.ID || strings.EqualFold(on, todo.Me) || strings.EqualFold(on, todo.Boss) {
 			on = w.ID
 		}
 		return "", fmt.Errorf("--waiting-for %s: a session you started: --on %s", person, on)
@@ -152,14 +152,13 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			it.On, person = todo.Clean(it.On), todo.Clean(person)
 			waiting := cmd.Flags().Changed("waiting-for")
-			// Refused before the store: a desktop boss's first call takes over an earlier list
 			switch {
 			case it.On != "" && waiting:
 				return errors.New("--on or --waiting-for, not both")
 			case waiting && person == "":
 				return errors.New("--waiting-for: no person")
 			}
-			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+			s, err := todoStore(*boss, false, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -212,6 +211,10 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 					return err
 				}
 				it.Until = t.Unix()
+			}
+			// Only once all is checked: a desktop boss's first call takes over an earlier list
+			if s, err = todoStore(*boss, true, stderr); err != nil {
+				return err
 			}
 			if cmd.Flags().Changed("replaces") {
 				if err := s.Replace(replaces, it, now); err != nil {

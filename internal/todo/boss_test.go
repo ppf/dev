@@ -39,6 +39,13 @@ func TestOnBoss(t *testing.T) {
 	if got, want := nudges(t, s, now), []string{`#5 "linked" (on boss): its session is gone`}; !slices.Equal(got, want) {
 		t.Errorf("nudges = %q, want %q", got, want)
 	}
+	// Another worker by the same name: its going is told again
+	if err := s.Replace(5, Item{On: Boss, Session: &Session{ID: "local_w2", Name: Boss}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := nudges(t, s, now), []string{`#5 "linked" (on boss): its session is gone`}; !slices.Equal(got, want) {
+		t.Errorf("nudges after another worker = %q, want %q", got, want)
+	}
 	if err := s.DoneText(1, "parked", now); err == nil || !strings.Contains(err.Error(), "is on boss, not the user's to tick") {
 		t.Errorf("tick: %v", err)
 	}
