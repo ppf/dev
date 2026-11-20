@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,6 +112,38 @@ func TestTodoStatus(t *testing.T) {
 			if got[w.Text] != w {
 				t.Errorf("❌ %s %q = %+v, want %+v", name, w.Text, got[w.Text], w)
 			}
+		}
+	}
+
+	// Each is placed in its column, whose: the boss follows up a person and a gone worker's item
+	var placed []struct {
+		Items []struct {
+			Text     string `json:"text"`
+			Column   string `json:"column"`
+			Assignee struct {
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			} `json:"assignee"`
+			NeedsYou   bool   `json:"needs_you"`
+			WaitingFor string `json:"waiting_for"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &placed); err != nil {
+		t.Fatal(err)
+	}
+	columns := map[string]string{"mine": "todo you  false", "the boss's own": "todo you  false", "asks": "progress worker w-ask true",
+		"works": "progress worker w-busy false", "failed": "progress worker w-failed true", "gone": "todo boss boss-a false",
+		"a person's": "waiting boss boss-a false Ola"}
+	if len(placed[0].Items) != len(columns) {
+		t.Errorf("❌ placed %d items, want %d", len(placed[0].Items), len(columns))
+	}
+	for _, it := range placed[0].Items {
+		got := fmt.Sprintf("%s %s %s %v", it.Column, it.Assignee.Kind, it.Assignee.Name, it.NeedsYou)
+		if it.WaitingFor != "" {
+			got += " " + it.WaitingFor
+		}
+		if got != columns[it.Text] {
+			t.Errorf("❌ %q placed %q, want %q", it.Text, got, columns[it.Text])
 		}
 	}
 
