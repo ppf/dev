@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -109,6 +110,15 @@ func newTodoSetCmd(boss *string) *cobra.Command {
 	}
 }
 
+// longItem is the text length over which dev todo add warns.
+const longItem = 120
+
+func warnLong(stderr io.Writer, text string) {
+	if n := utf8.RuneCountInString(text); n > longItem {
+		fmt.Fprintf(stderr, "⚠ long item (%d characters): keep a short title, put details in --context\n", n)
+	}
+}
+
 func newTodoAddCmd(boss *string) *cobra.Command {
 	var it todo.Item
 	var until string
@@ -162,6 +172,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				if err := s.Replace(replaces, it, now); err != nil {
 					return err
 				}
+				warnLong(cmd.ErrOrStderr(), it.Text)
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
@@ -172,6 +183,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnLong(cmd.ErrOrStderr(), it.Text)
 			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
