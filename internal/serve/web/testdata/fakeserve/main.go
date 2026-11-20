@@ -239,8 +239,7 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// start marks a To do card that is no ask, or one whose start wasn't picked up, started, sent to its boss: In
-// progress, the boss's (not the manager's own list); only the user's own reads starting, the others keep their word, as dev todo start leaves them.
+// start marks a To do card that is no ask, or one whose start wasn't picked up, started, as dev todo start leaves it.
 func (s *server) start(req request, it map[string]any) (int, string) {
 	options, _ := it["options"].([]any)
 	switch {

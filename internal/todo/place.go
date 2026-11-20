@@ -135,9 +135,9 @@ func (o Owner) boss() Assignee {
 
 // where is its column's title and whom it names, as a refusal says it: "in Waiting (Marek)".
 func (p Placement) where() string {
-	who := cmp.Or(p.WaitingFor, p.Assignee.Name)
-	if who == "" {
-		return "in " + sidebar.ColumnTitles[p.Column]
+	in := "in " + sidebar.ColumnTitles[p.Column]
+	if who := cmp.Or(p.WaitingFor, p.Assignee.Name); who != "" {
+		return in + " (" + who + ")"
 	}
-	return "in " + sidebar.ColumnTitles[p.Column] + " (" + who + ")"
+	return in
 }
