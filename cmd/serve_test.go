@@ -228,12 +228,17 @@ type reloadRun struct {
 
 func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRun {
 	t.Helper()
+	return startReloadRunLists(t, fire, execErr, func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil })
+}
+
+func startReloadRunLists(t *testing.T, fire <-chan struct{}, execErr error, lists func() (json.RawMessage, error)) *reloadRun {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := serve.Config{Version: "v1.0.0", Now: time.Now, Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler(),
-		Lists: func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil }}
+		Lists: lists}
 	r := &reloadRun{addr: ln.Addr().String(), watches: make(chan struct{}, 10), execs: make(chan []string, 10),
 		errc: make(chan error, 1), stderr: &syncBuffer{}}
 	watch, exec := watchReload, execReload
@@ -257,7 +262,7 @@ func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRu
 		if rd.Version != "v2.0.0" {
 			t.Errorf("exec into %q", rd.Version)
 		}
-		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid()) {
+		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid())+" 0" {
 			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
 		}
 		if _, err := http.Get("http://" + r.addr + "/v1/health"); err == nil {
@@ -270,7 +275,7 @@ func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRu
 	r.stop = stop
 	t.Cleanup(stop)
 	o := selfreload.Options{Own: "v1.0.0"}
-	go func() { r.errc <- serveReloading(ctx, ln, cfg, o, []string{"dev", "serve"}, io.Discard, r.stderr) }()
+	go func() { r.errc <- serveReloading(ctx, ln, cfg, o, []string{"dev", "serve"}, 0, r.stderr, r.stderr) }()
 	return r
 }
 
@@ -383,6 +388,71 @@ func TestServeReloadNotNow(t *testing.T) {
 		t.Errorf("stderr %q: ErrNotNow is no failure", r.stderr.String())
 	}
 	r.end(t)
+}
+
+// A stop during a reload's shutdown (a request holding it open) wins: no exec, serveReloading returns.
+func TestServeReloadStopWins(t *testing.T) {
+	fire, held, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	r := startReloadRunLists(t, fire, errors.New("exec called"), func() (json.RawMessage, error) {
+		close(held)
+		<-release
+		return json.RawMessage(`[]`), nil
+	})
+	<-r.watches
+	go func() {
+		if res, err := http.Get("http://" + r.addr + "/v1/board"); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	<-held
+	close(fire)
+	time.Sleep(100 * time.Millisecond) // the shutdown waits on the held request
+	r.stop()
+	close(release)
+	select {
+	case err := <-r.errc:
+		if err != nil {
+			t.Errorf("serveReloading: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveReloading still running")
+	}
+	select {
+	case <-r.execs:
+		t.Error("exec'd after a stop")
+	default:
+	}
+}
+
+func TestReexecArgs(t *testing.T) {
+	base := []string{"dev", "serve"}
+	for _, tc := range []struct {
+		addr string
+		want []string
+	}{
+		{"", []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
+		{"100.1.2.3:0", []string{"dev", "serve", "--addr", "100.1.2.3:8417"}},
+		{"100.1.2.3:8417", base},
+	} {
+		if got := reexecArgs(base, tc.addr, "100.1.2.3:8417"); !slices.Equal(got, tc.want) {
+			t.Errorf("--addr %q: %q, want %q", tc.addr, got, tc.want)
+		}
+	}
+	if !slices.Equal(base, []string{"dev", "serve"}) {
+		t.Errorf("args changed: %q", base)
+	}
+}
+
+func TestReexecMarker(t *testing.T) {
+	for _, tc := range []struct {
+		v        string
+		reloaded bool
+		caff     int
+	}{{"42 77", true, 77}, {"42 0", true, 0}, {"41 77", false, 0}, {"", false, 0}} {
+		if r, c := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff {
+			t.Errorf("%q: %v %d, want %v %d", tc.v, r, c, tc.reloaded, tc.caff)
+		}
+	}
 }
 
 // A warning repeated within a minute is written once, again after it.
