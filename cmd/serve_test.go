@@ -238,15 +238,11 @@ func startReloadRun(t *testing.T, fire <-chan struct{}, execErr error) *reloadRu
 		errc: make(chan error, 1), stderr: &syncBuffer{}}
 	watch, exec := watchReload, execReload
 	t.Cleanup(func() { watchReload, execReload = watch, exec })
-	first := true
 	watchReload = func(ctx context.Context, _ selfreload.Options) <-chan selfreload.Ready {
 		r.watches <- struct{}{}
 		ch := make(chan selfreload.Ready, 1)
 		gives := fire
-		if !first {
-			gives = nil
-		}
-		first = false
+		fire = nil // only the first watch gives one
 		go func() {
 			defer close(ch)
 			select {
