@@ -64,7 +64,7 @@ func (f *file) checkPartOf(id, partner int) error {
 		if it.ID == id {
 			continue
 		}
-		if it.ID == partner && it.PartOf != 0 || it.PartOf == partner || id != 0 && it.PartOf == id {
+		if (it.ID == partner && it.PartOf != 0) || it.PartOf == partner || (id != 0 && it.PartOf == id) {
 			return fmt.Errorf("--part-of %d: already linked to another item", partner)
 		}
 	}

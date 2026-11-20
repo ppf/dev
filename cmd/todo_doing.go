@@ -107,9 +107,6 @@ func doingOf(text string, stop bool) *todo.Doing {
 
 // bossDoing is dev todo doing <n> [text] in a boss's own session: its own item, no one told.
 func bossDoing(cmd *cobra.Command, boss string, args []string, stop bool) error {
-	if len(args) > 2 {
-		return errors.New("one doing line: quote it")
-	}
 	id, _ := strconv.Atoi(args[0])
 	text, err := doingText(args[1:], stop)
 	if err != nil {
