@@ -8,8 +8,8 @@ import (
 )
 
 // An item on Boss without a session is the boss's own, kept by a Replace that doesn't name another, given back by
-// --on me: open, not on others, not the user's to tick or answer; started, its boss is asked to. One linked to a worker named boss stays
-// that worker's.
+// --on me: open, not on others, not the user's to tick or answer; started, its boss is asked to. One linked to a
+// worker named boss stays that worker's.
 func TestOnBoss(t *testing.T) {
 	s := store(t)
 	s.boss = "boss-a"

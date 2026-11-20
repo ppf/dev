@@ -678,8 +678,8 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 }
 
 // Start marks open item sh.ID started, its note going to to, only while it still reads text, is on whom sh is, and no
-// start under StartLate old waits. sh is the item as read and placed (SetStatus) without its start: only a To do card
-// starts, not an ask. A late start is sent again: prev is the start it replaced.
+// start under StartLate old waits. sh is the item as read and placed (SetStatus): only a To do card starts, not an
+// ask. A late start is sent again, wherever it sits: prev is the start it replaced.
 func (s Store) Start(sh Shown, text, to string, now time.Time) (it Item, prev *Started, err error) {
 	id := sh.ID
 	err = s.update(now, refusing(func(f *file) error {
@@ -693,11 +693,11 @@ func (s Store) Start(sh Shown, text, to string, now time.Time) (it Item, prev *S
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, text)
 		case p.Started != nil && now.Sub(time.Unix(p.Started.At, 0)) < StartLate:
 			return fmt.Errorf("item %d: already sent to %s %s ago", id, p.Started.To, wait.Span(now.Sub(time.Unix(p.Started.At, 0))))
-		case p.On != sh.On || !sameSession(p.Session, sh.Session):
+		case p.On != sh.On || !sameSession(p.Session, sh.Session) || (p.Doing != nil) != (sh.Doing != nil):
 			return fmt.Errorf("item %d changed while it was read: look at the list again", id)
 		case len(p.Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
-		case sh.Column != sidebar.ColumnTodo:
+		case p.Started == nil && sh.Column != sidebar.ColumnTodo:
 			return fmt.Errorf("item %d is %s, not To do: only a To do card starts", id, sh.where())
 		}
 		prev, p.Started = p.Started, &Started{At: now.Unix(), To: to}

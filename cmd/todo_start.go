@@ -25,8 +25,8 @@ func newTodoStartCmd(boss *string) *cobra.Command {
 		Use:   "start <boss> <n> --question <text>",
 		Short: "Ask for To do item n on a dev boss's list to be started, as the user: its boss, or the manager for a closed boss",
 		Long: `Ask, as the user, for open item n on the list of dev boss session <boss> to be started, while it is a To do card
-(placed as dev todo --json places it) and no ask: the user's own, the boss's own parked one (--on boss), or one whose
-worker is gone. The boss's inbox gets "you were asked to start #<n> \"<text>\"", worded by whose it is, and it starts
+(placed as dev todo --json places it) and no ask: the user's own, the boss's own parked one (--on boss), one whose
+worker is gone, or a closed boss's one on a session. The boss's inbox gets "you were asked to start #<n> \"<text>\"", worded by whose it is, and it starts
 a worker on it and links it (dev todo add --replaces <n> --on <worker>), or does a parked one itself. A closed boss's
 item goes to the manager, which reopens that boss; refused when no manager takes it (none runs, or its inbox is off), as
 for a live boss with its inbox off. The item reads starting (the user's own; the others keep their word, In progress)
@@ -71,7 +71,7 @@ type notStarted struct{ error }
 func (e notStarted) Unwrap() error { return e.error }
 
 // startItem marks item id of boss name's list started while it reads text and sits in To do (placed as the boards
-// place it, from the live sessions) and sends its note to the boss, or the manager for a closed boss: the receiver's
+// place it, from the live sessions; a late start wherever it sits) and sends its note to the boss, or the manager for a closed boss: the receiver's
 // name. A note queued for a boss not resting says so on warn. The manager's own list isn't started.
 func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer) (string, error) {
 	if name == inbox.Manager {
@@ -82,7 +82,7 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 		return "", err
 	}
 	now := time.Now()
-	sh, err := unstarted(c, s, name, id, closed, now, warn)
+	sh, err := placed(c, s, name, id, closed, now, warn)
 	if err != nil {
 		return "", err
 	}
@@ -101,9 +101,9 @@ func startItem(c *tmux.Client, name string, id int, text string, warn io.Writer)
 	return to.Name, nil
 }
 
-// unstarted is open item id of s, boss name's list, placed as if not started: a late start goes again from where the
-// item sat; none: just its id. Sessions not read leave a linked item In progress (warn says why), so it doesn't start.
-func unstarted(c *tmux.Client, s todo.Store, name string, id int, closed bool, now time.Time, warn io.Writer) (todo.Shown, error) {
+// placed is open item id of s, boss name's list, placed as the boards place it; none: just its id. When the sessions
+// can't be read, an item linked to one isn't placed but refused, as its worker may run.
+func placed(c *tmux.Client, s todo.Store, name string, id int, closed bool, now time.Time, warn io.Writer) (todo.Shown, error) {
 	l, err := s.Read(now)
 	if err != nil {
 		return todo.Shown{}, err
@@ -114,8 +114,13 @@ func unstarted(c *tmux.Client, s todo.Store, name string, id int, closed bool, n
 		return todo.Shown{ID: id}, nil
 	}
 	l.Items = l.Items[i : i+1]
-	l.Items[0].Started, l.Items[0].StartLate = nil, false
-	setStatuses(c, []bossList{{Boss: name, Closed: closed, List: l}}, now, false, warn)
+	live, err := liveSessions(c, warn)
+	if err != nil && !closed && l.Items[0].Session != nil {
+		return todo.Shown{}, notStarted{fmt.Errorf("item %d: sessions not read, so whether %s runs isn't known: %w", id, l.Items[0].Session.Name, err)}
+	}
+	o := todo.OwnerOf(live, name, closed)
+	o.Unread = o.Unread || err != nil
+	l.SetStatus(o)
 	return l.Items[0], nil
 }
 

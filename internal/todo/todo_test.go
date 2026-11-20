@@ -945,7 +945,7 @@ func TestContext(t *testing.T) {
 	}
 }
 
-// placed is open item id of s placed on o's list as startItem places it, without its start; just its id when none.
+// placed is open item id of s placed on o's list as startItem places it; just its id when none.
 func placed(t *testing.T, s Store, o Owner, id int, now time.Time) Shown {
 	t.Helper()
 	l := read(t, s, now)
@@ -954,7 +954,6 @@ func placed(t *testing.T, s Store, o Owner, id int, now time.Time) Shown {
 		return Shown{ID: id}
 	}
 	l.Items = l.Items[i : i+1]
-	l.Items[0].Started, l.Items[0].StartLate = nil, false
 	l.SetStatus(o)
 	return l.Items[0]
 }

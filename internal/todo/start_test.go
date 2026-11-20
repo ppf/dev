@@ -11,7 +11,7 @@ import (
 
 // Any To do card starts, not an ask: the user's own, the boss's own parked one, a gone worker's, a closed boss's on a
 // session; started, it sits In progress (the list's boss's) under its old status word; a late start goes again from
-// where it sat. A card in another column, or one changed since it was read, doesn't.
+// wherever it sits now. A card in another column, or one changed since it was read, doesn't.
 func TestStartShapes(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	live := Owner{Name: "boss-x", Workers: []sidebar.Session{{Name: "busy", ID: "busy", Agent: "Claude", State: agent.Working}}}
@@ -68,7 +68,7 @@ func TestStartShapes(t *testing.T) {
 			if got.Status != tt.status || got.StatusOn != tt.on {
 				t.Errorf("old word = %q · %q, want %q · %q", got.Status, got.StatusOn, tt.status, tt.on)
 			}
-			// Late: sent again from where it sat
+			// Late: sent again, though it sits In progress
 			late := now.Add(StartLate)
 			if _, prev, err := s.Start(placed(t, s, tt.owner, 1, late), tt.it.Text, "manager", late); err != nil || prev == nil {
 				t.Errorf("late start: %v, prev %v", err, prev)
@@ -87,6 +87,32 @@ func TestStartShapes(t *testing.T) {
 	}
 	if _, _, err := s.Start(sh, "a", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
 		t.Errorf("start of a changed item: %v", err)
+	}
+	if _, err := s.Add(Item{Text: "b", On: Boss}, now); err != nil {
+		t.Fatal(err)
+	}
+	sh = placed(t, s, live, 2, now)
+	if err := s.update(now, func(f *file) error {
+		f.Items[len(f.Items)-1].Doing = &Doing{Text: "on it", At: now.Unix()}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Start(sh, "b", "boss-x", now); err == nil || !strings.Contains(err.Error(), "changed while it was read") {
+		t.Errorf("start of an item the boss took up meanwhile: %v", err)
+	}
+	// A late start whose PR moved since (in Review) is sent again, as before the board model
+	if _, err := s.Add(Item{Text: "c"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Start(placed(t, s, live, 3, now), "c", "boss-x", now); err != nil {
+		t.Fatal(err)
+	}
+	late := now.Add(StartLate)
+	sh = placed(t, s, live, 3, late)
+	sh.Column = sidebar.ColumnReview
+	if _, _, err := s.Start(sh, "c", "boss-x", late); err != nil {
+		t.Errorf("a late start in Review: %v", err)
 	}
 	if _, _, err := s.Start(placed(t, s, live, 9, now), "a", "boss-x", now); err == nil || !strings.Contains(err.Error(), "no open item 9") {
 		t.Errorf("start of no item: %v", err)

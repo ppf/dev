@@ -239,7 +239,7 @@ func (s *server) done(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// start marks a To do card that is no ask, or one whose start wasn't picked up, started, as dev todo start leaves it.
+// start marks a To do card that is no ask started, as dev todo start leaves it; a late start goes again wherever it sits.
 func (s *server) start(req request, it map[string]any) (int, string) {
 	options, _ := it["options"].([]any)
 	switch {
