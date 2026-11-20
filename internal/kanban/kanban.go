@@ -762,7 +762,7 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	}
 	foot := []string{owner(c)}
 	if it.Quiet {
-		foot = append(foot, "TEST")
+		foot = []string{"TEST", owner(c)}
 	}
 	if len(it.Options) > 0 {
 		foot = append(foot, strconv.Itoa(len(it.Options))+" options")
