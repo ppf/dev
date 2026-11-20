@@ -34,7 +34,7 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := strconv.Atoi(args[0]); err == nil {
 				if question != "" || fromBoard {
-					return errors.New("--question is the user's form: dev todo doing <boss> <n> --question <the item's text>")
+					return errors.New("--question and --from-board are the user's form: dev todo doing <boss> <n> --question <the item's text>")
 				}
 				return bossDoing(cmd, *boss, args, stop)
 			}
@@ -160,7 +160,7 @@ func userDoing(c *tmux.Client, name string, id int, question, text string, stop 
 	to, err := inbox.Recipient(c, recipient)
 	switch {
 	case err != nil && running(c, recipient) && !errors.Is(err, inbox.ErrInboxOff):
-		return "", notTold{fmt.Errorf("#%d marked, not sent to %s (tell it yourself): %w", id, recipient, err)}
+		return "", notTold{fmt.Errorf("#%d %s, not sent to %s (tell it yourself): %w", id, doingDone(stop), recipient, err)}
 	case err != nil:
 		fmt.Fprintf(warn, "⚠ dev todo: #%d marked, no one told: %v\n", id, err)
 		return "", nil
@@ -172,7 +172,7 @@ func userDoing(c *tmux.Client, name string, id int, question, text string, stop 
 	queued, err := to.Send(c, control.RealClock, inbox.UserDoing(name, id, it.Text, now, stop, closed))
 	switch {
 	case !queued:
-		return "", notTold{fmt.Errorf("#%d marked, not sent to %s (tell it yourself): %w", id, to.Name, err)}
+		return "", notTold{fmt.Errorf("#%d %s, not sent to %s (tell it yourself): %w", id, doingDone(stop), to.Name, err)}
 	case err != nil:
 		fmt.Fprintf(warn, "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, to.Name, err)
 	}

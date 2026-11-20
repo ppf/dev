@@ -348,3 +348,40 @@ func TestPartOfRetarget(t *testing.T) {
 		t.Errorf("part_of = %v, want 1⇄3, 2 unlinked", got)
 	}
 }
+
+// A link whose other half is ticked, stored on either side, gives way to a new one; restating it is refused; an ask
+// replaced keeps its doing.
+func TestPartOfTickedHalf(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b", PartOf: 1}, {Text: "q?", On: Boss, Options: []string{"x", "y"}, Doing: &Doing{Text: "on it"}}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Replace(1, Item{PartOf: 2}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{2}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Replace(1, Item{PartOf: 2}, now); err == nil || !strings.Contains(err.Error(), "no open item 2") {
+		t.Errorf("restate a link to a ticked half: %v", err)
+	}
+	if id, err := s.Add(Item{Text: "c", PartOf: 1}, now); err != nil || id != 4 {
+		t.Fatalf("link to 1, its old half ticked: %d, %v", id, err)
+	}
+	got := map[int]int{}
+	for _, it := range read(t, s, now).Items {
+		got[it.ID] = it.PartOf
+	}
+	if got[1] != 4 || got[4] != 1 || got[2] != 0 {
+		t.Errorf("part_of = %v, want 1⇄4, ticked 2 unlinked", got)
+	}
+	if err := s.Replace(3, Item{Context: []string{"more"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := s.read(); f.Items[2].Doing == nil {
+		t.Errorf("an ask replaced: doing dropped")
+	}
+}

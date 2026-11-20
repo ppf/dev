@@ -28,7 +28,7 @@ func TestTodoDoingRefused(t *testing.T) {
 		{"", []string{"todo", "doing", "boss-dev", "1", "on it", "--stop", "--question", "a"}, "--stop takes no doing line"},
 		{"1", []string{"todo", "doing", "1", "on", "it"}, "one doing line: quote it"},
 		{"1", []string{"todo", "doing", "1", "on it", "--stop"}, "--stop takes no doing line"},
-		{"", []string{"todo", "doing", "1", "--question", "a"}, "--question is the user's form"},
+		{"", []string{"todo", "doing", "1", "--question", "a"}, "--question and --from-board are the user's form"},
 	} {
 		t.Setenv("CLAUDECODE", tt.claude)
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {

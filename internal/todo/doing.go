@@ -61,12 +61,11 @@ func (f *file) checkPartOf(id, partner int) error {
 	if partner == id {
 		return fmt.Errorf("--part-of %d: an item isn't part of itself", partner)
 	}
-	if !slices.ContainsFunc(f.Items, func(it Item) bool { return it.ID == partner && it.Done == 0 }) {
+	if !f.open(partner) {
 		return fmt.Errorf("--part-of %d: no open item %d", partner, partner)
 	}
 	for _, it := range f.Items {
-		// A ticked half still shown is done: it links nothing
-		if it.ID == id || it.Done != 0 {
+		if it.ID == id {
 			continue
 		}
 		if (it.ID == partner && it.PartOf != 0) || it.PartOf == partner || (id != 0 && it.PartOf == id) {
@@ -83,6 +82,23 @@ func (f *file) unlinkGone() {
 			f.Items[i].PartOf = 0
 		}
 	}
+}
+
+// dropDoneLinks clears the links a ticked half still shown is in: it links nothing new.
+func (f *file) dropDoneLinks() {
+	done := func(id int) bool {
+		return slices.ContainsFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done != 0 })
+	}
+	for i, it := range f.Items {
+		if it.PartOf != 0 && (it.Done != 0 || done(it.PartOf)) {
+			f.Items[i].PartOf = 0
+		}
+	}
+}
+
+// open reports id an open item.
+func (f *file) open(id int) bool {
+	return slices.ContainsFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
 }
 
 // unlink clears the links other items store to id.
