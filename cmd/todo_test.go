@@ -616,3 +616,21 @@ func TestTodoQuiet(t *testing.T) {
 		t.Errorf("json = %+v, %v; want quiet, quiet, not", l, err)
 	}
 }
+
+// Over 120 characters add warns on stderr and still adds; at 120, or with --replaces alone, it stays quiet.
+func TestTodoAddLongHint(t *testing.T) {
+	todoEnv(t)
+	_, errOut, err := execute(t, "", "todo", "add", strings.Repeat("x", 121))
+	if err != nil || !strings.Contains(errOut, "long item (121 characters)") {
+		t.Errorf("121: err %v, stderr %q", err, errOut)
+	}
+	if _, errOut, err = execute(t, "", "todo", "add", strings.Repeat("é", 120)); err != nil || strings.Contains(errOut, "long item") {
+		t.Errorf("120: err %v, stderr %q", err, errOut)
+	}
+	if _, errOut, err = execute(t, "", "todo", "add", "--replaces", "1", "--on", "Marek"); err != nil || strings.Contains(errOut, "long item") {
+		t.Errorf("replaces alone: err %v, stderr %q", err, errOut)
+	}
+	if got := run(t, "", "todo", "--json"); strings.Count(got, `"text"`) != 2 {
+		t.Errorf("items not added: %s", got)
+	}
+}
