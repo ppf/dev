@@ -90,7 +90,7 @@ func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss)
 // canStart and canTick mirror the board's expanded row (herd's actions): a check item isn't started; a closed boss's
 // item starts only while the manager runs.
 func (m Model) canStart() bool {
-	return m.plain() && m.it.Status != sidebar.StatusCheck && (!m.it.Closed || m.managerRuns)
+	return m.plain() && m.it.Boss != sidebar.Manager && m.it.Status != sidebar.StatusCheck && (!m.it.Closed || m.managerRuns)
 }
 func (m Model) canTick() bool { return m.plain() }
 

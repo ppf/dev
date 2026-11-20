@@ -116,7 +116,7 @@ func TestBlockNarrow(t *testing.T) {
 
 // Many items keep the block in half the pane: each group shows as many rows as the others, "+N more" for the rest,
 // every group's title on screen; the selected row stays shown, expanded with its action words (no Go to boss on the
-// board's own list: its boss is here).
+// board's own list: its boss is here; this one is the manager's, so no Start either).
 func TestBlockBudget(t *testing.T) {
 	m := blockBoard(t)
 	for i := range 20 {
@@ -143,7 +143,7 @@ func TestBlockBudget(t *testing.T) {
 	}
 	block, _, _ = m.needBlock(gh)
 	all = strings.Join(plain(block), "\n")
-	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Start   Tick      s start · d tick · space open · esc back") {
+	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Tick      d tick · space open · esc back") {
 		t.Errorf("selected row not shown with its actions:\n%s", all)
 	}
 }
@@ -409,6 +409,14 @@ func TestBlockStart(t *testing.T) {
 	check.Status = sidebar.StatusCheck
 	if _, cmd := m.startNeed(check); cmd != nil {
 		t.Error("s started an item whose PR moved")
+	}
+	note := rows[i]
+	note.Boss = Manager
+	if acts, _ := m.actions(note); slices.ContainsFunc(acts, func(a action) bool { return a.key == "s" }) {
+		t.Errorf("manager's own note offers Start: %v", acts)
+	}
+	if _, cmd := m.startNeed(note); cmd != nil {
+		t.Error("s started the manager's own note")
 	}
 	closed := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
 	m.snap.all = slices.DeleteFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })

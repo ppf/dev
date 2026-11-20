@@ -94,7 +94,7 @@ const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.
 const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
 const onWorker = ({ list, it }) => !own(list, it) && (!!it.session || ON_WORKER.includes(it.status));
 const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
-const startable = (l, it) => !desktop(l) && own(l, it) && !it.options?.length && (['yours', 'boss closed'].includes(it.status) || !!it.start_late);
+const startable = (l, it) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (['yours', 'boss closed'].includes(it.status) || !!it.start_late);
 const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
 const receiver = l => l.closed ? 'the manager' : l.boss;
 

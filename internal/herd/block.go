@@ -575,7 +575,7 @@ func (m Model) actions(r needRow) (out []action, note string) {
 	}
 	switch r.Kind {
 	case sidebar.NeedPlain:
-		if r.Status != sidebar.StatusCheck {
+		if r.Status != sidebar.StatusCheck && r.Boss != Manager {
 			out = append(out, start)
 		}
 		out = append(out, tick)
