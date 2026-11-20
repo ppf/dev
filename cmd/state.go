@@ -173,7 +173,7 @@ func newStateCmd() *cobra.Command {
 }
 
 // desktopBossTodo is a desktop app boss's open to do list as hook output, on worker notes (so it ticks what they
-// closed) and on resume or /clear; "" otherwise.
+// closed), and on resume or /clear with its notes; "" otherwise.
 func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 	var e struct {
 		Name   string `json:"hook_event_name"`

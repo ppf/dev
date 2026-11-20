@@ -310,3 +310,49 @@ func TestStartContextTicked(t *testing.T) {
 		t.Errorf("again = %q, want the tick told once", out)
 	}
 }
+
+// Notes follow the open list on every start but a compaction, alone when nothing is open; a tick goes out once, the notes each time.
+func TestStartContextNotes(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s, err := todo.Desktop("local_boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	then := time.Unix(1700000000, 0)
+	none := func() ([]todo.Session, error) { return nil, nil }
+	if out, _ := StartContext(s, none, "startup", then); out != "" {
+		t.Errorf("no list, no notes = %q, want nothing", out)
+	}
+	if _, err := s.AddNote(todo.Note{Kind: todo.NoteDecided, Text: "CSV only", Why: "parser"}, then); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"startup", "clear", "resume"} {
+		out, err := StartContext(s, none, source, then.Add(8*24*time.Hour))
+		if err != nil || !strings.Contains(out, "Your notes (1 of 12, oldest 8d)") || !strings.Contains(out, "CSV only (why: parser) (8d, still true?)") || strings.Contains(out, "open to do list") {
+			t.Errorf("%s, notes only = %q, %v", source, out, err)
+		}
+	}
+	if _, err := s.Add(todo.Item{Text: "Ship"}, then); err != nil {
+		t.Fatal(err)
+	}
+	out, err := StartContext(s, none, "clear", then.Add(time.Hour))
+	list, notes := strings.Index(out, "Your open to do list"), strings.Index(out, "Your notes")
+	if err != nil || list < 0 || notes < list || strings.Contains(out, "still true?") {
+		t.Errorf("list and notes = %q, %v; want the list, then the notes, no 7d mark", out, err)
+	}
+	if out, _ := StartContext(s, none, "compact", then.Add(time.Hour)); out != "" {
+		t.Errorf("compact = %q, want nothing", out)
+	}
+	if _, err := s.Add(todo.Item{Text: "Sync", Until: then.Add(time.Hour).Unix()}, then); err != nil {
+		t.Fatal(err)
+	}
+	later := then.Add(2 * time.Hour)
+	out, err = StartContext(s, none, "clear", later)
+	tick, notes := strings.Index(out, "ticked by itself"), strings.Index(out, "Your notes")
+	if err != nil || tick < 0 || notes < tick {
+		t.Errorf("tick and notes = %q, %v; want the tick, then the notes", out, err)
+	}
+	if out, _ := StartContext(s, none, "clear", later); strings.Contains(out, "ticked by itself") || !strings.Contains(out, "Your notes") {
+		t.Errorf("again = %q, want the notes without the tick", out)
+	}
+}

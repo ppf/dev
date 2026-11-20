@@ -251,3 +251,24 @@ func TestNotesSurviveBossRestart(t *testing.T) {
 		t.Errorf("notes under the earlier key = %+v, %v: want them moved", n, err)
 	}
 }
+
+// A note unchanged for 7 days is marked to re-check, each note by its own age.
+func TestNotesTextStale(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	week := 7 * 24 * time.Hour
+	note := func(age time.Duration) Note {
+		return Note{ID: 1, Kind: NoteRisk, Text: "x", Added: now.Add(-age).Unix()}
+	}
+	if got := NotesText([]Note{note(week - time.Second)}, now); strings.Contains(got, "still true?") {
+		t.Errorf("6d23h = %q, want no mark", got)
+	}
+	if got := NotesText([]Note{note(week)}, now); !strings.Contains(got, "x (7d, still true?)\n") {
+		t.Errorf("7d = %q, want the mark", got)
+	}
+	done := note(8 * 24 * time.Hour)
+	done.Item, done.ItemDone = 4, true
+	got := NotesText([]Note{done, note(time.Hour)}, now)
+	if strings.Count(got, "still true?") != 1 || !strings.Contains(got, "oldest 8d") || !strings.Contains(got, "(item #4 done) (8d, still true?)\n") {
+		t.Errorf("mixed ages = %q, want only the 8d note marked, after its item flag", got)
+	}
+}
