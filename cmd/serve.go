@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -212,11 +213,13 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 		if err != nil {
 			return nil, err
 		}
-		lists, err := todoAll(c, stderr, now(), true)
+		lists, err := todoAll(c, stderr, now(), true, true)
 		if err != nil {
 			return nil, err
 		}
-		scrub := func(s string) string { return strings.ReplaceAll(s, filepath.Clean(home)+"/", "~/") }
+		// The home folder whole, not a sibling sharing its prefix (/Users/ann, not /Users/anna)
+		homeRe := regexp.MustCompile(regexp.QuoteMeta(filepath.Clean(home)) + `(/|$|[^\w.-])`)
+		scrub := func(s string) string { return homeRe.ReplaceAllString(s, "~$1") }
 		for i := range lists {
 			lists[i].Error = scrub(lists[i].Error)
 			for j := range lists[i].Items {

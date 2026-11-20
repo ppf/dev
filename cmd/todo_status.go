@@ -20,13 +20,15 @@ import (
 
 // setStatuses sets the statuses (todo.Owner.Status) of each list's items from the sessions live on c's server; when
 // those can't be read, the lists still print, an item on someone without a status, and stderr says why.
-func setStatuses(c *tmux.Client, lists []bossList, stderr io.Writer) {
+// With withNow, an item on a worker also gets what the worker does now (doing, a transcript read each): dev serve's
+// board only, as the sidebars poll this every 2 s.
+func setStatuses(c *tmux.Client, lists []bossList, now time.Time, withNow bool, stderr io.Writer) {
 	live, err := liveSessions(c, stderr)
 	for _, bl := range lists {
 		o := todo.OwnerOf(live, bl.Boss, bl.Closed)
 		o.Unread = o.Unread || err != nil
-		for i := range o.Workers {
-			o.Workers[i].Doing = doing(o.Workers[i], time.Now(), stderr)
+		if withNow {
+			o.Doing = func(s sidebar.Session) string { return doing(s, now, stderr) }
 		}
 		bl.SetStatus(o)
 	}
@@ -50,7 +52,7 @@ func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 		}
 		return
 	}
-	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, stderr)
+	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, time.Now(), false, stderr)
 }
 
 // desktopOwner is the desktop app boss's Owner: its workers on the desktop board (desktop.Board, without its question
@@ -113,15 +115,16 @@ func desktopSession(w desktop.Worker) sidebar.Session {
 	return s
 }
 
-// doing is what tmux worker s is doing now, as the boss board's card says it: working, its tool call's description
-// (else the tool); waiting, its planned wait, else what its reply's WAITING marker names; "" otherwise. A transcript
-// not written yet says nothing.
+// doing is what tmux worker s is doing now, as the boss board's card says it (herd's own section and statusText):
+// "" asking; its planned wait; working, its tool call's description, else the tool; else what its reply's newest
+// WAITING marker names. A transcript not written yet says nothing.
 func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
-	rank := s.Rank()
 	switch {
-	case rank == sidebar.RankWaiting && s.Wait.Held():
+	case s.Deciding, sidebar.NoteKind(s.Note) == sidebar.NoteAsks && s.State != agent.Working:
+		return ""
+	case s.Wait.Held():
 		return s.Wait.Text(now)
-	case rank != sidebar.RankWorking && rank != sidebar.RankWaiting, s.Transcript == "":
+	case s.Transcript == "":
 		return ""
 	}
 	t, err := desktop.ReadTail(s.Transcript)
@@ -132,8 +135,12 @@ func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
 		return ""
 	}
 	what := cmp.Or(t.ToolDescription, t.Tool)
-	if rank == sidebar.RankWaiting {
-		_, what, _ = desktop.Marker(t.Lines)
+	if s.State != agent.Working {
+		if st, marked, _ := desktop.Marker(t.Lines); st == desktop.StatusWaiting {
+			what = marked
+		} else {
+			what = ""
+		}
 	}
 	return strings.Join(strings.Fields(what), " ")
 }

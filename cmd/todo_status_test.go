@@ -119,8 +119,9 @@ func TestTodoDesktopStatus(t *testing.T) {
 	}
 }
 
-// A tmux worker's doing is its tool call working, its planned wait or WAITING marker waiting, nothing resting or
-// before its transcript is written; a desktop worker's is its board's status text.
+// A tmux worker's doing follows herd's sections: its tool call working, its planned wait, its newest WAITING marker
+// otherwise; nothing asking, resting without a marker or before its transcript is written. A desktop worker's is
+// its board's status text.
 func TestDoing(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, rows ...any) string {
@@ -152,9 +153,12 @@ func TestDoing(t *testing.T) {
 		want string
 	}{
 		{"working", sidebar.Session{State: agent.Working, Transcript: tool}, "Run the tests"},
-		{"waiting on a marker", sidebar.Session{Resume: true, Transcript: waits}, "CI on #12"},
+		{"rate-limited on a marker", sidebar.Session{Resume: true, Transcript: waits}, "CI on #12"},
+		{"resting on a marker", sidebar.Session{State: agent.Idle, Transcript: waits}, "CI on #12"},
 		{"planned wait", sidebar.Session{Wait: planned, Transcript: tool}, planned.Text(now)},
 		{"resting", sidebar.Session{State: agent.Idle, Transcript: tool}, ""},
+		{"asking", sidebar.Session{State: agent.Waiting, Deciding: true, Transcript: waits}, ""},
+		{"turn ended on a question", sidebar.Session{State: agent.Idle, Note: "asks: which one?", Transcript: waits}, ""},
 		{"no transcript yet", sidebar.Session{State: agent.Working, Transcript: filepath.Join(dir, "none.jsonl")}, ""},
 		{"no transcript option", sidebar.Session{State: agent.Working}, ""},
 	} {

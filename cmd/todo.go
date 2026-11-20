@@ -70,7 +70,7 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, and now: what its worker is doing now (its tool call, what it waits on), when known), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, and now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait)), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
@@ -608,7 +608,7 @@ type bossList struct {
 // A list it can't read is a row with its error, the others still printed.
 func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 	now := time.Now()
-	lists, err := todoAll(c, stderr, now, asJSON)
+	lists, err := todoAll(c, stderr, now, asJSON, false)
 	if err != nil {
 		return err
 	}
@@ -632,7 +632,7 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
 // board), else its gone marked.
-func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON bool) ([]bossList, error) {
+func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow bool) ([]bossList, error) {
 	all, err := todo.All(c, now, nil, true)
 	if err != nil {
 		return nil, err
@@ -653,7 +653,7 @@ func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON bool) ([]bo
 		lists = append(lists, bl)
 	}
 	if asJSON {
-		setStatuses(c, lists, stderr)
+		setStatuses(c, lists, now, withNow, stderr)
 	}
 	return lists, nil
 }

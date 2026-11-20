@@ -498,6 +498,7 @@ function facts(x) {
   const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', owner(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
   if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.now) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);

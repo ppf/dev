@@ -29,7 +29,7 @@ func TestBoardGolden(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	transcript := filepath.Join(home, "a-fix.jsonl")
-	call := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Bash","input":{"description":"Test ` + home + `/src/login.go"}}]}}`
+	call := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Bash","input":{"description":"Test ` + home + `/src/login.go in ` + home + `"}}]}}`
 	if err := os.WriteFile(transcript, []byte(call+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
