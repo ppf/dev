@@ -18,23 +18,17 @@ const (
 	keptMax = 50
 )
 
-// Finished is a ticked item that left its list (List.Finished): Assignee whose it was when ticked, DoneAt when, unix seconds.
+// Finished is a ticked item that left its list (List.Finished): Assignee whose it was when ticked, by its stored shape,
+// never running; DoneAt when, unix seconds.
 type Finished struct {
-	ID       int        `json:"id"`
-	Text     string     `json:"text"`
-	Link     string     `json:"link,omitempty"`
-	Answer   string     `json:"answer,omitempty"`
-	On       string     `json:"on,omitempty"`
-	Assignee FinishedBy `json:"assignee"`
-	DoneAt   int64      `json:"done_at"`
-	Quiet    bool       `json:"quiet,omitempty"`
-}
-
-// FinishedBy is whose a finished item was, by its stored on and session: Kind "you" (Own), "worker" (on a session,
-// Name its name) or "boss" (on a person: the list's boss followed it up, Name the boss, "boss" for a desktop app one's).
-type FinishedBy struct {
-	Kind string `json:"kind"`
-	Name string `json:"name,omitempty"`
+	ID       int      `json:"id"`
+	Text     string   `json:"text"`
+	Link     string   `json:"link,omitempty"`
+	Answer   string   `json:"answer,omitempty"`
+	On       string   `json:"on,omitempty"`
+	Assignee Assignee `json:"assignee"`
+	DoneAt   int64    `json:"done_at"`
+	Quiet    bool     `json:"quiet,omitempty"`
 }
 
 // donePath is the file of the list's finished items: beside the lists, not among them, as checksPath is.
@@ -113,19 +107,13 @@ func (f *file) keepTicked(now time.Time) {
 	}
 }
 
-// shownFinished is items as boards show them, on boss's list.
+// shownFinished is items as boards show them, on boss's list: each assignee as a live card's by its stored shape
+// (Owner.stored), read as unread so none is running.
 func shownFinished(items []Item, boss string) []Finished {
+	o := Owner{Name: boss, Unread: true}
 	out := make([]Finished, 0, len(items))
 	for _, it := range items {
-		var by FinishedBy
-		switch {
-		case Own(it.On, it.Session, boss):
-			by = FinishedBy{Kind: "you"}
-		case it.Session != nil:
-			by = FinishedBy{Kind: "worker", Name: it.Session.Name}
-		default:
-			by = FinishedBy{Kind: "boss", Name: cmp.Or(boss, "boss")}
-		}
+		by := o.stored(Shown{On: it.On, Session: it.Session}, Own(it.On, it.Session, boss)).Assignee
 		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet})
 	}
 	return out
