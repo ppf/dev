@@ -59,7 +59,7 @@ link, w goes to the worker it's on, g to its boss; esc closes. The boards' and t
 			if os.Getenv(showGuard) == "" {
 				return showPopup(c, client, m, name, id, it.Text)
 			}
-			p, err := tea.NewProgram(showModel{m: m}, tea.WithAltScreen()).Run()
+			p, err := tea.NewProgram(showModel{m: m}, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 			if err != nil {
 				return err
 			}
@@ -169,7 +169,14 @@ func (s showModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, nil
 	}
 	var cmd tea.Cmd
-	s.m, cmd = s.m.Update(msg)
+	if ms, ok := msg.(tea.MouseMsg); ok {
+		if ms.Action != tea.MouseActionPress || ms.Button != tea.MouseButtonLeft {
+			return s, nil
+		}
+		s.m, cmd = s.m.Click(ms.Y, s.w, s.h, time.Now())
+	} else {
+		s.m, cmd = s.m.Update(msg)
+	}
 	if s.m.Done {
 		return s, tea.Quit
 	}

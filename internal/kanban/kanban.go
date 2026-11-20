@@ -30,6 +30,8 @@ const (
 	cardH = 4
 	// refresh is how often the board reads the lists again
 	refresh = 5 * time.Second
+	// doubleClick is how long after a click opened an item the view takes no clicks
+	doubleClick = 500 * time.Millisecond
 )
 
 // List is a boss's list as dev todo --all --json gives it, statuses set; Error for one not read.
@@ -118,6 +120,7 @@ type Model struct {
 	top     int    // the selected column's first card shown
 	selKey  string // the selected card's key, kept across reads
 	item    *itemview.Model
+	clicked time.Time // when a click opened the item view
 	msg     string
 	w, h    int
 	Done    bool
@@ -181,6 +184,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Done = true
 			return m, tea.Quit
 		}
+	case tea.MouseMsg:
+		return m.mouse(msg, time.Now())
 	}
 	if m.item != nil {
 		return m.updateItem(msg)
@@ -208,6 +213,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // and says what went, or closes after a switch to a session.
 func (m Model) updateItem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	v, cmd := m.item.Update(msg)
+	return m.settle(v, cmd)
+}
+
+// settle takes the item view after a key or click: kept while open, else as updateItem says.
+func (m Model) settle(v itemview.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	if !v.Done {
 		m.item = &v
 		return m, cmd
@@ -262,6 +272,103 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 	m.selKey = ""
 	m.fix()
 	return m, nil
+}
+
+// mouse runs a click or the wheel. With the item view open a left click on it does what its line's key does, one
+// beside it closes it as esc does. Else a click on a card selects and opens it, on a column's head or a gap selects
+// the column, on "↑ n more" or "+n more" pages it, on a project shows that project; the wheel moves the selection
+// in the column under it (selecting that column first), the column scrolling with it.
+func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
+	left := ms.Action == tea.MouseActionPress && ms.Button == tea.MouseButtonLeft
+	wheel := ms.Button == tea.MouseButtonWheelUp || ms.Button == tea.MouseButtonWheelDown
+	if m.item != nil {
+		// A double click's second press would land on the view the first opened
+		if !left || now.Sub(m.clicked) < doubleClick {
+			return m, nil
+		}
+		x, y, bw, rows := m.box(now)
+		if ms.X < x || ms.X >= x+bw || ms.Y < y || ms.Y >= y+len(rows) {
+			return m.updateItem(tea.KeyMsg{Type: tea.KeyEsc})
+		}
+		v, cmd := m.item.Click(ms.Y-y, bw, m.h, now)
+		return m.settle(v, cmd)
+	}
+	if !left && !wheel {
+		return m, nil
+	}
+	// The board's text starts 2 in, under the top border
+	x, y := ms.X-2, ms.Y-1
+	if y == 0 && left {
+		cols, shown := layout(m.inner())
+		_, spans := m.filterLine(len(cols), shown, m.inner())
+		for _, sp := range spans {
+			if x >= sp.from && x < sp.to {
+				if sp.p < 0 {
+					return m.key("p")
+				}
+				m.msg, m.project, m.selKey = "", m.projects()[sp.p], ""
+				m.fix()
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+	r := y - 2
+	if r < 0 || r >= 2+m.cardRows() {
+		return m, nil
+	}
+	lc, _ := layout(m.inner())
+	cols := m.columns()
+	for _, sc := range m.shownCols() {
+		if x < sc.x || x >= sc.x+sc.w {
+			continue
+		}
+		sel := sc.i == m.col
+		top := 0
+		if sel {
+			top = m.top
+		}
+		if wheel {
+			card := 0
+			if sel {
+				card = m.card + 1
+				if ms.Button == tea.MouseButtonWheelUp {
+					card = m.card - 1
+				}
+			}
+			return m.pick(sc.i, card, top), nil
+		}
+		_, at := m.column(lc[sc.i], cols[sc.i], sel, sc.w, now)
+		hit := atColumn
+		if r < len(at) {
+			hit = at[r]
+		}
+		fit := m.fits(len(cols[sc.i]))
+		switch hit {
+		case atColumn:
+			card := m.card
+			if !sel {
+				card = 0
+			}
+			return m.pick(sc.i, card, top), nil
+		case atUp:
+			return m.pick(sc.i, top-1, max(0, top-fit)), nil
+		case atMore:
+			return m.pick(sc.i, top+fit, top+fit), nil
+		}
+		next, cmd := m.pick(sc.i, hit, top).key("enter")
+		b := next.(Model)
+		b.clicked = now
+		return b, cmd
+	}
+	return m, nil
+}
+
+// pick selects card of column col, top its first card shown where it can be, as a key would.
+func (m Model) pick(col, card, top int) Model {
+	m.msg, m.col, m.card, m.top, m.selKey = "", col, card, top, ""
+	m.fix()
+	return m
 }
 
 // cards are the open items the filter shows, in list order.
@@ -401,13 +508,10 @@ func fit(lines []string, w, h int) []string {
 
 // overlay dims the board and draws the item view centred over it.
 func (m Model) overlay(board []string, now time.Time) []string {
-	bw := min(itemview.Width, m.w)
-	box := m.item.View(bw, m.h, now)
-	if box == "" {
+	x, y, bw, rows := m.box(now)
+	if rows == nil {
 		return board
 	}
-	rows := strings.Split(box, "\n")
-	x, y := (m.w-bw)/2, max(0, (m.h-len(rows))/2)
 	out := make([]string, max(len(board), y+len(rows)))
 	for i := range out {
 		plain := ""
@@ -425,6 +529,17 @@ func (m Model) overlay(board []string, now time.Time) []string {
 	return out
 }
 
+// box is the item view's rows and where they go over the board: x, y and the width.
+func (m Model) box(now time.Time) (x, y, bw int, rows []string) {
+	bw = min(itemview.Width, m.w)
+	box := m.item.View(bw, m.h, now)
+	if box == "" {
+		return 0, 0, bw, nil
+	}
+	rows = strings.Split(box, "\n")
+	return (m.w - bw) / 2, max(0, (m.h-len(rows))/2), bw, rows
+}
+
 // board is the board's lines: its border, the filter line, the columns, the message and the keys.
 func (m Model) board(now time.Time) []string {
 	w, in := m.w, m.inner()
@@ -433,18 +548,13 @@ func (m Model) board(now time.Time) []string {
 	}
 	cols, shown := layout(in)
 	cards := m.columns()
-	// The columns share the width, the first ones a column more each where it doesn't divide
-	cw, extra := (in-gap*(shown-1))/shown, (in-gap*(shown-1))%shown
-	var body []string
-	body = append(body, m.filterLine(len(cols), shown, in), "")
+	filter, _ := m.filterLine(len(cols), shown, in)
+	body := []string{filter, ""}
 	var head [][]string
 	var widths []int
-	for i := m.off; i < min(len(cols), m.off+shown); i++ {
-		colW := cw
-		if i-m.off < extra {
-			colW++
-		}
-		head, widths = append(head, m.column(cols[i], cards[i], i == m.col, colW, now)), append(widths, colW)
+	for _, sc := range m.shownCols() {
+		lines, _ := m.column(cols[sc.i], cards[sc.i], sc.i == m.col, sc.w, now)
+		head, widths = append(head, lines), append(widths, sc.w)
 	}
 	rows := 2 + m.cardRows()
 	for r := range rows {
@@ -464,6 +574,27 @@ func (m Model) board(now time.Time) []string {
 		out = append(out, sidebar.Faint+"│"+reset+" "+padTo(ansi.Truncate(l, in, "…"), in)+" "+sidebar.Faint+"│"+reset)
 	}
 	return append(out, sidebar.Faint+"╰"+strings.Repeat("─", w-2)+"╯"+reset)
+}
+
+// shownCol is a column on screen: its index in layout's columns, its first x in the board's text and its width.
+type shownCol struct{ i, x, w int }
+
+// shownCols are the columns on screen, sharing the width, the first ones a column more each where it doesn't divide.
+func (m Model) shownCols() []shownCol {
+	in := m.inner()
+	cols, shown := layout(in)
+	cw, extra := (in-gap*(shown-1))/shown, (in-gap*(shown-1))%shown
+	var out []shownCol
+	x := 0
+	for i := m.off; i < min(len(cols), m.off+shown); i++ {
+		colW := cw
+		if i-m.off < extra {
+			colW++
+		}
+		out = append(out, shownCol{i, x, colW})
+		x += colW + gap
+	}
+	return out
 }
 
 // topLine is the top border: whose board at the left, the counts at the right.
@@ -495,8 +626,12 @@ func (m Model) topLine(cards [][]card, w int) string {
 		colour + counts + reset + sidebar.Faint + "─╮" + reset
 }
 
-// filterLine is the projects, the one shown bold, and which columns show when not all fit.
-func (m Model) filterLine(cols, shown, in int) string {
+// span is where a project shows on the filter line, its x in the board's text; p is its projects index, -1 for
+// "the next one" (the cut line).
+type span struct{ from, to, p int }
+
+// filterLine is the projects, the one shown bold, and which columns show when not all fit; and where each project is.
+func (m Model) filterLine(cols, shown, in int) (string, []span) {
 	more := ""
 	if shown < cols {
 		more = sidebar.Muted + "columns " + strconv.Itoa(m.off+1) + "–" + strconv.Itoa(m.off+shown) + " of " + strconv.Itoa(cols) + " · h/l" + reset
@@ -516,21 +651,38 @@ func (m Model) filterLine(cols, shown, in int) string {
 		}
 	}
 	l := sidebar.Muted + "project " + reset + strings.Join(ps, "  ")
+	var spans []span
+	x := len("project ")
+	for i, p := range ps {
+		spans = append(spans, span{x, x + ansi.StringWidth(p), i})
+		x += ansi.StringWidth(p) + 2
+	}
 	if ansi.StringWidth(l) > room {
 		// Too many to list: the one shown, and where it is among them
 		n := strconv.Itoa(slices.Index(projects, m.project)+1) + " of " + strconv.Itoa(len(projects))
 		l = sidebar.Muted + "project " + reset + bold + cmp.Or(m.project, "all") + reset + sidebar.Muted + " (" + n + ", p next)" + reset
+		spans = []span{{len("project "), ansi.StringWidth(l), -1}}
 	}
 	l = ansi.Truncate(l, max(0, room), "…")
-	if more == "" {
-		return l
+	for i := range spans {
+		spans[i].to = min(spans[i].to, room)
 	}
-	return padTo(l, in-ansi.StringWidth(more)) + more
+	if more == "" {
+		return l, spans
+	}
+	return padTo(l, in-ansi.StringWidth(more)) + more, spans
 }
 
+// What a column's line is, for a click: a card's index in the column, else these.
+const (
+	atColumn = -1 // the head, the rule, a gap or None
+	atUp     = -2 // "↑ n more"
+	atMore   = -3 // "+n more"
+)
+
 // column is a column's lines: its head (title and count, red where it holds what waits on the user; ▸ while
-// selected), its rule, then its cards from top, "↑ n more" and "+n more" where some don't show.
-func (m Model) column(c column, cs []card, sel bool, cw int, now time.Time) []string {
+// selected), its rule, then its cards from top, "↑ n more" and "+n more" where some don't show; and what each line is.
+func (m Model) column(c column, cs []card, sel bool, cw int, now time.Time) ([]string, []int) {
 	hot := slices.Contains(c.groups, sidebar.GroupOf(sidebar.StatusDecide)) || slices.Contains(c.groups, sidebar.GroupOf(sidebar.StatusYours))
 	colour, rule := "", sidebar.Faint
 	if hot {
@@ -544,26 +696,28 @@ func (m Model) column(c column, cs []card, sel bool, cw int, now time.Time) []st
 	title = ansi.Truncate(title, max(0, cw-len(n)-1), "…")
 	out := []string{bold + colour + title + reset + strings.Repeat(" ", max(0, cw-ansi.StringWidth(title)-len(n))) + sidebar.Muted + n + reset,
 		rule + strings.Repeat("─", cw) + reset}
+	at := []int{atColumn, atColumn}
 	if len(cs) == 0 {
-		return append(out, sidebar.Muted+"None"+reset)
+		return append(out, sidebar.Muted+"None"+reset), append(at, atColumn)
 	}
 	top, fit := 0, m.fits(len(cs))
 	if sel {
 		top = m.top
 	}
 	if top > 0 {
-		out = append(out, sidebar.Muted+"↑ "+strconv.Itoa(top)+" more"+reset)
+		out, at = append(out, sidebar.Muted+"↑ "+strconv.Itoa(top)+" more"+reset), append(at, atUp)
 	}
 	for i := top; i < min(len(cs), top+fit); i++ {
 		if i > top {
-			out = append(out, "")
+			out, at = append(out, ""), append(at, atColumn)
 		}
-		out = append(out, cardLines(cs[i], sel && i == m.card, cw, now)...)
+		lines := cardLines(cs[i], sel && i == m.card, cw, now)
+		out, at = append(out, lines...), append(at, slices.Repeat([]int{i}, len(lines))...)
 	}
 	if rest := len(cs) - top - fit; rest > 0 {
-		out = append(out, sidebar.Muted+"+"+strconv.Itoa(rest)+" more"+reset)
+		out, at = append(out, sidebar.Muted+"+"+strconv.Itoa(rest)+" more"+reset), append(at, atMore)
 	}
-	return out
+	return out, at
 }
 
 // cardLines are a card cw wide: project #id (? before an ask, ☐ before the user's own, as the boards mark them) and

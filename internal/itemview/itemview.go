@@ -5,6 +5,7 @@ package itemview
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -270,9 +271,15 @@ const minWidth = 20
 // View is the box, w columns wide (at most Width, none under minWidth), at most h rows: when cut, the text's lines
 // go first, then the facts, then the list's lines farthest from the selection; the border, title and keys stay.
 func (m Model) View(w, h int, now time.Time) string {
+	rows, _ := m.render(w, h, now)
+	return strings.Join(rows, "\n")
+}
+
+// render is View's rows and, for each, the entry it shows (-1 for none).
+func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 	w = min(w, Width)
 	if w < minWidth {
-		return ""
+		return nil, nil
 	}
 	in := w - 4
 	it := m.it
@@ -283,7 +290,7 @@ func (m Model) View(w, h int, now time.Time) string {
 	for _, c := range it.Context {
 		head = append(head, sidebar.Muted+ansi.Truncate(c, in, "…")+reset)
 	}
-	list, sel := m.listLines(in), m.sel
+	list, sel, first := m.listLines(in), m.sel, 0
 	facts := m.facts(in, now)
 	if m.msg != "" || m.busy != "" {
 		line := sidebar.Red + m.msg + reset
@@ -293,17 +300,22 @@ func (m Model) View(w, h int, now time.Time) string {
 		tail = append(tail, "", ansi.Truncate(line, in, "…"))
 	}
 	tail = append(tail, "", ansi.Truncate(m.keys(), in, "…"))
-	lines := func() []string {
+	lines := func() ([]string, []int) {
 		out := append(append([]string{""}, head...), "")
 		out = append(out, list...)
 		if len(facts) > 0 {
 			out = append(append(out, ""), facts...)
 		}
-		return append(out, tail...)
+		out = append(out, tail...)
+		at := slices.Repeat([]int{-1}, len(out))
+		for i := range list {
+			at[len(head)+2+i] = first + i
+		}
+		return out, at
 	}
 	room := max(1, h-2)
 cut:
-	for len(lines()) > room {
+	for all, _ := lines(); len(all) > room; all, _ = lines() {
 		switch {
 		case len(head) > 1:
 			head = head[:len(head)-1]
@@ -312,7 +324,7 @@ cut:
 		case len(list) > 1 && sel < len(list)-1:
 			list = list[:len(list)-1]
 		case len(list) > 1:
-			list, sel = list[1:], sel-1
+			list, sel, first = list[1:], sel-1, first+1
 		case len(head) > 0:
 			head = nil
 		default:
@@ -320,13 +332,32 @@ cut:
 		}
 	}
 	// Too short even so: the top lines go, the keys stay
-	all := lines()
-	all = all[max(0, len(all)-room):]
+	all, at := lines()
+	cut := max(0, len(all)-room)
 	out := []string{m.top(w, now)}
-	for _, l := range all {
+	for _, l := range all[cut:] {
 		out = append(out, sidebar.Faint+"│"+reset+" "+padTo(l, in)+" "+sidebar.Faint+"│"+reset)
 	}
-	return strings.Join(append(out, sidebar.Faint+"╰"+strings.Repeat("─", w-2)+"╯"+reset), "\n")
+	out = append(out, sidebar.Faint+"╰"+strings.Repeat("─", w-2)+"╯"+reset)
+	return out, append(append([]int{-1}, at[cut:]...), -1)
+}
+
+// Click runs a left click at row y of the box drawn w×h: on an option or action it does what that line's key does
+// (as j/k to it then ⏎); one while the own-words field is open leaves the field (its text kept) unless it's on the
+// field's own line.
+func (m Model) Click(y, w, h int, now time.Time) (Model, tea.Cmd) {
+	_, at := m.render(w, h, now)
+	if y < 0 || y >= len(at) || at[y] < 0 || m.busy != "" {
+		return m, nil
+	}
+	if m.typing {
+		if at[y] == len(m.entries)-1 {
+			return m, nil
+		}
+		m.typing = false
+	}
+	m.sel = at[y]
+	return m.key("enter")
 }
 
 // Height is how many rows View takes uncut at width w.

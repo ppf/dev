@@ -261,3 +261,83 @@ func TestCutSelection(t *testing.T) {
 		t.Errorf("at %d columns: %q", minWidth-1, v)
 	}
 }
+
+// row is the box's first row showing s.
+func row(t *testing.T, m Model, w, h int, s string) int {
+	t.Helper()
+	for i, l := range strings.Split(ansi.Strip(m.View(w, h, now)), "\n") {
+		if strings.Contains(l, s) {
+			return i
+		}
+	}
+	t.Fatalf("%q not in the view:\n%s", s, ansi.Strip(m.View(w, h, now)))
+	return -1
+}
+
+// click clicks row y of the box w×h, running the action's command too.
+func click(m Model, y, w, h int) Model {
+	m, cmd := m.Click(y, w, h, now)
+	if cmd != nil {
+		m, _ = m.Update(cmd())
+	}
+	return m
+}
+
+// A click on an option or action does what its key does; elsewhere nothing. Own words: a click on its line opens the
+// field, one on another line leaves it (text kept) and runs that line.
+func TestClick(t *testing.T) {
+	var r recorder
+	m := New(ask, r.actions(), false)
+	if m := click(m, row(t, m, Width, 40, "Wait"), Width, 40); !m.Done || !strings.HasSuffix(m.Result, "Wait | after the test") {
+		t.Errorf("click on Wait: done %v result %q", m.Done, m.Result)
+	}
+	for _, s := range []string{"Merge #221 now?", "status", "esc close", "╭─", "╰"} {
+		if m := click(m, row(t, m, Width, 40, s), Width, 40); m.Done || m.sel != 0 || len(r.calls) != 1 {
+			t.Errorf("click on %q: done %v sel %d calls %v", s, m.Done, m.sel, r.calls)
+		}
+	}
+	typed := press(click(m, row(t, m, Width, 40, "In your own words"), Width, 40), "h", "i")
+	if !typed.typing || string(typed.field) != "hi" {
+		t.Fatalf("click on own words: typing %v field %q", typed.typing, string(typed.field))
+	}
+	if again := click(typed, row(t, typed, Width, 40, "m    hi"), Width, 40); !again.typing || again.Done {
+		t.Error("click on the field's line left it")
+	}
+	r.calls = nil
+	if m := click(typed, row(t, typed, Width, 40, "Merge now"), Width, 40); !m.Done || !slices.Equal(r.calls, []string{"answer boss-dev Merge #221 now? Merge now | ships today (Recommended)"}) {
+		t.Errorf("click on Merge now while typing: done %v calls %v", m.Done, r.calls)
+	}
+
+	// A closed boss's ask refuses as 1 does
+	closed := ask
+	closed.Closed = true
+	r.calls = nil
+	if m := click(New(closed, r.actions(), false), row(t, New(closed, r.actions(), false), Width, 40, "Wait"), Width, 40); m.Done || len(r.calls) != 0 || !strings.Contains(m.msg, "reopens it") {
+		t.Errorf("click on a closed boss's option: done %v calls %v msg %q", m.Done, r.calls, m.msg)
+	}
+
+	// Actions: Tick, then a click while it's under way does nothing
+	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply", Status: sidebar.StatusYours}}
+	p := New(plain, r.actions(), false)
+	busy, cmd := p.Click(row(t, p, 60, 40, "Tick"), 60, 40, now)
+	if cmd == nil || busy.busy != "ticking" {
+		t.Fatalf("click on Tick: busy %q", busy.busy)
+	}
+	if again, cmd2 := busy.Click(row(t, busy, 60, 40, "Start"), 60, 40, now); cmd2 != nil || again.sel != busy.sel {
+		t.Error("a click ran while an action was under way")
+	}
+}
+
+// Cut short, a click still hits the line it shows: the list's front cut, the text gone.
+func TestClickCut(t *testing.T) {
+	var r recorder
+	it := ask
+	it.Options = []string{"o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9"}
+	m := press(New(it, r.actions(), false), "k", "k") // 9 selected: the list's front is cut
+	if v := ansi.Strip(m.View(Width, 9, now)); strings.Contains(v, "o1") {
+		t.Fatalf("not cut:\n%s", v)
+	}
+	if m := click(m, row(t, m, Width, 9, "o8"), Width, 9); !m.Done || !slices.Equal(r.calls, []string{"answer boss-dev Merge #221 now? o8"}) {
+		t.Errorf("click on o8 cut: calls %v", r.calls)
+	}
+}
