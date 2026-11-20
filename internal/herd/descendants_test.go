@@ -210,3 +210,43 @@ func TestBossLists(t *testing.T) {
 		t.Errorf("read %q: boss-x isn't asked for", read)
 	}
 }
+
+// bossLists leaves out a live and a closed boss whose lists hold only finished items (ticked over 5 s ago).
+func TestBossListsFinishedOnly(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	sessions := []string{"boss-a", "boss-shut"}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			var out string
+			for _, n := range sessions {
+				out += tmux.FormatRow(n, "1")
+			}
+			return out, nil
+		case "display-message":
+			return tmux.FormatRow("/tmp/tmux-1/default", strings.Trim(args[3], "=:"), "1", "$1", "1700000000"), nil
+		}
+		return "", nil
+	})
+	t0 := time.Now().Add(-time.Minute)
+	for _, n := range sessions {
+		s, err := todo.ForPane(c, tmux.SessionTarget(n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Add(todo.Item{Text: n + "'s"}, t0); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Done([]int{1}, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessions = []string{"boss-a"}
+	if all, err := todo.All(c, time.Now(), nil, true, true); err != nil || len(all) != 2 || len(all[0].Finished) != 1 || len(all[1].Finished) != 1 {
+		t.Fatalf("setup: All with finished = %+v, %v: want both lists, one finished item each", all, err)
+	}
+	got, err := bossLists(c, []string{"boss-a"}, true, time.Now())
+	if err != nil || len(got) != 0 {
+		t.Errorf("bossLists = %+v, %v: want none", got, err)
+	}
+}

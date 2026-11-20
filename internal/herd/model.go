@@ -676,7 +676,7 @@ func descendants(names []string, panes map[string][]row, id, name string) map[st
 // bossLists are the open items on the lists of bosses, by boss: those on no one wait on the user, the rest count
 // on the boss's card; with closed, then those of the bosses closed on the server; a list not read comes with its error.
 func bossLists(c *tmux.Client, bosses []string, closed bool, now time.Time) ([]todo.BossList, error) {
-	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) }, closed)
+	all, err := todo.All(c, now, func(name string) bool { return slices.Contains(bosses, name) }, closed, false)
 	if err != nil {
 		return nil, err
 	}
