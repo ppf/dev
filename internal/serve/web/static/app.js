@@ -95,7 +95,9 @@ const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.
 const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
 const onWorker = ({ list, it }) => !own(list, it) && (!!it.session || ON_WORKER.includes(it.status));
 const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
-const startable = (l, it) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (['yours', 'boss closed'].includes(it.status) || !!it.start_late);
+// A closed boss's item starts only while the manager runs, as on the tmux boards.
+const startable = (l, it) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (!l.closed || !!state.board?.manager_runs)
+  && (['yours', 'boss closed'].includes(it.status) || !!it.start_late);
 const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
 const receiver = l => l.closed ? 'the manager' : l.boss;
 
@@ -593,7 +595,7 @@ function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && find(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.errors[key(r.boss, r.id)], state.reachable].join('\n') : '';
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], state.reachable].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;

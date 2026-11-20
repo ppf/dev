@@ -37,6 +37,9 @@ func main() {
 	if err := json.Unmarshal(b, &s.board); err != nil {
 		log.Fatal(err)
 	}
+	if _, set := s.board["manager_runs"]; !set {
+		s.board["manager_runs"] = true
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {

@@ -17,6 +17,7 @@
     "decide": 1,
     "yours": 1
   },
+  "manager_runs": true,
   "lists": [
     {
       "boss": "boss-a",

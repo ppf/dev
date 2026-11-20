@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -95,6 +96,18 @@ func TestRoutes(t *testing.T) {
 	for _, p := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/pair"} {
 		if w := get(t, h, p, ""); w.Code != 405 || w.Header().Get("Allow") != "POST" {
 			t.Errorf("GET %s: %d Allow %q, want 405 POST", p, w.Code, w.Header().Get("Allow"))
+		}
+	}
+}
+
+// The board says whether the manager runs: the page offers Start on a closed boss's item only then.
+func TestBoardManagerRuns(t *testing.T) {
+	for name, runs := range map[string]func() bool{"nil": nil, "down": func() bool { return false }, "up": func() bool { return true }} {
+		h := Handler(Config{Now: time.Now, Guard: noGuard, Pair: http.NotFoundHandler(), ManagerRuns: runs,
+			Lists: func() (json.RawMessage, error) { return json.RawMessage(`[]`), nil }})
+		want := `"manager_runs": ` + fmt.Sprint(name == "up")
+		if w := get(t, h, "/v1/board", ""); !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: %s lacks %s", name, w.Body, want)
 		}
 	}
 }

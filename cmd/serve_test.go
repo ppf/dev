@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/serve"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -83,11 +84,12 @@ func TestBoardGolden(t *testing.T) {
 	}
 
 	h := serve.Handler(serve.Config{
-		Version: "v0.0.0-golden",
-		Now:     func() time.Time { return now },
-		Lists:   boardLists(c, io.Discard, func() time.Time { return now }),
-		Guard:   func(h http.Handler) http.Handler { return h },
-		Pair:    http.NotFoundHandler(),
+		Version:     "v0.0.0-golden",
+		Now:         func() time.Time { return now },
+		Lists:       boardLists(c, io.Discard, func() time.Time { return now }),
+		ManagerRuns: func() bool { return running(c, sidebar.Manager) },
+		Guard:       func(h http.Handler) http.Handler { return h },
+		Pair:        http.NotFoundHandler(),
 	})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8417/v1/board", nil))
