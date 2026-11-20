@@ -141,31 +141,6 @@ func TestStartShapes(t *testing.T) {
 	if err != nil || it.Doing != nil || it.Started == nil {
 		t.Errorf("a late start of an item marked doing = %+v, %v; want started, doing ended", it, err)
 	}
-	// Its note not sent: the start back, and doing only while it is on whom it was
-	restart := func(on string) {
-		t.Helper()
-		if err := s.update(now, func(f *file) error {
-			p := &f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
-			p.On, p.Started, p.Doing = on, it.Started, nil
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	restart("Marek")
-	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.update(now, func(f *file) error {
-		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
-		if p.Doing != nil || p.Started == nil || p.Started.At != now.Add(-StartLate).Unix() {
-			t.Errorf("Unstart onto an item moved meanwhile = %+v / %+v, want the late start back, no doing", p.Started, p.Doing)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	restart("")
 	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +148,25 @@ func TestStartShapes(t *testing.T) {
 		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
 		if p.Doing == nil || p.Doing.Text != "on it" || p.Started == nil || p.Started.At != now.Add(-StartLate).Unix() {
 			t.Errorf("after Unstart = %+v / %+v, want the late start and doing back", p.Started, p.Doing)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Ticked while its note was sent: the undo leaves it ticked, without doing or a start
+	if it, prev, err = s.Start(placed(t, s, live, id, now.Add(StartLate)), "d", "boss-x", now.Add(StartLate)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{id}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Unstart(id, it.Started.At, prev, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.update(now, func(f *file) error {
+		p := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id })]
+		if p.Doing != nil || *p.Started != *it.Started {
+			t.Errorf("Unstart onto a ticked item = %+v / %+v, want it as ticked", p.Started, p.Doing)
 		}
 		return nil
 	}); err != nil {

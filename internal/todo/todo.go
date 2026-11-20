@@ -733,14 +733,14 @@ func (s Store) Start(sh Shown, text, to string, now time.Time) (it, prev Item, e
 	return it, prev, err
 }
 
-// Unstart puts back prev's start in place of item id's start made at at, when its note couldn't be sent, and its doing
-// while the item is still on whom prev was, with none since.
+// Unstart puts back prev's start and doing in place of open item id's start made at at, when its note couldn't be
+// sent; doing only while it has none now.
 func (s Store) Unstart(id int, at int64, prev Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
-		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Started != nil && it.Started.At == at }); i >= 0 {
+		if i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 && it.Started != nil && it.Started.At == at }); i >= 0 {
 			p := &f.Items[i]
 			p.Started = prev.Started
-			if p.Doing == nil && p.On == prev.On && sameSession(p.Session, prev.Session) {
+			if p.Doing == nil {
 				p.Doing = prev.Doing
 			}
 		}
