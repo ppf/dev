@@ -119,9 +119,28 @@ func warnLong(stderr io.Writer, text string) {
 	}
 }
 
+// waitingFor is person as an item's on, refused when empty or when it names what --on means otherwise: me, boss,
+// this list's own boss (own), or a session the boss started.
+func waitingFor(person, own, boss string, stderr io.Writer) (string, error) {
+	switch {
+	case person == "":
+		return "", errors.New("--waiting-for: no person")
+	case strings.EqualFold(person, todo.Me), strings.EqualFold(person, todo.Boss), own != "" && strings.EqualFold(person, own):
+		return "", fmt.Errorf("--waiting-for %s: not a person: the user's own is --on me, your own task --on boss", person)
+	}
+	ws, err := todoWorkers(boss, stderr)
+	if err != nil {
+		return "", err
+	}
+	if w, ok := todo.Match(person, ws); ok {
+		return "", fmt.Errorf("--waiting-for %s: a session you started: --on %s", person, w.Name)
+	}
+	return person, nil
+}
+
 func newTodoAddCmd(boss *string) *cobra.Command {
 	var it todo.Item
-	var until string
+	var until, person string
 	var replaces int
 	cmd := &cobra.Command{
 		Use:   "add <item>",
@@ -143,21 +162,33 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.Context, err = contextLines(it.Context); err != nil {
 				return err
 			}
-			if it.On = todo.Clean(it.On); strings.EqualFold(it.On, todo.Me) {
+			stderr := cmd.ErrOrStderr()
+			it.On = todo.Clean(it.On)
+			switch {
+			case it.On != "" && cmd.Flags().Changed("waiting-for"):
+				return errors.New("--on or --waiting-for, not both")
+			case cmd.Flags().Changed("waiting-for"):
+				if it.On, err = waitingFor(todo.Clean(person), s.Boss(), *boss, stderr); err != nil {
+					return err
+				}
+			case strings.EqualFold(it.On, todo.Me):
 				it.On = todo.Me
-			} else if it.On != "" {
+			case strings.EqualFold(it.On, todo.Boss):
+				it.On = todo.Boss
+				fmt.Fprintln(stderr, "on boss: your own task, to do until you work on it")
+			case it.On != "":
 				// A worker of this boss's is linked, so its board shows the worker's state, or that it's gone
-				ws, err := todoWorkers(*boss, cmd.ErrOrStderr())
+				ws, err := todoWorkers(*boss, stderr)
 				if err != nil {
 					return err
 				}
 				if w, ok := todo.Match(it.On, ws); ok {
 					it.On, it.Session = w.Name, &w
 				} else if s.Boss() != "" && strings.EqualFold(it.On, s.Boss()) {
-					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: this list's own boss, so the user's own, as --on me\n", it.On)
-					it.On = todo.Me
+					fmt.Fprintf(stderr, "on %s: this list's own boss, so your own task, as --on boss\n", it.On)
+					it.On = todo.Boss
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "on %s: no single session this boss started (worker or boss) by that name or id, so a person\n", it.On)
+					fmt.Fprintf(stderr, "no session %s: a person is --waiting-for %s, your own task --on boss\n", it.On, it.On)
 				}
 			}
 			now := time.Now()
@@ -191,7 +222,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			return printCount(cmd.OutOrStdout(), s, "added "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone) or a person; me, or this boss's own name: the user's own (with --replaces, gives it back)")
+	cmd.Flags().StringVar(&it.On, "on", "", "who does it, when not the user: a session it started, worker or boss (its name or local_… id; its boards show its live state, or that it's gone); boss, or this boss's own name: the boss's own task; me: the user's own (with --replaces, gives it back)")
+	cmd.Flags().StringVar(&person, "waiting-for", "", "the person it waits for, no session (a reviewer, a teammate)")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
@@ -503,9 +535,10 @@ func newTodoNoteCmd(boss *string) *cobra.Command {
 		Use:   "note",
 		Short: "Print the boss's notes: decisions with their why, what the user said, open risks",
 		Long: fmt.Sprintf(`Notes are short dated lines a boss keeps with its list, outliving its /clear and its session: dev todo note
-decided|said|risk "<text>" adds one, dev todo note drop <n> removes one, without a subcommand they are printed.
+decided|said|risk|state "<text>" adds one, dev todo note drop <n> removes one, without a subcommand they are printed.
 At most %d notes of at most %d characters each. decided: a choice, --why says why; said: what the user told the boss
-that changes the work, it needs an end (--until or --item); risk: an open risk to watch. Not actions (dev todo add), not
+that changes the work, it needs an end (--until or --item); risk: an open risk to watch; state: the boss's standing
+state, kept off the board ("6 fixes parked for after your testing"), one per list: a new one replaces it. Not actions (dev todo add), not
 standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -527,7 +560,7 @@ standing rules (CLAUDE.md, memory). A note with --until drops itself then; one w
 		},
 	}
 	cmd.AddCommand(newTodoNoteDropCmd(boss))
-	for _, kind := range []string{todo.NoteDecided, todo.NoteSaid, todo.NoteRisk} {
+	for _, kind := range []string{todo.NoteDecided, todo.NoteSaid, todo.NoteRisk, todo.NoteState} {
 		cmd.AddCommand(newTodoNoteAddCmd(boss, kind))
 	}
 	return cmd
@@ -859,6 +892,8 @@ func todoLine(it todo.Shown, now time.Time) string {
 	switch {
 	case it.Gone:
 		parts = append(parts, "on "+it.On+", session gone")
+	case todo.OnBoss(it.On, it.Session):
+		parts = append(parts, "boss's own")
 	case it.On != "":
 		parts = append(parts, "on "+it.On)
 	}

@@ -15,7 +15,7 @@ import (
 
 // dev todo --json and --all --json give each item its status from the live sessions: a worker asking the user is
 // blocked, as is one resting after a failed turn, a working one working, a linked one gone is gone, a name that is
-// no session a person (waiting), an item on no one yours. --on the boss's own name is the user's own item.
+// no session a person (waiting), an item on no one yours. --on the boss's own name is the boss's own task (on boss), idle until it works on it.
 func TestTodoStatus(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
@@ -61,7 +61,7 @@ func TestTodoStatus(t *testing.T) {
 	env := []string{"TMUX_PANE=" + boss, "CLAUDECODE=1"}
 	dev(env, "todo", "add", "mine")
 	_, errOut := dev(env, "todo", "add", "--on", "boss-a", "the boss's own")
-	if !strings.Contains(errOut, "this list's own boss, so the user's own") {
+	if !strings.Contains(errOut, "this list's own boss, so your own task, as --on boss") {
 		t.Errorf("❌ --on boss-a stderr = %q", errOut)
 	}
 	dev(env, "todo", "add", "--on", "w-ask", "asks")
@@ -79,7 +79,7 @@ func TestTodoStatus(t *testing.T) {
 	}
 	want := []item{
 		{"mine", "", "yours", ""},
-		{"the boss's own", "", "yours", ""},
+		{"the boss's own", "boss", "idle", "boss-a"},
 		{"asks", "w-ask", "blocked", "w-ask"},
 		{"works", "w-busy", "working", "w-busy"},
 		{"failed", "w-failed", "blocked", "w-failed"},
@@ -131,7 +131,7 @@ func TestTodoStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &placed); err != nil {
 		t.Fatal(err)
 	}
-	columns := map[string]string{"mine": "todo you  false", "the boss's own": "todo you  false", "asks": "progress worker w-ask true",
+	columns := map[string]string{"mine": "todo you  false", "the boss's own": "todo boss boss-a false", "asks": "progress worker w-ask true",
 		"works": "progress worker w-busy false", "failed": "progress worker w-failed true", "gone": "todo boss boss-a false",
 		"a person's": "waiting boss boss-a false Ola"}
 	if len(placed[0].Items) != len(columns) {

@@ -123,10 +123,17 @@ func check(it Item, f fact, now time.Time) *sidebar.Check {
 			return &sidebar.Check{Kind: sidebar.CheckFailing, PR: pr, Since: last.ChecksAt}
 		}
 	}
-	if it.Added != 0 && now.Sub(time.Unix(it.Added, 0)) >= unchanged && len(it.Options) == 0 && it.Until <= now.Unix() {
+	if it.stale(now) {
 		return &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added}
 	}
 	return nil
+}
+
+// stale reports an open item unchanged for two days at now: not an ask, a dated item before its Until, nor one its
+// boss parked (OnBoss, not Doing).
+func (it Item) stale(now time.Time) bool {
+	parked := OnBoss(it.On, it.Session) && it.Doing == nil
+	return it.Added != 0 && now.Sub(time.Unix(it.Added, 0)) >= unchanged && len(it.Options) == 0 && it.Until <= now.Unix() && !parked
 }
 
 // A linked PR's state as Shown.PRState gives it.
@@ -386,7 +393,10 @@ type Nudge struct {
 // String is the nudge as its boss is told it: `#5 "Deploy the cache fix after #418 merges" (on Tomas): PR #418 merged 40m ago`.
 func (n Nudge) String() string {
 	on := ""
-	if n.On != "" {
+	switch {
+	case n.On == Boss:
+		on = " (yours, --on boss)"
+	case n.On != "":
 		on = " (on " + n.On + ")"
 	}
 	return fmt.Sprintf("#%d %q%s: %s", n.ID, n.Text, on, n.Why)
@@ -438,8 +448,7 @@ func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell fun
 			if l.Items[i].Gone && fc.Told[toldGone] == 0 {
 				tell(toldGone, "its session is gone")
 			}
-			if it.Added != 0 && len(it.Options) == 0 && it.Until <= now.Unix() && now.Sub(time.Unix(it.Added, 0)) >= unchanged &&
-				now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged {
+			if it.stale(now) && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged {
 				tell(toldUnchanged, (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added}).Long(now))
 			}
 			if fc.Told != nil {

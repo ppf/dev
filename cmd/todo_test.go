@@ -283,13 +283,67 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	}
 }
 
+// On a desktop app boss's list: --on boss, case aside, is the boss's own task, not on others; --waiting-for a person
+// is a person's item, refused beside --on or for me, boss or a worker; note state replaces the list's earlier one.
+func TestTodoOnBossWaitingFor(t *testing.T) {
+	todoEnv(t)
+	out, stderr, err := execute(t, "", "todo", "add", "Parked idea", "--on", "Boss")
+	if err != nil || out != "added 1 · to do 1\n" || stderr != "on boss: your own task, to do until you work on it\n" {
+		t.Errorf("--on Boss: %q, %q, %v", out, stderr, err)
+	}
+	out, stderr, err = execute(t, "", "todo", "add", "Review", "--waiting-for", " Ola ")
+	if err != nil || out != "added 2 · to do 2, 1 on others\n" || strings.Contains(stderr, "Ola") {
+		t.Errorf("--waiting-for Ola: %q, %q, %v", out, stderr, err)
+	}
+	for args, want := range map[string]string{
+		"--on|Marek|--waiting-for|Ola": "--on or --waiting-for, not both",
+		"--waiting-for|me":             "--waiting-for me: not a person",
+		"--waiting-for|BOSS":           "--waiting-for BOSS: not a person",
+		"--waiting-for|w":              "--waiting-for w: a session you started: --on W",
+		"--waiting-for| ":              "--waiting-for: no person",
+	} {
+		if _, _, err := execute(t, "", append([]string{"todo", "add", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", args, err, want)
+		}
+	}
+	if got := run(t, "", "todo", "add", "--replaces", "2", "--on", "boss"); got != "replaced 2 · to do 2\n" {
+		t.Errorf("--replaces --on boss: %q", got)
+	}
+	if got := run(t, "", "todo"); got != "1\t◌\tParked idea\tboss's own\n2\t◌\tReview\tboss's own\n" {
+		t.Errorf("dev todo = %q", got)
+	}
+	var l struct {
+		Items []struct {
+			On       string `json:"on"`
+			Column   string `json:"column"`
+			Assignee struct {
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			} `json:"assignee"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 2 {
+		t.Fatalf("--json: %v %+v", err, l)
+	}
+	if it := l.Items[0]; it.On != "boss" || it.Column != "todo" || it.Assignee.Kind != "boss" || it.Assignee.Name != "boss" {
+		t.Errorf("--json item = %+v, want on boss, to do, the boss's", it)
+	}
+	run(t, "", "todo", "note", "state", "6 fixes parked")
+	if got := run(t, "", "todo", "note", "state", "7 fixes parked"); got != "noted n2\n" {
+		t.Errorf("second state: %q", got)
+	}
+	if got := run(t, "", "todo", "note"); strings.Contains(got, "6 fixes") || !strings.Contains(got, "n2 ") || !strings.Contains(got, "state: 7 fixes parked") {
+		t.Errorf("notes = %q, want the second state only", got)
+	}
+}
+
 // --on a worker of the boss, by its local_… id or its name, links its session, shown under its name; --on
 // anyone else is a person; --on me gives an item back to the user.
 func TestTodoOnWorker(t *testing.T) {
 	todoEnv(t)
 	run(t, "", "todo", "add", "By id", "--on", "local_w")
 	run(t, "", "todo", "add", "By name", "--on", " w ")
-	if _, stderr, err := execute(t, "", "todo", "add", "A person", "--on", "Marek"); err != nil || !strings.Contains(stderr, "on Marek: no single session this boss started (worker or boss) by that name or id, so a person\n") {
+	if _, stderr, err := execute(t, "", "todo", "add", "A person", "--on", "Marek"); err != nil || !strings.Contains(stderr, "no session Marek: a person is --waiting-for Marek, your own task --on boss\n") {
 		t.Errorf("--on a person: stderr %q, %v; want a note", stderr, err)
 	}
 	run(t, "", "todo", "add", "Handed over", "--on", "Ola")

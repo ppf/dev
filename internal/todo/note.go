@@ -17,11 +17,13 @@ const (
 	MaxNote  = 200
 )
 
-// A note's kind: a choice with its why, what the user said that changes the work (it needs an end), an open risk.
+// A note's kind: a choice with its why, what the user said that changes the work (it needs an end), an open risk, the
+// boss's standing state (one per list: a new one replaces it).
 const (
 	NoteDecided = "decided"
 	NoteSaid    = "said"
 	NoteRisk    = "risk"
+	NoteState   = "state"
 )
 
 // Note is a dated line a boss keeps beside its list. Until, when set, drops it at that time, unix seconds; Item ties
@@ -40,9 +42,9 @@ type Note struct {
 // Check refuses a note of an unknown kind, no text, a text or why over MaxNote characters, or a said note without an end.
 func (n Note) Check() error {
 	switch n.Kind {
-	case NoteDecided, NoteSaid, NoteRisk:
+	case NoteDecided, NoteSaid, NoteRisk, NoteState:
 	default:
-		return fmt.Errorf("note kind %q: want %s, %s or %s", n.Kind, NoteDecided, NoteSaid, NoteRisk)
+		return fmt.Errorf("note kind %q: want %s, %s, %s or %s", n.Kind, NoteDecided, NoteSaid, NoteRisk, NoteState)
 	}
 	if n.Text == "" {
 		return fmt.Errorf("empty %s note", n.Kind)
@@ -58,7 +60,8 @@ func (n Note) Check() error {
 	return nil
 }
 
-// AddNote stores n and returns its id (1, 2…, shown as n1), never one used before. Over MaxNotes, an over-long text or why, a
+// AddNote stores n and returns its id (1, 2…, shown as n1), never one used before; a state note replaces the list's
+// earlier one. Over MaxNotes, an over-long text or why, a
 // said note without Until or Item, or an Item that isn't an open item is an error. The list's Updated stays.
 func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 	if err := n.Check(); err != nil {
@@ -70,18 +73,22 @@ func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 			return err
 		}
 		f.prune(now)
-		switch {
-		case len(f.Notes) >= MaxNotes:
-			return fmt.Errorf("%d notes already, at most %d: drop one first (dev todo note drop <n>)", len(f.Notes), MaxNotes)
-		case n.Item != 0 && !f.hasOpen(n.Item):
-			return fmt.Errorf("no open item %d", n.Item)
-		}
 		n.ID, n.Added = max(f.NextNote, 1), now.Unix()
 		// A file an earlier dev wrote has no NextNote: after its highest
 		for _, o := range f.Notes {
 			n.ID = max(n.ID, o.ID+1)
 		}
-		f.Notes, f.NextNote = append(f.Notes, n), n.ID+1
+		notes := f.Notes
+		if n.Kind == NoteState {
+			notes = slices.DeleteFunc(slices.Clone(notes), func(o Note) bool { return o.Kind == NoteState })
+		}
+		switch {
+		case len(notes) >= MaxNotes:
+			return fmt.Errorf("%d notes already, at most %d: drop one first (dev todo note drop <n>)", len(notes), MaxNotes)
+		case n.Item != 0 && !f.hasOpen(n.Item):
+			return fmt.Errorf("no open item %d", n.Item)
+		}
+		f.Notes, f.NextNote = append(notes, n), n.ID+1
 		id = n.ID
 		return s.write(f)
 	})

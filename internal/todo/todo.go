@@ -168,12 +168,12 @@ func (l List) MarkGone(workers func() ([]Session, error)) error {
 	return nil
 }
 
-// Open counts the items not ticked, and of them those waiting on someone else.
+// Open counts the items not ticked, and of them those waiting on someone else: not the boss's own (OnBoss).
 func (l List) Open() (n, on int) {
 	for _, it := range l.Items {
 		if !it.Done {
 			n++
-			if it.On != "" {
+			if it.On != "" && !OnBoss(it.On, it.Session) {
 				on++
 			}
 		}
@@ -586,8 +586,11 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			f.Next = 1
 		}
 		it.ID, it.Done, it.Added = max(f.Next, 1), 0, now.Unix()
-		if it.On == Me {
+		switch it.On {
+		case Me:
 			it.On, it.Session = "", nil
+		case Boss:
+			it.Session = nil
 		}
 		f.Items = append(f.Items, it)
 		f.Next, id = it.ID+1, it.ID
@@ -597,7 +600,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user. An id that isn't one is an error, as is an ask's
+// DoneOn and Context it doesn't set, and Quiet once set; On Me gives it back to the user, On Boss to its boss. An id that isn't one is an error, as is an ask's
 // new text over MaxQuestion.
 func (s Store) Replace(id int, it Item, now time.Time) error {
 	return s.update(now, func(f *file) error {
@@ -611,6 +614,8 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		switch it.On {
 		case Me:
 			it.On, it.Session = "", nil
+		case Boss:
+			it.Session = nil
 		case "":
 			it.On, it.Session = old.On, old.Session
 		}
@@ -1024,6 +1029,8 @@ func (l List) lines(limit int, now time.Time) string {
 		switch {
 		case it.Gone:
 			b.WriteString(" (on " + it.On + ", session gone)")
+		case OnBoss(it.On, it.Session):
+			b.WriteString(" (yours to do, --on boss)")
 		case it.On != "":
 			b.WriteString(" (on " + it.On + ")")
 		}
