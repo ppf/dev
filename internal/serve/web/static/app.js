@@ -1,8 +1,13 @@
 'use strict';
-// The phone page: reads /v1/board every 5 s while visible, answers, ticks and starts through /v1. List content stays in
-// memory only: no storage, no service worker.
+// The phone page: reads /v1/board when /v1/events says it changed, else every 5 s, while visible; answers, ticks and
+// starts through /v1. List content stays in memory only: no service worker; sessionStorage keeps only when this tab
+// last reloaded itself for a new version.
 
 const POLL_MS = 5000;
+// The stream's ping comes every 15 s: one quiet for longer than this is taken as dropped
+const QUIET_MS = 40000;
+const RETRY_MAX_MS = 15000;
+const RELOADED = 'dev-reloaded';
 const TIMEOUT_MS = 4000;
 const TICKABLE = ['yours', 'starting', 'check', 'boss closed'];
 const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
@@ -42,7 +47,12 @@ const state = {
   noteShown: '', // the note last drawn: a new one is scrolled to
   opener: '', // the open sheet's hash: closing it focuses its card
   shown: null, // the open item as last drawn, {k, text}: when a poll finds it gone, its sheet closes
+  version: '', // dev serve's version this page loaded with
+  newVersion: false, // a newer one is out: the line offers a reload
 };
+
+// The event stream: while it is open the board is read on its events, not polled
+const live = { es: null, open: false, retries: 0, retry: 0, quiet: 0, tag: '' }; // tag: the ETag the stream last named
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -170,7 +180,7 @@ function unpair() {
 }
 
 async function load() {
-  const seq = ++state.seq;
+  const seq = ++state.seq, asked = live.tag;
   let res = null;
   try {
     res = await call('GET', '/v1/board');
@@ -183,9 +193,16 @@ async function load() {
     if (location.hash !== '#/pair') location.hash = '#/pair';
   } else if (state.reachable) {
     state.asOf = new Date();
+    if (state.unpaired) { // paired again, as in another tab
+      state.unpaired = false;
+      reconnect();
+    }
     if (res.status !== 304) {
+      if (!sameVersion(res.data.version)) return;
       state.board = res.data;
       state.etag = res.etag;
+      // The stream named another board while this read was on its way, as one changed back
+      if (live.tag !== asked && live.tag && live.tag !== state.etag) setTimeout(load);
       dropStalePicks();
       const r = route();
       if (r.name === 'pair') return go('#/');
@@ -195,6 +212,88 @@ async function load() {
     }
   }
   render();
+}
+
+// sameVersion is false when the page reloads for a new dev serve version; else true (the line may offer a reload).
+function sameVersion(v) {
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(RELOADED)) || 0;
+  } catch {}
+  const step = versionStep(state.version, v, busy(), last, Date.now());
+  if (!state.version) state.version = v;
+  state.newVersion = step === 'offer';
+  if (step !== 'reload') return true;
+  reload();
+  return false;
+}
+
+function reload() {
+  try {
+    sessionStorage.setItem(RELOADED, String(Date.now()));
+  } catch {}
+  location.reload();
+}
+
+// busy is whether the user typed or picked in the open sheet, or a note is shown: a reload would lose it.
+function busy() {
+  const r = route(), p = r.name === 'item' && state.picks[key(r.boss, r.id)];
+  return !!state.note || (!!p && (!!p.option || !!p.text.trim()));
+}
+
+// connect opens the event stream while the page is shown and paired; each "board" event names the board's ETag.
+function connect() {
+  if (live.es || live.retry || document.visibilityState !== 'visible' || state.unpaired) return;
+  const es = live.es = new EventSource('/v1/events');
+  es.onopen = () => {
+    live.open = true;
+    live.retries = 0;
+  };
+  // While the board can't be read, every event reads it again: the ETag it last had may come back unchanged
+  es.addEventListener('board', e => {
+    heard();
+    live.tag = e.data;
+    if (e.data !== state.etag || !state.reachable) load();
+  });
+  // A ping checks the board (a 304 when unchanged): the stream alone doesn't prove the Mac still reads it
+  es.addEventListener('ping', () => {
+    heard();
+    load();
+  });
+  // A refused stream (401) closes for good: load finds out why, and the poll takes over until a retry opens it
+  es.onerror = dropped;
+  heard();
+}
+
+// heard restarts the watch for a stream gone quiet: a dropped connection may fire no error.
+function heard() {
+  clearTimeout(live.quiet);
+  live.quiet = setTimeout(dropped, QUIET_MS);
+}
+
+function dropped() {
+  disconnect();
+  live.retry = setTimeout(() => {
+    live.retry = 0;
+    connect();
+  }, Math.min(RETRY_MAX_MS, 1000 * 2 ** live.retries++));
+  load();
+}
+
+function disconnect() {
+  live.es?.close();
+  live.es = null;
+  live.open = false;
+  clearTimeout(live.quiet);
+  clearTimeout(live.retry);
+  live.retry = 0;
+}
+
+// reconnect opens the stream afresh, its retries forgotten.
+function reconnect() {
+  disconnect();
+  live.retries = 0;
+  connect();
 }
 
 const unread = boss => !!state.board?.lists?.find(l => l.boss === boss)?.error;
@@ -307,6 +406,7 @@ async function pair(code, device, out, btn) {
   state.unpaired = false;
   go('#/');
   load();
+  reconnect();
 }
 
 // statusOf is an open item's status; one the Mac couldn't work out shows as "no status".
@@ -629,6 +729,7 @@ function render() {
     const n = (count, what, cls) => el('span', { class: cls || false }, el('b', null, String(count)), what);
     tally.append(n(c.decide || 0, 'to decide', c.decide ? 'on' : ''), n(c.yours || 0, 'yours'), n(all.filter(onWorker).length, 'on workers'), n(all.length, 'open'));
     line.append('live · updated ' + hhmm(state.asOf));
+    if (state.newVersion) line.append(' · ', el('button', { class: 'reload', type: 'button', onclick: reload }, 'New version: reload'));
   }
 
   // Redraw the board only when what it shows changed (ages: each minute), so a poll or the sheet keeps its scroll.
@@ -671,6 +772,12 @@ document.addEventListener('keydown', e => {
   document.querySelectorAll('.opts .opt')[Number(e.key) - 1]?.click();
 });
 wide.addEventListener('change', render);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
-setInterval(() => { if (document.visibilityState === 'visible') load(); }, POLL_MS);
-load();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return disconnect();
+  load();
+  reconnect();
+});
+setInterval(() => { if (document.visibilityState === 'visible' && (!live.open || !state.reachable)) load(); }, POLL_MS);
+// The page's own version, not the first board's: that may come from a dev serve upgraded since (on the Pair screen)
+call('GET', '/v1/health').then(res => { if (!state.version && res.ok) state.version = res.data?.version || ''; }).catch(() => {});
+load().finally(connect);

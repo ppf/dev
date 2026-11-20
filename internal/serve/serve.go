@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +46,7 @@ func Handler(cfg Config) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": cfg.Version})
 	})
 	mux.Handle("GET /v1/board", cfg.Guard(http.HandlerFunc(cfg.board)))
+	mux.Handle("GET /v1/events", cfg.Guard(cfg.events(newWatch(cfg.read))))
 	mux.Handle("POST /v1/answer", cfg.Guard(fromPage(http.HandlerFunc(cfg.answer))))
 	mux.Handle("POST /v1/done", cfg.Guard(fromPage(http.HandlerFunc(cfg.done))))
 	mux.Handle("POST /v1/start", cfg.Guard(fromPage(http.HandlerFunc(cfg.start))))
@@ -98,11 +100,29 @@ type board struct {
 }
 
 func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
-	lists, err := cfg.Lists()
+	b, etag, err := cfg.read()
 	if err != nil {
-		log.Printf("dev serve: board not read: %v", err)
+		log.Printf("dev serve: %v", err)
 		writeError(w, http.StatusInternalServerError, "the board couldn't be read: see dev serve's output")
 		return
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if matches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Generated int64 `json:"generated"`
+		board
+	}{cfg.Now().Unix(), b})
+}
+
+// read is the board and its ETag.
+func (cfg Config) read() (board, string, error) {
+	lists, err := cfg.Lists()
+	if err != nil {
+		return board{}, "", fmt.Errorf("board not read: %w", err)
 	}
 	var statuses []struct {
 		Items []struct {
@@ -111,9 +131,7 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(lists, &statuses); err != nil {
-		log.Printf("dev serve: board not decoded: %v", err)
-		writeError(w, http.StatusInternalServerError, "the board couldn't be read: see dev serve's output")
-		return
+		return board{}, "", fmt.Errorf("board not decoded: %w", err)
 	}
 	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns()}
 	for _, l := range statuses {
@@ -131,23 +149,11 @@ func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := json.Marshal(b)
 	if err != nil {
-		log.Printf("dev serve: board not encoded: %v", err)
-		writeError(w, http.StatusInternalServerError, "the board couldn't be read: see dev serve's output")
-		return
+		return board{}, "", fmt.Errorf("board not encoded: %w", err)
 	}
 	sum := sha256.Sum256(body)
 	// Weak: two 200s of one board differ in generated
-	etag := `W/"` + hex.EncodeToString(sum[:16]) + `"`
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "no-cache")
-	if matches(r.Header.Get("If-None-Match"), etag) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Generated int64 `json:"generated"`
-		board
-	}{cfg.Now().Unix(), b})
+	return b, `W/"` + hex.EncodeToString(sum[:16]) + `"`, nil
 }
 
 // matches is whether an If-None-Match header names etag (weak comparison, as RFC 9110 has for it).

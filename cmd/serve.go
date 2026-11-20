@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -34,9 +35,9 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Serve the board to the phone page over HTTP",
 		Long: fmt.Sprintf(`Serve every dev boss's to do list, as dev todo --all --json has it, to a page on the phone: GET /v1/health,
-GET /v1/board, POST /v1/pair, and POST /v1/answer and /v1/done, which answer and tick as dev todo answer --question and done --text do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
+GET /v1/board, GET /v1/events (the board changed: an event stream), POST /v1/pair, and POST /v1/answer and /v1/done, which answer and tick as dev todo answer --question and done --text do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
 address, port %d; --addr takes a loopback, tailnet or private LAN ip:port, never 0.0.0.0, :: or a public
-address. Plain HTTP. /v1/board needs a paired phone on every bind, loopback too: dev serve pair.`, serve.DefaultPort),
+address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind, loopback too: dev serve pair.`, serve.DefaultPort),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if install || uninstall {
@@ -197,7 +198,7 @@ func serveConfig(stderr io.Writer, dir string) serve.Config {
 	return serve.Config{
 		Version:     buildVersion(),
 		Now:         time.Now,
-		Lists:       boardLists(tmux.New(), stderr, time.Now),
+		Lists:       boardLists(tmux.New(), &unrepeated{w: stderr, now: time.Now}, time.Now),
 		ManagerRuns: func() bool { return running(tmux.New(), sidebar.Manager) },
 		Answer:      pageAnswer,
 		Done:        pageDone(stderr),
@@ -232,12 +233,43 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 	}
 }
 
+// unrepeated drops a line written again within a minute: an open page's stream reads the board every second.
+type unrepeated struct {
+	w    io.Writer
+	now  func() time.Time
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+func (u *unrepeated) Write(p []byte) (int, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	now := u.now()
+	for line, at := range u.seen {
+		if now.Sub(at) >= time.Minute {
+			delete(u.seen, line)
+		}
+	}
+	if _, ok := u.seen[string(p)]; ok {
+		return len(p), nil
+	}
+	if u.seen == nil {
+		u.seen = map[string]time.Time{}
+	}
+	u.seen[string(p)] = now
+	return u.w.Write(p)
+}
+
 // listenAndServe serves on ln until ctx ends or SIGINT/SIGTERM, then shuts down.
 func listenAndServe(ctx context.Context, ln net.Listener, cfg serve.Config) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Shutdown waits for open requests: the pages' event streams end when it starts
+	base, closeStreams := context.WithCancel(context.Background())
+	defer closeStreams()
 	srv := &http.Server{Handler: serve.Handler(cfg), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute}
+		WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, BaseContext: func(net.Listener) context.Context { return base }}
+	srv.RegisterOnShutdown(closeStreams)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {
