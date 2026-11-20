@@ -521,7 +521,8 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session (the boards' row to its board), 1-9 answers an
-// open ask, d ticks a plain item, space opens a list item in its popup (dev todo show), esc/q leaves.
+// open ask, d ticks a plain item, space opens a list item in its popup (dev todo show), b the board (dev todo board),
+// esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
 	if m.needIdx >= len(rows) || rows[m.needIdx].key() != m.needKey {
@@ -561,6 +562,9 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		client, open := m.client(), m.openItem
 		return m, runAction(m.c, client, func() error { return open(client, row.Boss, row.ID, row.Text) })
+	case "b":
+		client, open := m.client(), m.openBoard
+		return m, runAction(m.c, client, func() error { return open(client, nil) })
 	case "d":
 		if row.Kind != NeedPlain {
 			showMessage(m.c, m.client(), "d ticks a plain item")
@@ -838,7 +842,7 @@ func (m Model) needsHint() string {
 	case row.Kind == NeedPlain:
 		hint = "d tick (stays till ticked) · esc leave"
 	default:
-		hint = "j/k ⏎ expand · esc leave"
+		hint = "j/k ⏎ expand · b board · esc leave"
 	}
 	return " " + faint + hint + reset
 }

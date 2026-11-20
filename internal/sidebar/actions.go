@@ -51,12 +51,23 @@ func OpenPicker(c *tmux.Client, client string) error {
 // OpenItem opens item id of boss's list in its popup on client (dev todo show), refused unless it still reads text;
 // it returns once the popup closes.
 func OpenItem(client, boss string, id int, text string) error {
+	return runDev("todo", "show", "--client", client, "--question", text, "--", boss, strconv.Itoa(id))
+}
+
+// OpenBoard opens the to do board in its popup on client (dev todo board), of bosses' lists or, with none, every
+// boss's; it returns once the popup closes.
+func OpenBoard(client string, bosses []string) error {
+	return runDev(append([]string{"todo", "board", "--client", client, "--"}, bosses...)...)
+}
+
+// runDev runs this dev with args, failing with what it printed to stderr.
+func runDev(args ...string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	var stderr strings.Builder
-	cmd := exec.Command(exe, "todo", "show", "--client", client, "--question", text, "--", boss, strconv.Itoa(id))
+	cmd := exec.Command(exe, args...)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return errors.New(cmp.Or(strings.TrimSpace(stderr.String()), err.Error()))

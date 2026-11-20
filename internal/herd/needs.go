@@ -213,7 +213,8 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
-// user's item, s start it (dev todo start), space open a list item in its popup (dev todo show), g/⏎ go to its session
+// user's item, s start it (dev todo start), space open a list item in its popup (dev todo show), b the board of this
+// board's lists (dev todo board), g/⏎ go to its session
 // (on Waiting on others' fold row open or fold it), esc or n back to the cards, t fold the block back to the cards,
 // ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -239,6 +240,9 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.todoFolded, m.needMode = true, false
 	case "ctrl+c":
 		return m, tea.Quit
+	case "b":
+		open, client, bosses := m.openBoard, m.snap.client, m.boardBosses()
+		return m, m.action(func() error { return open(client, bosses) })
 	case " ":
 		if !r.opens() {
 			m.msg = info("space opens a list item")
@@ -392,4 +396,13 @@ func (m Model) sendNeed(r needRow, n int, k tea.KeyMsg) (Model, tea.Cmd) {
 	m.openPicker(t)
 	next, cmd := m.typePick(k, t.pick)
 	return next.(Model), cmd
+}
+
+// boardBosses are the bosses the board shows: this one and those under it; none (every boss's) on the manager's.
+func (m Model) boardBosses() []string {
+	if m.snap.name == sidebar.Manager {
+		return nil
+	}
+	// Its bosses with no items yet too: the board follows their first
+	return append([]string{m.snap.name}, m.snap.bosses...)
 }

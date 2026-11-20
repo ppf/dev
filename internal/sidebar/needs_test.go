@@ -927,3 +927,22 @@ func TestNeedsOpenItem(t *testing.T) {
 		t.Errorf("checked %d rows, opened %+v", n, opened)
 	}
 }
+
+// b opens every boss's board.
+func TestNeedsOpenBoard(t *testing.T) {
+	var calls []answerCall
+	m, _ := key(needsModel(&calls), "n")
+	var opened [][]string
+	m.openBoard = func(client string, bosses []string) error {
+		opened = append(opened, bosses)
+		return nil
+	}
+	_, cmd := key(m, "b")
+	if cmd == nil {
+		t.Fatal("b opened nothing")
+	}
+	cmd()
+	if len(opened) != 1 || opened[0] != nil {
+		t.Errorf("opened %q, want every boss's board", opened)
+	}
+}
