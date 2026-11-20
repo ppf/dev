@@ -116,14 +116,18 @@ func desktopSession(w desktop.Worker) sidebar.Session {
 }
 
 // doing is what tmux worker s is doing now, as the boss board's card says it (herd's own section and statusText):
-// "" asking; its planned wait; working, its tool call's description, else the tool; else what its reply's newest
-// WAITING marker names. A transcript not written yet says nothing.
+// "" in a dialog (herd reads that off the screen); its planned wait; working, its tool call's description, else the
+// tool; its question when its turn ended on one; else what its reply's newest WAITING marker names. A transcript not
+// written yet says nothing.
 func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
 	switch {
-	case s.Deciding, sidebar.NoteKind(s.Note) == sidebar.NoteAsks && s.State != agent.Working:
+	case s.Deciding:
 		return ""
 	case s.Wait.Held():
 		return s.Wait.Text(now)
+	case sidebar.NoteKind(s.Note) == sidebar.NoteAsks && s.State != agent.Working:
+		_, ask, _ := strings.Cut(s.Note, ": ")
+		return strings.Join(strings.Fields(ask), " ")
 	case s.Transcript == "":
 		return ""
 	}

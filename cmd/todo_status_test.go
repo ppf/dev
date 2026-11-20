@@ -158,7 +158,7 @@ func TestDoing(t *testing.T) {
 		{"planned wait", sidebar.Session{Wait: planned, Transcript: tool}, planned.Text(now)},
 		{"resting", sidebar.Session{State: agent.Idle, Transcript: tool}, ""},
 		{"asking", sidebar.Session{State: agent.Waiting, Deciding: true, Transcript: waits}, ""},
-		{"turn ended on a question", sidebar.Session{State: agent.Idle, Note: "asks: which one?", Transcript: waits}, ""},
+		{"turn ended on a question", sidebar.Session{State: agent.Idle, Note: "asks: which  one?", Transcript: waits}, "which one?"},
 		{"no transcript yet", sidebar.Session{State: agent.Working, Transcript: filepath.Join(dir, "none.jsonl")}, ""},
 		{"no transcript option", sidebar.Session{State: agent.Working}, ""},
 	} {

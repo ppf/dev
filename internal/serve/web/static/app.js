@@ -644,7 +644,7 @@ function render() {
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
-      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus();
+      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
       state.noteShown = state.note;
     }
