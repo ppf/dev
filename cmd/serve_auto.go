@@ -23,9 +23,9 @@ import (
 // autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE, TMUX or TMUX_PANE).
 var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
 
-// autoServeDefault is the address dev boss starts dev serve on without DEV_SERVE_ADDR; "": dev serve's own default
-// (tailnet, else private LAN, port 8417).
-const autoServeDefault = ""
+// autoServeDefault is the address dev boss starts dev serve on without DEV_SERVE_ADDR: this Mac only (the user's
+// pick); "" would be dev serve's own default (tailnet, else private LAN), which a hand-run dev serve keeps.
+const autoServeDefault = "127.0.0.1:8417"
 
 // autoServeAddr is where dev boss starts dev serve: DEV_SERVE_ADDR, else autoServeDefault.
 func autoServeAddr(getenv func(string) string) string {
@@ -145,10 +145,13 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return err
 	}
 	if err := s.bind(addr); err != nil {
-		if addr != "" {
+		switch {
+		case s.getenv("DEV_SERVE_ADDR") != "":
 			return errors.New(strings.Replace(err.Error(), "--addr", "DEV_SERVE_ADDR", 1))
+		case addr == "":
+			return fmt.Errorf("%w (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)", err)
 		}
-		return fmt.Errorf("%w (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)", err)
+		return err
 	}
 	if ap, err := netip.ParseAddrPort(addr); err == nil && ap.Port() == 0 {
 		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")

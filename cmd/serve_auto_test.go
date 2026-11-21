@@ -82,7 +82,7 @@ func TestAutoServeDefaultAddr(t *testing.T) {
 	if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if want := [][]string{{"/bin/dev", "serve", "--awake=false"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
+	if want := [][]string{{"/bin/dev", "serve", "--awake=false", "--addr", "127.0.0.1:8417"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
 		t.Fatalf("spawned %q, want %q", f.spawned, want)
 	}
 }
@@ -141,10 +141,10 @@ func TestAutoServeOtherMachine(t *testing.T) {
 	}
 }
 
-// Switching autostart to loopback is autoServeDefault = "127.0.0.1:8417" and this test
+// Back to dev serve's own default (tailnet, else LAN) is autoServeDefault = "" and this test
 func TestAutoServeAddr(t *testing.T) {
-	if got := autoServeAddr(func(string) string { return "" }); got != "" {
-		t.Errorf("default %q, want dev serve's own default", got)
+	if got := autoServeAddr(func(string) string { return "" }); got != "127.0.0.1:8417" {
+		t.Errorf("default %q, want this Mac only", got)
 	}
 	if got := autoServeAddr(func(k string) string { return map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:9"}[k] }); got != "127.0.0.1:9" {
 		t.Errorf("override %q", got)
@@ -261,7 +261,7 @@ func TestAutoServeLaunchAgent(t *testing.T) {
 func TestAutoServeFails(t *testing.T) {
 	t.Run("no address", func(t *testing.T) {
 		f := &fakeStart{runs: -1, envValue: map[string]string{}, bindErr: errors.New("no tailnet or private LAN address")}
-		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "no tailnet or private LAN address (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)" || len(f.spawned) > 0 {
+		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "no tailnet or private LAN address" || len(f.spawned) > 0 {
 			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})
