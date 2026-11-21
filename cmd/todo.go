@@ -332,10 +332,10 @@ words. It ticks the item and the boss's inbox gets "you answered #<n> \"<questio
 takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), so no Claude answers for the user,
 and for a desktop app boss, which has no dev inbox: answer it in its chat. --question refuses the answer unless item n
 still reads that text (item numbers restart once a list empties). --via manager is the manager relaying what the user
-told it: only in the manager's coordinator pane, only for an item older than the user's latest prompt there, and the
-note quotes that prompt: "you answered #<n> \"<question>\" via manager (\"<prompt>\"): <answer>". The user's pick in
-the manager's AskUserQuestion counts as that prompt for one answer: its one question must contain --question, and the
-answer must be the option picked.`,
+told it, only from their pick in the manager's AskUserQuestion: only in the manager's coordinator pane, for an item
+older than that pick, once; its one question must start "<project> #<n>: " and contain --question, the answer must be
+the option picked (or what they typed under Other), and the note quotes it: "you answered #<n> \"<question>\" via
+manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask the item as a question instead.`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -363,15 +363,13 @@ answer must be the option picked.`,
 				if manager, said, err = managerPrompt(c); err != nil {
 					return err
 				}
-				if said.Pick {
-					if err := pickFor(said, name, id, question); err != nil {
-						return err
-					}
+				if err := pickFor(said, name, id, question); err != nil {
+					return err
 				}
 				before = said.At
 			}
 			var claim func() (string, func() error, error)
-			if said != nil && said.Pick {
+			if said != nil {
 				// A pick answers one item, also with two answers relayed at once
 				claim = func() (string, func() error, error) {
 					if err := manager.Box.Claim(*said); err != nil {
@@ -403,11 +401,12 @@ answer must be the option picked.`,
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button (needs --question): allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
-	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's answer from their latest prompt to it (only in its coordinator pane)")
+	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's pick in its AskUserQuestion (only in its coordinator pane)")
 	return cmd
 }
 
-// managerPrompt is the manager and the user's latest prompt to it, for an answer relayed from its coordinator pane.
+// managerPrompt is the manager and the user's latest prompt to it (a pick or a typed message), for an answer relayed
+// from its coordinator pane.
 func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	notHere := errors.New("--via manager runs only in the manager's coordinator pane")
 	pane := os.Getenv("TMUX_PANE")
@@ -431,13 +430,15 @@ func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	return self, p, nil
 }
 
-// pickFor refuses a pick, the user's latest words to the manager, that isn't one question asking item id of boss,
-// question, or that left it open.
+// pickFor refuses the user's latest words to the manager unless they are a pick of one question asking item id of
+// boss, question, that didn't leave it open: a typed message can't be tied to an item.
 func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
 	asked := strings.ToLower(pick.Question)
 	item := fmt.Sprintf(" #%d: ", id)
 	named := strings.HasPrefix(asked, strings.ToLower(boss)+item) || strings.HasPrefix(asked, strings.ToLower(strings.TrimPrefix(boss, "boss-"))+item)
 	switch {
+	case !pick.Pick:
+		return errors.New("--via manager: the user's latest words here are a typed message, not a pick: ask the item as a one-click question (AskUserQuestion; they can still type under Other)")
 	case question == "":
 		return errors.New("--via manager from a pick needs --question with the item's text")
 	case pick.Question == "":

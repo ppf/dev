@@ -281,11 +281,55 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		// A finished turn ends a run of rate limits
 		resumeErr = unsetResume(c, pane, true)
 	}
+	var handErr error
+	if ok && n.Kind == Decision && w.Herd == "" && w.Outside == "" {
+		n.Handed, handErr = handOver(c, clk, b, w, n)
+	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-	return errors.Join(askErr, resumeErr, err, setNote(c, pane, n.Summary()))
+	return errors.Join(askErr, resumeErr, handErr, err, setNote(c, pane, n.Summary()))
+}
+
+// handOver queues worker w's decision n in the Manager's inbox, once per wait, and delivers it, when w's boss b runs
+// under the live Manager: the Manager asks the user and sends their pick to w itself, so the user is asked once.
+// handed reports it there (queued now or before), kept in b's box for Watch's stuck note; else b relays it as before.
+func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (handed bool, err error) {
+	m, ok, err := managerOver(c, b)
+	if !ok || err != nil {
+		return false, err
+	}
+	// One per wait: a dialog read or not, its Notification and PermissionRequest are one question
+	n.Of, n.Key = b.Name, Decision+"\x00"+w.Since
+	if _, err := m.Box.Add(n, clk.Now()); err != nil {
+		return false, err
+	}
+	return true, errors.Join(b.Box.update(func(s *state) error {
+		s.health(w.Session).Handed = w.Since
+		return nil
+	}), Deliver(c, clk, m))
+}
+
+// managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.
+func managerOver(c *tmux.Client, b Boss) (Boss, bool, error) {
+	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))
+	if !ok || err != nil || m.Name != Manager {
+		return Boss{}, false, err
+	}
+	a, err := control.Resolve(c, Manager)
+	if control.NoAgent(err) {
+		return Boss{}, false, nil
+	}
+	if err != nil {
+		return Boss{}, false, err
+	}
+	// remain-on-exit keeps a crashed coordinator's pane
+	dead, err := c.Run("display-message", "-p", "-t", a.Pane, "#{pane_dead}")
+	if err != nil || strings.TrimSpace(dead) == "1" {
+		return Boss{}, false, err
+	}
+	return m, true, nil
 }
 
 // asked is what pane's dialog asks (agent.Question.Ask), clipped, when its question (@agent_question) is the

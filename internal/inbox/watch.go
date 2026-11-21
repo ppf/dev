@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +105,7 @@ type sight struct {
 	parked  bool   // working with Claude's input box back: its turn waits on background tasks
 	waiting bool   // its planned wait holds: no stuck note while it rests or waits on background tasks, no asks repeat
 	waitEnd int64  // its planned wait ended this round while it worked: its stuck clock starts there
+	managed bool   // its boss runs under the live Manager, which a decision of its may be handed to
 }
 
 // prCheck is a PR's merge and CI state as Watch checks it.
@@ -183,8 +185,12 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 		if w.waitEnd != 0 {
 			h.WaitEnd = w.waitEnd
 		}
-		stuck := func(text, key string) {
-			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key, Outside: w.Outside != ""}
+		stuck := func(text, key string, handed bool) {
+			n := Note{Worker: w.Session, Kind: Stuck, Text: text, Key: Stuck + "\x00" + key, Outside: w.Outside != "", Handed: handed}
+			if handed {
+				// The Manager gone later, the boss gets the plain note
+				n.Key += "\x00handed"
+			}
 			holding = append(holding, n)
 			if h.Stuck != n.Key && s.add(n) {
 				h.Stuck = n.Key
@@ -202,13 +208,17 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 				if w.parked {
 					text += ", waiting on its background tasks"
 				}
-				stuck(text, "working"+strconv.FormatInt(progress.Unix(), 10))
+				stuck(text, "working"+strconv.FormatInt(progress.Unix(), 10), false)
 			}
 		case unix(w.Since) == 0:
 			// No stretch to time
 		case agent.Deciding(w.trusted, w.WaitingFor):
 			if held := now.Sub(since); held >= StuckDecision {
-				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since)
+				// Handed to the Manager, still there: it asks; else the boss relays it, and keeps it
+				if !w.managed && h.Handed == w.Since {
+					h.Handed = ""
+				}
+				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since, w.managed && h.Handed == w.Since)
 			}
 		case resting(w.trusted, w.WaitingFor) && !w.waiting:
 			if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
@@ -302,13 +312,14 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	live := map[string]bool{}
 	var sights []sight
 	var due []paneRow // idle workers whose PR to check
-	var errs []error
+	m, managed, err := managerOver(c, b)
+	errs := []error{err}
 	for _, r := range rows {
 		if !sidebar.Names(r.StartedBy, id, b.Name, true) {
 			continue
 		}
 		live[r.Session] = true
-		w := sight{paneRow: r, trusted: agent.Trusted(r.State, r.StateCmd, r.Command)}
+		w := sight{paneRow: r, trusted: agent.Trusted(r.State, r.StateCmd, r.Command), managed: managed}
 		if mates[r.Pane] || w.trusted == "" {
 			continue
 		}
@@ -427,6 +438,9 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 		if err := setNote(c, panes[n.Worker], n.Summary()); err != nil && !strings.Contains(err.Error(), "can't find pane") {
 			errs = append(errs, err)
 		}
+	}
+	if managed {
+		errs = append(errs, remindManager(c, clk, b, m, holding))
 	}
 	errs = append(errs, deliverPending(c, clk, b))
 	if len(due) > 0 {
@@ -594,4 +608,31 @@ func checkPRs(c *tmux.Client, clk control.Clock, b Boss, due []paneRow) error {
 		errs = append(errs, deliverPending(c, clk, b))
 	}
 	return errors.Join(errs...)
+}
+
+// remindManager queues in the Manager's inbox, once each, the stuck notes of decisions handed to it (handOver) that
+// still wait, and delivers them: it may have lost the first note to a /clear. Not while that first note still waits
+// there: the Manager would get the one dialog twice.
+func remindManager(c *tmux.Client, clk control.Clock, b, m Boss, holding []Note) error {
+	queued := false
+	for _, n := range holding {
+		if n.Kind != Stuck || !n.Handed {
+			continue
+		}
+		n.Handed, n.Of = false, b.Name
+		var added bool
+		if err := m.Box.update(func(s *state) error {
+			if !slices.ContainsFunc(s.Notes, func(q Note) bool { return q.Worker == n.Worker && q.Of != "" }) {
+				added = s.add(n)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		queued = queued || added
+	}
+	if !queued {
+		return nil
+	}
+	return Deliver(c, clk, m)
 }

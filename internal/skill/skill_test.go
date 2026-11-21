@@ -171,12 +171,17 @@ func TestAskRules(t *testing.T) {
 		"**One question per call, in order.** Re-read `dev todo --all` right before each",
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
+		"a message the user typed here answers no item (dev refuses it): ask that item as a question",
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
 		"**Assess the user's ideas before handing them on.**", "With real cons or a conflict on the lists",
 		"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
 		"you decide nothing for a project",
+		"text typed under Other goes on only if it says to",
+		"ending `the manager asks the user: leave it to the manager` is the manager's",
+		"**A worker's permission prompt or dialog under a boss of yours**",
+		"only the answer after the colon is theirs",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)
@@ -193,13 +198,21 @@ func TestTodoOwnerRule(t *testing.T) {
 		if strings.Contains(text, "dev todo") && !strings.Contains(text, "add --on <worker name>") {
 			t.Errorf("%s/SKILL.md: dev todo rule without --on for a worker's item", name)
 		}
+		// A boss's own or parked item and a person's must not read as free-text owners
+		for _, want := range []string{"An item you do yourself or park gets `--on boss`", "`dev todo doing <n> '<what now>'`", "`--waiting-for <who>`", "never a free-text owner"} {
+			if strings.Contains(text, "dev todo") && !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: owner rule missing %q", name, want)
+			}
+		}
 	}
 }
 
 func TestTodoNoteRule(t *testing.T) {
 	for name, text := range byName {
-		if strings.Contains(text, "dev todo") && !strings.Contains(text, "dev todo note decided|said|risk") {
-			t.Errorf("%s/SKILL.md: dev todo rule without dev todo note", name)
+		for _, want := range []string{"dev todo note decided|said|risk", "`state` holds your standing state off the board"} {
+			if strings.Contains(text, "dev todo") && !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: note rule missing %q", name, want)
+			}
 		}
 	}
 }

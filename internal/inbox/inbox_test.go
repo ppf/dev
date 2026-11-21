@@ -338,6 +338,32 @@ func TestObserveDecision(t *testing.T) {
 	}
 }
 
+// A decision handed to the Manager goes stuck as "leave it" while the Manager is there; gone, the boss gets it plain.
+func TestObserveDecisionHanded(t *testing.T) {
+	o := newObserver(t)
+	w := worker("waiting", "permission_prompt", o.ago(StuckDecision))
+	w.managed = true
+	o.s.health("w").Handed = "an earlier wait"
+	const plain = "[dev boss inbox] 1 worker update(s):\n- w stuck: waiting on a decision for 3m, unanswered"
+	if got, _ := o.round(0, w); got != plain {
+		t.Errorf("another wait handed = %q, want %q", got, plain)
+	}
+	o = newObserver(t)
+	o.s.health("w").Handed = w.Since
+	got, holding := o.round(0, w)
+	if want := plain + "; " + leaveToManager; got != want || len(holding) != 1 || !strings.HasSuffix(holding[0], leaveToManager) {
+		t.Errorf("handed = %q, holding %q; want %q", got, holding, want)
+	}
+	w.managed = false
+	if got, _ := o.round(time.Minute, w); got != "[dev boss inbox] 1 worker update(s):\n- w stuck: waiting on a decision for 4m, unanswered" {
+		t.Errorf("Manager gone = %q, want the plain note", got)
+	}
+	w.managed = true
+	if got, holding := o.round(time.Minute, w); got != "" || len(holding) != 1 || strings.HasSuffix(holding[0], leaveToManager) {
+		t.Errorf("Manager back = %q, holding %q; want it kept by the boss", got, holding)
+	}
+}
+
 // A question a turn ended on is repeated while the worker rests: after AskAgain, then twice as long each time.
 func TestObserveAsksAgain(t *testing.T) {
 	o := newObserver(t)
@@ -425,6 +451,25 @@ func TestObserveContext(t *testing.T) {
 	w.Context = "85"
 	if got, _ := o.round(time.Second, w); got != "[dev boss inbox] 1 worker update(s):\n- w high context: 85% used" {
 		t.Errorf("full again = %q", got)
+	}
+}
+
+// A decision handed to the manager tells the boss to leave it and the manager to answer the worker; Outside wins.
+func TestNoteHanded(t *testing.T) {
+	n := Note{Worker: "w", Kind: Decision, Text: "Bash"}
+	for _, tt := range []struct {
+		name string
+		note func(Note) Note
+		want string
+	}{
+		{"boss's", func(n Note) Note { n.Handed = true; return n }, "w needs a decision: Bash; " + leaveToManager},
+		{"manager's", func(n Note) Note { n.Of = "boss-a"; return n },
+			"w (boss-a's worker) needs a decision: Bash; ask the user, then send-keys only their pick to w yourself (its boss leaves it to you)"},
+		{"outside", func(n Note) Note { n.Outside, n.Handed = true, true; return n }, "w needs a decision: Bash; " + leaveIt},
+	} {
+		if got := tt.note(n).String(); got != tt.want {
+			t.Errorf("%s = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }
 

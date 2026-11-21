@@ -296,6 +296,9 @@ func Resolve(c *tmux.Client, target string) (Agent, error) {
 	return Agent{}, fmt.Errorf("session %q %w", target, errNoAgentPane)
 }
 
+// NoAgent reports Resolve's error for a session with no agent registered in it.
+func NoAgent(err error) bool { return errors.Is(err, errNoAgentPane) }
+
 // AwaitAgent polls until session has a registered agent; a timeout reports the session's agent window.
 func AwaitAgent(c *tmux.Client, clk Clock, session string, timeout time.Duration) (Agent, error) {
 	start := clk.Now()

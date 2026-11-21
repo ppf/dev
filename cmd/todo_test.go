@@ -554,12 +554,14 @@ func TestTodoAnswerRefused(t *testing.T) {
 // user left the item open.
 func TestPickFor(t *testing.T) {
 	pick := func(q, a string) *inbox.Prompt { return &inbox.Prompt{Pick: true, Question: q, Answer: a} }
+	typed := &inbox.Prompt{Text: "dev #7: merge it"}
 	for _, tt := range []struct {
 		name     string
 		pick     *inbox.Prompt
 		question string
 		want     string
 	}{
+		{"typed message", typed, "Merge #148?", "a typed message, not a pick"},
 		{"its item", pick("dev #7: Merge #148? (CI green)", "Merge"), "Merge #148?", ""},
 		{"boss name", pick("boss-dev #7: Merge #148?", "Merge"), "Merge #148?", ""},
 		{"no --question", pick("dev #7: Merge #148?", "Merge"), "", "needs --question"},
@@ -570,6 +572,9 @@ func TestPickFor(t *testing.T) {
 		{"number prefix", pick("dev #70: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"project suffix", pick("api-dev #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"left open", pick("dev #7: Merge #148?", "leave it open"), "Merge #148?", "the item stays open"},
+		// The manager's own assessment question names no item: never an item's answer, typed under Other neither
+		{"assessment", pick("Hand on the user's idea to cache Merge #148? builds?", "Hand it on"), "Merge #148?", "not boss-dev #7"},
+		{"assessment, Other", pick("Merge #148? cache idea: hand it on?", "merge it and cache the builds"), "Merge #148?", "not boss-dev #7"},
 	} {
 		err := pickFor(tt.pick, "boss-dev", 7, tt.question)
 		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
