@@ -548,7 +548,10 @@ function columns(ls) {
 function swipe(ls) {
   // The lane is taken once the scroll stops: a tab's smooth scroll lands on no lane it passes
   let settle = 0;
-  const lanes = el('div', { class: 'lanes', onscroll: () => { clearTimeout(settle); settle = setTimeout(() => laneInView(lanes), 150); } },
+  const lanes = el('div', { class: 'lanes', onscroll: () => {
+    clearTimeout(settle);
+    settle = setTimeout(() => { tabbing = false; laneInView(lanes); }, 150);
+  } },
     ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
@@ -559,8 +562,12 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
+// tabbing is a tab's smooth scroll under way: state.lane already names where it goes.
+let tabbing = false;
+
 // showLane scrolls the phone's lanes to column k's.
 function showLane(k, smooth) {
+  tabbing = smooth;
   const lanes = document.querySelector('#view .lanes'), lane = lanes?.querySelector('[data-k="' + k + '"]');
   if (!lane) return;
   lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: smooth ? 'smooth' : 'instant' });
@@ -783,7 +790,9 @@ function render() {
       const f = document.activeElement?.dataset?.f;
       // and each column keeps its scroll, the phone's filter strip its own
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
-      const strip = view.querySelector('.filters')?.scrollLeft || 0;
+      const strip = view.querySelector('.filters')?.scrollLeft || 0, swiped = view.querySelector('.lanes');
+      // A swipe cut by the redraw keeps the lane it got to
+      if (swiped && !tabbing) laneInView(swiped);
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
