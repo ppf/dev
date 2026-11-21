@@ -325,6 +325,7 @@ func serveConfig(stderr io.Writer, dir string, loopback bool) serve.Config {
 		Done:        pageDone(stderr),
 		Start:       pageStart(stderr),
 		Doing:       pageDoing(stderr),
+		Reopen:      pageReopen(stderr),
 		Guard:       guard,
 		Pair:        http.HandlerFunc(auth.Pair),
 		Page:        web.Handler(),

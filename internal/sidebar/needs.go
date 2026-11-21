@@ -323,7 +323,7 @@ func runTodo(timeout time.Duration, args ...string) (stdout, warning string, err
 	warning = strings.Join(strings.Fields(stderr.String()), " ")
 	switch {
 	case ctx.Err() != nil:
-		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, it may be ticked", args[0], timeout)
+		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, it may have gone through", args[0], timeout)
 	case err != nil:
 		return "", "", errors.New(cmp.Or(warning, err.Error()))
 	}
@@ -352,6 +352,12 @@ func AnswerNeed(boss string, id int, question, option string) (string, error) {
 // StartNeed asks for item id of boss's list to be started, as dev todo start does, only while it still reads text.
 func StartNeed(boss string, id int, text string) (string, error) {
 	out, warning, err := runTodo(answerTimeout, "start", "--from-board", "--question="+text, "--", boss, strconv.Itoa(id))
+	return strings.TrimSpace(out + " " + warning), err
+}
+
+// ReopenNeed puts the user's ticked item id back on boss's list, as dev todo reopen does, only while it still reads text.
+func ReopenNeed(boss string, id int, text string) (string, error) {
+	out, warning, err := runTodo(answerTimeout, "reopen", "--from-board", "--question="+text, "--", boss, strconv.Itoa(id))
 	return strings.TrimSpace(out + " " + warning), err
 }
 

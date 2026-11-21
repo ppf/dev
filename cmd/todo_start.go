@@ -135,7 +135,7 @@ func startReceiver(c *tmux.Client, name string) (s todo.Store, to inbox.Boss, cl
 		s, err = todo.ForPane(c, pane)
 		return s, to, false, err
 	}
-	s, ok, cerr := todo.ClosedStore(c, name, time.Now())
+	s, ok, cerr := todo.ClosedStore(c, name, time.Now(), false)
 	switch {
 	case cerr != nil:
 		return s, to, false, errors.Join(err, cerr)

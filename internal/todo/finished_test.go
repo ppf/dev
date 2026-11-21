@@ -386,8 +386,12 @@ func TestAllFinishedOnly(t *testing.T) {
 	if lists, err := Closed(c, now); err != nil || len(lists) != 0 {
 		t.Errorf("Closed = %d lists, %v", len(lists), err)
 	}
-	if _, ok, err := ClosedStore(c, "boss-shut", now); err != nil || ok {
+	if _, ok, err := ClosedStore(c, "boss-shut", now, false); err != nil || ok {
 		t.Errorf("ClosedStore = %v, %v: want not found", ok, err)
+	}
+	// Reopen finds it
+	if s, ok, err := ClosedStore(c, "boss-shut", now, true); err != nil || !ok || s.Boss() != "boss-shut" {
+		t.Errorf("ClosedStore with finished = %v, %v: want boss-shut's", ok, err)
 	}
 }
 

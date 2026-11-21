@@ -41,6 +41,10 @@ func actHandler(calls *[]call, err error) http.Handler {
 			*calls = append(*calls, call{boss, id, text, "doing " + doing})
 			return err
 		},
+		Reopen: func(boss string, id int, text string) error {
+			*calls = append(*calls, call{boss, id, text, "reopen"})
+			return err
+		},
 		Guard: noGuard,
 		Pair:  http.NotFoundHandler(),
 	})
@@ -80,8 +84,11 @@ func TestActOK(t *testing.T) {
 			t.Errorf("doing %s = %d %s", body, w.Code, w.Body)
 		}
 	}
+	if w := post(h, "/v1/reopen", `{"boss":"boss-a","id":5,"text":"Read again"}`, true); w.Code != http.StatusOK {
+		t.Errorf("reopen = %d %s", w.Code, w.Body)
+	}
 	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}, {"boss-a", 3, "Write the notes", "start"},
-		{"boss-a", 4, "Send the cert", "doing mailing ops"}, {"boss-a", 4, "Send the cert", "doing stop after mailing ops"}}
+		{"boss-a", 4, "Send the cert", "doing mailing ops"}, {"boss-a", 4, "Send the cert", "doing stop after mailing ops"}, {"boss-a", 5, "Read again", "reopen"}}
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls = %+v, want %+v", calls, want)
 	}
@@ -104,6 +111,8 @@ func TestActRefused(t *testing.T) {
 		{"no text, doing", "/v1/doing", `{"boss":"b","id":1,"doing":"x"}`, true, http.StatusBadRequest},
 		{"doing and stop", "/v1/doing", `{"boss":"b","id":1,"text":"T","doing":"x","stop":true}`, true, http.StatusBadRequest},
 		{"desktop boss, doing", "/v1/doing", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
+		{"no header, reopen", "/v1/reopen", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
+		{"no text, reopen", "/v1/reopen", `{"boss":"b","id":1}`, true, http.StatusBadRequest},
 		{"no JSON", "/v1/answer", `option=A`, true, http.StatusBadRequest},
 		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, true, http.StatusBadRequest},
 		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, true, http.StatusBadRequest},
@@ -136,6 +145,11 @@ func TestActErrors(t *testing.T) {
 	w = post(actHandler(&calls, again), "/v1/start", `{"boss":"b","id":1,"text":"T"}`, true)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already sent to boss-a") {
 		t.Errorf("start refused = %d %s", w.Code, w.Body)
+	}
+	notMine := Refused{Code: http.StatusConflict, Err: errors.New(`item 1 was on fix-login, not the user's to reopen`)}
+	w = post(actHandler(&calls, notMine), "/v1/reopen", `{"boss":"b","id":1,"text":"T"}`, true)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "not the user's to reopen") {
+		t.Errorf("reopen refused = %d %s", w.Code, w.Body)
 	}
 	other := Refused{Code: http.StatusConflict, Err: errors.New(`item 1 is on fix-login, not the user's`)}
 	w = post(actHandler(&calls, other), "/v1/doing", `{"boss":"b","id":1,"text":"T","seen":{},"doing":"x"}`, true)

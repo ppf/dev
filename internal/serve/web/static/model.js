@@ -135,13 +135,19 @@ const doable = (l, it) => !desktop(l) && it.assignee?.kind === 'you' && !it.opti
 const receiver = l => l.closed ? 'the manager' : l.boss;
 
 // verdict is what dropping card x from column from on column to does: null for nothing (the same column), {act, hint}
-// for the call to make (doing, stop, start, tick: the sheet's buttons' but stop), or {why} when it is refused. Waiting and Review are set
-// by a session or a PR, Done reopens nothing yet; managerRuns: a closed boss's card starts only through the manager.
+// for the call to make (doing, start, tick: the sheet's buttons'; stop, reopen: a drop's only), or {why} when it is
+// refused. Waiting and Review are set by a session or a PR, Done reopens the user's own card to To do; managerRuns: a
+// closed boss's card starts only through the manager.
 function verdict(x, from, to, managerRuns) {
   if (from === to) return null;
   const { list: l, it } = x, ask = !!it.options?.length, mine = whoOf(x) === ME;
   const no = why => ({ why });
-  if (from === 'done') return no('reopen is not built yet');
+  if (from === 'done') {
+    if (desktop(l)) return no("a desktop app boss's card: change it in its chat");
+    if (!mine) return no('only your own card reopens');
+    if (to !== 'todo') return no('reopen it to To do');
+    return { act: 'reopen', hint: 'back to To do' };
+  }
   if (to === 'waiting') return no('set by the session');
   if (to === 'review') return no('set by the PR');
   if (desktop(l)) return no("a desktop app boss's card: change it in its chat");
