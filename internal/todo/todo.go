@@ -184,8 +184,17 @@ func (l List) Open() (n, on int) {
 // ErrNotBoss is ForPane's error for a session not marked a dev boss.
 var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is its boss's")
 
-// Store is one boss's list file; boss is its session's name when known.
-type Store struct{ path, boss string }
+// Store is one boss's list file; boss is its session's name when known; trial: its writes write nothing (Trial).
+type Store struct {
+	path, boss string
+	trial      bool
+}
+
+// Trial is s with its changes tried, not written: their refusals, nothing else.
+func (s Store) Trial() Store {
+	s.trial = true
+	return s
+}
 
 // Boss is the name of the boss session whose list it is, when known.
 func (s Store) Boss() string { return s.boss }
@@ -207,21 +216,32 @@ const desktopPrefix = "desktop-"
 // Desktop is the list of the desktop app boss session id (local_…).
 func Desktop(id string) (Store, error) { return open(desktopPrefix + id) }
 
-// AdoptDesktop moves into s, when it has no file yet, the newest list with open items earlier accepts; adopted
-// reports it. Unreadable lists are skipped and returned in err.
+// AdoptDesktop moves into s, when it has no file yet, the newest list with open items earlier accepts (Adoptable);
+// adopted reports it. Unreadable lists are skipped and returned in err.
 func (s Store) AdoptDesktop(earlier func() (func(id string) bool, error)) (adopted bool, err error) {
+	from, ok, err := s.Adoptable(earlier)
+	if ok {
+		var takeErr error
+		adopted, takeErr = s.take(from)
+		err = errors.Join(err, takeErr)
+	}
+	return adopted, err
+}
+
+// Adoptable is the list AdoptDesktop would move into s: ok false when s has a file, or no list with open items is
+// one earlier accepts. Unreadable lists are skipped and returned in err.
+func (s Store) Adoptable(earlier func() (func(id string) bool, error)) (from Store, ok bool, err error) {
 	if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
-		return false, err
+		return from, false, err
 	}
 	paths, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), desktopPrefix+"*.json"))
 	if err != nil || len(paths) == 0 {
-		return false, err
+		return from, false, err
 	}
 	isEarlier, err := earlier()
 	if err != nil {
-		return false, err
+		return from, false, err
 	}
-	var from Store
 	var updated int64
 	var unread []error
 	for _, path := range paths {
@@ -239,10 +259,7 @@ func (s Store) AdoptDesktop(earlier func() (func(id string) bool, error)) (adopt
 			from, updated = Store{path: path}, l.Updated
 		}
 	}
-	if from.path != "" {
-		adopted, err = s.take(from)
-	}
-	return adopted, errors.Join(append(unread, err)...)
+	return from, from.path != "", errors.Join(unread...)
 }
 
 // take moves from's file to s, when s has none and from still has one; taken reports it.
@@ -990,7 +1007,7 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 			return err
 		}
 		f.prune(now)
-		if err := fn(&f); err != nil {
+		if err := fn(&f); err != nil || s.trial {
 			return err
 		}
 		f.Updated = now.Unix()

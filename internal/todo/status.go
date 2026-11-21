@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ppf/dev/internal/sidebar"
 )
@@ -34,6 +35,8 @@ type Owner struct {
 	Unread  bool
 	// Doing is what a worker an item is on does now, asked only for those; nil: its Session.Doing
 	Doing func(sidebar.Session) string
+	// Stopped are the IDs of Workers with no live Claude: desktop app sessions not archived, their process ended
+	Stopped []string
 }
 
 // OwnerOf is boss's Owner among the live sessions: its workers are those it started, bosses among them; Unread when an
@@ -145,12 +148,18 @@ func Own(on string, session *Session, boss string) bool {
 	return on == "" || session == nil && boss != "" && on != Boss && strings.EqualFold(on, boss)
 }
 
+// linked is when dev todo add began linking --on to a worker session (v0.57.0): an unlinked item added since is a
+// person's, never a worker started later under that name.
+var linked = time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC).Unix()
+
 // worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's
-// name), else the one with an agent its on names (Match: the only one by that name), as the previews' cards are.
+// name), else, for an item added before linked, the one with an agent its on names (Match: the only one by that name).
 func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	name := ""
 	if it.Session != nil {
 		name = it.Session.ID
+	} else if it.Added >= linked {
+		return sidebar.Session{}, false
 	} else {
 		var ws []Session
 		for _, w := range o.Workers {

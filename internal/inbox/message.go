@@ -446,6 +446,76 @@ func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note 
 	return n
 }
 
+// WithdrawTicked drops the queued notes that the user is on an item (UserDoing) once that item is no longer open as
+// the note reads it: ticked, or gone from its list. item is open item id of boss's list: its text, open false for none.
+// A lookup that fails keeps its note.
+func (b Box) WithdrawTicked(item func(boss string, id int) (text string, open bool, err error)) error {
+	s, err := b.read()
+	if err != nil {
+		return err
+	}
+	var stale []Note
+	var errs []error
+	for _, n := range s.Notes {
+		boss, id, ok := doingKey(n)
+		if !ok {
+			continue
+		}
+		text, open, err := item(boss, id)
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case !open || !strings.Contains(n.Text, fmt.Sprintf(`#%d "%s"`, id, text)):
+			stale = append(stale, n)
+		}
+	}
+	if len(stale) > 0 {
+		errs = append(errs, b.update(func(s *state) error {
+			s.Notes = slices.DeleteFunc(s.Notes, func(n Note) bool { return slices.Contains(stale, n) })
+			return nil
+		}))
+	}
+	return errors.Join(errs...)
+}
+
+// doingKey is the boss and item id of a UserDoing note's key, "doing <boss> <id>".
+func doingKey(n Note) (boss string, id int, ok bool) {
+	rest, found := strings.CutPrefix(n.Key, "doing ")
+	i := strings.LastIndexByte(rest, ' ')
+	if n.Kind != UserOn || !found || i < 0 {
+		return "", 0, false
+	}
+	id, err := strconv.Atoi(rest[i+1:])
+	return rest[:i], id, err == nil
+}
+
+// listItem is WithdrawTicked's lookup on c's server: open item id of boss's list, live or closed.
+func listItem(c *tmux.Client, now time.Time) func(string, int) (string, bool, error) {
+	return func(boss string, id int) (string, bool, error) {
+		var s todo.Store
+		if pane, err := control.BossPane(c, boss); err == nil {
+			if s, err = todo.ForPane(c, pane); err != nil {
+				return "", false, err
+			}
+		} else {
+			closed, ok, err := todo.ClosedStore(c, boss, now)
+			if err != nil || !ok {
+				return "", false, err
+			}
+			s = closed
+		}
+		l, err := s.Read(now)
+		if err != nil {
+			return "", false, err
+		}
+		i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done })
+		if i < 0 {
+			return "", false, nil
+		}
+		return l.Items[i].Text, true, nil
+	}
+}
+
 // Socket is the socket path of the tmux server c reaches.
 func Socket(c *tmux.Client) (string, error) {
 	out, err := c.Run("display-message", "-p", "#{socket_path}")

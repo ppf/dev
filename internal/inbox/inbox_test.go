@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -743,6 +744,52 @@ func TestAddUserDoing(t *testing.T) {
 	bt, _ := b.Take()
 	if len(bt.Notes) != maxNotes || bt.Notes[0].Text != `#4 "a": second` || bt.Notes[1].Text != `#5 "b": other item` || bt.Notes[2].Text != `boss-b #4 "a": closed one (boss-b is closed)` {
 		t.Errorf("got %d notes, first %+v, %+v, %+v; want #4's second line in its place, #5 and boss-b's #4 beside it, all kept", len(bt.Notes), bt.Notes[0], bt.Notes[1], bt.Notes[2])
+	}
+}
+
+// Doing notes past the cap go too, the oldest first, once no other droppable note is left.
+func TestAddCapsDoing(t *testing.T) {
+	b := testBox(t)
+	_, _ = b.Add(Answer(1, "a?", "Yes"), time.Time{})
+	for i := range maxNotes + 3 {
+		_, _ = b.Add(UserDoing("boss-a", i+2, "x", "", false, false), time.Time{})
+	}
+	bt, _ := b.Take()
+	if len(bt.Notes) != maxNotes || bt.Dropped != 4 || bt.Notes[0].Kind != Answered || bt.Notes[1].Key != "doing boss-a 6" {
+		t.Errorf("got %d notes, %d dropped, first %+v, %+v; want %d, the answer kept, doing #2-#5 dropped", len(bt.Notes), bt.Dropped, bt.Notes[0], bt.Notes[1], maxNotes)
+	}
+}
+
+// A queued doing note goes once its item is ticked, gone, or another item took its number; a failed lookup keeps it.
+func TestWithdrawTicked(t *testing.T) {
+	b := testBox(t)
+	for _, n := range []Note{
+		UserDoing("boss-a", 1, "open", "on it", false, false),
+		UserDoing("boss-a", 2, "ticked", "", false, false),
+		UserDoing("boss-a", 3, "old text", "", false, false),
+		UserDoing("boss-b", 1, "unread", "", true, true),
+		Answer(2, "q?", "Yes"),
+	} {
+		_, _ = b.Add(n, time.Time{})
+	}
+	lists := map[string]map[int]string{"boss-a": {1: "open", 3: "new item"}}
+	err := b.WithdrawTicked(func(boss string, id int) (string, bool, error) {
+		if boss == "boss-b" {
+			return "", false, errors.New("list unread")
+		}
+		text, ok := lists[boss][id]
+		return text, ok, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "list unread") {
+		t.Errorf("err = %v, want the failed lookup", err)
+	}
+	bt, _ := b.Take()
+	var keys []string
+	for _, n := range bt.Notes {
+		keys = append(keys, n.Key)
+	}
+	if want := []string{"doing boss-a 1", "doing boss-b 1", "answer 2"}; !slices.Equal(keys, want) {
+		t.Errorf("left %q, want %q", keys, want)
 	}
 }
 

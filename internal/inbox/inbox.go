@@ -556,12 +556,15 @@ func (s *state) add(n Note) bool {
 		return true
 	}
 	s.Notes = append(s.Notes, n)
-	// The oldest go first, answers, starts, the user's doing and ticks last: an answered or ticked item is off the list,
-	// a started one waits on its note and one the user is on must get no worker, so a dropped note would be lost
+	// The oldest go first, answers, starts and ticks never: an answered or ticked item is off the list, a started one
+	// waits on its note. The user's doing goes last of the rest: the boss's list still says the user is on it
 	for over := len(s.Notes) - maxNotes; over > 0; over-- {
 		i := slices.IndexFunc(s.Notes, func(n Note) bool {
 			return n.Kind != Answered && n.Kind != Start && n.Kind != UserOn && n.Key != tickKey
 		})
+		if i < 0 {
+			i = slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind == UserOn })
+		}
 		if i < 0 {
 			break
 		}

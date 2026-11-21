@@ -2,6 +2,7 @@ package todo
 
 import (
 	"cmp"
+	"slices"
 
 	"github.com/ppf/dev/internal/sidebar"
 )
@@ -49,7 +50,7 @@ func (o Owner) place(it Shown) Placement {
 	p := o.stored(it, own)
 	w, live := o.worker(it)
 	if live && !own && !onBoss {
-		p = Placement{Assignee: Assignee{Kind: sidebar.AssigneeWorker, Name: w.Name, Running: true}}
+		p = Placement{Assignee: Assignee{Kind: sidebar.AssigneeWorker, Name: w.Name, Running: !slices.Contains(o.Stopped, w.ID)}}
 	}
 	boss := o.boss()
 	at := func(column string, needsYou bool) Placement {

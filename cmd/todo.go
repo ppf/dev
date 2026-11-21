@@ -213,6 +213,15 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				it.Until = t.Unix()
 			}
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
+			if err := tryAdoptable(*boss, func(t todo.Store) error {
+				if cmd.Flags().Changed("replaces") {
+					return t.Replace(replaces, it, now)
+				}
+				_, err := t.Add(it, now)
+				return err
+			}); err != nil {
+				return err
+			}
 			if s, err = todoStore(*boss, true, stderr); err != nil {
 				return err
 			}
@@ -866,6 +875,30 @@ func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 		fmt.Fprintln(stderr, "⚠ dev todo: no earlier list taken over: "+err.Error())
 	}
 	return s, nil
+}
+
+// tryAdoptable runs try on a trial (todo.Store.Trial) of the earlier list a desktop app boss's first write takes over
+// (desktopTodo), so a refused write takes over nothing; nil when it is a tmux boss's list, or none is taken over. One
+// the lookup can't tell is left to desktopTodo, which says why.
+func tryAdoptable(boss string, try func(todo.Store) error) error {
+	pane, id, err := todoBoss(boss)
+	if err != nil || pane != "" || boss != "" {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	s, err := todo.Desktop(id)
+	if err != nil {
+		return err
+	}
+	paths := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
+	from, ok, _ := s.Adoptable(func() (func(string) bool, error) { return desktop.Earlier(paths, id) })
+	if !ok {
+		return nil
+	}
+	return try(from.Trial())
 }
 
 // printCount prints prefix, then how many items are open: "to do 3, 1 on others", "to do empty".
