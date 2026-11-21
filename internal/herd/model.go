@@ -135,7 +135,7 @@ type Model struct {
 	size          paneSize        // how fit last sized the pane
 	restoredSize  paneSize        // size as a reload carried it, taken at the first refresh; unlisted when none
 	restored      bool            // carried by a reload: until the first good refresh, no card is new to Asking
-	restoredNeed  needRestore     // TO DO mode's row as a reload carried it, taken at the first good refresh
+	restoredNeed  *needRestore    // TO DO mode's cursor as a reload carried it, taken at the first good refresh
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
 	todoFolded    bool            // TO DO shows as its header only (t)
@@ -273,16 +273,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.expands, t.sess.Name)
 				}
 			}
-			if m.restoredNeed.key != "" {
-				// Before the first refresh TO DO has no rows: fixNeeds would leave it
-				m.needMode, m.needIdx, m.needKey = true, m.restoredNeed.idx, m.restoredNeed.key
-			}
-			m.snap, m.err, m.restored, m.restoredNeed = msg.snap, nil, false, needRestore{}
+			m.snap, m.err, m.restored = msg.snap, nil, false
 			if msg.msgs != nil {
 				m.msgs = msg.msgs
 			}
 			if msg.todo != nil {
 				m.todo = msg.todo
+			}
+			if n := m.restoredNeed; n != nil {
+				// Only now has TO DO rows: before, fixNeeds would have left it
+				m.needMode, m.needIdx, m.needKey, m.needDone, m.todoFolded = true, n.Idx, m.needSig(n.Key), m.needSig(n.Done), false
+				m.restoredNeed = nil
 			}
 			if msg.inputs == m.inputs {
 				m.focused = msg.snap.focused

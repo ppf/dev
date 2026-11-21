@@ -26,7 +26,8 @@ func TestIdle(t *testing.T) {
 		{"kill asked", Model{confirm: "a"}, false},
 		{"answer in flight", Model{answering: "a"}, false},
 		{"TO DO mode", Model{needMode: true}, true},
-		{"TO DO's answer waiting on its row", Model{needMode: true, needDone: "a"}, false},
+		{"TO DO's answer waiting on its row (carried)", Model{needMode: true, needDone: "a"}, true},
+		{"TO DO on a row with a long text (carried hashed)", Model{needMode: true, needKey: strings.Repeat("x", maxState+1)}, true},
 	} {
 		if got := tc.m.idle(); got != tc.want {
 			t.Errorf("%s: idle() = %v, want %v", tc.name, got, tc.want)
@@ -155,19 +156,33 @@ func TestReloadAfterTodoLeftStaysOnCards(t *testing.T) {
 	}
 }
 
-// An answer from TO DO waits on its row until it goes: a reload meanwhile would put the cursor back on it.
-func TestReloadHeldByTodoAnswerUntilItsRowGoes(t *testing.T) {
+// An answer from TO DO waits on its row until it goes, after a reload too: else the cursor would land back on it.
+func TestReloadCarriesTodoAnswer(t *testing.T) {
 	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n")
 	m.needDone, m.needKey = m.needKey, ""
-	if _, quit := refreshed(m); quit {
-		t.Fatal("reloaded with TO DO's answer still on its row")
+	m, quit := refreshed(m)
+	if !quit {
+		t.Fatal("no reload with TO DO's answer on its row")
 	}
-	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ v2") {
-		t.Errorf("bottom row %q: want the held reload", row)
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); !n.needMode || n.needDone != m.needDone || n.needKey != "" {
+		t.Fatalf("after the reload: TO DO mode %v, waiting on %q key %q; want waiting on %q, no key", n.needMode, n.needDone, n.needKey, m.needDone)
 	}
-	m.needDone = ""
-	if _, quit := refreshed(m); !quit {
-		t.Fatal("no reload once the answered row went")
+}
+
+// Between the exec and the first refresh, which brings TO DO mode back, keys would act on the cards.
+func TestKeysWaitForCarriedTodo(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n", "j")
+	m, _ = refreshed(m)
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	n, cmd := keys(n, "enter", "t")
+	if cmd != nil || n.todoFolded {
+		t.Fatalf("keys before the first refresh acted: cmd %v, TO DO folded %v", cmd != nil, n.todoFolded)
+	}
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); !n.needMode || n.needIdx != 1 {
+		t.Fatalf("TO DO mode %v on row %d, want on row 1", n.needMode, n.needIdx)
 	}
 }
 
