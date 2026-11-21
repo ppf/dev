@@ -534,6 +534,7 @@ function body(l) {
   // Opened, focus goes to the first card it showed: the toggle moves past them
   const more = capped && el('button', { type: 'button', class: 'more', 'data-f': 'more', onclick: () => {
     state.more = !state.more;
+    settle();
     render();
     if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[xs.length]?.focus();
   } },
@@ -573,12 +574,8 @@ function swipe(ls) {
 // refilter draws the board for a filter just changed, at once: a swipe under way gives its lane first. On the phone a lane
 // the filter emptied gives way to the first drawn with cards.
 function refilter() {
-  const before = document.querySelector('#view .lanes'), had = !!before?.querySelector('.lane.on .card');
-  if (settling && before) {
-    clearTimeout(settling);
-    settling = 0;
-    state.lane = laneAt(before);
-  }
+  settle();
+  const had = !!document.querySelector('#view .lanes [data-k="' + state.lane + '"] .card');
   render();
   const lanes = document.querySelector('#view .lanes');
   if (!had || !lanes || lanes.querySelector('.lane.on .card')) return;
@@ -588,6 +585,15 @@ function refilter() {
 
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
 let settling = 0;
+
+// settle ends a swipe under way at once, for a redraw the user asked for: its lane is the one in view.
+function settle() {
+  const lanes = document.querySelector('#view .lanes');
+  if (!settling || !lanes) return;
+  clearTimeout(settling);
+  settling = 0;
+  state.lane = laneAt(lanes);
+}
 
 // showLane scrolls the phone's lanes to column k's.
 function showLane(k) {
@@ -606,8 +612,9 @@ function laneInView(lanes) {
 // laneAt is the key of the lane most in view.
 function laneAt(lanes) {
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
+  if (!w) return state.lane; // not laid out
   const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1;
-  return COLUMNS[end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w)].key;
+  return COLUMNS[end ? COLUMNS.length - 1 : Math.min(COLUMNS.length - 1, Math.round(lanes.scrollLeft / w))].key;
 }
 
 // land makes column k's lane the one shown (the others cut to its height), its tab marked and in view, the page back up
