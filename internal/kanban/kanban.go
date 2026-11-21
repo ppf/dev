@@ -381,7 +381,6 @@ func (m Model) all() []card {
 	return out
 }
 
-// cards are the cards the project filter shows.
 func (m Model) cards() []card {
 	if m.project == "" {
 		return m.all()
@@ -394,7 +393,8 @@ func (m Model) cards() []card {
 func (m Model) columns() [][]card {
 	out := make([][]card, len(sidebar.Columns))
 	for _, c := range m.cards() {
-		out[c.column()] = append(out[c.column()], c)
+		i := c.column()
+		out[i] = append(out[i], c)
 	}
 	done := slices.Index(sidebar.Columns, sidebar.ColumnDone)
 	todoCol := slices.Index(sidebar.Columns, sidebar.ColumnTodo)

@@ -9,7 +9,6 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 )
 
-// chip is a short mark on a card's foot.
 type chip struct{ text, colour string }
 
 // marks are what a card shows beside its text, as the web page's marks: state (a start's, a PR's, its worker's) at the
