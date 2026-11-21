@@ -187,10 +187,11 @@ func Count(rows []NeedRow) Tally {
 	return t
 }
 
+// card reports a list item's card: not a session's, nor a list not read.
+func (r NeedRow) card() bool { return r.Boss != "" && r.Kind != NeedUnread }
+
 // Mine reports a list item's card the user's (assignee you).
-func (r NeedRow) Mine() bool {
-	return r.Boss != "" && r.Kind != NeedUnread && r.Assignee.Kind == AssigneeYou
-}
+func (r NeedRow) Mine() bool { return r.card() && r.Assignee.Kind == AssigneeYou }
 
 // Group is the row's block: -1 for a session's (Needs you, first), its column's index in Columns for a list item's,
 // len(Columns) for a list not read, after them.
@@ -205,18 +206,18 @@ func (r NeedRow) Group() int {
 }
 
 // Yours reports a row the user acts on: a session's, a list not read, or the user's card (Mine).
-func (r NeedRow) Yours() bool { return r.Boss == "" || r.Kind == NeedUnread || r.Mine() }
+func (r NeedRow) Yours() bool { return !r.card() || r.Mine() }
 
 // Tickable reports a list item d ticks (dev todo done): the user's card, or their own item asked to start, not an ask.
 func (r NeedRow) Tickable() bool {
-	return r.Boss != "" && r.Kind != NeedUnread && len(r.Options) == 0 && (r.Mine() || r.StartedAt != 0 && r.On == "")
+	return r.card() && len(r.Options) == 0 && (r.Mine() || r.StartedAt != 0 && r.On == "")
 }
 
 // Startable reports a list item s starts (dev todo start), as the web board offers it: a To do card or a late start,
 // not an ask; on the manager's own list only the user's; a closed boss's only while the manager runs, which takes it.
 func (r NeedRow) Startable(managerRuns bool) bool {
-	return r.Boss != "" && r.Kind != NeedUnread && len(r.Options) == 0 && (r.Boss != Manager || r.Mine()) &&
-		(!r.Closed || managerRuns) && (r.StartLate || r.Column == ColumnTodo)
+	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine()) && (!r.Closed || managerRuns) &&
+		(r.StartLate || r.Column == ColumnTodo)
 }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.

@@ -107,13 +107,13 @@ func (m Model) bottom() []string {
 	}
 	if m.needMode {
 		rows := m.needRows()
-		open := ""
-		if m.needIdx < len(rows) && rows[m.needIdx].opens() {
-			open = "  space open"
-		}
 		var r needRow
 		if m.needIdx < len(rows) {
 			r = rows[m.needIdx]
+		}
+		open := ""
+		if r.opens() {
+			open = "  space open"
 		}
 		switch {
 		case r.fold != nil:
