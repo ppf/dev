@@ -429,6 +429,9 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 	return n
 }
 
+// noLonger ends a UserDoing note of a stop.
+const noLonger = ": no longer on it"
+
 // UserDoing is the note telling a boss the user is on its item id, text, themselves, doing what (stop: no longer);
 // with closed, the list of that closed boss, sent to the Manager. A newer one for that item replaces it while queued.
 func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note {
@@ -438,7 +441,7 @@ func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note 
 	}
 	switch {
 	case stop:
-		n.Text += ": no longer on it"
+		n.Text += noLonger
 	case doing != "":
 		n.Text += ": " + doing
 	}
@@ -448,10 +451,10 @@ func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note 
 	return n
 }
 
-// WithdrawTicked drops the queued notes that the user is on an item (UserDoing) once that item is no longer open as
-// the note reads it: ticked, or gone from its list. item is open item id of boss's list: its text, open false for none.
-// A lookup that fails keeps its note.
-func (b Box) WithdrawTicked(item func(boss string, id int) (text string, open bool, err error)) error {
+// WithdrawTicked drops the queued notes that the user is on an item (UserDoing) once that item is no longer open, or,
+// for one saying the user is on it, no longer marked doing (another item took its number). item is open item id of
+// boss's list, and whether it is marked doing. A lookup that fails keeps its note.
+func (b Box) WithdrawTicked(item func(boss string, id int) (open, doing bool, err error)) error {
 	s, err := b.read()
 	if err != nil {
 		return err
@@ -463,11 +466,11 @@ func (b Box) WithdrawTicked(item func(boss string, id int) (text string, open bo
 		if !ok {
 			continue
 		}
-		text, open, err := item(boss, id)
+		open, doing, err := item(boss, id)
 		switch {
 		case err != nil:
 			errs = append(errs, err)
-		case !open || !strings.Contains(n.Text, fmt.Sprintf(`#%d "%s"`, id, text)):
+		case !open || !doing && !strings.Contains(n.Text, noLonger):
 			stale = append(stale, n)
 		}
 	}
@@ -492,32 +495,32 @@ func doingKey(n Note) (boss string, id int, ok bool) {
 }
 
 // listItem is WithdrawTicked's lookup on c's server: open item id of boss's list, live or closed (no session).
-func listItem(c *tmux.Client, now time.Time) func(string, int) (string, bool, error) {
-	return func(boss string, id int) (string, bool, error) {
+func listItem(c *tmux.Client, now time.Time) func(string, int) (bool, bool, error) {
+	return func(boss string, id int) (bool, bool, error) {
 		var s todo.Store
 		if pane, err := control.BossPane(c, boss); err == nil {
 			if s, err = todo.ForPane(c, pane); err != nil {
-				return "", false, err
+				return false, false, err
 			}
 		} else if _, missing := c.Run("has-session", "-t", tmux.SessionTarget(boss)); missing == nil {
 			// Live but not read: not a closed boss's list
-			return "", false, err
+			return false, false, err
 		} else {
 			closed, ok, err := todo.ClosedStore(c, boss, now)
 			if err != nil || !ok {
-				return "", false, err
+				return false, false, err
 			}
 			s = closed
 		}
 		l, err := s.Read(now)
 		if err != nil {
-			return "", false, err
+			return false, false, err
 		}
 		i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done })
 		if i < 0 {
-			return "", false, nil
+			return false, false, nil
 		}
-		return l.Items[i].Text, true, nil
+		return true, l.Items[i].Doing != nil, nil
 	}
 }
 

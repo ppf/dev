@@ -141,6 +141,32 @@ func TestTodoDesktopStatus(t *testing.T) {
 			t.Errorf("%s placed %q, want %q", text, placed[text], w)
 		}
 	}
+	// An item from before linking, found by its worker's name: a --replaces keeping its --on links that worker
+	list := filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "todo", "desktop-local_boss.json")
+	data, err := os.ReadFile(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f map[string]any
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range f["items"].([]any) {
+		if it := it.(map[string]any); it["text"] == "Run" {
+			delete(it, "session")
+			it["added"] = 1
+		}
+	}
+	if data, err = json.Marshal(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(list, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(t, "", "todo", "add", "--replaces", "2", "--context", "rerun")
+	if got := run(t, "", "todo", "--json"); !strings.Contains(strings.Join(strings.Fields(got), ""), `"text":"Run","on":"Busy","session":{"id":"local_busy","name":"Busy"}`) {
+		t.Errorf("--replaces of an item found by name: %s, want it linked to local_busy", got)
+	}
 	// A live file it can't read: a running worker would read stopped
 	if err := os.WriteFile(filepath.Join(sessions, "2.json"), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)

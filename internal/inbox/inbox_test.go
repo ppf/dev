@@ -760,25 +760,28 @@ func TestAddCapsDoing(t *testing.T) {
 	}
 }
 
-// A queued doing note goes once its item is ticked, gone, or another item took its number; a failed lookup keeps it.
+// A queued doing note goes once its item is ticked or gone, or another item without doing took its number; a reworded
+// item still marked doing keeps it, as does a stop on an open item; a failed lookup keeps it.
 func TestWithdrawTicked(t *testing.T) {
 	b := testBox(t)
 	for _, n := range []Note{
-		UserDoing("boss-a", 1, "open", "on it", false, false),
+		UserDoing("boss-a", 1, "old text", "on it", false, false),
 		UserDoing("boss-a", 2, "ticked", "", false, false),
-		UserDoing("boss-a", 3, "old text", "", false, false),
+		UserDoing("boss-a", 3, "same title", "", false, false),
+		UserDoing("boss-a", 4, "stopped", "", true, false),
 		UserDoing("boss-b", 1, "unread", "", true, true),
 		Answer(2, "q?", "Yes"),
 	} {
 		_, _ = b.Add(n, time.Time{})
 	}
-	lists := map[string]map[int]string{"boss-a": {1: "open", 3: "new item"}}
-	err := b.WithdrawTicked(func(boss string, id int) (string, bool, error) {
+	type item struct{ doing bool }
+	lists := map[string]map[int]item{"boss-a": {1: {doing: true}, 3: {}, 4: {}}}
+	err := b.WithdrawTicked(func(boss string, id int) (bool, bool, error) {
 		if boss == "boss-b" {
-			return "", false, errors.New("list unread")
+			return false, false, errors.New("list unread")
 		}
-		text, ok := lists[boss][id]
-		return text, ok, nil
+		it, ok := lists[boss][id]
+		return ok, it.doing, nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "list unread") {
 		t.Errorf("err = %v, want the failed lookup", err)
@@ -788,7 +791,7 @@ func TestWithdrawTicked(t *testing.T) {
 	for _, n := range bt.Notes {
 		keys = append(keys, n.Key)
 	}
-	if want := []string{"doing boss-a 1", "doing boss-b 1", "answer 2"}; !slices.Equal(keys, want) {
+	if want := []string{"doing boss-a 1", "doing boss-a 4", "doing boss-b 1", "answer 2"}; !slices.Equal(keys, want) {
 		t.Errorf("left %q, want %q", keys, want)
 	}
 }

@@ -264,7 +264,9 @@ func deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	}
 	done, sendErr := send(c, clk, b, a)
 	if expired {
-		sendErr = errors.Join(fmt.Errorf("inbox: the batch sent over Claude's messaging socket went unshown %s into a rest: pasting it", flightTimeout), sendErr)
+		// Its notes are back in the inbox: what the user was on may have ticked since
+		sendErr = errors.Join(fmt.Errorf("inbox: the batch sent over Claude's messaging socket went unshown %s into a rest: pasting it", flightTimeout), sendErr,
+			b.Box.WithdrawTicked(listItem(c, clk.Now())))
 	}
 	if done {
 		return nil

@@ -203,6 +203,10 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				} else {
 					fmt.Fprintf(stderr, "no session %s: a person is --waiting-for %s, your own task --on boss\n", it.On, it.On)
 				}
+			case cmd.Flags().Changed("replaces"):
+				if it.On, it.Session, err = keptWorker(s, replaces, *boss, stderr); err != nil {
+					return err
+				}
 			}
 			now := time.Now()
 			if until != "" {
@@ -875,6 +879,31 @@ func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 		fmt.Fprintln(stderr, "⚠ dev todo: no earlier list taken over: "+err.Error())
 	}
 	return s, nil
+}
+
+// keptWorker is the live worker open item n of s is on by name (todo.ByName), linked, for a --replaces keeping its --on:
+// its refreshed Added would read it as a person's. "" for any other item.
+func keptWorker(s todo.Store, n int, boss string, stderr io.Writer) (string, *todo.Session, error) {
+	l, err := s.Read(time.Now())
+	if err != nil {
+		return "", nil, err
+	}
+	i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == n && !it.Done })
+	if i < 0 {
+		return "", nil, nil
+	}
+	old := l.Items[i]
+	if old.On == "" || todo.OnBoss(old.On, old.Session) || todo.Own(old.On, old.Session, s.Boss()) || !todo.ByName(old) {
+		return "", nil, nil
+	}
+	ws, err := todoWorkers(boss, stderr)
+	if err != nil {
+		return "", nil, err
+	}
+	if w, ok := todo.Match(old.On, ws); ok {
+		return w.Name, &w, nil
+	}
+	return "", nil, nil
 }
 
 // tryAdoptable runs try on a trial (todo.Store.Trial) of the earlier list a desktop app boss's first write takes over
