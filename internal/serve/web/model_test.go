@@ -122,8 +122,15 @@ say('needs you and Me', names({ needs: true, who: [ME] }), ['2a closed, PR moved
 const quiet = { list: live, it: { id: 9, text: 'test', quiet: true, column: 'todo', assignee: you, needs_you: true }, done: false };
 say('tally: done and test items left out', tally([...all, quiet]), { need: 5, mine: 6, open: ROWS.length - 1 });
 say('tally: needs you is what the needs filter shows', tally(all).need, names({ needs: true }).length);
-say('whos: Me first, then by count, then by name', whos(all).slice(0, 5), [[ME, 7], ['boss-dev', 8], ['boss-shop', 2], ['dev-ssl', 2], ['dev-api', 1]]);
+const opens = ws => ws.reduce((a, [, n]) => a + n, 0);
+say('whos: open count, Me first, then by count, then by name', whos(all).slice(0, 5), [[ME, 6], ['boss-dev', 8], ['boss-shop', 2], ['dev-ssl', 2], ['dev-api', 1]]);
+say('whos: the counts add up to the tally\'s open', opens(whos(all)), tally(all).open);
+say('whos: follows the Project filter', whos(all, 'shop').filter(([, n]) => n).map(([w]) => w), [ME, 'boss-shop']);
+say('whos: the Project filter keeps every chip', whos(all, 'shop').length, whos(all).length);
 say('whos: Me with no card of its own', whos([card('10a working')]), [[ME, 0], ['dev-web', 1]]);
+const mix = [{ list: live, it: { id: 1, assignee: worker('dev-a'), done_at: t }, done: true }, { list: live, it: { id: 2, assignee: worker('dev-b'), column: 'todo' }, done: false },
+  { list: live, it: { id: 3, assignee: worker('dev-b'), quiet: true }, done: false }, { list: live, it: { id: 4, assignee: worker('dev-c'), column: 'todo' }, done: false }];
+say('whos: done and test items out, a 0 chip stays and sorts last', whos(mix), [[ME, 0], ['dev-b', 1], ['dev-c', 1], ['dev-a', 0]]);
 const ls = lanes(all);
 say('lanes: the five columns in order', ls.map(l => l.key), ['todo', 'progress', 'waiting', 'review', 'done']);
 say('To do: needs you, then mine, then sessions\'', ls[0].xs.map(x => x.it.text), ['3a ask', '2b closed, own', '3d own', '2c closed, on a session', '4c boss', '6 gone']);
@@ -175,6 +182,8 @@ if (JSON.stringify(got) !== JSON.stringify(want)) console.log('golden board: ' +
 const sent = cards(board).find(x => x.it.text === 'Send the invoice');
 if (marks(sent).chips[0]?.[0] !== 'waiting for alice') console.log('waiting_for not read: ' + JSON.stringify(marks(sent)));
 if (lanes(cards(board))[4].xs[0]?.it.done_at !== 1699999940) console.log('done_at not read');
+const chips = whos(cards(board)), openSum = chips.reduce((n, [, c]) => n + c, 0);
+if (openSum !== tally(cards(board)).open || openSum !== 4) console.log('chip counts ' + JSON.stringify(chips) + ' do not add up to the tally: ' + tally(cards(board)).open);
 `)
 }
 

@@ -90,10 +90,14 @@ function tally(xs) {
   return { need: open.filter(needsYou).length, mine: open.filter(x => whoOf(x) === ME).length, open: open.length };
 }
 
-// whos are the assignees with their card counts: ME first, then by count, then by name.
-function whos(xs) {
+// whos are the assignees with their open cards, as the tally counts them (done and test items left out) inside project
+// (none: all): ME first, then by count, then by name. An assignee with only other cards stays, at 0.
+function whos(xs, proj = '') {
   const n = new Map([[ME, 0]]);
-  for (const x of xs) n.set(whoOf(x), (n.get(whoOf(x)) || 0) + 1);
+  for (const x of xs) {
+    const w = whoOf(x);
+    n.set(w, (n.get(w) || 0) + (!x.done && !x.it.quiet && (!proj || project(x.list) === proj) ? 1 : 0));
+  }
   return [...n].sort((a, b) => (b[0] === ME) - (a[0] === ME) || b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
