@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -403,21 +404,77 @@ func TestServedMany(t *testing.T) {
 	t.Run("same address, next serve", func(t *testing.T) {
 		dir := t.TempDir()
 		a := startFake(t, dir)
+		a.srv.Close()
 		// Another process bound a's address after a closed its listener
-		if err := writeFile(filepath.Join(dir, addrDir), a.ap.String()+".json", addrRecord{Addr: a.ap.String(), Pid: os.Getppid()}); err != nil {
+		next := addrRecord{Addr: a.ap.String(), Pid: os.Getppid()}
+		if err := writeFile(filepath.Join(dir, addrDir), a.ap.String()+".json", next); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.forget(); err != nil {
 			t.Fatal(err)
 		}
-		want(t, dir, a)
+		var got addrRecord
+		if err := readFile(filepath.Join(dir, addrDir), a.ap.String()+".json", &got); err != nil || got != next {
+			t.Errorf("the next serve's record: %v %v, want kept", got, err)
+		}
 	})
 	t.Run("another machine's address", func(t *testing.T) {
 		dir := t.TempDir()
-		startFake(t, dir)
-		if _, err := Served(dir, func(netip.Addr) bool { return false }, time.Second); !errors.Is(err, ErrNotRunning) {
+		a := startFake(t, dir)
+		if _, err := Served(dir, func(netip.Addr) bool { return false }, time.Second); !errors.Is(err, ErrNotRunning) ||
+			!strings.Contains(err.Error(), "runs on "+a.ap.String()+", no longer this Mac's address") {
 			t.Errorf("got %v", err)
 		}
+	})
+	t.Run("live address, process gone", func(t *testing.T) {
+		dir := t.TempDir()
+		a := startFake(t, dir)
+		if err := writeFile(filepath.Join(dir, addrDir), a.ap.String()+".json", addrRecord{Addr: a.ap.String(), Pid: deadPid(t)}); err != nil {
+			t.Fatal(err)
+		}
+		want(t, dir)
+	})
+	t.Run("unreadable record", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, addrDir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, addrDir, "127.0.0.1:1.json"), []byte(`{}`), 0o000); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Served(dir, local, time.Second); err == nil || errors.Is(err, ErrNotRunning) {
+			t.Errorf("alone: %v, want its read error", err)
+		}
+		a := startFake(t, t.TempDir())
+		if err := writeFile(filepath.Join(dir, addrDir), a.ap.String()+".json", addrRecord{Addr: a.ap.String(), Pid: os.Getpid()}); err != nil {
+			t.Fatal(err)
+		}
+		want(t, dir, a) // beside a live one: that one
+	})
+	t.Run("ipv6", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "[::1]:0")
+		if err != nil {
+			t.Skipf("no ::1: %v", err)
+		}
+		srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`))
+		}))
+		srv.Listener = ln
+		srv.Start()
+		defer srv.Close()
+		dir := t.TempDir()
+		ap := netip.MustParseAddrPort(ln.Addr().String())
+		forget, err := RecordAddr(dir, ap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := Served(dir, local, time.Second); err != nil || !slices.Equal(addrsOf(got), []netip.AddrPort{ap}) {
+			t.Fatalf("got %v %v", got, err)
+		}
+		if err := forget(); err != nil {
+			t.Fatal(err)
+		}
+		want(t, dir)
 	})
 	t.Run("damaged record beside a live one", func(t *testing.T) {
 		dir := t.TempDir()
@@ -436,6 +493,13 @@ func TestServedMany(t *testing.T) {
 		}
 		a := startFake(t, dir) // another address: the legacy record stays
 		want(t, dir, a, old)
+		if err := writeFile(dir, legacyAddrFile, a.ap.String()); err != nil { // and a's own address once
+			t.Fatal(err)
+		}
+		want(t, dir, a)
+		if err := writeFile(dir, legacyAddrFile, old.ap.String()); err != nil {
+			t.Fatal(err)
+		}
 		old.srv.Close()
 		if _, err := RecordAddr(dir, old.ap); err != nil { // a dev serve on its address now
 			t.Fatal(err)

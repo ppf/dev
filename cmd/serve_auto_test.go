@@ -93,7 +93,6 @@ func TestAutoServeRunning(t *testing.T) {
 	for _, tt := range []struct{ version, want string }{
 		{"(devel) abc", ""},
 		{"v0.71.0", "⚠ dev serve v0.71.0 runs (this dev is (devel) abc): restart it to update, unless it reloads itself\n"},
-		{"", ""}, // an older dev serve's health named none
 	} {
 		f := &fakeStart{version: tt.version, envValue: map[string]string{}}
 		var out bytes.Buffer
@@ -123,6 +122,26 @@ func TestAutoServePrivateRunning(t *testing.T) {
 	var out bytes.Buffer
 	if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
 		t.Fatalf("err %v, out %q, spawned %q", err, out.String(), f.spawned)
+	}
+}
+
+func TestAutoServePrivateUnreadable(t *testing.T) {
+	f := &fakeStart{envValue: map[string]string{"TMUX_TMPDIR": "/tmp/x"}}
+	s := f.starter(t)
+	s.served = func(string, time.Duration) ([]serve.Running, error) {
+		return nil, errors.New("addr: permission denied")
+	}
+	if err := s.ensure(&bytes.Buffer{}); err == nil || err.Error() != "addr: permission denied" {
+		t.Fatalf("got %v, want the read error", err)
+	}
+}
+
+// DEV_SERVE_ADDR as an IPv4-mapped address: dev serve records it unmapped, and the start still names it
+func TestAutoServeMapped(t *testing.T) {
+	f := &fakeStart{runs: 1, at: "127.0.0.1:18417", envValue: map[string]string{"DEV_SERVE_ADDR": "[::ffff:127.0.0.1]:18417"}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || out.String() != "dev serve started: http://127.0.0.1:18417/ (this Mac only, no pairing needed)\n" {
+		t.Fatalf("got %v %q", err, out.String())
 	}
 }
 

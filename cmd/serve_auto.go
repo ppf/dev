@@ -105,8 +105,8 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
-		if _, err := served(time.Second); err == nil {
-			return nil
+		if _, err := served(time.Second); err == nil || !errors.Is(err, serve.ErrNotRunning) {
+			return err
 		}
 		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")
 	}
@@ -123,7 +123,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 	if err == nil {
 		warned := map[string]bool{}
 		for _, r := range live {
-			if r.Version != "" && r.Version != s.own && !warned[r.Version] {
+			if r.Version != s.own && !warned[r.Version] {
 				warned[r.Version] = true
 				fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", r.Version, s.own)
 			}

@@ -176,7 +176,7 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 			if err != nil {
 				return err
 			}
-			live, err := serve.Served(dir, ownIP, time.Second)
+			live, err := served(dir, ownIP, time.Second)
 			if err != nil {
 				return err
 			}
@@ -199,6 +199,8 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 	}
 	return cmd
 }
+
+var served = serve.Served // test seam: a phone-reachable dev serve would need a LAN bind
 
 // phoneURLs is the page's URL on each dev serve a phone can reach (not loopback): any of them takes the code, the
 // state folder's.

@@ -183,22 +183,24 @@ func unreadable(err error) bool {
 	return errors.Is(err, fs.ErrNotExist) || syntax || typ
 }
 
-// gone is whether no process has pid (EPERM: one runs, another user's).
+// gone is whether no process has pid (EPERM: one runs, another user's); pid 0, a legacy record's, is unknown: not gone.
 func gone(pid int) bool {
 	return pid > 0 && errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
-// ErrNotRunning is Served's error when no dev serve answers: no record, or nothing answers /v1/health there.
+// ErrNotRunning is Served's error when no dev serve answers: no record, its address no longer this Mac's, or nothing
+// answers /v1/health there.
 var ErrNotRunning = errors.New("dev serve is not running")
 
-// Running is a dev serve that answers: its address and the version its /v1/health names.
+// Running is a dev serve that answers: its address and the version its /v1/health names (never empty).
 type Running struct {
 	Addr    netip.AddrPort
 	Version string
 }
 
 // Served is every dev serve recorded in dir that answers on an address of this Mac (local), phone-reachable ones
-// (not loopback) first, then by address; it waits at most timeout for them. ErrNotRunning when none answers.
+// (not loopback) first, then by address; it waits at most timeout for them. ErrNotRunning when none answers, unless
+// a record can't be read: that error.
 func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]Running, error) {
 	recs := filepath.Join(dir, addrDir)
 	names, err := recordNames(recs)
@@ -206,6 +208,7 @@ func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]R
 		return nil, err
 	}
 	var addrs []netip.AddrPort
+	var moved []string // a live dev serve's address this Mac no longer has
 	var readErr error
 	add := func(err error, addr string, pid int) {
 		switch {
@@ -214,7 +217,12 @@ func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]R
 			readErr = errors.Join(readErr, err)
 		case gone(pid):
 		default:
-			if ap, err := netip.ParseAddrPort(addr); err == nil && local(ap.Addr()) && !slices.Contains(addrs, ap) {
+			ap, err := netip.ParseAddrPort(addr)
+			switch {
+			case err != nil: // a record no dev serve wrote
+			case !local(ap.Addr()):
+				moved = append(moved, ap.String())
+			case !slices.Contains(addrs, ap):
 				addrs = append(addrs, ap)
 			}
 		}
@@ -228,22 +236,17 @@ func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]R
 	err = readFile(dir, legacyAddrFile, &legacy)
 	add(err, legacy, 0)
 
-	live := make([]*Running, len(addrs))
+	live := make([]Running, len(addrs))
 	var wg sync.WaitGroup
 	for i, ap := range addrs {
 		wg.Go(func() {
 			if v, ok := health(ap, timeout); ok {
-				live[i] = &Running{Addr: ap, Version: v}
+				live[i] = Running{Addr: ap, Version: v}
 			}
 		})
 	}
 	wg.Wait()
-	var running []Running
-	for _, r := range live {
-		if r != nil {
-			running = append(running, *r)
-		}
-	}
+	running := slices.DeleteFunc(live, func(r Running) bool { return r.Version == "" })
 	if len(running) > 0 {
 		slices.SortFunc(running, phoneFirst)
 		return running, nil
@@ -251,8 +254,10 @@ func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]R
 	switch {
 	case readErr != nil:
 		return nil, readErr
+	case len(addrs) == 0 && len(moved) > 0:
+		return nil, fmt.Errorf("%w: it runs on %s, no longer this Mac's address: restart it", ErrNotRunning, strings.Join(moved, ", "))
 	case len(addrs) == 0:
-		return nil, fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
+		return nil, fmt.Errorf("%w: start it first (a dev serve from before v0.68.0 must be restarted)", ErrNotRunning)
 	}
 	tried := make([]string, len(addrs))
 	for i, ap := range addrs {

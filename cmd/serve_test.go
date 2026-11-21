@@ -250,6 +250,30 @@ func TestServePairTwo(t *testing.T) {
 	}
 }
 
+// #146's case: dev boss's loopback dev serve and a hand-run one for the phone: pair writes a code and names the phone's.
+func TestServePairPhone(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	origTerm, origServed := hasTerminal, served
+	t.Cleanup(func() { hasTerminal, served = origTerm, origServed })
+	t.Setenv("CLAUDECODE", "")
+	hasTerminal = func() bool { return true }
+	served = func(string, func(netip.Addr) bool, time.Duration) ([]serve.Running, error) {
+		return []serve.Running{{Addr: netip.MustParseAddrPort("192.168.1.9:8417"), Version: "v1"},
+			{Addr: netip.MustParseAddrPort("127.0.0.1:8417"), Version: "v1"}}, nil
+	}
+	out, _, err := execute(t, "", "serve", "pair")
+	if want := "open http://192.168.1.9:8417/ on the phone and enter the code "; err != nil || !strings.HasPrefix(out, want) {
+		t.Fatalf("got %q %v, want %q…", out, err, want)
+	}
+	dir, err := authDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pair.json")); err != nil {
+		t.Errorf("no code written: %v", err)
+	}
+}
+
 func TestPhoneURLs(t *testing.T) {
 	live := []serve.Running{{Addr: netip.MustParseAddrPort("100.64.0.2:8417")}, {Addr: netip.MustParseAddrPort("192.168.1.9:8417")},
 		{Addr: netip.MustParseAddrPort("127.0.0.1:8417")}}
