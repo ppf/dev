@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
 )
 
@@ -69,6 +71,28 @@ func TestWorkerDecisionToManager(t *testing.T) {
 	check(t, "the manager asks", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) needs a decision: "+
 		"Claude needs your permission to use Bash; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
 	check(t, "the boss leaves it", take(app), plain+"; the manager asks the user: leave it to the manager")
+	// Still unanswered: the boss's stuck note leaves it too, the manager gets a reminder, once
+	later := control.Clock{Now: func() time.Time { return time.Now().Add(inbox.StuckDecision + time.Minute) }, Sleep: time.Sleep}
+	for range 2 {
+		if err := inbox.Watch(s.tmux, later, app); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(t, "the boss's stuck note", take(app), "[dev boss inbox] 1 worker update(s):\n- app-w stuck: waiting on a decision for 4m, unanswered; "+
+		"the manager asks the user: leave it to the manager")
+	check(t, "the manager's reminder", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) stuck: waiting on a decision for 4m, "+
+		"unanswered; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
+
+	// A worker started outside tmux, or one that is itself a boss: not handed over
+	s.T("set-option", "-t", "=app-w:", "@dev_started_outside", "1")
+	decide()
+	check(t, "outside: left to its coordinator", take(app), plain+"; started by a coordinator outside tmux: leave it to that coordinator")
+	s.T("set-option", "-u", "-t", "=app-w:", "@dev_started_outside")
+	s.T("set-option", "-t", "=app-w:", "@dev_herd", "1")
+	decide()
+	check(t, "a boss below: its own decision goes up as before", take(app), plain)
+	s.T("set-option", "-u", "-t", "=app-w:", "@dev_herd")
+	check(t, "nothing for the manager", take(manager), "")
 
 	s.T("set-option", "-t", "=manager:", inbox.OptOff, "off")
 	decide()

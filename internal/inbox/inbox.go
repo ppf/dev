@@ -442,6 +442,7 @@ type health struct {
 	PRChecked string `json:"pr_checked,omitempty"` // the idle stretch (@agent_since) its PR was checked in
 	Full      bool   `json:"full,omitempty"`       // a high context note went out, until its use drops back
 	WaitEnd   int64  `json:"wait_end,omitempty"`   // when a planned wait it still worked through ended: its stuck clock starts there
+	Handed    string `json:"handed,omitempty"`     // the wait (@agent_since) whose decision went to the Manager (handOver)
 }
 
 // Box is one boss's inbox file.
@@ -569,11 +570,12 @@ func (s *state) add(n Note) bool {
 		return true
 	}
 	s.Notes = append(s.Notes, n)
-	// The oldest go first, answers, starts, the user's doing and ticks last: an answered or ticked item is off the list,
-	// a started one waits on its note and one the user is on must get no worker, so a dropped note would be lost
+	// The oldest go first, answers, starts, the user's doing, ticks and decisions handed over last: an answered or ticked
+	// item is off the list, a started one waits on its note, one the user is on must get no worker and a handed decision
+	// has no one else asking, so a dropped note would be lost
 	for over := len(s.Notes) - maxNotes; over > 0; over-- {
 		i := slices.IndexFunc(s.Notes, func(n Note) bool {
-			return n.Kind != Answered && n.Kind != Start && n.Kind != UserOn && n.Key != tickKey
+			return n.Kind != Answered && n.Kind != Start && n.Kind != UserOn && n.Key != tickKey && n.Of == ""
 		})
 		if i < 0 {
 			break

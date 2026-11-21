@@ -291,18 +291,30 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 }
 
 // handOver queues worker w's decision n in the Manager's inbox, and delivers it, when w's boss b runs under the live
-// Manager (b's @dev_started_by, the Manager's inbox on): the Manager asks the user and sends their pick to w itself,
-// so the user is asked once. handed reports it queued there; else b relays it as before.
+// Manager: the Manager asks the user and sends their pick to w itself, so the user is asked once. handed reports it
+// queued there, kept in b's box for Watch's stuck note; else b relays it as before.
 func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (handed bool, err error) {
-	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))
-	if !ok || err != nil || m.Name != Manager {
+	m, ok, err := managerOver(c, b)
+	if !ok || err != nil {
 		return false, err
 	}
 	n.Of, n.Key = b.Name, n.Key+"\x00"+w.Since
 	if _, err := m.Box.Add(n, clk.Now()); err != nil {
 		return false, err
 	}
-	return true, Deliver(c, clk, m)
+	return true, errors.Join(b.Box.update(func(s *state) error {
+		s.health(w.Session).Handed = w.Since
+		return nil
+	}), Deliver(c, clk, m))
+}
+
+// managerOver is the Manager when it started or adopted boss b and is alive with its inbox on.
+func managerOver(c *tmux.Client, b Boss) (Boss, bool, error) {
+	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))
+	if !ok || err != nil || m.Name != Manager {
+		return Boss{}, false, err
+	}
+	return m, true, nil
 }
 
 // asked is what pane's dialog asks (agent.Question.Ask), clipped, when its question (@agent_question) is the
