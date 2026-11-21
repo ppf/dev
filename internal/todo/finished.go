@@ -137,12 +137,12 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 			return err
 		}
 		f.prune(now)
-		was := func(x Item) bool { return x.ID == id && x.Done != 0 && x.Text == text }
 		kept, err := s.readDone(true)
 		if err != nil {
 			return err
 		}
 		done := finished(append(slices.Clone(kept), f.dropped...), now)
+		was := func(x Item) bool { return x.ID == id && x.Done != 0 && x.Text == text }
 		i, j := slices.IndexFunc(f.Items, was), slices.IndexFunc(done, was)
 		switch {
 		case i >= 0:
