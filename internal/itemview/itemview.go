@@ -4,6 +4,7 @@ package itemview
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -36,18 +37,20 @@ type Item struct {
 	todo.Shown
 }
 
-// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done, start and reopen (their
-// output, or why not), the browser, a switch of the client to a session.
+// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done, start, reopen and doing
+// (their output, or why not), the browser, a switch of the client to a session.
 type Actions struct {
 	Answer func(boss string, id int, question, answer string) (string, error)
 	Tick   func(boss string, id int, text string) (string, error)
 	Start  func(boss string, id int, text string) (string, error)
 	Reopen func(boss string, id int, text string) (string, error)
+	Doing  func(boss string, id int, text, seen, doing string, stop bool) (string, error)
 	Open   func(url string) error
 	Switch func(session string) error
 }
 
-// entry is a line of the view's list: an ask's option (key 1-9) or own words (m), or an action.
+// entry is a line of the view's list: an ask's option (key 1-9) or own words (m), or an action (I'm on it, i, has a
+// field too).
 type entry struct {
 	key, word, detail string
 	rec               bool
@@ -60,7 +63,7 @@ type Model struct {
 	managerRuns bool // the manager takes a closed boss's starts
 	entries     []entry
 	sel         int
-	typing      bool   // the own-words field takes the keys
+	typing      string // the key of the line whose field takes the keys (m own words, i I'm on it), "" for none
 	field       []rune // its text
 	busy        string // the action under way
 	msg         string // the last action's failure, or why a key does nothing
@@ -98,6 +101,25 @@ func (m Model) canStart() bool {
 }
 func (m Model) canTick() bool { return m.plain() }
 
+// canDoing and canStop are what todo.SetDoing takes, as the web page offers them: I'm on it on the user's own To do card,
+// no ask, not on it or started yet; stop on the user's card with a doing line; never a desktop app boss's.
+func (m Model) canDoing() bool {
+	it := m.it
+	return m.yourCard() && len(it.Options) == 0 && it.Column == sidebar.ColumnTodo && it.Doing == nil && it.Started == nil
+}
+func (m Model) canStop() bool { return m.yourCard() && len(m.it.Options) == 0 && m.it.Doing != nil }
+
+// yourCard is an open item assigned to the user, not a desktop app boss's.
+func (m Model) yourCard() bool {
+	return !m.it.Done && !strings.HasPrefix(m.it.Boss, "local_") && m.it.Assignee.Kind == sidebar.AssigneeYou
+}
+
+// seen is the item's doing line and start as the view read them, for dev todo doing --seen.
+func (m Model) seen() string {
+	b, _ := json.Marshal(todo.Seen{Doing: m.it.Doing, Started: m.it.Started})
+	return string(b)
+}
+
 // canReopen is what todo.Reopen takes, as the web page offers it: the user's own ticked item, never a desktop app boss's.
 func (m Model) canReopen() bool {
 	return m.it.Done && m.own() && !strings.HasPrefix(m.it.Boss, "local_")
@@ -118,6 +140,12 @@ func (m Model) list() []entry {
 	}
 	if m.canStart() {
 		out = append(out, entry{key: "s", word: "Start", detail: "ask " + m.startTo() + " to start it"})
+	}
+	switch {
+	case m.canDoing():
+		out = append(out, entry{key: "i", word: "I'm on it", detail: "In progress, no worker started: say what you do now…"})
+	case m.canStop():
+		out = append(out, entry{key: "i", word: "Stop", detail: "off it: To do, or Review if its PR moved"})
 	}
 	if m.canTick() {
 		out = append(out, entry{key: "d", word: "Tick", detail: "done: it leaves every board"})
@@ -163,11 +191,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.busy = ""
 		if msg.err != nil {
 			m.msg = "❌ " + strings.Join(strings.Fields(msg.err.Error()), " ")
+			// I'm on it's field closes: a failure may have marked it anyway (its boss not told), which esc and the
+			// board's next read show
+			if m.typing == "i" {
+				m.typing = ""
+			}
 			return m, nil
 		}
 		m.Done, m.Result = true, msg.out
 	case tea.KeyMsg:
-		if m.typing {
+		if m.typing != "" {
 			return m.typeKey(msg)
 		}
 		if msg.Type != tea.KeyRunes || msg.Paste || msg.Alt || len(msg.Runes) < 2 {
@@ -180,7 +213,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.busy != "" || m.Done || m.msg != "" {
 				return m, cmd
 			}
-			if m.typing {
+			if m.typing != "" {
 				return m.typeKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: msg.Runes[i+1:]})
 			}
 		}
@@ -188,9 +221,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// key runs k: j/k/↓/↑ move (wrapping), ⏎ the selected line's key, 1-9 answer, m own words, s start, d tick, r reopen,
-// w go to the worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c wait while an action is under way, so its
-// outcome shows.
+// key runs k: j/k/↓/↑ move (wrapping), ⏎ the selected line's key, 1-9 answer, m own words, s start, i I'm on it (its
+// field) or stop, d tick, r reopen, w go to the worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c
+// wait while an action is under way, so its outcome shows.
 func (m Model) key(k string) (Model, tea.Cmd) {
 	switch {
 	case k == "ctrl+c":
@@ -228,10 +261,16 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, it.Options[n]) })
-	case k == "m" && m.ask() && !it.Closed:
-		m.typing = true
-		m.sel = len(m.entries) - 1
+	case k == "m" && m.ask() && !it.Closed, k == "i" && m.canDoing():
+		if k == "i" {
+			// A fresh line each time; own words wait for the next m
+			m.field = nil
+		}
+		m.typing = k
+		m.sel = slices.IndexFunc(m.entries, func(e entry) bool { return e.key == k })
 		return m, nil
+	case k == "i" && m.canStop():
+		return m.run("stopping", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, m.seen(), "", true) })
 	case k == "s" && m.canStart():
 		return m.run("starting", func() (string, error) { return m.acts.Start(it.Boss, it.ID, it.Text) })
 	case k == "d" && m.canTick():
@@ -248,14 +287,14 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		m.msg = sidebar.NeedRow{Boss: it.Boss, Project: project(it.Boss)}.ClosedHint()
 	case k == "o":
 		m.msg = "#" + strconv.Itoa(it.ID) + " has no link"
-	case len(k) == 1 && strings.Contains("sdrw", k):
+	case len(k) == 1 && strings.Contains("sidrw", k):
 		m.msg = k + " doesn't act on this item: its keys are below"
 	}
 	return m, nil
 }
 
-// typeKey edits the own-words field: ⏎ answers with it, esc leaves it, backspace deletes; a pasted line break is a
-// space.
+// typeKey edits the open field: ⏎ answers with own words, or marks I'm on it with what is done now (none is fine), esc
+// leaves it, backspace deletes; a pasted line break is a space.
 func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case k.Type == tea.KeyCtrlC:
@@ -266,18 +305,21 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 	}
 	switch k.Type {
 	case tea.KeyEsc:
-		m.typing, m.msg = false, ""
+		m.typing, m.msg = "", ""
 	case tea.KeyBackspace:
 		if len(m.field) > 0 {
 			m.field = m.field[:len(m.field)-1]
 		}
 	case tea.KeyEnter:
 		text := strings.TrimSpace(string(m.field))
+		it := m.it
+		if m.typing == "i" {
+			return m.run("marking", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, m.seen(), text, false) })
+		}
 		if text == "" {
 			m.msg = "Type an answer, or esc"
 			return m, nil
 		}
-		it := m.it
 		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, text) })
 	case tea.KeySpace:
 		m.field = append(m.field, ' ')
@@ -285,6 +327,10 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 		for _, r := range k.Runes {
 			if unicode.IsSpace(r) {
 				r = ' '
+			}
+			if m.typing == "i" && len(m.field) >= todo.MaxDoing {
+				m.msg = fmt.Sprintf("At most %d characters", todo.MaxDoing)
+				break
 			}
 			m.field = append(m.field, r)
 		}
@@ -303,6 +349,9 @@ func (m Model) run(doing string, fn func() (string, error)) (Model, tea.Cmd) {
 
 // project is a list's project as the boards label it: its boss's name less "boss-".
 func project(boss string) string { return strings.TrimPrefix(boss, "boss-") }
+
+// minField is the fewest columns a typed field keeps beside its line's label.
+const minField = 8
 
 // minWidth is the narrowest box View draws.
 const minWidth = 20
@@ -382,18 +431,18 @@ cut:
 }
 
 // Click runs a left click at x, y of the box drawn w×h: on an option or action it does what that line's key does
-// (as j/k to it then ⏎), elsewhere (the border too) nothing; while the own-words field is open, one on another line of the list leaves
+// (as j/k to it then ⏎), elsewhere (the border too) nothing; while a field is open, one on another line of the list leaves
 // the field (its text kept) and runs that line. None while an action is under way.
 func (m Model) Click(x, y, w, h int, now time.Time) (Model, tea.Cmd) {
 	_, at := m.render(w, h, now)
 	if x < 1 || x >= min(w, Width)-1 || y < 0 || y >= len(at) || at[y] < 0 || m.busy != "" {
 		return m, nil
 	}
-	if m.typing {
-		if at[y] == len(m.entries)-1 {
+	if m.typing != "" {
+		if m.entries[at[y]].key == m.typing {
 			return m, nil
 		}
-		m.typing = false
+		m.typing = ""
 	}
 	m.sel = at[y]
 	return m.key("enter")
@@ -446,8 +495,12 @@ func (m Model) listLines(in int) []string {
 			word = bold + word + reset + strings.Repeat(" ", wordW-ansi.StringWidth(word)+3)
 		}
 		detail := sidebar.Muted + e.detail + reset
-		if e.key == "m" && m.typing {
+		if e.key == m.typing {
 			detail = string(m.field) + cursorCell
+			// Too narrow for the label and some of the field: the field alone
+			if in-ansi.StringWidth(mark+e.key+"  "+star+word) < minField {
+				word = ""
+			}
 			if w := in - ansi.StringWidth(mark+e.key+"  "+star+word); ansi.StringWidth(detail) > w {
 				// The field's end, where it's typed
 				detail = ansi.TruncateLeft(detail, ansi.StringWidth(detail)-w+1, "…")
@@ -508,7 +561,9 @@ func (m Model) facts(in int, now time.Time) []string {
 func (m Model) keys() string {
 	var ks [][2]string
 	switch {
-	case m.typing:
+	case m.typing == "i":
+		ks = [][2]string{{"⏎", "on it"}, {"esc", "back"}}
+	case m.typing != "":
 		ks = [][2]string{{"⏎", "answer"}, {"esc", "back"}}
 	case m.ask():
 		if !m.it.Closed {
@@ -520,7 +575,7 @@ func (m Model) keys() string {
 			ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
 		}
 	}
-	if m.ask() && !m.typing {
+	if m.ask() && m.typing == "" {
 		if m.it.Link != "" {
 			ks = append(ks, [2]string{"o", "open link"})
 		}
@@ -528,7 +583,7 @@ func (m Model) keys() string {
 			ks = append(ks, [2]string{"g", "go to boss"})
 		}
 	}
-	if !m.typing {
+	if m.typing == "" {
 		ks = append(ks, [2]string{"esc", "close"})
 	}
 	parts := make([]string, len(ks))

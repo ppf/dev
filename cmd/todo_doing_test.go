@@ -29,7 +29,7 @@ func TestTodoDoingRefused(t *testing.T) {
 		{"", []string{"todo", "doing", "boss-dev", "1", "on it", "--stop", "--question", "a"}, "--stop takes no doing line"},
 		{"1", []string{"todo", "doing", "1", "on", "it"}, "one doing line: quote it"},
 		{"1", []string{"todo", "doing", "1", "on it", "--stop"}, "--stop takes no doing line"},
-		{"", []string{"todo", "doing", "1", "--question", "a"}, "--question and --from-board are the user's form"},
+		{"", []string{"todo", "doing", "1", "--question", "a"}, "--question, --from-board and --seen are the user's form"},
 	} {
 		t.Setenv("CLAUDECODE", tt.claude)
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -66,6 +66,15 @@ func TestTodoDoingDesktop(t *testing.T) {
 	}
 	if out, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--stop", "--question", "mine"); err != nil || out != "#1 stopped, no one told\n" {
 		t.Errorf("user stop = %q, %v", out, err)
+	}
+	// A board's --seen: refused once the doing line changed since the board read it
+	stale := `{"doing":null,"started":null}`
+	run(t, "", "todo", "doing", "local_boss", "1", "phoning", "--question", "mine")
+	if _, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "again", "--question", "mine", "--seen", stale); err == nil || !strings.Contains(err.Error(), "changed since it was read") {
+		t.Errorf("stale --seen: %v", err)
+	}
+	if _, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--question", "mine", "--seen", "{"); err == nil || !strings.Contains(err.Error(), "--seen") {
+		t.Errorf("bad --seen: %v", err)
 	}
 }
 
