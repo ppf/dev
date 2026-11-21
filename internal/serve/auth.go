@@ -89,19 +89,27 @@ func NewCode(dir string, now time.Time) (string, error) {
 }
 
 // RecordAddr writes the address the running dev serve listens on to dir, for dev serve pair; the func removes it
-// unless another dev serve has recorded its own since.
+// unless another dev serve has recorded its own since, and puts back the one it replaced while that one still
+// answers (a hand-run dev serve for the phone beside dev boss's own on loopback).
 func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	prev, _, perr := Served(dir, time.Second)
 	if err := writeFile(dir, addrFile, ap.String()); err != nil {
 		return nil, err
 	}
 	return func() {
 		var cur string
-		if readFile(dir, addrFile, &cur) == nil && cur == ap.String() {
-			_ = os.Remove(filepath.Join(dir, addrFile))
+		if readFile(dir, addrFile, &cur) != nil || cur != ap.String() {
+			return
 		}
+		if perr == nil && prev != ap && writeFile(dir, addrFile, prev.String()) == nil {
+			if _, _, err := Served(dir, time.Second); err == nil {
+				return
+			}
+		}
+		_ = os.Remove(filepath.Join(dir, addrFile))
 	}, nil
 }
 

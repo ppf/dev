@@ -322,3 +322,31 @@ func TestAlive(t *testing.T) {
 		t.Fatalf("released: %v %v", alive, err)
 	}
 }
+
+func TestRecordAddrPutsBack(t *testing.T) {
+	health := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`)) })
+	first, second := httptest.NewServer(health), httptest.NewServer(health)
+	defer second.Close()
+	dir := t.TempDir()
+	a, b := netip.MustParseAddrPort(first.Listener.Addr().String()), netip.MustParseAddrPort(second.Listener.Addr().String())
+	if _, err := RecordAddr(dir, a); err != nil {
+		t.Fatal(err)
+	}
+	forgetB, err := RecordAddr(dir, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgetB()
+	if got, _, err := Served(dir, time.Second); err != nil || got != a {
+		t.Fatalf("after the second one left: %v %v, want %v back", got, err, a)
+	}
+	forgetB, err = RecordAddr(dir, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	forgetB()
+	if _, err := os.Stat(filepath.Join(dir, addrFile)); !os.IsNotExist(err) {
+		t.Fatalf("a gone one put back: %v", err)
+	}
+}
