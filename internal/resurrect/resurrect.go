@@ -778,13 +778,7 @@ func Snapshot(c *tmux.Client) error {
 	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
 	// The timeout kills save.sh's whole group: a pane dump left behind would keep writing a cut snapshot
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		// Gone already (it finished at the deadline): no error, so a save that succeeded isn't called timed out
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); !errors.Is(err, syscall.ESRCH) {
-			return err
-		}
-		return os.ErrProcessDone
-	}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	// A child left holding the output after save.sh exited would keep CombinedOutput waiting
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
@@ -793,6 +787,10 @@ func Snapshot(c *tmux.Client) error {
 	}
 	// Any child left (held the output past WaitDelay, or outlived a failed save.sh) goes before the lock does
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// save.sh exited 0 (at the deadline, or a child held the output): its snapshot is written
+	if cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		return nil
+	}
 	what := "failed (" + err.Error() + ")"
 	if ctx.Err() != nil {
 		what = "timed out after " + snapshotTimeout.String()

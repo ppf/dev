@@ -1124,14 +1124,7 @@ func TestSnapshotTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 1s: dumping") {
 		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
 	}
-	pid := childPid(t, pidFile)
-	deadline := time.Now().Add(2 * time.Second)
-	for running(pid) {
-		if time.Now().After(deadline) {
-			t.Fatalf("save.sh's child %d outlived it", pid)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitGone(t, childPid(t, pidFile))
 }
 
 // childPid reads the pid save.sh's child wrote to file, killed at the test's end.
@@ -1149,10 +1142,22 @@ func childPid(t *testing.T, file string) int {
 	return pid
 }
 
-// running reports whether process pid runs: a zombie left unreaped doesn't.
-func running(pid int) bool {
-	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
+// waitGone waits up to 2 s for process pid to stop running: a zombie left unreaped counts as stopped.
+func waitGone(t *testing.T, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		_, gone := err.(*exec.ExitError)
+		switch {
+		case gone || err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "Z"):
+			return
+		case err != nil:
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("save.sh's child %d outlived it", pid)
+		}
+	}
 }
 
 // A failing save.sh's warning says how it ended and what it printed; a child it left holding the output dies too.
@@ -1164,9 +1169,7 @@ func TestSnapshotFailed(t *testing.T) {
 	if err := Snapshot(f.client()); err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh failed (exit status 3): boom") {
 		t.Errorf("Snapshot = %v, calls %q; want the exit and the output", err, f.calls)
 	}
-	if pid := childPid(t, pidFile); running(pid) {
-		t.Errorf("save.sh's child %d outlived it", pid)
-	}
+	waitGone(t, childPid(t, pidFile))
 }
 
 // saveScript makes home the user's home, its tmux-resurrect save.sh running body.

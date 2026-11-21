@@ -407,18 +407,16 @@ func TestFastKeysPty(t *testing.T) {
 	defer func() { _ = ptmx.Close(); _ = tty.Close() }()
 	ready := make(chan struct{})
 	p := tea.NewProgram(firstKey{m: New(ask, Actions{}, false), ready: ready}, tea.WithInput(tty), tea.WithOutput(io.Discard))
-	done := make(chan tea.Model, 1)
-	go func() {
-		m, err := p.Run()
-		if err != nil {
-			t.Error(err)
-		}
-		done <- m
-	}()
+	type result struct {
+		m   tea.Model
+		err error
+	}
+	done := make(chan result, 1)
+	go func() { m, err := p.Run(); done <- result{m, err} }()
 	select {
 	case <-ready:
-	case <-done:
-		t.Fatal("the program ended before it started")
+	case r := <-done:
+		t.Fatalf("the program ended before it started: %v", r.err)
 	case <-time.After(5 * time.Second):
 		p.Kill()
 		t.Fatal("the program never started")
@@ -427,8 +425,11 @@ func TestFastKeysPty(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case m := <-done:
-		if sel := m.(firstKey).m.sel; sel != 2 {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if sel := r.m.(firstKey).m.sel; sel != 2 {
 			t.Errorf("jj in one write: sel %d, want 2", sel)
 		}
 	case <-time.After(5 * time.Second):
