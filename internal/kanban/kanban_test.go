@@ -684,3 +684,12 @@ func TestClickScrolledAndIgnored(t *testing.T) {
 		t.Errorf("❌ wheel over the item view: view open %v card %d", m.item != nil, m.card)
 	}
 }
+
+// Keys pressed fast in the item view each run there, as on the board.
+func TestItemViewFastKeys(t *testing.T) {
+	m, _ := board(t, fixture(2), 120, 40)
+	m = keys(t, m, "enter", "jj")
+	if !strings.Contains(plain(m), "▸ m") {
+		t.Errorf("❌ jj didn't move to own words:\n%s", plain(m))
+	}
+}
