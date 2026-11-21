@@ -1060,7 +1060,8 @@ func TestCountNeedYouOnce(t *testing.T) {
 	}
 	if c := Count(rows); c != (Tally{NeedYou: 3, Mine: 1}) {
 		t.Errorf("tally %+v, want 3 need you, 1 mine", c)
-	}	// A worker resting after a failed turn has no session row: its card counts
+	}
+	// A worker resting after a failed turn has no session row: its card counts
 	failed := NeedRow{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w2"}, NeedsYou: true}
 	if c := Count(append(rows, failed)); c.NeedYou != 4 {
 		t.Errorf("tally %+v, want 4 need you", c)
