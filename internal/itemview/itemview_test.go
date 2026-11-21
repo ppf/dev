@@ -366,6 +366,12 @@ func TestFastKeys(t *testing.T) {
 	if m, _ = m.Update(cmd()); !m.Done || len(r.calls) != 1 || !strings.HasSuffix(r.calls[0], "Wait | after the test") {
 		t.Errorf("2j1: calls %q", r.calls)
 	}
+	if m := press(New(ask, Actions{}, false), "5j"); m.sel != 0 || m.msg != "#4 has 2 options" {
+		t.Errorf("5j: sel %d, msg %q; want the hint kept", m.sel, m.msg)
+	}
+	if m, _ := New(ask, Actions{}, false).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj"), Alt: true}); m.sel != 0 {
+		t.Errorf("alt+jj: sel %d, want 0", m.sel)
+	}
 	if m := press(New(ask, Actions{}, false), "mok"); !m.typing || string(m.field) != "ok" {
 		t.Errorf("mok: typing %v, field %q", m.typing, string(m.field))
 	}
@@ -402,8 +408,21 @@ func TestFastKeysPty(t *testing.T) {
 	ready := make(chan struct{})
 	p := tea.NewProgram(firstKey{m: New(ask, Actions{}, false), ready: ready}, tea.WithInput(tty), tea.WithOutput(io.Discard))
 	done := make(chan tea.Model, 1)
-	go func() { m, _ := p.Run(); done <- m }()
-	<-ready
+	go func() {
+		m, err := p.Run()
+		if err != nil {
+			t.Error(err)
+		}
+		done <- m
+	}()
+	select {
+	case <-ready:
+	case <-done:
+		t.Fatal("the program ended before it started")
+	case <-time.After(5 * time.Second):
+		p.Kill()
+		t.Fatal("the program never started")
+	}
 	if _, err := ptmx.Write([]byte("jj")); err != nil {
 		t.Fatal(err)
 	}

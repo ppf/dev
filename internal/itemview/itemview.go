@@ -146,14 +146,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.typing {
 			return m.typeKey(msg)
 		}
-		if msg.Type != tea.KeyRunes || msg.Paste || len(msg.Runes) < 2 {
+		if msg.Type != tea.KeyRunes || msg.Paste || msg.Alt || len(msg.Runes) < 2 {
 			return m.key(msg.String())
 		}
-		// Keys pressed fast come as one: each runs, until one starts an action or closes the view; after m the rest are typed
+		// Keys pressed fast come as one: each runs, until one starts an action, closes the view or shows a hint; after m the rest are typed
 		for i, r := range msg.Runes {
 			var cmd tea.Cmd
 			m, cmd = m.key(string(r))
-			if m.busy != "" || m.Done {
+			if m.busy != "" || m.Done || m.msg != "" {
 				return m, cmd
 			}
 			if m.typing {

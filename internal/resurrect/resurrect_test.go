@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1110,7 +1111,7 @@ func TestSnapshotWithoutResurrect(t *testing.T) {
 func TestSnapshotTimeout(t *testing.T) {
 	home := t.TempDir()
 	pidFile := filepath.Join(home, "child.pid")
-	saveScript(t, home, "sleep 30 &\necho $! > "+pidFile+".tmp\nmv "+pidFile+".tmp "+pidFile+"\necho dumping\nsleep 30\n")
+	saveScript(t, home, "sleep 30 &\necho $! > '"+pidFile+".tmp'\nmv '"+pidFile+".tmp' '"+pidFile+"'\necho dumping\nsleep 30\n")
 	old := snapshotTimeout
 	snapshotTimeout = time.Second
 	t.Cleanup(func() { snapshotTimeout = old })
@@ -1123,17 +1124,9 @@ func TestSnapshotTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 1s: dumping") {
 		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
 	}
-	data, rerr := os.ReadFile(pidFile)
-	if rerr != nil {
-		t.Fatal(rerr)
-	}
-	pid, perr := strconv.Atoi(strings.TrimSpace(string(data)))
-	if perr != nil || pid <= 0 {
-		t.Fatalf("child pid %q", data)
-	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	pid := childPid(t, pidFile)
 	deadline := time.Now().Add(2 * time.Second)
-	for syscall.Kill(pid, 0) == nil {
+	for running(pid) {
 		if time.Now().After(deadline) {
 			t.Fatalf("save.sh's child %d outlived it", pid)
 		}
@@ -1141,12 +1134,38 @@ func TestSnapshotTimeout(t *testing.T) {
 	}
 }
 
-// A failing save.sh's warning says how it ended and what it printed.
+// childPid reads the pid save.sh's child wrote to file, killed at the test's end.
+func childPid(t *testing.T, file string) int {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("child pid %q", data)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+// running reports whether process pid runs: a zombie left unreaped doesn't.
+func running(pid int) bool {
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
+}
+
+// A failing save.sh's warning says how it ended and what it printed; a child it left holding the output dies too.
 func TestSnapshotFailed(t *testing.T) {
-	saveScript(t, t.TempDir(), "echo boom\nexit 3\n")
+	home := t.TempDir()
+	pidFile := filepath.Join(home, "child.pid")
+	saveScript(t, home, "sleep 30 &\necho $! > '"+pidFile+"'\necho boom\nexit 3\n")
 	f := &fakeServer{}
 	if err := Snapshot(f.client()); err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh failed (exit status 3): boom") {
 		t.Errorf("Snapshot = %v, calls %q; want the exit and the output", err, f.calls)
+	}
+	if pid := childPid(t, pidFile); running(pid) {
+		t.Errorf("save.sh's child %d outlived it", pid)
 	}
 }
 
