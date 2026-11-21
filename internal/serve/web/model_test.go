@@ -159,3 +159,57 @@ if (marks(sent).chips[0]?.[0] !== 'waiting for alice') console.log('waiting_for 
 if (lanes(cards(board))[4].xs[0]?.it.done_at !== 1699999940) console.log('done_at not read');
 `)
 }
+
+// A drop's verdict, one case per row of the move rules: the call a button makes, or why it is refused.
+func TestVerdict(t *testing.T) {
+	runModel(t, `
+const live = { boss: 'boss-dev' }, closed = { boss: 'boss-shop', closed: true };
+const you = { kind: 'you' }, boss = { kind: 'boss', name: 'boss-dev', running: true };
+const c = (list, it, done = false) => ({ list, it: { id: 1, text: 'x', ...it }, done });
+const yours = c(live, { status: 'yours', column: 'todo', assignee: you });
+const ask = c(live, { status: 'decide', options: ['a', 'b'], column: 'todo', assignee: you, needs_you: true });
+const parked = c(live, { status: 'idle', on: 'boss', column: 'todo', assignee: boss });
+const shut = c(closed, { status: 'boss closed', on: 'shop-fix', session: { name: 'shop-fix' }, column: 'todo', assignee: { kind: 'boss', name: 'boss-shop' } });
+const doing = c(live, { status: 'yours', doing: { text: '', at: 1 }, column: 'progress', assignee: you });
+const working = c(live, { status: 'working', on: 'dev-x', session: { name: 'dev-x' }, column: 'progress', assignee: { kind: 'worker', name: 'dev-x', running: true } });
+const started = c(live, { status: 'starting', started: { at: 1, to: 'boss-dev' }, column: 'progress', assignee: boss });
+const review = c(live, { status: 'check', column: 'review', assignee: you, needs_you: true });
+const waiting = c(live, { status: 'waiting', on: 'Carl', column: 'waiting', assignee: boss, waiting_for: 'Carl' });
+const done = c(live, { column: 'done', assignee: you }, true);
+const desk = c({ boss: 'local_1' }, { status: 'yours', column: 'todo', assignee: you });
+const mgr = c({ boss: 'manager' }, { status: 'idle', on: 'boss', column: 'todo', assignee: { kind: 'boss', name: 'manager' } });
+const v = (x, to, runs = true) => JSON.stringify(verdict(x, columnOf(x), to, runs));
+const got = [
+  ['1 own To do → In progress: on it', v(yours, 'progress'), "doing"],
+  ['1 a boss\'s To do → In progress: Start', v(parked, 'progress'), 'start'],
+  ['1 a closed boss\'s session card, manager runs: Start', v(shut, 'progress'), 'start'],
+  ['1 the same, no manager', v(shut, 'progress', false), 'boss-shop is closed and no manager runs to start it'],
+  ['1 an ask → In progress', v(ask, 'progress'), 'answer it: open the card'],
+  ['1 the manager\'s own card', v(mgr, 'progress'), "the manager's own card: ask the manager in its session"],
+  ['2 own, doing → To do: stop', v(doing, 'todo'), 'stop'],
+  ['2 a session\'s card → To do', v(working, 'todo'), 'dev-x is working on it'],
+  ['2 a started card → To do', v(started, 'todo'), 'boss-dev was asked to start it'],
+  ['3 own To do → Done: tick', v(yours, 'done'), 'tick'],
+  ['3 own Review → Done: tick', v(review, 'done'), 'tick'],
+  ['3 own, doing → Done: tick', v(doing, 'done'), 'tick'],
+  ['3 an ask → Done', v(ask, 'done'), 'answer it instead'],
+  ['3 a session\'s card → Done', v(working, 'done'), 'boss-dev ticks it'],
+  ['3 a boss\'s card → Done', v(parked, 'done'), 'boss-dev ticks it'],
+  ['4 → Waiting', v(yours, 'waiting'), 'set by the session'],
+  ['4 → Review', v(doing, 'review'), 'set by the PR'],
+  ['4 out of Waiting', v(waiting, 'todo'), 'the session moves it out of Waiting'],
+  ['4 out of Review', v(review, 'progress'), 'the PR moves it out of Review'],
+  ['5 out of Done', v(done, 'todo'), 'reopen is not built yet'],
+  ['6 the same column: nothing', v(yours, 'todo'), 'null'],
+  ['a desktop app list', v(desk, 'progress'), "a desktop app boss's card: change it in its chat"],
+  ['a desktop app list → Done', v(desk, 'done'), "a desktop app boss's card: change it in its chat"],
+  ['2 own, in progress, not doing → To do', v(c(live, { status: 'yours', column: 'progress', assignee: you }), 'todo'), 'you are working on it'],
+  ['3 own, on its boss by name → Done', v(c(live, { status: 'yours', on: 'boss-dev', column: 'todo', assignee: you }), 'done'), 'not tickable from the page'],
+];
+for (const [name, out, want] of got) {
+  const o = JSON.parse(out), is = o === null ? 'null' : o.act || o.why;
+  if (is !== want) console.log(name + ': ' + out + ', want ' + want);
+  if (o?.act && !o.hint) console.log(name + ': no hint');
+}
+`)
+}

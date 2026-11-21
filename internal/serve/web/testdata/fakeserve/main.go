@@ -164,6 +164,7 @@ type request struct {
 	Text     string `json:"text"`
 	Option   string `json:"option"`
 	Doing    string `json:"doing"`
+	Stop     bool   `json:"stop"`
 }
 
 // act checks the page's header and finds the open item the request names, then hands it to f under the lock.
@@ -265,7 +266,7 @@ func (s *server) start(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// doing marks the user's own item, no ask, in progress as todo.SetDoing does.
+// doing marks the user's own item, no ask, in progress as todo.SetDoing does, or with stop ends it: back to To do.
 func (s *server) doing(req request, it map[string]any) (int, string) {
 	options, _ := it["options"].([]any)
 	on, _ := it["on"].(string)
@@ -276,6 +277,12 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 		return 409, fmt.Sprintf("item %d is on %s, not the user's", req.ID, on)
 	case len(options) > 0:
 		return 409, fmt.Sprintf("item %d is a question: answer it", req.ID)
+	case req.Stop && it["doing"] == nil:
+		return 409, fmt.Sprintf("item %d isn't marked doing", req.ID)
+	case req.Stop:
+		delete(it, "doing")
+		it["column"] = "todo"
+		return 200, ""
 	}
 	it["doing"] = map[string]any{"text": req.Doing, "at": time.Now().Unix()}
 	it["column"], it["assignee"] = "progress", map[string]any{"kind": "you"}

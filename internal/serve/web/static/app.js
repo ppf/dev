@@ -9,7 +9,6 @@ const QUIET_MS = 40000;
 const RETRY_MAX_MS = 15000;
 const RELOADED = 'dev-reloaded';
 const TIMEOUT_MS = 4000;
-const TICKABLE = ['yours', 'starting', 'check', 'boss closed'];
 const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
 const WHO_SHOWN = 10; // assignee chips shown until "+N"
 const TODO_SHOWN = 5; // To do's cards shown until "Show N more", what needs the user always
@@ -34,6 +33,7 @@ const state = {
   filter: { project: '', who: [], needs: false }, // model.js matches
   note: '', errors: {}, // item key → the server's last refusal
   pending: {}, // item key → an answer or tick on its way
+  moves: {}, // item key → {to, act, after} a card dropped on column to, shown there until the board read after its call (seq > after)
   sig: '', sheetSig: '',
   noteFor: '', // the screen the note was left for: any other clears it
   noteShown: '', // the note last drawn: a new one is scrolled to
@@ -82,21 +82,9 @@ let hues = new Map();
 const hue = name => hues.get(name);
 const key = (boss, id) => boss + '/' + id;
 const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
-// A desktop app boss's list is read here, never answered, ticked or started: the Mac refuses it.
-const desktop = l => l.boss.startsWith('local_');
-// own is whether the item is the user's, as todo.Own has it.
-const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.toLowerCase());
 const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
 const onWorker = ({ list, it }) => !own(list, it) && (!!it.session || ON_WORKER.includes(it.status));
-const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
-// A closed boss's item starts only while the manager runs, as on the tmux boards.
-const startable = (l, it) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (!l.closed || !!state.board?.manager_runs)
-  && (!!it.start_late || it.column === 'todo' && ['yours', 'boss closed'].includes(it.status)); // as todo.Start: a late start, else a To do card
-const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
-// The user marks their own item (the Mac's assignee: you), no ask, in progress (todo.SetDoing); the page offers it on To do
-// cards only, not a desktop list's, nor one being started.
-const doable = (l, it) => !desktop(l) && it.assignee?.kind === 'you' && !it.options?.length && it.column === 'todo' && !it.doing && !it.started;
-const receiver = l => l.closed ? 'the manager' : l.boss;
+const managerRuns = () => !!state.board?.manager_runs;
 
 // An option is a string "label | detail", ending " (Recommended)" for the pick the boss recommends, either side of
 // " | " (as todo.Split reads it), or an object. An answer names the label.
@@ -147,6 +135,7 @@ async function call(method, path, body) {
   }
 }
 
+const NO_REPLY = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
 const errorOf = res => res.data?.error || 'Your Mac answered ' + res.status + '.';
 
 function unpair() {
@@ -165,6 +154,10 @@ async function load() {
     res = await call('GET', '/v1/board');
   } catch {}
   if (seq !== state.seq) return;
+  // A dropped card goes where the first board read after its call puts it
+  if ((res?.ok && res.data) || res?.status === 304) {
+    for (const [k, m] of Object.entries(state.moves)) if (m.after < seq) delete state.moves[k];
+  }
   state.reachable = !!res && (res.status === 401 || res.status === 304 || (res.ok && !!res.data));
   state.problem = !res || state.reachable ? '' : res.ok ? 'Your Mac sent a board this page cannot read.' : errorOf(res);
   if (res?.status === 401) {
@@ -312,8 +305,10 @@ async function post(path, body, k) {
     delete state.pending[k];
     state.sheetSig = state.sig = ''; // redraw: the item's buttons were disabled while it was pending
   }
+  if (res?.ok && state.moves[k]) state.moves[k].after = state.seq;
+  else delete state.moves[k];
   if (!res) {
-    state.errors[k] = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
+    state.errors[k] = NO_REPLY;
     onBoard(k, state.errors[k]);
     return load();
   }
@@ -339,26 +334,20 @@ async function send(list, it) {
   }
 }
 
-async function tick(list, it) {
+// itemCall posts path for item it of list with extra in its body; when the Mac took it, leaves with note: whether it did.
+async function itemCall(path, list, it, extra, note) {
   const k = key(list.boss, it.id);
-  if (await post('/v1/done', { boss: list.boss, id: it.id, text: it.text }, k)) {
-    leave(k, 'Ticked: ' + it.text);
-  }
+  const ok = !!await post(path, { boss: list.boss, id: it.id, text: it.text, ...extra }, k);
+  if (ok) leave(k, note + it.text);
+  return ok;
 }
 
-async function start(list, it) {
-  const k = key(list.boss, it.id);
-  if (await post('/v1/start', { boss: list.boss, id: it.id, text: it.text }, k)) {
-    leave(k, 'Start sent: ' + it.text);
-  }
-}
-
-async function onIt(list, it) {
-  const k = key(list.boss, it.id);
-  if (await post('/v1/doing', { boss: list.boss, id: it.id, text: it.text, doing: '' }, k)) {
-    leave(k, 'On it, in progress: ' + it.text);
-  }
-}
+const tick = (list, it) => itemCall('/v1/done', list, it, {}, 'Ticked: ');
+const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
+const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '' }, 'On it, in progress: ');
+const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true }, 'Off it: ');
+// What each verdict act calls: the sheet's buttons' own; stop doing has no button yet
+const ACTS = { tick, start, doing: onIt, stop: offIt };
 
 // leave closes item k's sheet with note, when it is still the one shown, and reads the board again.
 function leave(k, note) {
@@ -452,16 +441,28 @@ function flag(it) {
 
 // card is an open item's card; a finished one is a row.
 function card(x) {
-  if (x.done) return doneRow(x);
+  const c = x.done ? doneRow(x) : openCard(x);
+  cardOf.set(c, x);
+  return c;
+}
+
+// cardOf is the card each drawn card element shows, for a drag or Shift+arrow on it.
+const cardOf = new WeakMap();
+
+// What a dropped card's band says until the board settles it
+const MOVING = { tick: 'Ticking…', start: 'Starting…', doing: 'Moving in progress…', stop: 'Off it…' };
+const movingBand = x => x.moving && el('div', { class: 'flag pend' }, MOVING[x.moving.act]);
+
+function openCard(x) {
   const { list, it } = x, m = marks(x), h = itemHash(list.boss, it.id), k = key(list.boss, it.id), mine = whoOf(x) === ME;
   const old = it.added && Date.now() / 1000 - it.added > DAY && mine;
-  const startBtn = startable(list, it) && el('button', { class: 'btn-s', type: 'button', 'data-f': h + '/start', disabled: !state.reachable || state.pending[k],
+  const startBtn = startable(list, it, managerRuns()) && el('button', { class: 'btn-s', type: 'button', 'data-f': h + '/start', disabled: !state.reachable || state.pending[k] || !!x.moving,
     onclick: e => { e.currentTarget.disabled = true; start(list, it); } }, 'Start');
   const [title, rest] = lead(it.text), line = m.line || (it.doing && mine ? 'on it' : '');
   // The flag says what a red band or chip would: needs you, and why
   const said = tone => m.red && tone === 'red';
-  return el('article', { class: 'card' + (mine ? ' mine' : '') + (m.red ? ' need' : '') },
-    m.red && flag(it),
+  return el('article', { class: 'card' + (mine ? ' mine' : '') + (m.red ? ' need' : '') + (x.moving ? ' moving' : '') },
+    movingBand(x), m.red && !x.moving && flag(it),
     el('div', { class: 'clab' }, dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'id' }, '#' + it.id),
       m.word && el('span', { class: 'st ' + statusClass(m.word) }, m.word),
       it.added && el('span', { class: 'age' + (old ? ' old' : '') }, age(it.added))),
@@ -484,8 +485,8 @@ function card(x) {
 function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
-  return el('article', { class: 'card done', title: named, 'aria-label': named },
-    el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
+  return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named },
+    movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
@@ -529,8 +530,9 @@ const hotCount = l => l.xs.filter(x => needsYou(x) && !x.it.quiet).length;
 
 function body(l) {
   // To do shows its first cards, and every one that needs the user, until opened whole
-  const capped = l.key === 'todo' && l.xs.length > Math.max(TODO_SHOWN, l.xs.filter(needsYou).length);
-  const xs = capped && !state.more ? l.xs.slice(0, Math.max(TODO_SHOWN, l.xs.filter(needsYou).length)) : l.xs;
+  const n = Math.max(TODO_SHOWN, l.xs.filter(needsYou).length), capped = l.key === 'todo' && l.xs.length > n;
+  // and a card just dropped there wherever it sorts
+  const xs = capped && !state.more ? [...l.xs.slice(0, n), ...l.xs.slice(n).filter(x => x.moving)] : l.xs;
   // Opened, focus goes to the first card it showed: the toggle moves past them
   const more = capped && el('button', { type: 'button', class: 'more', 'data-f': 'more', onclick: () => {
     state.more = !state.more;
@@ -538,7 +540,7 @@ function body(l) {
     clearTimeout(settling);
     settling = 0;
     render();
-    if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[xs.length]?.focus();
+    if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[n]?.focus();
   } },
     state.more ? 'Show fewer' : 'Show ' + (l.xs.length - xs.length) + ' more');
   return [el('div', { class: 'stack', 'data-k': l.key }, xs.map(card), more),
@@ -644,8 +646,14 @@ function land(lanes, k) {
   }
 }
 
+// shownAt is open card x as drawn: in the column it was dropped on while that is on its way.
+function shownAt(x) {
+  const m = !x.done && state.moves[key(x.list.boss, x.it.id)];
+  return m ? { ...x, moving: m, done: m.to === 'done', it: { ...x.it, column: m.to } } : x;
+}
+
 function board() {
-  const all = cards(state.board);
+  const raw = cards(state.board), all = raw.map(shownAt);
   const projects = [...new Set(all.map(x => project(x.list)))].sort();
   if (!projects.includes(state.filter.project)) state.filter.project = '';
   // A pressed assignee whose cards are gone has no chip left to unpress
@@ -657,7 +665,8 @@ function board() {
   const kinds = new Map();
   for (const x of all) if (kindOf(x) === 'boss' || !kinds.get(whoOf(x))) kinds.set(whoOf(x), kindOf(x));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
-  const ls = lanes(all.filter(x => matches(x, state.filter))).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
+  // A dropped card is filtered as it was: a tick under "need you" stays shown, Ticking…
+  const ls = lanes(raw.filter(x => matches(x, state.filter)).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
   const out = [...listErrors(), filters(projects, ws, kinds), ...(wide.matches ? [columns(ls)] : swipe(ls))];
   if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
@@ -731,12 +740,12 @@ function item(boss, id) {
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
   const acts = [], hints = [];
   const act = (label, cls, run, hint) => {
-    const b = el('button', { class: 'btn ' + cls, type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { acts.forEach(a => { a.disabled = true; }); run(list, it); } }, label);
+    const b = el('button', { class: 'btn ' + cls, type: 'button', disabled: !state.reachable || state.pending[k] || !!state.moves[k], onclick: () => { acts.forEach(a => { a.disabled = true; }); run(list, it); } }, label);
     acts.push(b);
     hints.push(hint);
   };
   if (doable(list, it)) act("I'm on it", 'primary', onIt, "I'm on it moves it to In progress as yours.");
-  if (startable(list, it)) act('Start', '', start, 'Start asks ' + receiver(list) + ' on your Mac to start a worker on it.');
+  if (startable(list, it, managerRuns())) act('Start', '', start, 'Start asks ' + receiver(list) + ' on your Mac to start a worker on it.');
   if (tickable(list, it)) act('Tick as done', doable(list, it) ? '' : 'primary', tick, 'Ticking tells ' + list.boss + ' on your Mac. The item leaves every board.');
   if (acts.length) {
     out.push(el('div', { class: 'acts' }, acts), el('p', { class: 'hint' }, hints.join(' ')));
@@ -772,7 +781,7 @@ function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && find(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], !!state.moves[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;
@@ -817,8 +826,9 @@ function render() {
   // Redraw the board only when what it shows changed (ages: each minute), so a poll or the sheet keeps its scroll.
   // The pair screen keeps what was typed: it is drawn once per visit.
   const sig = r.name === 'pair' ? 'pair' : [state.reachable, state.unpaired, state.etag, state.note, JSON.stringify(state.filter), state.more, state.allWho, wide.matches,
-    Math.floor(Date.now() / 60000)].join('\n');
-  if (sig !== state.sig && !(settling && b && r.name !== 'pair')) {
+    JSON.stringify(state.moves), Math.floor(Date.now() / 60000)].join('\n');
+  // A card lifted holds the board as it was: a redraw would drop it from under the pointer
+  if (sig !== state.sig && !((settling || drag?.lifted) && b && r.name !== 'pair')) {
     state.sig = sig;
     const view = document.getElementById('view');
     if (r.name === 'pair') view.replaceChildren(...pairScreen());
@@ -834,15 +844,196 @@ function render() {
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
       if (!wide.matches) showLane(state.lane);
       if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
-      if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
+      if (state.note && state.note !== state.noteShown && !dropping) window.scrollTo(0, 0);
       state.noteShown = state.note;
     }
   }
   sheet(r);
 }
 
+const FLASH_MS = 4500;
+const DRAG_PX = 5; // a press moved this far lifts its card: less is a click
+const titleOf = k => COLUMNS.find(c => c.key === k).title;
+
+// acted is what of card x a drop's call reads or changes: what it is, whom it's on, its doing line and start, its column, its list's state.
+const acted = ({ list, it }) => JSON.stringify([it.text, it.added, it.on, it.session?.name, it.doing, it.started, it.options, columnOf({ it }), !!list.closed]);
+
+// move runs what dropping card x on column to means (verdict): the call the sheet's button makes (stop doing: a drop's
+// only), the card shown there meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y};
+// else by the card). shown: the verdict the drag showed for to, when it was lifted.
+async function move(x, to, at, shown) {
+  const k = key(x.list.boss, x.it.id);
+  // A finished card's id may be an open one's again: only an open card (or one shown dropped on Done) is on its way
+  if ((!x.done || x.moving) && (state.moves[k] || state.pending[k])) return refuse(x, 'already on its way to your Mac', at);
+  if (!x.done) {
+    const now = find(x.list.boss, x.it.id), was = shown || verdict(x, columnOf(x), to, managerRuns()), is = verdict(now || x, columnOf(now || x), to, managerRuns());
+    if (!now) return refuse(x, 'no longer open', at);
+    // A drop does what was shown when the card was picked up, not what a change on the Mac since would make of it
+    if (acted(now) !== acted(x) || is?.act !== was?.act || is?.hint !== was?.hint) {
+      return refuse(now, 'it changed on your Mac meanwhile: look again', at);
+    }
+    x = now;
+  }
+  const v = verdict(x, columnOf(x), to, managerRuns());
+  if (!v) return;
+  if (v.why) return refuse(x, v.why, at);
+  // as the buttons, disabled then
+  if (!state.reachable) return refuse(x, 'your Mac is not reachable', at);
+  state.moves[k] = { to, act: v.act };
+  delete state.errors[k];
+  let ok = false;
+  dropping++;
+  try {
+    render();
+    ok = await ACTS[v.act](x.list, x.it);
+  } finally {
+    dropping--;
+    state.noteShown = state.note; // the button's note, shown without scrolling the board away from the drop
+    if (state.moves[k]?.after === undefined) delete state.moves[k]; // never left for good
+  }
+  if (!ok && !state.unpaired) refuse(x, state.errors[k] || state.note || 'not moved', at, to); // unpaired: Pair says why
+}
+
+let flashTimer = 0;
+
+// refuse says why card x stays where it is: a callout at at (else under the card) and a line at the foot, for a few seconds;
+// to: the column a failed call was for, which the Mac may have saved it in anyway (its boss not told).
+function refuse(x, why, at, to) {
+  for (const n of document.querySelectorAll('body > .refuse, body > .toast')) n.remove();
+  at ||= anchor(x);
+  // Where it is now: an unanswered call may have moved it after all
+  const now = x.done ? x : find(x.list.boss, x.it.id);
+  const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': Math.min(at.y, innerHeight - 140) + 'px' } }, why);
+  // gone from the open items after a tick with no reply: ticked, likely; after a refusal: someone else's change
+  const moved = !!to && (now ? columnOf(now) === to : to === 'done' && why === NO_REPLY);
+  const toast = el('div', { class: 'toast' }, (moved ? 'Moved, with a problem' : 'Not moved') + ' · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
+  document.body.append(call, toast);
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { call.remove(); toast.remove(); }, FLASH_MS);
+}
+
+// anchor is the point under card x as drawn, else the middle of the screen.
+function anchor(x) {
+  const r = document.querySelector('#view [data-f="' + CSS.escape(itemHash(x.list.boss, x.it.id)) + '"]')?.closest('.card')?.getBoundingClientRect();
+  return r ? { x: r.left, y: r.bottom + 6 } : { x: innerWidth / 2 - 160, y: innerHeight / 2 };
+}
+
+// drag is the card pressed on the wide board, {x, el, id, sx, sy}; once moved DRAG_PX, lifted with its ghost, the
+// columns (each {el, k, v: its verdict}) and the one under the pointer (over).
+let drag = null, swallow = false, dropping = 0; // dropping: drops whose call is on its way
+
+function press(e) {
+  if (drag?.lifted) drop(e, true); // its pointerup never came
+  swallow = false; // a new press: its click is its own
+  if (e.pointerType === 'touch' || e.button !== 0 || !wide.matches || route().name !== 'board') return;
+  const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
+  if (!x || x.moving || e.target.closest('button, select, input, textarea, .quick')) return;
+  drag = { x, el: c, id: e.pointerId, sx: e.clientX, sy: e.clientY };
+}
+
+function lift() {
+  const r = drag.el.getBoundingClientRect(), from = columnOf(drag.x);
+  drag.dx = drag.sx - r.left;
+  drag.dy = drag.sy - r.top;
+  drag.ghost = drag.el.cloneNode(true);
+  drag.ghost.classList.add('ghost');
+  drag.ghost.removeAttribute('aria-label');
+  drag.ghost.setAttribute('aria-hidden', 'true');
+  drag.ghost.inert = true;
+  drag.ghost.style.setProperty('--gw', r.width + 'px');
+  document.body.append(drag.ghost);
+  drag.el.classList.add('slot');
+  document.documentElement.classList.add('dragging');
+  getSelection()?.removeAllRanges();
+  drag.cols = [...document.querySelectorAll('#view .col[data-k]')].map(c => {
+    const v = verdict(drag.x, from, c.dataset.k, managerRuns());
+    if (v?.why) {
+      c.classList.add('is-dim');
+      c.querySelector('.ch').after(el('div', { class: 'dim-hint' }, v.why));
+    }
+    return { el: c, k: c.dataset.k, v };
+  });
+  drag.lifted = true;
+  drag.el.setPointerCapture?.(drag.id); // its pointerup comes back from outside the window too
+}
+
+// follow moves the ghost to the pointer and marks the column under it: a target with what a drop does, or refusing.
+function follow(e) {
+  drag.ghost.style.setProperty('--gx', e.clientX - drag.dx + 'px');
+  drag.ghost.style.setProperty('--gy', e.clientY - drag.dy + 'px');
+  const over = colAt(drag.cols, e);
+  if (over === drag.over) return;
+  if (drag.over) unmark(drag.over);
+  drag.over = over;
+  if (!over?.v) return;
+  over.el.classList.add(over.v.why ? 'is-refuse' : 'is-target');
+  if (over.v.act) over.el.querySelector('.ch').after(el('div', { class: 'drop-hint' }, 'Drop: ' + over.v.hint));
+}
+
+// colAt is the column of cols under the pointer of e, null for none.
+const colAt = (cols, e) => cols.find(c => {
+  const r = c.el.getBoundingClientRect();
+  // its part on screen: a released pointer outside the window is captured too
+  return e.clientX >= Math.max(0, r.left) && e.clientX <= Math.min(innerWidth, r.right) && e.clientY >= Math.max(0, r.top) && e.clientY <= Math.min(innerHeight, r.bottom);
+}) || null;
+
+function unmark(c) {
+  c.el.classList.remove('is-target', 'is-refuse');
+  c.el.querySelector('.drop-hint')?.remove();
+}
+
+// drop ends the drag: a lifted card goes to the column under the pointer, if any (end: no drop, as Escape).
+function drop(e, end = false) {
+  const d = drag;
+  drag = null;
+  if (!d?.lifted) return;
+  // where it is released, not where it last moved; none once the board left (a sheet, the phone layout)
+  const over = !end && wide.matches && route().name === 'board' && colAt(d.cols, e);
+  // The click its pointerup fires opens no sheet, a cancelled drag's (button still down) too
+  swallow = true;
+  d.ghost.remove();
+  d.el.classList.remove('slot');
+  document.documentElement.classList.remove('dragging');
+  for (const c of d.cols) {
+    unmark(c);
+    c.el.classList.remove('is-dim');
+    c.el.querySelector('.dim-hint')?.remove();
+  }
+  render(); // what was held meanwhile
+  if (over) move(d.x, over.k, { x: e.clientX, y: e.clientY + 12 }, over.v);
+}
+
+document.addEventListener('pointerdown', press);
+document.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  if (!drag.lifted) {
+    if (!(e.buttons & 1)) return void (drag = null); // released where no pointerup reached the page
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < DRAG_PX) return;
+    if (!drag.el.isConnected) return void (drag = null); // redrawn since the press
+    lift();
+  }
+  follow(e);
+});
+document.addEventListener('pointerup', e => {
+  if (drag && e.pointerId === drag.id) drop(e);
+  // its click comes before any timer; with none (released off the card), Enter's own click goes through
+  if (swallow) setTimeout(() => { swallow = false; });
+});
+document.addEventListener('pointercancel', e => { if (drag && e.pointerId === drag.id) drop(e, true); });
+window.addEventListener('blur', e => drop(e, true));
+// The click that ends a drag opens no sheet
+document.addEventListener('click', e => {
+  if (!swallow) return;
+  swallow = false;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+// A card's link would drag as a link
+document.getElementById('view').addEventListener('dragstart', e => e.preventDefault());
+
 window.addEventListener('hashchange', () => {
   const r = route().name;
+  if (r !== 'board') drop(null, true); // the board behind a sheet or Pair takes no drop
   if (location.hash !== state.noteFor) state.note = '';
   if (r !== 'item') state.shown = null;
   state.errors = {};
@@ -851,14 +1042,30 @@ window.addEventListener('hashchange', () => {
 });
 document.getElementById('shade').addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => {
+  if (drag?.lifted && e.key === 'Escape') return drop(e, true);
+  if (['Enter', ' '].includes(e.key)) swallow = false; // a drag cancelled away from the window (no pointerup): this click is its own
+  if (route().name === 'board' && wide.matches && e.shiftKey && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
+    if (!x || drag?.lifted || e.target.closest('button')) return; // a card's own buttons keep their keys
+    e.preventDefault();
+    const next = COLUMNS[COLUMNS.findIndex(col => col.key === columnOf(x)) + (e.key === 'ArrowRight' ? 1 : -1)];
+    if (next) move(x, next.key);
+    return;
+  }
   if (route().name !== 'item') return;
   if (e.key === 'Escape') return closeSheet();
   if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   document.querySelectorAll('.opts .opt')[Number(e.key) - 1]?.click();
 });
-wide.addEventListener('change', render);
+wide.addEventListener('change', () => {
+  drop(null, true); // the columns it was over are gone
+  render();
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return disconnect();
+  if (document.visibilityState !== 'visible') {
+    drop(null, true);
+    return disconnect();
+  }
   load();
   reconnect();
 });
