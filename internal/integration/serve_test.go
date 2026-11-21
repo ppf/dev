@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // dev serve's /v1/board on loopback needs no pairing but refuses another site's request; its lists are what dev todo
@@ -65,7 +66,7 @@ func TestServeBoard(t *testing.T) {
 			t.Fatalf("❌ /v1/board with %v: %d %s, want 403", h, resp.StatusCode, body)
 		}
 	}
-	events, err := http.Get(url + "v1/events")
+	events, err := (&http.Client{Timeout: 10 * time.Second}).Get(url + "v1/events") // headers and the first event
 	if err != nil {
 		t.Fatal(err)
 	}
