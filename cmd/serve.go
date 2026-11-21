@@ -356,13 +356,6 @@ func ownIP(ip netip.Addr) bool {
 // aliveFile is serve.Alive's lock, kept across a reload's exec so no dev boss sees none running meanwhile.
 var aliveFile *os.File
 
-// aliveFd is aliveFile's descriptor; 0 without one.
-func aliveFd() uintptr {
-	if aliveFile == nil {
-		return 0
-	}
-	return aliveFile.Fd()
-}
 
 // caffeinate is the running caffeinate's pid (0: none), handed to the process a reload execs.
 var caffeinate atomic.Int64
@@ -438,13 +431,16 @@ func serveReloading(parent context.Context, ln net.Listener, cfg serve.Config, o
 		default:
 			stop() // a signal from here on ends the process: the exec can't be called off
 			fmt.Fprintf(out, "↻ dev serve: reloading into %s\n", r.Version)
-			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d %d", os.Getpid(), caffeinate.Load(), aliveFd())); err != nil {
-				return err
-			}
+			var kept uintptr // named to the new process only when it really stays open there
 			if aliveFile != nil {
 				if kerr := serve.KeepAcrossExec(aliveFile, true); kerr != nil {
 					fmt.Fprintf(stderr, "⚠ dev serve: alive lock not kept across the reload: %v\n", kerr)
+				} else {
+					kept = aliveFile.Fd()
 				}
+			}
+			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d %d", os.Getpid(), caffeinate.Load(), kept)); err != nil {
+				return err
 			}
 			err = execReload(r, a)
 			if uerr := os.Unsetenv(envServeReexec); uerr != nil {
