@@ -531,7 +531,12 @@ function body(l) {
   // To do shows its first cards, and every one that needs the user, until opened whole
   const capped = l.key === 'todo' && l.xs.length > Math.max(TODO_SHOWN, l.xs.filter(needsYou).length);
   const xs = capped && !state.more ? l.xs.slice(0, Math.max(TODO_SHOWN, l.xs.filter(needsYou).length)) : l.xs;
-  const more = capped && el('button', { type: 'button', class: 'more', 'data-f': 'more', onclick: () => { state.more = !state.more; render(); } },
+  // Opened, focus goes to the first card it showed: the toggle moves past them
+  const more = capped && el('button', { type: 'button', class: 'more', 'data-f': 'more', onclick: () => {
+    state.more = !state.more;
+    render();
+    if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[xs.length]?.focus();
+  } },
     state.more ? 'Show fewer' : 'Show ' + (l.xs.length - xs.length) + ' more');
   return [el('div', { class: 'stack', 'data-k': l.key }, xs.map(card), more),
     !l.xs.length && !l.hidden && el('div', { class: 'cfoot' }, 'none'),
