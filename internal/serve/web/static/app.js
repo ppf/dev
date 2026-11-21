@@ -135,6 +135,7 @@ async function call(method, path, body) {
   }
 }
 
+const NO_REPLY = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
 const errorOf = res => res.data?.error || 'Your Mac answered ' + res.status + '.';
 
 function unpair() {
@@ -307,7 +308,7 @@ async function post(path, body, k) {
   if (res?.ok && state.moves[k]) state.moves[k].after = state.seq;
   else delete state.moves[k];
   if (!res) {
-    state.errors[k] = 'No reply from your Mac: it may or may not have been sent. Look at the list before trying again.';
+    state.errors[k] = NO_REPLY;
     onBoard(k, state.errors[k]);
     return load();
   }
@@ -854,21 +855,21 @@ const FLASH_MS = 4500;
 const DRAG_PX = 5; // a press moved this far lifts its card: less is a click
 const titleOf = k => COLUMNS.find(c => c.key === k).title;
 
+// acted is what of card x a drop's call reads or changes: what it is, whom it's on, its doing line and start, its column, its list's state.
+const acted = ({ list, it }) => JSON.stringify([it.text, it.added, it.on, it.session?.name, it.doing, it.started, it.options, columnOf({ it }), !!list.closed]);
+
 // move runs what dropping card x on column to means (verdict): the call the sheet's button makes (stop doing: a drop's
 // only), the card shown there meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y};
-// else by the card).
-// acted is what of card x a drop's call reads or changes: what it is, whom it's on, its doing line and start, its column.
-const acted = ({ it }) => JSON.stringify([it.text, it.added, it.on, it.session?.name, it.doing, it.started, it.options, columnOf({ it })]);
-
-async function move(x, to, at) {
+// else by the card). shown: the verdict the drag showed for to, when it was lifted.
+async function move(x, to, at, shown) {
   const k = key(x.list.boss, x.it.id);
   // A finished card's id may be an open one's again: only an open card (or one shown dropped on Done) is on its way
   if ((!x.done || x.moving) && (state.moves[k] || state.pending[k])) return refuse(x, 'already on its way to your Mac', at);
   if (!x.done) {
-    const now = find(x.list.boss, x.it.id);
+    const now = find(x.list.boss, x.it.id), was = shown || verdict(x, columnOf(x), to, managerRuns()), is = verdict(now || x, columnOf(now || x), to, managerRuns());
     if (!now) return refuse(x, 'no longer open', at);
     // A drop does what was shown when the card was picked up, not what a change on the Mac since would make of it
-    if (acted(now) !== acted(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
+    if (acted(now) !== acted(x) || is?.act !== was?.act || is?.hint !== was?.hint) {
       return refuse(now, 'it changed on your Mac meanwhile: look again', at);
     }
     x = now;
@@ -903,7 +904,8 @@ function refuse(x, why, at, to) {
   // Where it is now: an unanswered call may have moved it after all
   const now = x.done ? x : find(x.list.boss, x.it.id);
   const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': Math.min(at.y, innerHeight - 140) + 'px' } }, why);
-  const moved = !!to && (now ? columnOf(now) === to : to === 'done');
+  // gone from the open items after a tick with no reply: ticked, likely; after a refusal: someone else's change
+  const moved = !!to && (now ? columnOf(now) === to : to === 'done' && why === NO_REPLY);
   const toast = el('div', { class: 'toast' }, (moved ? 'Moved, with a problem' : 'Not moved') + ' · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
   document.body.append(call, toast);
   clearTimeout(flashTimer);
@@ -985,7 +987,8 @@ function drop(e, end = false) {
   const d = drag;
   drag = null;
   if (!d?.lifted) return;
-  const over = !end && colAt(d.cols, e); // where it is released, not where it last moved
+  // where it is released, not where it last moved; none once the board left (a sheet, the phone layout)
+  const over = !end && wide.matches && route().name === 'board' && colAt(d.cols, e);
   // The click its pointerup fires opens no sheet, a cancelled drag's (button still down) too
   swallow = true;
   d.ghost.remove();
@@ -997,7 +1000,7 @@ function drop(e, end = false) {
     c.el.querySelector('.dim-hint')?.remove();
   }
   render(); // what was held meanwhile
-  if (over) move(d.x, over.k, { x: e.clientX, y: e.clientY + 12 });
+  if (over) move(d.x, over.k, { x: e.clientX, y: e.clientY + 12 }, over.v);
 }
 
 document.addEventListener('pointerdown', press);
@@ -1030,6 +1033,7 @@ document.getElementById('view').addEventListener('dragstart', e => e.preventDefa
 
 window.addEventListener('hashchange', () => {
   const r = route().name;
+  if (r !== 'board') drop(null, true); // the board behind a sheet or Pair takes no drop
   if (location.hash !== state.noteFor) state.note = '';
   if (r !== 'item') state.shown = null;
   state.errors = {};
@@ -1039,10 +1043,10 @@ window.addEventListener('hashchange', () => {
 document.getElementById('shade').addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => {
   if (drag?.lifted && e.key === 'Escape') return drop(e, true);
-  swallow = false; // a drag cancelled away from the window (no pointerup): Enter's click is its own
+  if (['Enter', ' '].includes(e.key)) swallow = false; // a drag cancelled away from the window (no pointerup): this click is its own
   if (route().name === 'board' && wide.matches && e.shiftKey && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
     const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
-    if (!x || drag?.lifted) return;
+    if (!x || drag?.lifted || e.target.closest('button')) return; // a card's own buttons keep their keys
     e.preventDefault();
     const next = COLUMNS[COLUMNS.findIndex(col => col.key === columnOf(x)) + (e.key === 'ArrowRight' ? 1 : -1)];
     if (next) move(x, next.key);
@@ -1053,7 +1057,10 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   document.querySelectorAll('.opts .opt')[Number(e.key) - 1]?.click();
 });
-wide.addEventListener('change', render);
+wide.addEventListener('change', () => {
+  drop(null, true); // the columns it was over are gone
+  render();
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') {
     drop(null, true);

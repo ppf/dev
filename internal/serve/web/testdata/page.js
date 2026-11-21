@@ -325,6 +325,8 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   run("globalThis.lifted = find('boss-a', 1)");
   await show([{ ...mine('todo'), text: 'Order the pump' }, worker, parked], 'E9c');
   await run("move(lifted, 'done')");
+  await run("move(find('boss-a', 3), 'progress', null, { why: 'boss-a is closed and no manager runs to start it' })");
+  check('shown refused at the lift, startable at the drop: refused, nothing sent', last('refuse') === 'it changed on your Mac meanwhile: look again' && !posts.length);
   check('reworded on the Mac while lifted: refused, nothing sent', last('refuse') === 'it changed on your Mac meanwhile: look again' && !posts.length);
 
   // Under "need you", a ticked Review card stays shown, Ticking…, until settled
