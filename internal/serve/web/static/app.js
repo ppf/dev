@@ -534,7 +534,9 @@ function body(l) {
   // Opened, focus goes to the first card it showed: the toggle moves past them
   const more = capped && el('button', { type: 'button', class: 'more', 'data-f': 'more', onclick: () => {
     state.more = !state.more;
-    settle();
+    // Its own lane stays: the redraw goes now, not when a swipe under way stops
+    clearTimeout(settling);
+    settling = 0;
     render();
     if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[xs.length]?.focus();
   } },
@@ -564,21 +566,21 @@ function swipe(ls) {
     ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
-    return el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
-      'aria-selected': String(state.lane === l.key), onclick: () => showLane(l.key) },
+    return el('button', { type: 'button', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
+      'aria-pressed': String(state.lane === l.key), onclick: () => showLane(l.key) },
     l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
   };
-  return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
+  return [el('div', { class: 'tabs', role: 'group', 'aria-label': 'Columns' }, ls.map(tab)), lanes];
 }
 
 // refilter draws the board for a filter just changed, at once: a swipe under way gives its lane first. On the phone a lane
-// the filter emptied gives way to the first drawn with cards.
-function refilter() {
+// the filter emptied (with jump, any lane left empty: the need-you shortcut) gives way to the first drawn with cards.
+function refilter(jump = false) {
   settle();
-  const had = !!document.querySelector('#view .lanes [data-k="' + state.lane + '"] .card');
+  const had = !!document.querySelector('#view .lanes > .lane[data-k="' + state.lane + '"] .card');
   render();
   const lanes = document.querySelector('#view .lanes');
-  if (!had || !lanes || lanes.querySelector('.lane.on .card')) return;
+  if (!(had || jump) || !lanes || lanes.querySelector('.lane.on .card')) return;
   const next = [...lanes.children].find(l => l.querySelector('.card'));
   if (next) showLane(next.dataset.k);
 }
@@ -586,13 +588,13 @@ function refilter() {
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
 let settling = 0;
 
-// settle ends a swipe under way at once, for a redraw the user asked for: its lane is the one in view.
+// settle ends a swipe under way at once, for a filter the user picked: its lane is the one in view.
 function settle() {
   const lanes = document.querySelector('#view .lanes');
   if (!settling || !lanes) return;
   clearTimeout(settling);
   settling = 0;
-  state.lane = laneAt(lanes);
+  laneInView(lanes);
 }
 
 // showLane scrolls the phone's lanes to column k's.
@@ -611,10 +613,10 @@ function laneInView(lanes) {
 
 // laneAt is the key of the lane most in view.
 function laneAt(lanes) {
+  if (!lanes.clientWidth) return state.lane; // hidden: nothing in view
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
-  if (!w) return state.lane; // not laid out
   const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1;
-  return COLUMNS[end ? COLUMNS.length - 1 : Math.min(COLUMNS.length - 1, Math.round(lanes.scrollLeft / w))].key;
+  return COLUMNS[end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w)].key;
 }
 
 // land makes column k's lane the one shown (the others cut to its height), its tab marked and in view, the page back up
@@ -633,7 +635,7 @@ function land(lanes, k) {
   if (moved && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView();
   for (const t of document.querySelectorAll('#view .tab')) {
     const on = t.dataset.f === 'tab:' + k;
-    t.setAttribute('aria-selected', String(on));
+    t.setAttribute('aria-pressed', String(on));
     if (on) {
       const strip = t.parentElement, sr = strip.getBoundingClientRect(), tr = t.getBoundingClientRect();
       strip.scrollLeft += tr.left - sr.left - (sr.width - tr.width) / 2;
@@ -804,7 +806,7 @@ function render() {
     const n = (count, what) => el('span', null, el('b', null, String(count)), what);
     // What needs the user: a shortcut to those cards, again to all
     const need = el('button', { type: 'button', class: 'need' + (t.need ? ' on' : ''), 'aria-pressed': String(f.needs), 'data-f': 'needs',
-      onclick: () => { f.needs = !f.needs; refilter(); } }, el('b', null, String(t.need)), 'need you');
+      onclick: () => { f.needs = !f.needs; refilter(f.needs); } }, el('b', null, String(t.need)), 'need you');
     top.append(need, n(t.mine, 'mine'), n(t.open, 'open'));
     if (focused) need.focus({ preventScroll: true });
     line.append('live · updated ' + hhmm(state.asOf));

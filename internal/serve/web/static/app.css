@@ -136,6 +136,7 @@ a { color: var(--act); }
 .quick button:hover { border-color: var(--edge-strong); }
 .quick button.rec { border-color: var(--hot); background: var(--hot-wash); }
 .quick .k { color: var(--meta); font-weight: 600; font-size: var(--fs-meta); }
+.quick button.rec .k::after { content: " ★"; color: var(--hot); } /* recommended, not by colour alone */
 .quick small { flex-basis: 100%; padding-left: 15px; font-weight: 450; color: var(--meta); font-size: var(--fs-meta); }
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; }
 .tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border-radius: var(--r-chip); padding: 2px 7px; font-size: var(--fs-tag); font-weight: 600; background: var(--well); color: var(--ink2); }
@@ -173,7 +174,7 @@ a { color: var(--act); }
 .tabs::-webkit-scrollbar { display: none; }
 .tab { flex: none; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 0; background: none; font-size: 14px; font-weight: 600; color: var(--meta); box-shadow: inset 0 -3px 0 transparent; }
 .tab .n { font-size: var(--fs-meta); }
-.tab[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -3px 0 var(--sq); }
+.tab[aria-pressed="true"] { color: var(--ink); box-shadow: inset 0 -3px 0 var(--sq); }
 .tab .hotn { background: var(--hot); color: var(--hot-ink); border-radius: 5px; padding: 0 5px; font-size: 11px; font-weight: 700; }
 .lanes { display: flex; align-items: flex-start; gap: 18px; overflow: auto hidden; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 12px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); scroll-padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
 .lanes::-webkit-scrollbar { display: none; }
