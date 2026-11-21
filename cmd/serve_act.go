@@ -16,7 +16,8 @@ import (
 )
 
 // pageAnswer is dev todo answer --question from the phone page: its note says so. $CLAUDECODE's refusal can't apply
-// to a server; the Guard is what keeps an agent on the Mac from answering as the user (S2's session cookie).
+// to a server. On a tailnet or LAN bind the Guard's session cookie stands in; on loopback the Guard stops only another
+// origin's page, not a process on the Mac.
 func pageAnswer(boss string, id int, question, answer string) error {
 	c := tmux.New()
 	if !running(c, boss) {

@@ -72,7 +72,7 @@ func TestAutoServeStarts(t *testing.T) {
 	if !slices.Equal(f.env, []string{"PATH=/bin", "TMUX=/private/tmp/tmux-501/default,0,-1"}) {
 		t.Fatalf("env %q: want PATH and the boss's socket only", f.env)
 	}
-	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (pair this browser: dev serve pair)\n" {
+	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (this Mac only, no pairing needed)\n" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -165,7 +165,7 @@ func TestAutoServeLAN(t *testing.T) {
 	if err := s.ensure(&out); err != nil {
 		t.Fatal(err)
 	}
-	if want := "dev serve started: http://192.168.1.89:8417/ (pair this browser: dev serve pair)\n⚠ " + serve.LANNotice + "\n"; out.String() != want {
+	if want := "dev serve started: http://192.168.1.89:8417/ (pair a phone: dev serve pair)\n⚠ " + serve.LANNotice + "\n"; out.String() != want {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 }

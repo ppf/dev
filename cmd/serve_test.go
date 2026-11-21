@@ -151,7 +151,15 @@ func TestServePair(t *testing.T) {
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
 		t.Errorf("no server: %v, want not running", err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`)) }))
+	var tick atomic.Int32 // what the serve answers an empty tick: 400 past a loopback Guard
+	tick.Store(http.StatusBadRequest)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/done" {
+			w.WriteHeader(int(tick.Load()))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`))
+	}))
 	defer srv.Close()
 	ln := srv.Listener
 	dir, err := authDir()
@@ -163,9 +171,21 @@ func TestServePair(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, _, err := execute(t, "", "serve", "pair")
-	loop := regexp.MustCompile(`^dev serve listens on 127\.0\.0\.1 only: a phone can't reach it\. .*\nOn this Mac: open http://127\.0\.0\.1:\d+/ and enter the code \d{4} \d{4} \(valid 5 minutes, once\)\n$`)
-	if err != nil || !loop.MatchString(out) || strings.Contains(out, "on the phone") {
+	loop := regexp.MustCompile(`^dev serve listens on 127\.0\.0\.1 only: no pairing needed, open http://127\.0\.0\.1:\d+/ in a browser on this Mac\.\nA phone can't reach it: .+\n$`)
+	if err != nil || !loop.MatchString(out) || strings.Contains(out, "code") {
 		t.Errorf("pair on loopback: %q %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pair.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("pair on loopback wrote a code: %v", err)
+	}
+	for code, want := range map[int32]string{http.StatusUnauthorized: "older dev", http.StatusInternalServerError: "answered 500"} {
+		tick.Store(code)
+		if out, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), want) || out != "" {
+			t.Errorf("pair on a loopback serve answering %d: %q %v, want %q", code, out, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pair.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("pair on a refusing loopback serve wrote a code: %v", err)
 	}
 	forget()
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
@@ -179,17 +199,65 @@ func TestServePair(t *testing.T) {
 	}
 }
 
-// pairMessage names a URL for the phone only when the bound address is not loopback.
-func TestPairMessage(t *testing.T) {
+// loopbackMessage names the URL for this Mac's browser, IPv6 too.
+func TestLoopbackMessage(t *testing.T) {
 	for _, tc := range []struct{ addr, want string }{
-		{"192.168.1.89:8417", "open http://192.168.1.89:8417/ on the phone and enter the code 1234 5678 (valid 5 minutes, once)\n"},
-		{"100.101.102.103:8417", "open http://100.101.102.103:8417/ on the phone and enter the code 1234 5678 (valid 5 minutes, once)\n"},
-		{"127.0.0.1:8417", "dev serve listens on 127.0.0.1 only: a phone can't reach it. HINT\nOn this Mac: open http://127.0.0.1:8417/ and enter the code 1234 5678 (valid 5 minutes, once)\n"},
-		{"[::1]:8417", "dev serve listens on ::1 only: a phone can't reach it. HINT\nOn this Mac: open http://[::1]:8417/ and enter the code 1234 5678 (valid 5 minutes, once)\n"},
+		{"127.0.0.1:8417", "dev serve listens on 127.0.0.1 only: no pairing needed, open http://127.0.0.1:8417/ in a browser on this Mac.\nA phone can't reach it: HINT\n"},
+		{"[::1]:8417", "dev serve listens on ::1 only: no pairing needed, open http://[::1]:8417/ in a browser on this Mac.\nA phone can't reach it: HINT\n"},
 	} {
-		if got := pairMessage(netip.MustParseAddrPort(tc.addr), "1234 5678", "HINT"); got != tc.want {
+		if got := loopbackMessage(netip.MustParseAddrPort(tc.addr), "HINT"); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.addr, got, tc.want)
 		}
+	}
+}
+
+// Whether the bound address is loopback picks the Guard: a paired session on a tailnet or LAN bind, as before; none
+// on loopback, where another origin's request is refused instead.
+func TestServeConfigGuard(t *testing.T) {
+	do := func(h http.Handler, path, body, host string, cookie *http.Cookie, header ...string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "http://"+host+path, strings.NewReader(body))
+		r.Header.Set("X-Dev-Page", "1")
+		for i := 0; i < len(header); i += 2 {
+			r.Header.Set(header[i], header[i+1])
+		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, tc := range []struct {
+		loopback bool
+		host     string
+		header   []string
+		want     int
+	}{
+		{false, "192.168.1.89:8417", nil, http.StatusUnauthorized},
+		{false, "100.101.102.103:8417", nil, http.StatusUnauthorized},
+		{true, "127.0.0.1:8417", nil, http.StatusBadRequest}, // past the Guard: the body names no item
+		{true, "127.0.0.1:8417", []string{"Origin", "https://evil.example"}, http.StatusForbidden},
+		{true, "127.0.0.1:8417", []string{"Sec-Fetch-Site", "cross-site"}, http.StatusForbidden},
+	} {
+		h := serve.Handler(serveConfig(io.Discard, t.TempDir(), tc.loopback))
+		if got := do(h, "/v1/done", `{}`, tc.host, nil, tc.header...).Code; got != tc.want {
+			t.Errorf("loopback %v %s %v: %d, want %d", tc.loopback, tc.host, tc.header, got, tc.want)
+		}
+	}
+	// On a LAN bind a code from dev serve pair pairs, and its cookie passes the Guard
+	dir := t.TempDir()
+	h := serve.Handler(serveConfig(io.Discard, dir, false))
+	code, err := serve.NewCode(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := do(h, "/v1/pair", `{"code":"`+code+`","device":"phone"}`, "192.168.1.89:8417", nil)
+	cookies := w.Result().Cookies()
+	if w.Code != http.StatusOK || len(cookies) != 1 {
+		t.Fatalf("pair on LAN: %d %s", w.Code, w.Body)
+	}
+	if got := do(h, "/v1/done", `{}`, "192.168.1.89:8417", cookies[0]).Code; got != http.StatusBadRequest {
+		t.Errorf("paired tick on LAN: %d, want 400 (past the Guard)", got)
 	}
 }
 

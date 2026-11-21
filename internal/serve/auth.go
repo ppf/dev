@@ -183,7 +183,8 @@ func Unpair(dir, device string) ([]string, error) {
 	return dropped, writeFile(dir, sessionFile, kept)
 }
 
-// Session is the Guard: the request carries a paired device's session cookie, else 401 (500 if sessions can't be read).
+// Session is the Guard on a tailnet or LAN bind: the request carries a paired device's session cookie, else 401 (500
+// if sessions can't be read).
 // It reads sessions.json without the lock: writeFile replaces it by a rename.
 func (a *Auth) Session(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

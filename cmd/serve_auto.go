@@ -212,7 +212,11 @@ func (s *starter) ensure(stderr io.Writer) error {
 		// After an exit too: a second dev boss's dev serve may have taken the port first
 		if ap, _, err := served(300 * time.Millisecond); err == nil && s.local(ap.Addr()) {
 			if !ended {
-				fmt.Fprintf(stderr, "dev serve started: http://%s/ (pair this browser: dev serve pair)\n", ap)
+				hint := "pair a phone: dev serve pair"
+				if ap.Addr().IsLoopback() {
+					hint = "this Mac only, no pairing needed"
+				}
+				fmt.Fprintf(stderr, "dev serve started: http://%s/ (%s)\n", ap, hint)
 				if _, kind, err := serve.Check(ap.String()); err == nil && kind == serve.LAN {
 					fmt.Fprintln(stderr, "⚠ "+serve.LANNotice)
 				}
