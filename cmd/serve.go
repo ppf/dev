@@ -356,7 +356,6 @@ func ownIP(ip netip.Addr) bool {
 // aliveFile is serve.Alive's lock, kept across a reload's exec so no dev boss sees none running meanwhile.
 var aliveFile *os.File
 
-
 // caffeinate is the running caffeinate's pid (0: none), handed to the process a reload execs.
 var caffeinate atomic.Int64
 
