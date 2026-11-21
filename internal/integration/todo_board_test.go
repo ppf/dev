@@ -64,10 +64,10 @@ func TestTodoBoard(t *testing.T) {
 	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_BOARD_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "board", "--client", "none", "--", "boss-a")
 	view := s.T("display", "-t", "=boss-a:2", "-p", "#{pane_id}")
 	capture := func() string { return s.T("capture-pane", "-p", "-t", view) }
-	waitFor(t, "the board drawn", func() bool { return strings.Contains(capture(), "? a #1") })
+	waitFor(t, "the board drawn", func() bool { return strings.Contains(capture(), "! a #1") })
 	shown := capture()
-	for _, want := range []string{"TO DO board · boss-a and its workers", "1 to decide · 1 yours · 3 open", "▸ For you", "Waiting on others",
-		"☐ a #2", "a #3", "Carl", "h/l column"} {
+	for _, want := range []string{"TO DO board · boss-a and its workers", "1 need you · 2 mine", "▸ To do", "Waiting", "decide",
+		"a #2", "a #3", "waiting for Carl", "h/l column"} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("❌ %q missing:\n%s", want, shown)
 		}
@@ -78,25 +78,25 @@ func TestTodoBoard(t *testing.T) {
 
 	// ⏎ opens the ask over the board; 2 answers it; the board reads the lists again
 	s.T("send-keys", "-t", view, "Enter")
-	waitFor(t, "the ask open", func() bool { return strings.Contains(capture(), "a #1 · To decide") })
+	waitFor(t, "the ask open", func() bool { return strings.Contains(capture(), "a #1 · To do") })
 	s.T("send-keys", "-t", view, "2")
 	waitFor(t, "#1 answered and gone from the board", func() bool {
-		return strings.Contains(dev(user, "todo", "--all", "--json"), `"answer": "Wait"`) && !strings.Contains(capture(), "? a #1")
+		return strings.Contains(dev(user, "todo", "--all", "--json"), `"answer": "Wait"`) && !strings.Contains(capture(), "! a #1")
 	})
 
 	// space opens the own item; d ticks it
 	s.T("send-keys", "-t", view, "Space")
-	waitFor(t, "the item open", func() bool { return strings.Contains(capture(), "a #2 · Yours") })
+	waitFor(t, "the item open", func() bool { return strings.Contains(capture(), "a #2 · To do") })
 	s.T("send-keys", "-t", view, "d")
 	waitFor(t, "#2 ticked and gone from the board", func() bool {
-		return strings.Contains(dev(user, "todo", "--all", "--json"), `"done": true`) && !strings.Contains(capture(), "☐ a #2")
+		return strings.Contains(dev(user, "todo", "--all", "--json"), `"done": true`) && !strings.Contains(capture(), "a #2")
 	})
 
 	// esc closes the item view, then the board
-	s.T("send-keys", "-t", view, "l", "l", "Enter") // For you, Starting · In progress, Waiting on others
-	waitFor(t, "the person's item open", func() bool { return strings.Contains(capture(), "a #3 · waiting") })
+	s.T("send-keys", "-t", view, "l", "l", "Enter") // To do, In progress, Waiting
+	waitFor(t, "the person's item open", func() bool { return strings.Contains(capture(), "a #3 · Waiting") })
 	s.T("send-keys", "-t", view, "Escape")
-	waitFor(t, "the item closed", func() bool { return !strings.Contains(capture(), "a #3 · waiting") })
+	waitFor(t, "the item closed", func() bool { return !strings.Contains(capture(), "a #3 · Waiting") })
 
 	// A click on a card opens it; one beside the view closes it (SGR mouse reports, as tmux sends them)
 	click := func(s0 string, dx, dy int) {
@@ -110,10 +110,10 @@ func TestTodoBoard(t *testing.T) {
 		t.Fatalf("❌ %q not on the board:\n%s", s0, capture())
 	}
 	click("Review of the coupon", 0, 0)
-	waitFor(t, "the person's item open by a click", func() bool { return strings.Contains(capture(), "a #3 · waiting") })
+	waitFor(t, "the person's item open by a click", func() bool { return strings.Contains(capture(), "a #3 · Waiting") })
 	time.Sleep(600 * time.Millisecond) // past the double-click guard
 	click("TO DO board", 0, 0)
-	waitFor(t, "the item closed by a click beside it", func() bool { return !strings.Contains(capture(), "a #3 · waiting") })
+	waitFor(t, "the item closed by a click beside it", func() bool { return !strings.Contains(capture(), "a #3 · Waiting") })
 	s.T("send-keys", "-t", view, "Escape")
 	waitFor(t, "the board closed", func() bool {
 		_, err := s.Try("capture-pane", "-p", "-t", view)
