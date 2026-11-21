@@ -24,13 +24,16 @@ func newTodoBoardCmd(boss *string) *cobra.Command {
 	var client string
 	cmd := &cobra.Command{
 		Use:   "board [<boss> [<the bosses under it>...]]",
-		Short: "Show the to do lists as a kanban board in a full-window popup, as the user: a column per status group",
-		Long: `Show every dev boss's open to do items (or only the lists of <boss> and the bosses under it) in a full-window tmux popup, as
-columns by status group in the boards' order: To decide, Yours, Starting, In progress, Waiting on others, Check, Boss
-closed, each its own column where they fit at 24 columns, else four merged (For you, Starting · In progress, Waiting
-on others, Check · Boss closed), as many side by side as fit. h/l move between columns, j/k within one, ⏎ or space
-opens the item over the board (as dev todo show), p shows the next project, esc closes. The lists are read again
-every 5 seconds and after an action. The previews' and the sidebar's TO DO open it with b.`,
+		Short: "Show the to do lists as a kanban board in a full-window popup, as the user: To do, In progress, Waiting, Review, Done",
+		Long: `Show every dev boss's to do items (or only the lists of <boss> and the bosses under it) in a full-window tmux popup, as
+the web page's five columns, in its order: To do, In progress, Waiting, Review, Done (ticked in the last 24 hours), each
+item in the column dev todo --all --json gives it. A card shows its project and number, its state at the right (starting,
+a PR's, its worker's), the title, @assignee (you for yours) with its marks (decide, needs you, waiting for, boss closed,
+⇄ with another item) and, under it, what is done on it now. A column with a card that waits on you has a red head; the top
+line counts what needs you and what is yours. All five show side by side from 136 columns wide, else as many as fit, h/l
+moving on to the rest. j/k move within a column, ⏎ or space opens the item over the board (as dev todo show), p shows
+the next project, esc closes. The lists are read again every 2 seconds and after an action, so a card moved on the web
+page moves here. The previews' and the sidebar's TO DO open it with b.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
 				return errors.New("the bosses are board's arguments: leave out --boss")
@@ -70,14 +73,14 @@ every 5 seconds and after an action. The previews' and the sidebar's TO DO open 
 // kanbanLists are the lists as dev todo --all --json reads them, only bosses' when any are named.
 func kanbanLists(c *tmux.Client, bosses []string) kanban.Loaded {
 	var warn strings.Builder
-	lists, err := todoAll(c, &warn, time.Now(), true, false, false)
+	lists, err := todoAll(c, &warn, time.Now(), true, true, true)
 	if err != nil {
 		return kanban.Loaded{Err: err}
 	}
 	out := []kanban.List{}
 	for _, bl := range lists {
 		if len(bosses) == 0 || slices.Contains(bosses, bl.Boss) {
-			out = append(out, kanban.List{Boss: bl.Boss, Closed: bl.Closed, Error: bl.Error, Items: bl.Items})
+			out = append(out, kanban.List{Boss: bl.Boss, Closed: bl.Closed, Error: bl.Error, Items: bl.Items, Finished: bl.Finished})
 		}
 	}
 	_, managerErr := c.Run("has-session", "-t", tmux.SessionTarget(sidebar.Manager))
@@ -89,7 +92,7 @@ func knownBosses(c *tmux.Client, bosses []string) error {
 	if len(bosses) == 0 {
 		return nil
 	}
-	lists, err := todoAll(c, io.Discard, time.Now(), false, false, false)
+	lists, err := todoAll(c, io.Discard, time.Now(), false, false, true)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 // A live and a closed boss whose lists hold only finished items: dev todo --all --json and dev serve's board carry
-// them, items empty; the sidebar reading that JSON shows no row for them, the popup and the text list don't get them.
+// them, items empty; the sidebar reading that JSON shows no row for them, the popup gets them for its Done column, the text list doesn't.
 func TestTodoAllFinishedOnly(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	sessions := []string{"boss-live", "boss-shut", "manager"}
@@ -79,7 +79,8 @@ func TestTodoAllFinishedOnly(t *testing.T) {
 	if got := out.String(); got != "no boss has a to do list\n" {
 		t.Errorf("text list:\n%s", got)
 	}
-	if l := kanbanLists(c, nil); l.Err != nil || len(l.Lists) != 0 {
+	l := kanbanLists(c, nil)
+	if l.Err != nil || len(l.Lists) != 2 || len(l.Lists[0].Items) != 0 || len(l.Lists[0].Finished) != 1 || len(l.Lists[1].Finished) != 1 {
 		t.Errorf("popup lists = %+v, %v", l.Lists, l.Err)
 	}
 	board, err := boardLists(c, io.Discard, time.Now)()

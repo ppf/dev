@@ -1,10 +1,11 @@
-// Package kanban is the to do board as columns by status group (sidebar.Groups), the item view (itemview) drawn
+// Package kanban is the to do board as the web page's five columns (sidebar.Columns), the item view (itemview) drawn
 // over it. It draws and takes keys and clicks only; its host (dev todo board, in a full-window tmux popup) loads the lists and
 // runs the actions.
 package kanban
 
 import (
 	"cmp"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,20 +27,21 @@ const (
 	cardW = 24
 	// gap is the room between columns, a dim rule in its middle
 	gap = 3
-	// cardH is a card's lines: project #id and status, the title on 2, whom it's on
-	cardH = 4
+	// cardH is a card's lines: project #id and its state, the title on 2, the assignee and marks, what is done on it now
+	cardH = 5
 	// refresh is how often the board reads the lists again
-	refresh = 5 * time.Second
+	refresh = 2 * time.Second
 	// doubleClick is how long after a click opened an item the view takes no clicks on it
 	doubleClick = 500 * time.Millisecond
 )
 
-// List is a boss's list as dev todo --all --json gives it, statuses set; Error for one not read.
+// List is a boss's list as dev todo --all --json gives it, columns set, with its finished items; Error for one not read.
 type List struct {
-	Boss   string
-	Closed bool
-	Error  string
-	Items  []todo.Shown
+	Boss     string
+	Closed   bool
+	Error    string
+	Items    []todo.Shown
+	Finished []todo.Finished
 }
 
 // Loaded is a read of the lists: them or why not, its warning, and whether the manager runs (takes closed bosses' starts).
@@ -50,54 +52,45 @@ type Loaded struct {
 	ManagerRuns bool
 }
 
-// column is a board column: its title and the groups (sidebar.Groups indexes) it holds.
-type column struct {
-	title  string
-	groups []int
-}
+// fitCols is how many of the five columns (sidebar.Columns) fit side by side at inner text width w, all from 132 on;
+// h/l scrolls the rest in.
+func fitCols(w int) int { return max(1, min(len(sidebar.Columns), (w+gap)/(cardW+gap))) }
 
-var (
-	// wide gives every group its own column
-	wide = func() []column {
-		out := make([]column, len(sidebar.Groups))
-		for i, g := range sidebar.Groups {
-			out[i] = column{g.Title, []int{i}}
-		}
-		return out
-	}()
-	// merged is four columns, what waits on the user first
-	merged = []column{
-		{"For you", []int{0, 1}},
-		{"Starting · In progress", []int{2, 3}},
-		{"Waiting on others", []int{4}},
-		{"Check · Boss closed", []int{5, 6}},
-	}
-)
-
-// layout is the board's columns at inner text width w and how many show at once: every group its own column where
-// all fit at cardW, else the four merged ones, as many as fit side by side, h/l scrolling the rest in.
-func layout(w int) (cols []column, shown int) {
-	if len(wide)*cardW+(len(wide)-1)*gap <= w {
-		return wide, len(wide)
-	}
-	return merged, max(1, min(len(merged), (w+gap)/(cardW+gap)))
-}
-
-// card is an open item on the board.
+// card is an item on the board: an open one, or a ticked one (done: still in its list's items, or kept in its finished).
 type card struct {
 	boss   string
 	closed bool
 	it     todo.Shown
+	done   bool
+	doneAt int64 // when it was ticked, unix seconds; 0 for one not yet moved out of its list's items
 }
 
-func (c card) key() string { return c.boss + "\x00" + strconv.Itoa(c.it.ID) }
+// key is the card's identity across reads: ids restart, so a finished #3 is not an open #3.
+func (c card) key() string {
+	return c.boss + "\x00" + strconv.Itoa(c.it.ID) + "\x00" + strconv.FormatBool(c.done)
+}
 
-// group is c's sidebar.Groups index; no or an unknown status is In progress, as the boards have it.
-func (c card) group() int {
-	if g := sidebar.GroupOf(c.it.Status); g >= 0 {
-		return g
+// column is the card's sidebar column as the model placed it (todo.Owner.place); one it didn't name is In progress,
+// as an unknown status is on the boards.
+func (c card) column() int {
+	if c.done {
+		return slices.Index(sidebar.Columns, sidebar.ColumnDone)
 	}
-	return sidebar.GroupOf(sidebar.StatusWorking)
+	if i := slices.Index(sidebar.Columns, c.it.Column); i >= 0 {
+		return i
+	}
+	return slices.Index(sidebar.Columns, sidebar.ColumnProgress)
+}
+
+// needsYou is whether the card waits on the user (a red mark): never a ticked one.
+func (c card) needsYou() bool { return !c.done && c.it.NeedsYou }
+
+// mine is whether the card is the user's: its assignee, else its owner by the list.
+func (c card) mine() bool {
+	if c.it.Assignee.Kind != "" {
+		return c.it.Assignee.Kind == sidebar.AssigneeYou
+	}
+	return todo.Own(c.it.On, c.it.Session, c.boss)
 }
 
 // Model is the board. Done once the user closed it or went to a session from its item view.
@@ -177,6 +170,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fix()
 		return m, nil
 	case tickMsg:
+		// A read still under way is not stacked on: a slow server would pile them up
+		if m.reads > m.shown {
+			return m, tick()
+		}
 		read := m.read()
 		return m, tea.Batch(read, tick())
 	case tea.KeyMsg:
@@ -302,8 +299,7 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 	// The board's text starts 2 in, under the top border
 	x, y := ms.X-2, ms.Y-1
 	if y == 0 && left {
-		cols, shown := layout(m.inner())
-		_, spans := m.filterLine(len(cols), shown, m.inner())
+		_, spans := m.filterLine(len(sidebar.Columns), fitCols(m.inner()), m.inner())
 		for _, sp := range spans {
 			if x >= sp.from && x < sp.to {
 				if sp.p < 0 {
@@ -320,7 +316,6 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 	if r < 0 || r >= 2+m.cardRows() {
 		return m, nil
 	}
-	cols, _ := layout(m.inner())
 	cards := m.columns()
 	for _, sc := range m.shownCols() {
 		if x < sc.x || x >= sc.x+sc.w {
@@ -341,7 +336,7 @@ func (m Model) mouse(ms tea.MouseMsg, now time.Time) (tea.Model, tea.Cmd) {
 			}
 			return m.pick(sc.i, card, top), nil
 		}
-		_, at := m.column(cols[sc.i], cards[sc.i], sel, sc.w, now)
+		_, at := m.column(sc.i, cards[sc.i], sel, sc.w, now)
 		hit := atColumn
 		if r < len(at) {
 			hit = at[r]
@@ -374,47 +369,76 @@ func (m Model) pick(col, card, top int) Model {
 	return m
 }
 
-// cards are the open items the filter shows, in list order.
-func (m Model) cards() []card {
+// all are the board's cards: each list's items (open ones, and ticked ones not yet moved out) and its finished items.
+func (m Model) all() []card {
 	var out []card
 	for _, l := range m.lists {
-		if m.project != "" && project(l.Boss) != m.project {
-			continue
-		}
 		for _, it := range l.Items {
-			if !it.Done {
-				out = append(out, card{boss: l.Boss, closed: l.Closed, it: it})
-			}
+			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: it.Done})
+		}
+		for _, f := range l.Finished {
+			it := todo.Shown{ID: f.ID, Text: f.Text, Link: f.Link, Answer: f.Answer, On: f.On, Quiet: f.Quiet, Done: true,
+				Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: f.Assignee}}
+			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: true, doneAt: f.DoneAt})
 		}
 	}
 	return out
 }
 
-// columns are the cards by layout column, by status within one as the boards sort them (sidebar.Statuses).
-func (m Model) columns() [][]card {
-	cols, _ := layout(m.inner())
-	out := make([][]card, len(cols))
-	at := make([]int, len(sidebar.Groups))
-	for i, c := range cols {
-		for _, g := range c.groups {
-			at[g] = i
-		}
+func (m Model) cards() []card {
+	if m.project == "" {
+		return m.all()
 	}
+	return slices.DeleteFunc(m.all(), func(c card) bool { return project(c.boss) != m.project })
+}
+
+// columns are the cards by column, each in the web page's order: Done newest first; the others what needs the user
+// first, then (To do) the user's, then the soonest due, then the oldest.
+func (m Model) columns() [][]card {
+	out := make([][]card, len(sidebar.Columns))
 	for _, c := range m.cards() {
-		i := at[c.group()]
+		i := c.column()
 		out[i] = append(out[i], c)
 	}
-	for _, cs := range out {
-		slices.SortStableFunc(cs, func(a, b card) int { return cmp.Compare(rank(a), rank(b)) })
+	done := slices.Index(sidebar.Columns, sidebar.ColumnDone)
+	todoCol := slices.Index(sidebar.Columns, sidebar.ColumnTodo)
+	for i, cs := range out {
+		slices.SortStableFunc(cs, func(a, b card) int {
+			switch {
+			case i == done:
+				return cmp.Compare(doneAt(b), doneAt(a))
+			case a.needsYou() != b.needsYou():
+				return boolRank(b.needsYou()) - boolRank(a.needsYou())
+			case i == todoCol && a.mine() != b.mine():
+				return boolRank(b.mine()) - boolRank(a.mine())
+			}
+			return urgency(a.it, b.it)
+		})
 	}
 	return out
 }
 
-func rank(c card) int {
-	if i := slices.Index(sidebar.Statuses, c.it.Status); i >= 0 {
-		return i
+// doneAt is when a card was ticked; one still in its list's items has none yet: the newest.
+func doneAt(c card) int64 {
+	if c.doneAt == 0 {
+		return math.MaxInt64
 	}
-	return slices.Index(sidebar.Statuses, sidebar.StatusWorking)
+	return c.doneAt
+}
+
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// urgency orders by the soonest due first, then the oldest.
+func urgency(a, b todo.Shown) int {
+	if (a.Until != 0) != (b.Until != 0) {
+		return boolRank(b.Until != 0) - boolRank(a.Until != 0)
+	}
+	return cmp.Or(cmp.Compare(a.Until, b.Until), cmp.Compare(a.Added, b.Added))
 }
 
 // projects are "" (all) then every list's project, sorted.
@@ -451,7 +475,7 @@ func (m *Model) fix() {
 	if len(cs) > 0 {
 		m.selKey = cs[m.card].key()
 	}
-	_, shown := layout(m.inner())
+	shown := fitCols(m.inner())
 	m.off = max(0, min(m.off, len(cols)-shown))
 	m.off = max(min(m.off, m.col), m.col-shown+1)
 	fit := m.fits(len(cs))
@@ -549,14 +573,14 @@ func (m Model) board(now time.Time) []string {
 	if w < 4 {
 		return nil
 	}
-	cols, shown := layout(in)
+	shown := fitCols(in)
 	cards := m.columns()
-	filter, _ := m.filterLine(len(cols), shown, in)
+	filter, _ := m.filterLine(len(sidebar.Columns), shown, in)
 	body := []string{filter, ""}
 	var head [][]string
 	var widths []int
 	for _, sc := range m.shownCols() {
-		lines, _ := m.column(cols[sc.i], cards[sc.i], sc.i == m.col, sc.w, now)
+		lines, _ := m.column(sc.i, cards[sc.i], sc.i == m.col, sc.w, now)
 		head, widths = append(head, lines), append(widths, sc.w)
 	}
 	rows := 2 + m.cardRows()
@@ -572,7 +596,7 @@ func (m Model) board(now time.Time) []string {
 		body = append(body, strings.Join(parts, " "+sidebar.Faint+"│"+reset+" "))
 	}
 	body = append(body, m.message(in), m.keys(in))
-	out := []string{m.topLine(cards, w)}
+	out := []string{m.topLine(w)}
 	for _, l := range body {
 		out = append(out, sidebar.Faint+"│"+reset+" "+padTo(ansi.Truncate(l, in, "…"), in)+" "+sidebar.Faint+"│"+reset)
 	}
@@ -585,11 +609,11 @@ type shownCol struct{ i, x, w int }
 // shownCols are the columns on screen, sharing the width, the first ones a column more each where it doesn't divide.
 func (m Model) shownCols() []shownCol {
 	in := m.inner()
-	cols, shown := layout(in)
+	shown := fitCols(in)
 	cw, extra := (in-gap*(shown-1))/shown, (in-gap*(shown-1))%shown
 	var out []shownCol
 	x := 0
-	for i := m.off; i < min(len(cols), m.off+shown); i++ {
+	for i := m.off; i < min(len(sidebar.Columns), m.off+shown); i++ {
 		colW := cw
 		if i-m.off < extra {
 			colW++
@@ -600,32 +624,30 @@ func (m Model) shownCols() []shownCol {
 	return out
 }
 
-// topLine is the top border: whose board at the left, the counts at the right.
-func (m Model) topLine(cards [][]card, w int) string {
-	var decide, yours, open int
-	for _, cs := range cards {
-		for _, c := range cs {
-			if c.it.Quiet {
-				continue
-			}
-			open++
-			switch c.it.Status {
-			case sidebar.StatusDecide:
-				decide++
-			case sidebar.StatusYours:
-				yours++
-			}
+// topLine is the top border: whose board at the left, "N need you · N mine" at the right, counted on every list read
+// (the project filter leaves them), open cards only, test items left out, as the web page's tally.
+func (m Model) topLine(w int) string {
+	var need, mine int
+	for _, c := range m.all() {
+		if c.done || c.it.Quiet {
+			continue
+		}
+		if c.needsYou() {
+			need++
+		}
+		if c.mine() {
+			mine++
 		}
 	}
 	title := " TO DO board · " + m.whose + " "
-	counts := " " + strconv.Itoa(decide) + " to decide · " + strconv.Itoa(yours) + " yours · " + strconv.Itoa(open) + " open "
+	counts := " " + strconv.Itoa(need) + " need you · " + strconv.Itoa(mine) + " mine "
 	if ansi.StringWidth(title)+ansi.StringWidth(counts)+4 > w {
 		counts = ""
 	}
 	title = ansi.Truncate(title, max(0, w-4-ansi.StringWidth(counts)), "…")
 	fill := max(0, w-4-ansi.StringWidth(title)-ansi.StringWidth(counts))
 	colour := sidebar.Muted
-	if decide > 0 {
+	if need > 0 {
 		colour = sidebar.Red
 	}
 	return sidebar.Faint + "╭─" + reset + bold + title + reset + sidebar.Faint + strings.Repeat("─", fill) + reset +
@@ -687,15 +709,14 @@ const (
 	atMore   = -3 // "+n more"
 )
 
-// column is a column's lines: its head (title and count, red where it holds what waits on the user; ▸ while
+// column is column i's lines: its head (title and count, red where it holds a card that waits on the user; ▸ while
 // selected), its rule, then its cards from top, "↑ n more" and "+n more" where some don't show; and what each line is.
-func (m Model) column(c column, cs []card, sel bool, cw int, now time.Time) ([]string, []int) {
-	hot := slices.Contains(c.groups, sidebar.GroupOf(sidebar.StatusDecide)) || slices.Contains(c.groups, sidebar.GroupOf(sidebar.StatusYours))
+func (m Model) column(i int, cs []card, sel bool, cw int, now time.Time) ([]string, []int) {
 	colour, rule := "", sidebar.Faint
-	if hot {
+	if slices.ContainsFunc(cs, func(c card) bool { return c.needsYou() && !c.it.Quiet }) {
 		colour, rule = sidebar.Red, sidebar.Red
 	}
-	title := c.title
+	title := sidebar.ColumnTitles[sidebar.Columns[i]]
 	if sel {
 		title = "▸ " + title
 	}
@@ -727,25 +748,22 @@ func (m Model) column(c column, cs []card, sel bool, cw int, now time.Time) ([]s
 	return out, at
 }
 
-// cardLines are a card cw wide: project #id (? before an ask, ☐ before the user's own, as the boards mark them) and
-// its status word at the right in the boards' colours; the title on 2 lines, bold for an ask; whom it's on, its
-// options and link. The selected card is on the selection band.
+// cardLines are a card cw wide: project #id (a red ! when it waits on the user) and at the right its state (a start's,
+// a PR's, a worker's), in the marks' colours; the title on 2 lines, bold for an ask; @assignee with its chips, options
+// and link; what is done on it now. The selected card is on the selection band.
 func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	it := c.it
+	mk := marksOf(c, now)
 	mark := ""
-	switch it.Status {
-	case sidebar.StatusDecide:
-		mark = sidebar.Gold + bold + "?" + reset + " "
-	case sidebar.StatusYours:
-		mark = "☐ "
+	if mk.red {
+		mark = sidebar.Red + bold + "!" + reset + " "
 	}
 	// A long project is cut, the number kept
 	id := " #" + strconv.Itoa(it.ID)
 	name := ansi.Truncate(project(c.boss), max(1, cw-ansi.StringWidth(mark+id)), "…")
 	num := ansi.Truncate(mark+sidebar.Muted+name+id+reset, cw, "")
-	word, colour := status(it, now)
-	word = ansi.Truncate(word, max(0, cw-ansi.StringWidth(num)-1), "…")
-	lines := []string{num + strings.Repeat(" ", max(0, cw-ansi.StringWidth(num)-ansi.StringWidth(word))) + colour + word + reset}
+	word := ansi.Truncate(mk.state, max(0, cw-ansi.StringWidth(num)-1), "…")
+	lines := []string{num + strings.Repeat(" ", max(0, cw-ansi.StringWidth(num)-ansi.StringWidth(word))) + mk.stateColour + word + reset}
 	style := ""
 	if len(it.Options) > 0 {
 		style = bold
@@ -760,17 +778,31 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	for _, l := range title {
 		lines = append(lines, style+l+reset)
 	}
-	foot := []string{owner(c)}
-	if it.Quiet {
-		foot = []string{"TEST", owner(c)}
+	who := sidebar.Muted + "@" + assignee(c) + reset
+	var chips []string
+	for _, ch := range mk.chips {
+		chips = append(chips, ch.colour+ch.text+reset)
 	}
-	if len(it.Options) > 0 {
-		foot = append(foot, strconv.Itoa(len(it.Options))+" options")
+	foot := append([]string{who}, chips...)
+	if it.WaitingFor != "" {
+		// The person first: a narrow card cuts the tail
+		foot = append(chips, who)
+	}
+	if it.Quiet {
+		foot = append([]string{sidebar.Muted + "TEST" + reset}, foot...)
+	}
+	if len(it.Options) > 0 && !c.done {
+		foot = append(foot, sidebar.Muted+strconv.Itoa(len(it.Options))+" options"+reset)
 	}
 	if it.Link != "" {
-		foot = append(foot, link(it.Link))
+		foot = append(foot, sidebar.Muted+link(it.Link)+reset)
 	}
-	lines = append(lines, sidebar.Muted+ansi.Truncate(strings.Join(foot, " · "), cw, "…")+reset)
+	lines = append(lines, ansi.Truncate(strings.Join(foot, sidebar.Muted+" · "+reset), cw, "…"))
+	doing := ""
+	if mk.line != "" {
+		doing = sidebar.Gold + ansi.Truncate("▸ "+strings.Join(strings.Fields(mk.line), " "), cw, "…") + reset
+	}
+	lines = append(lines, doing)
 	if sel {
 		for i, l := range lines {
 			lines[i] = sidebar.SelectedBG + strings.ReplaceAll(padTo(l, cw), reset, reset+sidebar.SelectedBG) + reset
@@ -779,27 +811,16 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	return lines
 }
 
-// status is the card's status word and colour: a start's "sent to boss-x · 3m" (red "start not picked up" once
-// late), a check's "#18 merged 3d", else the status.
-func status(it todo.Shown, now time.Time) (string, string) {
-	colour := sidebar.StatusColours[it.Status]
+// assignee is whose the card is: "you" for the user's, else the session's name ("boss" for a desktop app boss).
+func assignee(c card) string {
+	a := c.it.Assignee
 	switch {
-	case it.StartLate:
-		return "start not picked up", sidebar.Red
-	case it.Status == sidebar.StatusStarting && it.Started != nil:
-		return "sent to " + it.Started.To + " · " + sidebar.AgeSpan(now.Sub(time.Unix(it.Started.At, 0))), colour
-	case it.Status == sidebar.StatusCheck && it.Check != nil:
-		return it.Check.Short(now), colour
-	}
-	return cmp.Or(it.Status, "open"), colour
-}
-
-// owner is whom the card is on: "you" for the user's own.
-func owner(c card) string {
-	if todo.Own(c.it.On, c.it.Session, c.boss) {
+	case a.Kind == sidebar.AssigneeYou, a.Kind == "" && c.mine():
 		return "you"
+	case a.Name != "":
+		return a.Name
 	}
-	return cmp.Or(c.it.StatusOn, c.it.On)
+	return cmp.Or(c.it.On, "boss")
 }
 
 // link is a link as a card names it: "PR #n" for a pull request, else "link".
