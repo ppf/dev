@@ -48,6 +48,7 @@ type Pane struct {
 	now      *Ready         // quitting the program for RunPane to exec it
 	failedTo string         // the version whose exec failed last, fails times in a row
 	fails    int
+	exit     bool // the user quit: a reload decided before tea.Quit lands must not turn it into an exec
 }
 
 // NewPane is a pane's reload state in a process running version own.
@@ -102,10 +103,16 @@ func (p Pane) Quitting() bool { return p.now != nil }
 
 // Reload quits the program to exec into the held Ready, when idle and nothing runs off the update loop.
 func (p *Pane) Reload(idle bool) tea.Cmd {
-	if p.ready == nil || p.now != nil || !idle || p.Busy.Load() != 0 {
+	if p.ready == nil || p.now != nil || p.exit || !idle || p.Busy.Load() != 0 {
 		return nil
 	}
 	p.now = p.ready
+	return tea.Quit
+}
+
+// Quit is the user's quit (ctrl+c): the program exits, no reload.
+func (p *Pane) Quit() tea.Cmd {
+	p.exit = true
 	return tea.Quit
 }
 

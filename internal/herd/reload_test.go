@@ -312,6 +312,21 @@ func TestCarryLeavesOut(t *testing.T) {
 	if len(r.drafts) != 0 {
 		t.Errorf("a reply kept for a closed session carried: %v", r.drafts)
 	}
+	// Its pane replaced, a long one would hold the reload for good
+	t0 := m.snap.tiles[0]
+	m.snap.all = append(m.snap.all, t0.sess)
+	m.drafts = map[string]replyBox{t0.sess.Name: {pane: t0.pane + "x", ed: editor{text: []rune(strings.Repeat("x", maxState))}}}
+	if !m.fits() {
+		t.Error("a reply kept for a replaced pane counted against the bound")
+	}
+}
+
+// ctrl+c with a release held exits: a refresh before tea.Quit lands must not turn it into a reload.
+func TestCtrlCBeatsHeldReload(t *testing.T) {
+	next, _ := ready(t, board4()).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if _, quit := refreshed(next.(Model)); quit || next.(Model).reload.Quitting() {
+		t.Error("a refresh after ctrl+c reloaded instead of exiting")
+	}
 }
 
 func TestClickClearsReloadError(t *testing.T) {
@@ -338,7 +353,7 @@ func TestResizeBeforeFirstRefreshUndoesCarriedCollapse(t *testing.T) {
 // A kept reply too long to carry holds the reload, rather than failing the exec on the environment's size.
 func TestReloadHeldByStateOverBound(t *testing.T) {
 	m := ready(t, board4())
-	m.drafts = map[string]replyBox{"docs-api": {pane: "%1", ed: editor{text: []rune(strings.Repeat("x", maxState+1))}}}
+	m.drafts = map[string]replyBox{"docs-api": {ed: editor{text: []rune(strings.Repeat("x", maxState+1))}}}
 	m, quit := refreshed(m)
 	if quit {
 		t.Fatal("reloaded with state over the bound")

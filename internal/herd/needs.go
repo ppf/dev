@@ -239,7 +239,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Folded to its header, its rows take no keys
 		m.todoFolded, m.needMode = true, false
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.reload.Quit()
 	case "b":
 		open, client, bosses := m.openBoard, m.snap.client, m.boardBosses()
 		return m, m.action(func() error { return open(client, bosses) })

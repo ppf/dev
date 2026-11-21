@@ -103,6 +103,9 @@ func (m Model) carry() []string {
 		if !slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == name }) {
 			continue // its session is closed: it can't be sent
 		}
+		if i := slices.IndexFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }); i >= 0 && m.snap.tiles[i].pane != b.pane {
+			continue // its pane was replaced: open won't bring it back
+		}
 		if c.Drafts == nil {
 			c.Drafts = map[string]draft{}
 		}

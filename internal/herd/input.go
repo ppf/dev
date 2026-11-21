@@ -225,7 +225,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		m.todoFolded = !m.todoFolded
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.reload.Quit()
 	}
 	return m, nil
 }
@@ -399,7 +399,7 @@ func (m Model) action(fn func() error) tea.Cmd {
 // replies, esc closes, ctrl+c quits. A dialog the worker waits on shows as a picker instead.
 func (m Model) typeBox(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
-		return m, tea.Quit
+		return m, m.reload.Quit()
 	}
 	m.msg = message{}
 	b := &m.box
