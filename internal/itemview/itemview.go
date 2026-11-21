@@ -104,11 +104,13 @@ func (m Model) canTick() bool { return m.plain() }
 // no ask, not on it or started yet; stop on the user's card with a doing line; never a desktop app boss's.
 func (m Model) canDoing() bool {
 	it := m.it
-	return !it.Done && !strings.HasPrefix(it.Boss, "local_") && it.Assignee.Kind == sidebar.AssigneeYou && len(it.Options) == 0 &&
-		it.Column == sidebar.ColumnTodo && it.Doing == nil && it.Started == nil
+	return m.yourCard() && len(it.Options) == 0 && it.Column == sidebar.ColumnTodo && it.Doing == nil && it.Started == nil
 }
-func (m Model) canStop() bool {
-	return !m.it.Done && !strings.HasPrefix(m.it.Boss, "local_") && m.it.Assignee.Kind == sidebar.AssigneeYou && m.it.Doing != nil
+func (m Model) canStop() bool { return m.yourCard() && m.it.Doing != nil }
+
+// yourCard is an open item assigned to the user, not a desktop app boss's.
+func (m Model) yourCard() bool {
+	return !m.it.Done && !strings.HasPrefix(m.it.Boss, "local_") && m.it.Assignee.Kind == sidebar.AssigneeYou
 }
 
 // canReopen is what todo.Reopen takes, as the web page offers it: the user's own ticked item, never a desktop app boss's.
@@ -208,8 +210,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // key runs k: j/k/↓/↑ move (wrapping), ⏎ the selected line's key, 1-9 answer, m own words, s start, i I'm on it (its
-// field) or stop, d tick, r reopen, w go to the worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c wait while an action is under way, so its
-// outcome shows.
+// field) or stop, d tick, r reopen, w go to the worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c
+// wait while an action is under way, so its outcome shows.
 func (m Model) key(k string) (Model, tea.Cmd) {
 	switch {
 	case k == "ctrl+c":
