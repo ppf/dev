@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -152,7 +151,7 @@ func TestServePair(t *testing.T) {
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
 		t.Errorf("no server: %v, want not running", err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`)) }))
 	defer srv.Close()
 	ln := srv.Listener
 	dir, err := authDir()
@@ -290,7 +289,7 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 		if rd.Version != "v2.0.0" {
 			t.Errorf("exec into %q", rd.Version)
 		}
-		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid())+" 0" {
+		if got := os.Getenv(envServeReexec); got != fmt.Sprintf("%d 0 %d", os.Getpid(), alive.Fd()) {
 			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
 		}
 		// The socket stays bound, so a connection waits unanswered
@@ -538,12 +537,12 @@ func TestServeReloadHeldByOpenRequest(t *testing.T) {
 
 func TestReexecMarker(t *testing.T) {
 	for _, tc := range []struct {
-		v        string
-		reloaded bool
-		caff     int
-	}{{"42 77", true, 77}, {"42 0", true, 0}, {"41 77", false, 0}, {"", false, 0}} {
-		if r, c := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff {
-			t.Errorf("%q: %v %d, want %v %d", tc.v, r, c, tc.reloaded, tc.caff)
+		v          string
+		reloaded   bool
+		caff, kept int
+	}{{"42 77 9", true, 77, 9}, {"42 77", true, 77, 0}, {"42 0 0", true, 0, 0}, {"41 77 9", false, 0, 0}, {"", false, 0, 0}} {
+		if r, c, k := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff || k != tc.kept {
+			t.Errorf("%q: %v %d %d, want %v %d %d", tc.v, r, c, k, tc.reloaded, tc.caff, tc.kept)
 		}
 	}
 }

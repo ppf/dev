@@ -68,8 +68,8 @@ func TestAutoServeStarts(t *testing.T) {
 	if want := [][]string{{"/bin/dev", "serve", "--awake=false", "--addr", "127.0.0.1:18417"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
 		t.Fatalf("spawned %q, want %q", f.spawned, want)
 	}
-	if !slices.Equal(f.env, []string{"TMUX=/private/tmp/tmux-501/default,1,0", "PATH=/bin"}) {
-		t.Fatalf("env %q: want TMUX and PATH only", f.env)
+	if !slices.Equal(f.env, []string{"PATH=/bin"}) {
+		t.Fatalf("env %q: want PATH only", f.env)
 	}
 	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (pair this browser: dev serve pair)\n" {
 		t.Fatalf("got %q", got)
@@ -180,6 +180,16 @@ func TestStartLock(t *testing.T) {
 	}
 }
 
+func TestAutoServePrivateSocket(t *testing.T) {
+	f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": "/tmp/x/it,9,3", "DEV_SERVE_ADDR": "127.0.0.1:18417"}}
+	if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(f.env, []string{"TMUX=/tmp/x/it,0,-1"}) {
+		t.Fatalf("env %q: want the boss's socket, no session", f.env)
+	}
+}
+
 func TestAutoServeDefaultSocket(t *testing.T) {
 	for _, socket := range []string{"/tmp/tmux-501/default", "/private/tmp/tmux-501/default"} {
 		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0", "TMUX_TMPDIR": "/tmp/custom", "XDG_STATE_HOME": "rel"}}
@@ -201,7 +211,7 @@ func TestLastLine(t *testing.T) {
 		from int64
 		want string
 	}{{0, "listen: in use"}, {9, "listen: in use"}, {100, "exited"}} {
-		if got := lastLine(path, tt.from); got != tt.want {
+		if got := lastLine(path, tt.from, "exited"); got != tt.want {
 			t.Errorf("from %d: %q, want %q", tt.from, got, tt.want)
 		}
 	}
@@ -255,10 +265,10 @@ func TestAutoServeFails(t *testing.T) {
 		f := &fakeStart{runs: -1, envValue: map[string]string{}}
 		var out bytes.Buffer
 		began := time.Now()
-		if err := f.starter(t).ensure(&out); err != nil || !strings.HasPrefix(out.String(), "⚠ dev serve: started, not answering after 300ms: exited (log: ") {
+		if err := f.starter(t).ensure(&out); err != nil || !strings.HasPrefix(out.String(), "⚠ dev serve: started, not answering after 300ms: no output yet (log: ") {
 			t.Fatalf("got %v %q", err, out.String())
 		}
-		if took := time.Since(began); took > time.Second {
+		if took := time.Since(began); took > 2*time.Second {
 			t.Fatalf("took %s", took)
 		}
 	})

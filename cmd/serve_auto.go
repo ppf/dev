@@ -20,9 +20,8 @@ import (
 	"github.com/ppf/dev/internal/serve"
 )
 
-// autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE or TMUX_PANE); TMUX
-// keeps the boss's tmux server.
-var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TMUX", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
+// autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE, TMUX or TMUX_PANE).
+var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
 
 // autoServeDefault is the address dev boss starts dev serve on without DEV_SERVE_ADDR; "": dev serve's own default
 // (tailnet, else private LAN, port 8417).
@@ -145,6 +144,11 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return err
 	}
 	logPath := filepath.Join(s.dir, "serve.log")
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 1<<20 { // none runs: nothing writes it now
+		if err := os.Truncate(logPath, 0); err != nil {
+			return err
+		}
+	}
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
@@ -165,16 +169,24 @@ func (s *starter) ensure(stderr io.Writer) error {
 			continue
 		}
 		// It runs in /: a relative folder would be another one there
-		if strings.HasSuffix(k, "_HOME") || strings.HasSuffix(k, "_DIR") || k == "TMUX_TMPDIR" {
+		if strings.HasSuffix(k, "_HOME") || strings.HasSuffix(k, "_DIR") || strings.HasSuffix(k, "TMPDIR") {
 			if v, err = filepath.Abs(v); err != nil {
 				return err
 			}
 		}
 		env = append(env, k+"="+v)
 	}
+	// Off the default server (DEV_SERVE_ADDR set) it reads the boss's one: its socket, no session of its own
+	if t := s.getenv("TMUX"); t != "" && !s.defaultServer() {
+		socket, _, _ := strings.Cut(t, ",")
+		env = append(env, "TMUX="+socket+",0,-1")
+	}
 	exited, err := s.spawn(s.exe, args, env, log)
 	if err != nil {
 		return err
+	}
+	if least := time.Now().Add(time.Second); deadline.Before(least) { // its turn came late: still give it a second
+		deadline = least
 	}
 	ended := false
 	for time.Now().Before(deadline) {
@@ -198,9 +210,9 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 	}
 	if ended {
-		return fmt.Errorf("%s (log: %s)", lastLine(logPath, start), logPath)
+		return fmt.Errorf("%s (log: %s)", lastLine(logPath, start, "exited"), logPath)
 	}
-	fmt.Fprintf(stderr, "⚠ dev serve: started, not answering after %s: %s (log: %s)\n", s.wait, lastLine(logPath, start), logPath)
+	fmt.Fprintf(stderr, "⚠ dev serve: started, not answering after %s: %s (log: %s)\n", s.wait, lastLine(logPath, start, "no output yet"), logPath)
 	return nil
 }
 
@@ -240,8 +252,8 @@ func (s *starter) defaultServer() bool {
 	return d == "" || d == "/tmp" || d == "/private/tmp"
 }
 
-// lastLine is the last line written to path after offset from, without its "❌ "; "exited" when none.
-func lastLine(path string, from int64) string {
+// lastLine is the last line written to path after offset from, without its "❌ "; none when there is none.
+func lastLine(path string, from int64, none string) string {
 	f, err := os.Open(path)
 	if err != nil {
 		return err.Error()
@@ -258,7 +270,7 @@ func lastLine(path string, from int64) string {
 	if l := strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "❌ "); l != "" {
 		return l
 	}
-	return "exited"
+	return none
 }
 
 // spawnServe starts exe args in its own session (no SIGHUP from the terminal or tmux), output to log; exited

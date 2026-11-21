@@ -146,8 +146,8 @@ func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 		OK      bool
 		Version string
 	}
-	// Another program on a stale record's port answers no {"ok":true}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&health) != nil || !health.OK {
+	// Another program on a stale record's port answers no {"ok":true,"version":…}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&health) != nil || !health.OK || health.Version == "" {
 		return ap, "", notRunning
 	}
 	return ap, health.Version, nil

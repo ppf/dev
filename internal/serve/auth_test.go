@@ -267,7 +267,7 @@ func TestServed(t *testing.T) {
 		running    bool
 	}{
 		{"dev serve", `{"ok":true,"version":"v0.72.0"}`, 200, "v0.72.0", true},
-		{"no version", `{"ok":true}`, 200, "", true},
+		{"no version", `{"ok":true}`, 200, "", false},
 		{"another program", `hello`, 200, "", false},
 		{"500", `{"ok":true}`, 500, "", false},
 	} {
