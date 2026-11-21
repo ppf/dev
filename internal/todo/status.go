@@ -152,17 +152,13 @@ func Own(on string, session *Session, boss string) bool {
 // since is a person's, never a worker started later under that name.
 var linked = time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC).Unix()
 
-// ByName reports an item on someone whose worker is found by the name it's on (Owner.worker): unlinked, added before
-// linking began.
-func ByName(it Shown) bool { return it.Session == nil && it.Added < linked }
-
 // worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's
 // name), else, for an item added before linked, the one with an agent its on names (Match: the only one by that name).
 func (o Owner) worker(it Shown) (sidebar.Session, bool) {
 	name := ""
 	if it.Session != nil {
 		name = it.Session.ID
-	} else if !ByName(it) {
+	} else if it.Added >= linked {
 		return sidebar.Session{}, false
 	} else {
 		var ws []Session

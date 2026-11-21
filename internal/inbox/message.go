@@ -452,8 +452,8 @@ func UserDoing(boss string, id int, text, doing string, stop, closed bool) Note 
 }
 
 // WithdrawTicked drops the queued notes that the user is on an item (UserDoing) once that item is no longer open, or,
-// for one saying the user is on it, no longer marked doing (another item took its number). item is open item id of
-// boss's list, and whether it is marked doing. A lookup that fails keeps its note.
+// for one saying the user is on it, no longer the user's marked doing (another item took its number). item is open item
+// id of boss's list, and whether the user is on it. A lookup that fails keeps its note.
 func (b Box) WithdrawTicked(item func(boss string, id int) (open, doing bool, err error)) error {
 	s, err := b.read()
 	if err != nil {
@@ -520,7 +520,8 @@ func listItem(c *tmux.Client, now time.Time) func(string, int) (bool, bool, erro
 		if i < 0 {
 			return false, false, nil
 		}
-		return true, l.Items[i].Doing != nil, nil
+		it := l.Items[i]
+		return true, it.Doing != nil && todo.Own(it.On, it.Session, boss), nil
 	}
 }
 
