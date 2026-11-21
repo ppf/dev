@@ -449,7 +449,7 @@ function card(x) {
 const cardOf = new WeakMap();
 
 // What a dropped card's band says until the board settles it
-const MOVING = { tick: 'Ticking…', start: 'Starting…', doing: 'Moving in progress…', stop: 'Back to To do…' };
+const MOVING = { tick: 'Ticking…', start: 'Starting…', doing: 'Moving in progress…', stop: 'Off it…' };
 const movingBand = x => x.moving && el('div', { class: 'flag pend' }, MOVING[x.moving.act]);
 
 function openCard(x) {
@@ -739,7 +739,7 @@ function item(boss, id) {
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
   const acts = [], hints = [];
   const act = (label, cls, run, hint) => {
-    const b = el('button', { class: 'btn ' + cls, type: 'button', disabled: !state.reachable || state.pending[k], onclick: () => { acts.forEach(a => { a.disabled = true; }); run(list, it); } }, label);
+    const b = el('button', { class: 'btn ' + cls, type: 'button', disabled: !state.reachable || state.pending[k] || !!state.moves[k], onclick: () => { acts.forEach(a => { a.disabled = true; }); run(list, it); } }, label);
     acts.push(b);
     hints.push(hint);
   };
@@ -780,7 +780,7 @@ function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && find(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], !!state.moves[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;
@@ -859,12 +859,12 @@ const titleOf = k => COLUMNS.find(c => c.key === k).title;
 // else by the card).
 async function move(x, to, at) {
   const k = key(x.list.boss, x.it.id);
+  if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
   if (!x.done) {
-    if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
     const now = find(x.list.boss, x.it.id);
     if (!now) return refuse(x, 'no longer open', at);
     // A drop does what was shown when the card was picked up, not what a change on the Mac since would make of it
-    if (columnOf(now) !== columnOf(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
+    if (now.it.text !== x.it.text || now.it.added !== x.it.added || columnOf(now) !== columnOf(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
       return refuse(now, 'it changed on your Mac meanwhile: look again', at);
     }
     x = now;
@@ -1028,6 +1028,7 @@ window.addEventListener('hashchange', () => {
 document.getElementById('shade').addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => {
   if (drag?.lifted && e.key === 'Escape') return drop(e, true);
+  swallow = false; // a drag cancelled away from the window (no pointerup): Enter's click is its own
   if (route().name === 'board' && wide.matches && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
     const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
     if (!x || drag?.lifted) return;

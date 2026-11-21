@@ -156,7 +156,7 @@ function verdict(x, from, to, managerRuns) {
     return no('not startable from the page');
   }
   // In progress → To do
-  if (mine && it.doing) return { act: 'stop', hint: "you're off it: back to To do" };
+  if (mine && it.doing) return { act: 'stop', hint: "you're off it: To do, or Review if its PR moved" };
   if (it.started) return no(it.started.to + ' was asked to start it');
   return no((mine ? 'you are' : whoOf(x) + ' is') + ' working on it');
 }

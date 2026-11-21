@@ -298,7 +298,7 @@ Open the printed URL on the phone and enter the code (8 digits shown as `1234 56
 | To do → In progress | a closed boss's, no manager running | refused: "boss-x is closed and no manager runs to start it" |
 | To do → In progress | on the manager's own list, not yours | refused: "the manager's own card: ask the manager in its session" |
 | To do → In progress | an ask | refused: "answer it: open the card" |
-| In progress → To do | yours, marked doing | stop doing: back to To do |
+| In progress → To do | yours, marked doing | stop doing: back to To do (Review if its PR moved) |
 | In progress → To do | started, not picked up yet | refused: "boss-x was asked to start it" |
 | In progress → To do | a session's or boss's | refused: "dev-x is working on it" |
 | In progress → To do | yours, not marked doing | refused: "you are working on it" |
