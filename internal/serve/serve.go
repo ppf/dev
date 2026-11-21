@@ -90,7 +90,8 @@ func ipHost(next http.Handler) http.Handler {
 }
 
 // SameOrigin is the Guard on a loopback bind, in place of a paired session: it refuses a request, reads too, that a
-// browser marks as sent from another site (Sec-Fetch-Site) or whose Origin isn't this server.
+// browser marks as another origin's (Sec-Fetch-Site) or whose Origin isn't http:// and the request's Host. A request
+// with neither header (not a browser's) passes.
 func SameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		site, origin := r.Header.Get("Sec-Fetch-Site"), r.Header.Get("Origin")

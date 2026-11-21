@@ -193,35 +193,53 @@ func TestLoopbackMessage(t *testing.T) {
 	}
 }
 
-// The bound address's kind picks the Guard: a session on a tailnet or LAN bind, as before; none on loopback, where
-// another site's request is refused instead.
+// Whether the bound address is loopback picks the Guard: a paired session on a tailnet or LAN bind, as before; none
+// on loopback, where another origin's request is refused instead.
 func TestServeConfigGuard(t *testing.T) {
-	tick := func(kind serve.Kind, host string, header ...string) int {
-		h := serve.Handler(serveConfig(io.Discard, t.TempDir(), kind))
-		r := httptest.NewRequest(http.MethodPost, "http://"+host+"/v1/done", strings.NewReader(`{}`))
+	do := func(h http.Handler, path, body, host string, cookie *http.Cookie, header ...string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "http://"+host+path, strings.NewReader(body))
 		r.Header.Set("X-Dev-Page", "1")
 		for i := 0; i < len(header); i += 2 {
 			r.Header.Set(header[i], header[i+1])
 		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		return w.Code
+		return w
 	}
 	for _, tc := range []struct {
-		kind   serve.Kind
-		host   string
-		header []string
-		want   int
+		loopback bool
+		host     string
+		header   []string
+		want     int
 	}{
-		{serve.LAN, "192.168.1.89:8417", nil, http.StatusUnauthorized},
-		{serve.Tailnet, "100.101.102.103:8417", nil, http.StatusUnauthorized},
-		{serve.Loopback, "127.0.0.1:8417", nil, http.StatusBadRequest}, // past the Guard: the body names no item
-		{serve.Loopback, "127.0.0.1:8417", []string{"Origin", "https://evil.example"}, http.StatusForbidden},
-		{serve.Loopback, "127.0.0.1:8417", []string{"Sec-Fetch-Site", "cross-site"}, http.StatusForbidden},
+		{false, "192.168.1.89:8417", nil, http.StatusUnauthorized},
+		{false, "100.101.102.103:8417", nil, http.StatusUnauthorized},
+		{true, "127.0.0.1:8417", nil, http.StatusBadRequest}, // past the Guard: the body names no item
+		{true, "127.0.0.1:8417", []string{"Origin", "https://evil.example"}, http.StatusForbidden},
+		{true, "127.0.0.1:8417", []string{"Sec-Fetch-Site", "cross-site"}, http.StatusForbidden},
 	} {
-		if got := tick(tc.kind, tc.host, tc.header...); got != tc.want {
-			t.Errorf("kind %d %s %v: %d, want %d", tc.kind, tc.host, tc.header, got, tc.want)
+		h := serve.Handler(serveConfig(io.Discard, t.TempDir(), tc.loopback))
+		if got := do(h, "/v1/done", `{}`, tc.host, nil, tc.header...).Code; got != tc.want {
+			t.Errorf("loopback %v %s %v: %d, want %d", tc.loopback, tc.host, tc.header, got, tc.want)
 		}
+	}
+	// On a LAN bind a code from dev serve pair pairs, and its cookie passes the Guard
+	dir := t.TempDir()
+	h := serve.Handler(serveConfig(io.Discard, dir, false))
+	code, err := serve.NewCode(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := do(h, "/v1/pair", `{"code":"`+code+`","device":"phone"}`, "192.168.1.89:8417", nil)
+	cookies := w.Result().Cookies()
+	if w.Code != http.StatusOK || len(cookies) != 1 {
+		t.Fatalf("pair on LAN: %d %s", w.Code, w.Body)
+	}
+	if got := do(h, "/v1/done", `{}`, "192.168.1.89:8417", cookies[0]).Code; got != http.StatusBadRequest {
+		t.Errorf("paired tick on LAN: %d, want 400 (past the Guard)", got)
 	}
 }
 

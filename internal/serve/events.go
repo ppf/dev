@@ -11,8 +11,8 @@ import (
 var (
 	// checkEvery is how often the board is read while a stream is open: the sidebars read it every 2 s.
 	checkEvery = time.Second
-	// beatEvery is how often a stream says it is alive (the page takes one quiet for 40 s as dropped) and checks its
-	// session again, so an unpaired phone's stream ends.
+	// beatEvery is how often a stream says it is alive (the page takes one quiet for 40 s as dropped) and checks the
+	// Guard again, so an unpaired phone's stream ends.
 	beatEvery = 15 * time.Second
 )
 

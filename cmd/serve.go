@@ -41,9 +41,9 @@ func newServeCmd() *cobra.Command {
 		Long: fmt.Sprintf(`Serve every dev boss's to do list, as dev todo --all --json has it, to a page on the phone: GET /v1/health,
 GET /v1/board, GET /v1/events (the board changed: an event stream), POST /v1/pair, and POST /v1/answer, /v1/done, /v1/start and /v1/doing, which answer, tick, start and mark in progress or end it as dev todo answer --question, done --text, start and doing do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
 address, port %d; --addr takes a loopback, tailnet or private LAN ip:port, never 0.0.0.0, :: or a public
-address. Plain HTTP. On a tailnet or LAN address, /v1/board, /v1/events and the POSTs need a paired phone: dev serve
-pair. On a loopback address they need no pairing: a request another site's page sends (Sec-Fetch-Site, Origin) is
-refused instead.`, serve.DefaultPort),
+address. Plain HTTP. On a tailnet or LAN address, /v1/board, /v1/events and the answer, done, start and doing POSTs
+need a paired phone: dev serve pair. On a loopback address they need no pairing: a request a browser marks as
+another origin's (Sec-Fetch-Site, Origin) is refused instead.`, serve.DefaultPort),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if install || uninstall {
@@ -68,7 +68,12 @@ refused instead.`, serve.DefaultPort),
 			}
 			defer forget()
 			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
+			loopback := ap.Addr().IsLoopback()
+			where := "on the phone"
+			if loopback {
+				where = "in a browser on this Mac, no pairing needed (a phone can't reach it)"
+			}
+			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ "+where)
 			// After a reload the caffeinate started before it still waits on this pid
 			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
 			if err := os.Unsetenv(envServeReexec); err != nil {
@@ -86,9 +91,7 @@ refused instead.`, serve.DefaultPort),
 			if kind == serve.LAN {
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
-			if kind == serve.Loopback {
-				fmt.Fprintln(out, "no pairing on loopback: open it in a browser on this Mac (a phone can't reach it)")
-			} else {
+			if !loopback {
 				fmt.Fprintln(out, "pair a phone: dev serve pair")
 			}
 			// Off the serving path: a hung tmux server must not hold up the page
@@ -106,7 +109,7 @@ refused instead.`, serve.DefaultPort),
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
 			bound := ln.Addr().(*net.TCPAddr).AddrPort()
 			args := func() ([]string, error) { return reexecArgs(os.Args, addr, bound, ownIP(bound.Addr())) }
-			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir, kind), o, args, out, stderr)
+			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir, loopback), o, args, out, stderr)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "the ip:port to listen on: loopback, tailnet or private LAN")
@@ -227,12 +230,12 @@ func bind(addr string) (netip.AddrPort, serve.Kind, error) {
 	return serve.Default(addrs, serve.DefaultRoute)
 }
 
-// serveConfig reads the board from dev todo --all --json's code on the default tmux server: for paired phones, for any
-// same-origin browser on a loopback bind (kind is the bound address's).
-func serveConfig(stderr io.Writer, dir string, kind serve.Kind) serve.Config {
+// serveConfig reads the board from dev todo --all --json's code on the default tmux server: for paired phones; when the
+// bound address is loopback, for any request a browser doesn't mark as another origin's.
+func serveConfig(stderr io.Writer, dir string, loopback bool) serve.Config {
 	auth := &serve.Auth{Dir: dir, Now: time.Now}
 	guard := auth.Session
-	if kind == serve.Loopback {
+	if loopback {
 		guard = serve.SameOrigin
 	}
 	return serve.Config{
