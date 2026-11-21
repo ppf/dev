@@ -843,7 +843,7 @@ function render() {
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
       if (!wide.matches) showLane(state.lane);
       if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
-      if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
+      if (state.note && state.note !== state.noteShown && !dropping) window.scrollTo(0, 0);
       state.noteShown = state.note;
     }
   }
@@ -857,14 +857,18 @@ const titleOf = k => COLUMNS.find(c => c.key === k).title;
 // move runs what dropping card x on column to means (verdict): the call the sheet's button makes (stop doing: a drop's
 // only), the card shown there meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y};
 // else by the card).
+// acted is what of card x a drop's call reads or changes: what it is, whom it's on, its doing line and start, its column.
+const acted = ({ it }) => JSON.stringify([it.text, it.added, it.on, it.session?.name, it.doing, it.started, it.options, columnOf({ it })]);
+
 async function move(x, to, at) {
   const k = key(x.list.boss, x.it.id);
-  if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
+  // A finished card's id may be an open one's again: only an open card (or one shown dropped on Done) is on its way
+  if ((!x.done || x.moving) && (state.moves[k] || state.pending[k])) return refuse(x, 'already on its way to your Mac', at);
   if (!x.done) {
     const now = find(x.list.boss, x.it.id);
     if (!now) return refuse(x, 'no longer open', at);
     // A drop does what was shown when the card was picked up, not what a change on the Mac since would make of it
-    if (now.it.text !== x.it.text || now.it.added !== x.it.added || columnOf(now) !== columnOf(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
+    if (acted(now) !== acted(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
       return refuse(now, 'it changed on your Mac meanwhile: look again', at);
     }
     x = now;
@@ -877,25 +881,30 @@ async function move(x, to, at) {
   state.moves[k] = { to, act: v.act };
   delete state.errors[k];
   let ok = false;
+  dropping++;
   try {
     render();
     ok = await ACTS[v.act](x.list, x.it);
   } finally {
+    dropping--;
+    state.noteShown = state.note; // the button's note, shown without scrolling the board away from the drop
     if (state.moves[k]?.after === undefined) delete state.moves[k]; // never left for good
   }
-  if (!ok && !state.unpaired) refuse(x, state.errors[k] || state.note || 'not moved', at); // unpaired: Pair says why
+  if (!ok && !state.unpaired) refuse(x, state.errors[k] || state.note || 'not moved', at, to); // unpaired: Pair says why
 }
 
 let flashTimer = 0;
 
-// refuse says why card x stays where it is: a callout at at (else under the card) and a line at the foot, for a few seconds.
-function refuse(x, why, at) {
+// refuse says why card x stays where it is: a callout at at (else under the card) and a line at the foot, for a few seconds;
+// to: the column a failed call was for, which the Mac may have saved it in anyway (its boss not told).
+function refuse(x, why, at, to) {
   for (const n of document.querySelectorAll('body > .refuse, body > .toast')) n.remove();
   at ||= anchor(x);
   // Where it is now: an unanswered call may have moved it after all
   const now = x.done ? x : find(x.list.boss, x.it.id);
   const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': Math.min(at.y, innerHeight - 140) + 'px' } }, why);
-  const toast = el('div', { class: 'toast' }, 'Not moved · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
+  const moved = !!to && (now ? columnOf(now) === to : to === 'done');
+  const toast = el('div', { class: 'toast' }, (moved ? 'Moved, with a problem' : 'Not moved') + ' · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
   document.body.append(call, toast);
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { call.remove(); toast.remove(); }, FLASH_MS);
@@ -909,7 +918,7 @@ function anchor(x) {
 
 // drag is the card pressed on the wide board, {x, el, id, sx, sy}; once moved DRAG_PX, lifted with its ghost, the
 // columns (each {el, k, v: its verdict}) and the one under the pointer (over).
-let drag = null, swallow = false;
+let drag = null, swallow = false, dropping = 0; // dropping: drops whose call is on its way
 
 function press(e) {
   if (drag?.lifted) drop(e, true); // its pointerup never came
@@ -962,7 +971,8 @@ function follow(e) {
 // colAt is the column of cols under the pointer of e, null for none.
 const colAt = (cols, e) => cols.find(c => {
   const r = c.el.getBoundingClientRect();
-  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  // its part on screen: a released pointer outside the window is captured too
+  return e.clientX >= Math.max(0, r.left) && e.clientX <= Math.min(innerWidth, r.right) && e.clientY >= Math.max(0, r.top) && e.clientY <= Math.min(innerHeight, r.bottom);
 }) || null;
 
 function unmark(c) {
@@ -994,6 +1004,7 @@ document.addEventListener('pointerdown', press);
 document.addEventListener('pointermove', e => {
   if (!drag || e.pointerId !== drag.id) return;
   if (!drag.lifted) {
+    if (!(e.buttons & 1)) return void (drag = null); // released where no pointerup reached the page
     if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < DRAG_PX) return;
     if (!drag.el.isConnected) return void (drag = null); // redrawn since the press
     lift();
@@ -1029,7 +1040,7 @@ document.getElementById('shade').addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => {
   if (drag?.lifted && e.key === 'Escape') return drop(e, true);
   swallow = false; // a drag cancelled away from the window (no pointerup): Enter's click is its own
-  if (route().name === 'board' && wide.matches && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+  if (route().name === 'board' && wide.matches && e.shiftKey && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
     const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
     if (!x || drag?.lifted) return;
     e.preventDefault();
