@@ -135,6 +135,7 @@ type Model struct {
 	size          paneSize        // how fit last sized the pane
 	restoredSize  paneSize        // size as a reload carried it, taken at the first refresh; unlisted when none
 	restored      bool            // carried by a reload: until the first good refresh, no card is new to Asking
+	restoredNeed  needRestore     // TO DO mode's row as a reload carried it, taken at the first good refresh
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
 	todoFolded    bool            // TO DO shows as its header only (t)
@@ -272,7 +273,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.expands, t.sess.Name)
 				}
 			}
-			m.snap, m.err, m.restored = msg.snap, nil, false
+			if m.restoredNeed.key != "" {
+				// Before the first refresh TO DO has no rows: fixNeeds would leave it
+				m.needMode, m.needIdx, m.needKey = true, m.restoredNeed.idx, m.restoredNeed.key
+			}
+			m.snap, m.err, m.restored, m.restoredNeed = msg.snap, nil, false, needRestore{}
 			if msg.msgs != nil {
 				m.msgs = msg.msgs
 			}
