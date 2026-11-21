@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1100,5 +1102,46 @@ func TestSnapshotWithoutResurrect(t *testing.T) {
 	f := &fakeServer{}
 	if err := Snapshot(f.client()); err != nil || len(f.calls) > 0 {
 		t.Errorf("Snapshot = %v, calls %q; want nothing done", err, f.calls)
+	}
+}
+
+// A save.sh past snapshotTimeout says so, and dies with what it started: a pane dump left behind would keep writing
+// a cut snapshot.
+func TestSnapshotTimeout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	scripts := filepath.Join(home, ".tmux", "plugins", "tmux-resurrect", "scripts")
+	if err := os.MkdirAll(scripts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(home, "child.pid")
+	if err := os.WriteFile(filepath.Join(scripts, "save.sh"), []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidFile+"\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := snapshotTimeout
+	snapshotTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { snapshotTimeout = old })
+	f := &fakeServer{}
+	start := time.Now()
+	err := Snapshot(f.client())
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("Snapshot took %v: it waited for save.sh's child", took)
+	}
+	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 300ms") {
+		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
+	}
+	data, rerr := os.ReadFile(pidFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("save.sh's child %d outlived it", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

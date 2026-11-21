@@ -45,6 +45,11 @@ func size() string {
 func child(mode string) {
 	sigs := make(chan os.Signal, 4)
 	signal.Notify(sigs, syscall.SIGWINCH, syscall.SIGTERM)
+	// Before the first line: the test's Ctrl-C may follow it at once
+	ints := make(chan os.Signal, 1)
+	if mode == "cooked" {
+		signal.Notify(ints, syscall.SIGINT)
+	}
 	fmt.Printf("tty=%v,%v TERM=%s size=%s\n", term.IsTerminal(0), term.IsTerminal(1), os.Getenv("TERM"), size())
 	switch mode {
 	case "echo":
@@ -91,8 +96,6 @@ func child(mode string) {
 		os.Exit(5)
 	case "cooked":
 		// Claude before it goes raw: Ctrl-C must still interrupt it
-		ints := make(chan os.Signal, 1)
-		signal.Notify(ints, syscall.SIGINT)
 		<-ints
 		fmt.Print("got INT\n")
 		os.Exit(4)

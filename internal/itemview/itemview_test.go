@@ -2,6 +2,7 @@ package itemview
 
 import (
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/creack/pty"
 
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/todo"
@@ -347,5 +349,71 @@ func TestClickCut(t *testing.T) {
 	}
 	if m := click(m, row(t, m, Width, 9, "o8"), Width, 9); !m.Done || !slices.Equal(r.calls, []string{"answer boss-dev Merge #221 now? o8"}) {
 		t.Errorf("click on o8 cut: calls %v", r.calls)
+	}
+}
+
+// Keys pressed fast arrive in one read, as one message: each runs, up to the one that starts an action or closes
+// the view; after m the rest are typed. A paste stays one.
+func TestFastKeys(t *testing.T) {
+	var r recorder
+	if m := press(New(ask, r.actions(), false), "jj"); m.sel != 2 {
+		t.Errorf("jj: sel %d, want 2", m.sel)
+	}
+	m, cmd := New(ask, r.actions(), false).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2j1")})
+	if m.busy == "" || cmd == nil || m.sel != 0 {
+		t.Fatalf("2j1: busy %q, cmd %v, sel %d; want answering 2 only", m.busy, cmd != nil, m.sel)
+	}
+	if m, _ = m.Update(cmd()); !m.Done || len(r.calls) != 1 || !strings.HasSuffix(r.calls[0], "Wait | after the test") {
+		t.Errorf("2j1: calls %q", r.calls)
+	}
+	if m := press(New(ask, Actions{}, false), "mok"); !m.typing || string(m.field) != "ok" {
+		t.Errorf("mok: typing %v, field %q", m.typing, string(m.field))
+	}
+	if m, _ := New(ask, Actions{}, false).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj"), Paste: true}); m.sel != 0 {
+		t.Errorf("pasted jj: sel %d, want 0", m.sel)
+	}
+}
+
+// firstKey runs the view until its first key message.
+type firstKey struct {
+	m     Model
+	ready chan struct{}
+}
+
+func (f firstKey) Init() tea.Cmd { return func() tea.Msg { close(f.ready); return nil } }
+
+func (f firstKey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(tea.KeyMsg); !ok {
+		return f, nil
+	}
+	f.m, _ = f.m.Update(msg)
+	return f, tea.Quit
+}
+
+func (f firstKey) View() string { return "" }
+
+// Two keys a terminal sends in one write reach the view as two, as in its popup.
+func TestFastKeysPty(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ptmx.Close(); _ = tty.Close() }()
+	ready := make(chan struct{})
+	p := tea.NewProgram(firstKey{m: New(ask, Actions{}, false), ready: ready}, tea.WithInput(tty), tea.WithOutput(io.Discard))
+	done := make(chan tea.Model, 1)
+	go func() { m, _ := p.Run(); done <- m }()
+	<-ready
+	if _, err := ptmx.Write([]byte("jj")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case m := <-done:
+		if sel := m.(firstKey).m.sel; sel != 2 {
+			t.Errorf("jj in one write: sel %d, want 2", sel)
+		}
+	case <-time.After(5 * time.Second):
+		p.Kill()
+		t.Fatal("no key read")
 	}
 }
