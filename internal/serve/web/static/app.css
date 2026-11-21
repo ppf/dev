@@ -136,7 +136,7 @@ a { color: var(--act); }
 .quick button:hover { border-color: var(--edge-strong); }
 .quick button.rec { border-color: var(--hot); background: var(--hot-wash); }
 .quick .k { color: var(--meta); font-weight: 600; font-size: var(--fs-meta); }
-.quick button.rec .k::after { content: " ★" / "recommended"; color: var(--hot); } /* recommended, not by colour alone */
+.quick button.rec .k::after { content: " ★"; content: " ★" / "recommended"; color: var(--hot); } /* recommended, not by colour alone */
 .quick small { flex-basis: 100%; padding-left: 15px; font-weight: 450; color: var(--meta); font-size: var(--fs-meta); }
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; }
 .tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border-radius: var(--r-chip); padding: 2px 7px; font-size: var(--fs-tag); font-weight: 600; background: var(--well); color: var(--ink2); }

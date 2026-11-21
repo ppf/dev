@@ -567,7 +567,7 @@ function swipe(ls) {
   const tab = l => {
     const hot = hotCount(l);
     return el('button', { type: 'button', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
-      'aria-current': String(state.lane === l.key), onclick: () => showLane(l.key) },
+      'aria-current': state.lane === l.key && 'true', onclick: () => showLane(l.key) },
     l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
   };
   return [el('div', { class: 'tabs', role: 'group', 'aria-label': 'Columns' }, ls.map(tab)), lanes];
@@ -594,7 +594,7 @@ function settle() {
   if (!settling || !lanes) return;
   clearTimeout(settling);
   settling = 0;
-  state.lane = laneAt(lanes); // the redraw that follows marks it
+  laneInView(lanes);
 }
 
 // showLane scrolls the phone's lanes to column k's.
@@ -635,7 +635,8 @@ function land(lanes, k) {
   if (moved && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView();
   for (const t of document.querySelectorAll('#view .tab')) {
     const on = t.dataset.f === 'tab:' + k;
-    t.setAttribute('aria-current', String(on));
+    if (on) t.setAttribute('aria-current', 'true');
+    else t.removeAttribute('aria-current');
     if (on) {
       const strip = t.parentElement, sr = strip.getBoundingClientRect(), tr = t.getBoundingClientRect();
       strip.scrollLeft += tr.left - sr.left - (sr.width - tr.width) / 2;
