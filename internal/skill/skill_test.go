@@ -175,7 +175,7 @@ func TestAskRules(t *testing.T) {
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
 		"**Assess the user's ideas before handing them on.**", "With real cons, ask the user first",
-		"a one-line why", "Your assessment decides nothing for a project",
+		"a one-line why", "your assessment decides nothing for a project", "the request word for word in `--context`",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)
