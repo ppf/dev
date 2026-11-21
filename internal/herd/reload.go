@@ -4,31 +4,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 
 	"github.com/ppf/dev/internal/selfreload"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 const (
 	// envState carries the previews' UI state across a reload's exec
 	envState = "DEV_PREVIEWS_STATE"
-	// maxState bounds envState, dropping the oldest replies, so the exec doesn't fail on the environment's size
+	// maxState bounds envState, dropping the oldest replies, then the bottom row's message, so the exec doesn't fail
+	// on the environment's size
 	maxState = 32 << 10
 )
 
 // carried is the UI state a reload keeps: the board scrolls to the selection, so that keeps its scroll too.
 type carried struct {
-	Selected   string          `json:"selected,omitempty"`
-	Folds      map[string]bool `json:"folds,omitempty"`
-	Expands    map[string]bool `json:"expands,omitempty"`
-	TodoFolded bool            `json:"todo_folded,omitempty"`
-	WaitOpen   bool            `json:"wait_open,omitempty"`
-	History    []string        `json:"history,omitempty"`
-	Size       paneSize        `json:"size,omitempty"`
-	Msg        string          `json:"msg,omitempty"`
-	Alert      bool            `json:"alert,omitempty"`
+	Selected   string           `json:"selected,omitempty"`
+	Folds      map[string]bool  `json:"folds,omitempty"`
+	Expands    map[string]bool  `json:"expands,omitempty"`
+	TodoFolded bool             `json:"todo_folded,omitempty"`
+	WaitOpen   bool             `json:"wait_open,omitempty"`
+	History    []string         `json:"history,omitempty"`
+	Size       paneSize         `json:"size,omitempty"`
+	Msg        string           `json:"msg,omitempty"`
+	Alert      bool             `json:"alert,omitempty"`
+	Drafts     map[string]draft `json:"drafts,omitempty"`
+}
+
+// draft is a reply kept for a card (Model.drafts).
+type draft struct {
+	Pane string `json:"pane"`
+	Text string `json:"text"`
+	Pos  int    `json:"pos"`
 }
 
 // Run shows the previews in pane until its pane closes or Ctrl-C. When a new release of exe is installed it
@@ -50,21 +57,10 @@ func Run(c *tmux.Client, pane, exe string, args []string) error {
 	return nil
 }
 
-// idle: nothing typed, asked, open or in flight would be lost by a reload (Busy counts the commands running).
-// A draft kept for another card holds it too, until sent or cleared.
+// idle: nothing typed, asked, open or in flight would be lost by a reload (Busy counts the commands running);
+// replies kept for cards are carried.
 func (m Model) idle() bool {
-	return m.box.session == "" && !m.drafted() && m.confirm == "" && m.answering == "" && !m.needMode
-}
-
-// drafted reports a kept draft that can still be sent: its session is on the server (only gone from the board,
-// it may come back); one for a closed session can't, and holds nothing.
-func (m Model) drafted() bool {
-	for name := range m.drafts {
-		if slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == name }) {
-			return true
-		}
-	}
-	return false
+	return m.box.session == "" && m.confirm == "" && m.answering == "" && !m.needMode
 }
 
 // held says what holds a ready reload, for the bottom row; "" when none is held.
@@ -79,8 +75,6 @@ func (m Model) held() string {
 		why = "after TO DO (esc)"
 	case m.answering != "":
 		why = "after answering " + m.answering
-	case m.drafted():
-		why = "once the unsent message goes"
 	}
 	return "↻ " + v + " reloads " + why
 }
@@ -89,15 +83,27 @@ func (m Model) held() string {
 func (m Model) carry() []string {
 	c := carried{Selected: m.selected, Folds: m.folds, Expands: m.expands, TodoFolded: m.todoFolded, WaitOpen: m.waitOpen,
 		History: m.history, Size: m.size, Msg: m.msg.text, Alert: m.msg.alert}
+	for name, b := range m.drafts {
+		if c.Drafts == nil {
+			c.Drafts = map[string]draft{}
+		}
+		c.Drafts[name] = draft{Pane: b.pane, Text: string(b.ed.text), Pos: b.ed.pos}
+	}
 	for {
 		b, err := json.Marshal(c)
 		if err != nil {
 			panic(err) // maps and strings only
 		}
-		if len(b) <= maxState || len(c.History) == 0 {
+		switch {
+		case len(b) <= maxState:
+			return []string{envState + "=" + string(b)}
+		case len(c.History) > 0:
+			c.History = c.History[1:]
+		case c.Msg != "":
+			c.Msg, c.Alert = "", false
+		default:
 			return []string{envState + "=" + string(b)}
 		}
-		c.History = c.History[1:]
 	}
 }
 
@@ -114,5 +120,12 @@ func (m Model) restore(s string) Model {
 	m.selected, m.folds, m.expands, m.todoFolded, m.waitOpen, m.history = c.Selected, c.Folds, c.Expands, c.TodoFolded, c.WaitOpen, c.History
 	m.msg = message{text: c.Msg, alert: c.Alert}
 	m.restoredSize, m.restored = c.Size, true
+	for name, d := range c.Drafts {
+		if m.drafts == nil {
+			m.drafts = map[string]replyBox{}
+		}
+		text := []rune(d.Text)
+		m.drafts[name] = replyBox{session: name, pane: d.Pane, ed: editor{text: text, pos: min(max(d.Pos, 0), len(text))}, hist: -1}
+	}
 	return m
 }

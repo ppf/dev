@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ppf/dev/internal/selfreload"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -22,8 +21,7 @@ func TestIdle(t *testing.T) {
 	}{
 		{"nothing open", Model{}, true},
 		{"reply box open", Model{box: replyBox{session: "a"}}, false},
-		{"a reply kept for another card", Model{drafts: map[string]replyBox{"a": {}}, snap: snapshot{all: []sidebar.Session{{Name: "a"}}}}, false},
-		{"a reply kept for a closed session", Model{drafts: map[string]replyBox{"a": {}}}, true},
+		{"a reply kept for another card (carried)", Model{drafts: map[string]replyBox{"a": {}}}, true},
 		{"kill asked", Model{confirm: "a"}, false},
 		{"answer in flight", Model{answering: "a"}, false},
 		{"TO DO mode", Model{needMode: true}, false},
@@ -86,22 +84,17 @@ func TestReloadHeldByTypedReply(t *testing.T) {
 	} else if got := string(m.box.ed.text); got != "hi" {
 		t.Fatalf("draft %q after the refresh, want hi", got)
 	}
-	// Focus moved away: the reply is kept for its card, and still holds the reload
+	// Focus moved away: the reply is kept for its card and carried by the reload
 	m.blur()
 	m, quit := refreshed(m)
-	if quit {
-		t.Fatal("reloaded with a reply kept for a card")
+	if !quit {
+		t.Fatal("no reload with only a kept reply: it would hold the reload for as long as it's forgotten")
 	}
-	if row := ansiStrip(m.bottom())[0]; !strings.HasPrefix(row, " ↻ v2 reloads once the unsent message goes  j/k") {
-		t.Errorf("bottom row %q: want what holds the reload, then the keys", row)
-	}
-	m.open(m.snap.tiles[index(m.snap.tiles, m.selected)])
-	if string(m.box.ed.text) != "hi" {
-		t.Fatal("the kept reply didn't come back")
-	}
-	m = typed(m, "esc")
-	if _, quit = refreshed(m); !quit {
-		t.Fatal("no reload once the reply was cleared")
+	n := Model{}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	n.snap = m.snap
+	n.open(n.snap.tiles[index(n.snap.tiles, m.selected)])
+	if got := string(n.box.ed.text); got != "hi" || n.box.ed.pos != 2 {
+		t.Fatalf("after the reload the kept reply is %q at %d, want hi at 2", got, n.box.ed.pos)
 	}
 }
 
@@ -254,13 +247,19 @@ func TestRestoreBadState(t *testing.T) {
 func TestBottomRowAfterReload(t *testing.T) {
 	m := twoTiles()
 	m.reload = selfreload.Pane{Flash: "v2"}
-	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ dev v2") {
-		t.Errorf("after a reload: %q, want ↻ dev v2", row)
+	if row := ansiStrip(m.bottom())[0]; !strings.HasPrefix(row, " ↻ dev v2  ") || !strings.Contains(row, "j/k") {
+		t.Errorf("after a reload: %q, want ↻ dev v2 before the keys", row)
 	}
 	m.reload.Err = errors.New("reload: boom")
+	m.msg = info("Sent to b")
 	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "❌ reload: boom") {
-		t.Errorf("after a failed reload: %q", row)
+		t.Errorf("after a failed reload, under an info message: %q", row)
 	}
+	m.msg = alert("❌ close failed")
+	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "close failed") {
+		t.Errorf("an action's alert under a reload error: %q", row)
+	}
+	m.msg = message{}
 	if got := typed(m, "j"); got.reload.Err != nil {
 		t.Error("a key leaves the reload error")
 	}
@@ -285,5 +284,19 @@ func TestReloadHeldByTodoFocusAsk(t *testing.T) {
 	}
 	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ v2") {
 		t.Errorf("bottom row %q: want the held reload", row)
+	}
+}
+
+// An empty, collapsed pane opens to show a reload error, as it does for any alert.
+func TestReloadErrorOpensCollapsedPane(t *testing.T) {
+	var ran []string
+	m := Model{width: collapsedW, height: 10, size: collapsed, c: tmux.NewFake(func(args []string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		return "", nil
+	})}
+	m.reload.Err = errors.New("reload: boom")
+	m.fit()
+	if m.size == collapsed || len(ran) == 0 {
+		t.Fatalf("size %v, tmux calls %q: want the pane opened for the error", m.size, ran)
 	}
 }

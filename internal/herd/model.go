@@ -212,7 +212,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.reload.Err == nil && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {

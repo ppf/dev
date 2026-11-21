@@ -95,15 +95,15 @@ func (m Model) bottom() []string {
 	switch {
 	case m.confirm != "":
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
-	case m.reload.Err != nil:
-		// Before messages: the key that clears one clears it too, unseen
-		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	case m.msg.alert:
 		return []string{sidebar.AlertRow(m.msg.text, w)}
-	case m.msg.text != "":
-		return []string{sidebar.HintRow(m.msg.text, w)}
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
+	case m.reload.Err != nil:
+		// Before info: the key that clears one clears it too, unseen
+		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
+	case m.msg.text != "":
+		return []string{sidebar.HintRow(m.msg.text, w)}
 	}
 	if m.needMode {
 		rows := m.needRows()
@@ -120,9 +120,6 @@ func (m Model) bottom() []string {
 			return m.hintRow("j/k move" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		}
 		return m.hintRow("j/k move  1-9 answer  m reply" + open + "  g/⏎ go  t fold to do  esc cards  b board")
-	}
-	if m.reload.Flash != "" {
-		return []string{sidebar.HintRow("↻ dev "+m.reload.Flash, w)}
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
@@ -162,6 +159,9 @@ func (m Model) bottom() []string {
 // hintRow is the bottom row of keys with what holds a ready reload: before them, so a narrow pane shows it, but
 // after TO DO's keys, which the user is using.
 func (m Model) hintRow(keys string) []string {
+	if m.reload.Flash != "" && !m.needMode {
+		keys = "↻ dev " + m.reload.Flash + "  " + keys
+	}
 	switch h := m.held(); {
 	case h == "":
 	case m.needMode:
