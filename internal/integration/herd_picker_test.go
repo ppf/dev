@@ -146,7 +146,7 @@ func TestHerdNeedsBlock(t *testing.T) {
 	_, errOut, status := devAgent(d.scriptEnv(), "", "prompt", "w1", "ask")
 	check(t, "prompt", status+errOut, "0")
 	waitPane(t, d, previews, "the dialog in TO DO", func(s string) bool {
-		return strings.Contains(s, "TO DO · ") && strings.Contains(s, "1 need you · 0 to decide · 0 yours · n") && strings.Contains(s, "1 Yes   2 No")
+		return strings.Contains(s, "TO DO · ") && strings.Contains(s, "1 need you · 0 mine · n") && strings.Contains(s, "1 Yes   2 No")
 	})
 	d.T("send-keys", "-t", previews, "n")
 	waitPane(t, d, previews, "TO DO focused", func(s string) bool { return strings.Contains(s, "esc cards") })
@@ -212,7 +212,7 @@ func TestHerdNeedsStaleAge(t *testing.T) {
 		t.Fatalf("❌ todo add: %v %s", err, out)
 	}
 	waitPane(t, d, previews, "the fresh item, unmarked", func(s string) bool {
-		return strings.Contains(s, "1 yours") && strings.Contains(s, "Call Vince") && !strings.Contains(s, "18h")
+		return strings.Contains(s, "1 mine") && strings.Contains(s, "Call Vince") && !strings.Contains(s, "18h")
 	})
 	t.Logf("fresh:\n%s", d.T("capture-pane", "-p", "-t", previews))
 	files, _ := filepath.Glob(filepath.Join(d.tmp, "state", "dev", "todo", "*.json"))

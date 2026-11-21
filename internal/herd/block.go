@@ -318,8 +318,9 @@ func cutsAlike(rows []needRow, w int) bool {
 	return false
 }
 
-// mark is the row's mark: ● a dialog, ? a question or ask, ☐ the user's card (red when it needs them), ● in its
-// status's colour on a worker, ◌ in Waiting, ○ in Review, · the boss's, ⚠ a list not read.
+// mark is the row's mark: ● a dialog, ? a question or ask, ☐ the user's card (red when it needs them), a red ● on any
+// other card needing them, ◌ in Waiting (muted on a worker not read), ○ in Review, ● in its status's colour on a
+// worker, · the boss's, ⚠ a list not read.
 func (r needRow) mark() string {
 	switch {
 	case r.Kind == sidebar.NeedDialog:
@@ -332,10 +333,14 @@ func (r needRow) mark() string {
 		return sidebar.Red + "☐" + reset
 	case r.Mine():
 		return "☐"
+	case r.NeedsYou:
+		return sidebar.Red + "●" + reset
 	case r.Column == sidebar.ColumnWaiting:
 		return sidebar.Green + "◌" + reset
 	case r.Column == sidebar.ColumnReview:
 		return sidebar.Gold + "○" + reset
+	case r.Assignee.Kind == sidebar.AssigneeWorker && r.Status == "":
+		return sidebar.Muted + "◌" + reset
 	case r.Assignee.Kind == sidebar.AssigneeWorker:
 		return sidebar.StatusColours[r.Status] + "●" + reset
 	}
@@ -371,6 +376,13 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 	case r.Column == sidebar.ColumnReview && check:
 		add(r.Check.Short(now))
 		colour, check = sidebar.Gold, false
+		if named && r.WaitingFor != "" {
+			add("waiting for " + r.WaitingFor)
+		}
+	case r.Assignee.Kind == sidebar.AssigneeWorker && r.Status == "":
+		// Its boss's workers weren't read, as the web board's ?
+		add("?")
+		colour = sidebar.Muted
 	case r.Assignee.Kind == sidebar.AssigneeWorker || r.Status == sidebar.StatusGone:
 		add(r.Status)
 		colour = sidebar.StatusColours[r.Status]

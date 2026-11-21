@@ -59,7 +59,7 @@ func TestSidebarNeedsYouAnswer(t *testing.T) {
 	d.T("set-option", "-p", "-t", pane, "@dev_boss_pane", "coordinator")
 	d.T("set-option", "-p", "-t", previews, "@dev_boss_pane", "previews")
 	sidebar := actEnsure(d, "boss-a")
-	waitScreen(t, d.server, sidebar, "TO DO  1 decide  → board")
+	waitScreen(t, d.server, sidebar, "TO DO  1 need you · 1 mine  → board")
 	d.T("select-pane", "-t", sidebar)
 	d.T("send-keys", "-t", sidebar, "n")
 	waitScreen(t, d.server, sidebar, "⏎ board")
@@ -88,7 +88,7 @@ func TestNeedsYouTick(t *testing.T) {
 	d.T("set-option", "-p", "-t", pane, "@dev_boss_pane", "coordinator")
 	d.T("set-option", "-p", "-t", previews, "@dev_boss_pane", "previews")
 	sidebar := actEnsure(d, "boss-a")
-	waitScreen(t, d.server, sidebar, "TO DO  1 decide · 1 to do  → board")
+	waitScreen(t, d.server, sidebar, "TO DO  1 need you · 2 mine  → board")
 	d.T("select-pane", "-t", sidebar)
 	d.T("send-keys", "-t", sidebar, "n")
 	d.T("send-keys", "-t", sidebar, "Enter")
@@ -96,13 +96,13 @@ func TestNeedsYouTick(t *testing.T) {
 	t.Logf("board, before:\n%s", d.T("capture-pane", "-p", "-t", previews))
 	d.T("send-keys", "-t", previews, "d")
 	waitFor(t, "the ask isn't ticked", func() bool {
-		return strings.Contains(d.T("capture-pane", "-p", "-t", previews), "d ticks your own plain item")
+		return strings.Contains(d.T("capture-pane", "-p", "-t", previews), "d ticks your own item, not an ask")
 	})
 	d.T("send-keys", "-t", previews, "j")
 	waitScreen(t, d.server, previews, "d tick (stays till ticked)")
 	d.T("send-keys", "-t", previews, "d")
 	waitFor(t, "Call Vince ticked", func() bool { return strings.Contains(dev("todo"), "☑\tCall Vince") })
-	waitScreen(t, d.server, previews, "1 to decide · 0 yours")
+	waitScreen(t, d.server, previews, "1 need you · 1 mine")
 	t.Logf("board, after:\n%s", d.T("capture-pane", "-p", "-t", previews))
 }
 
@@ -114,7 +114,7 @@ func TestSidebarNeedsYouTick(t *testing.T) {
 	dev("todo", "add", "Call Vince")
 	dev("todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait")
 	sidebar := actEnsure(d, "boss-a")
-	waitScreen(t, d.server, sidebar, "TO DO  1 decide · 1 to do")
+	waitScreen(t, d.server, sidebar, "TO DO  1 need you · 2 mine")
 	d.T("select-pane", "-t", sidebar)
 	d.T("send-keys", "-t", sidebar, "n")
 	d.T("send-keys", "-t", sidebar, "j")
@@ -122,9 +122,9 @@ func TestSidebarNeedsYouTick(t *testing.T) {
 	t.Logf("sidebar, before:\n%s", d.T("capture-pane", "-p", "-t", sidebar))
 	d.T("send-keys", "-t", sidebar, "d")
 	waitFor(t, "Call Vince ticked", func() bool { return strings.Contains(dev("todo"), "☑\tCall Vince") })
-	waitFor(t, "to do count gone", func() bool {
+	waitFor(t, "mine count down", func() bool {
 		s := d.T("capture-pane", "-p", "-t", sidebar)
-		return strings.Contains(s, "TO DO  1 decide") && !strings.Contains(s, "1 to do")
+		return strings.Contains(s, "TO DO  1 need you · 1 mine")
 	})
 	t.Logf("sidebar, after:\n%s", d.T("capture-pane", "-p", "-t", sidebar))
 }

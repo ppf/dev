@@ -1022,13 +1022,20 @@ func TestNeedRowGates(t *testing.T) {
 		{"mine in review", with(mine, func(r *NeedRow) { r.Column = ColumnReview }), true, false, false},
 		{"ask", with(mine, func(r *NeedRow) { r.Kind, r.Options = NeedListAsk, []string{"a", "b"} }), false, false, false},
 		{"boss's own", boss, false, true, false},
-		{"own started", with(boss, func(r *NeedRow) { r.On, r.StartedAt, r.Column = "", 1, ColumnProgress }), true, false, false},
-		{"own started late", with(boss, func(r *NeedRow) { r.On, r.StartedAt, r.StartLate, r.Column = "", 1, true, ColumnProgress }), true, true, false},
+		{"own started", with(boss, func(r *NeedRow) { r.On, r.Status, r.StartedAt, r.Column = "", StatusStarting, 1, ColumnProgress }), true, false, false},
+		{"own started late", with(boss, func(r *NeedRow) {
+			r.On, r.Status, r.StartedAt, r.StartLate, r.Column = "", StatusStarting, 1, true, ColumnProgress
+		}), true, true, false},
 		{"worker's", with(boss, func(r *NeedRow) { r.Column, r.Assignee = ColumnProgress, NeedAssignee{Kind: AssigneeWorker, Name: "w"} }), false, false, false},
 		{"manager's own", with(boss, func(r *NeedRow) { r.Boss = Manager }), false, false, false},
 		{"mine on the manager's", with(mine, func(r *NeedRow) { r.Boss = Manager }), true, true, false},
 		{"closed, no manager", with(mine, func(r *NeedRow) { r.Closed = true }), true, false, false},
-		{"mine started late on the manager's", with(boss, func(r *NeedRow) { r.Boss, r.On, r.StartedAt, r.StartLate = Manager, "", 1, true }), true, true, false},
+		{"legacy own started (on its boss's name)", with(boss, func(r *NeedRow) {
+			r.On, r.Status, r.StartedAt, r.Column = "boss-dev", StatusStarting, 1, ColumnProgress
+		}), true, false, false},
+		{"mine started late on the manager's", with(boss, func(r *NeedRow) {
+			r.Boss, r.On, r.Status, r.StartedAt, r.StartLate = Manager, "", StatusStarting, 1, true
+		}), true, true, false},
 		{"closed, manager runs", with(mine, func(r *NeedRow) { r.Closed = true }), true, true, true},
 		{"session", NeedRow{Kind: NeedDialog, Session: "w"}, false, false, true},
 	} {
@@ -1053,5 +1060,13 @@ func TestCountNeedYouOnce(t *testing.T) {
 	}
 	if c := Count(rows); c != (Tally{NeedYou: 3, Mine: 1}) {
 		t.Errorf("tally %+v, want 3 need you, 1 mine", c)
+	}	// A worker resting after a failed turn has no session row: its card counts
+	failed := NeedRow{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w2"}, NeedsYou: true}
+	if c := Count(append(rows, failed)); c.NeedYou != 4 {
+		t.Errorf("tally %+v, want 4 need you", c)
+	}
+	// A column a board doesn't know sits in In progress, as on the web board
+	if g := (NeedRow{Kind: NeedOn, Boss: "b", Column: "later"}).Group(); g != slices.Index(Columns, ColumnProgress) {
+		t.Errorf("unknown column's group %d", g)
 	}
 }

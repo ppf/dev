@@ -402,7 +402,7 @@ func TestBlockStart(t *testing.T) {
 			m, _ = keys(m, "j")
 		}
 		all := strings.Join(plain(m.render()), "\n")
-		if !strings.Contains(all, "In progress  2") || !strings.Contains(all, "· noc            DM David") || !strings.Contains(all, tt.want) ||
+		if !strings.Contains(all, "In progress  2") || !strings.Contains(all, " noc            DM David") || !strings.Contains(all, tt.want) ||
 			!strings.Contains(all, "         "+tt.acts) {
 			t.Errorf("late %v: want In progress, the boss's, %q and %q:\n%s", tt.late, tt.want, tt.acts, all)
 		}
@@ -552,5 +552,15 @@ func TestReviewRight(t *testing.T) {
 		Assignee: sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: "b"}}}
 	if got, _ := gone.right(now, true); got != "gone" {
 		t.Errorf("gone = %q", got)
+	}
+	person := r
+	person.Assignee, person.WaitingFor = sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: "b"}, "Carl"
+	if got, _ := person.right(now, true); got != r.Check.Short(now)+" · waiting for Carl" {
+		t.Errorf("a person's Review card = %q", got)
+	}
+	unread := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedOn, Boss: "b", Column: sidebar.ColumnProgress,
+		Assignee: sidebar.NeedAssignee{Kind: sidebar.AssigneeWorker, Name: "w"}}}
+	if got, _ := unread.right(now, true); got != "?" {
+		t.Errorf("workers not read = %q", got)
 	}
 }

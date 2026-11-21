@@ -175,12 +175,18 @@ const MineWord = "mine"
 // Count tallies rows, test items left out.
 func Count(rows []NeedRow) Tally {
 	var t Tally
+	asking := map[string]bool{}
+	for _, r := range rows {
+		if r.Kind == NeedDialog || r.Kind == NeedAsk {
+			asking[r.Session] = true
+		}
+	}
 	for _, r := range rows {
 		if r.Quiet {
 			continue
 		}
-		// A blocked worker's card counts by its session's row
-		if r.Kind == NeedDialog || r.Kind == NeedAsk || r.NeedsYou && r.Assignee.Kind != AssigneeWorker {
+		// A blocked worker's card counts by its session's row, when it has one (not after a failed turn)
+		if r.Kind == NeedDialog || r.Kind == NeedAsk || r.NeedsYou && !(r.Assignee.Kind == AssigneeWorker && asking[r.Assignee.Name]) {
 			t.NeedYou++
 		}
 		if r.Mine() {
@@ -196,8 +202,8 @@ func (r NeedRow) card() bool { return r.Boss != "" && r.Kind != NeedUnread }
 // Mine reports a list item's card the user's (assignee you).
 func (r NeedRow) Mine() bool { return r.card() && r.Assignee.Kind == AssigneeYou }
 
-// Group is the row's block: -1 for a session's (Needs you, first), its column's index in Columns for a list item's,
-// len(Columns) for a list not read, after them.
+// Group is the row's block: -1 for a session's (Needs you, first), its column's index in Columns for a list item's
+// (In progress for a column it doesn't know, as the web board), len(Columns) for a list not read, after them.
 func (r NeedRow) Group() int {
 	switch r.Kind {
 	case NeedDialog, NeedAsk:
@@ -205,7 +211,10 @@ func (r NeedRow) Group() int {
 	case NeedUnread:
 		return len(Columns)
 	}
-	return slices.Index(Columns, r.Column)
+	if i := slices.Index(Columns, r.Column); i >= 0 {
+		return i
+	}
+	return slices.Index(Columns, ColumnProgress)
 }
 
 // Yours reports a row the user acts on: a session's, a list not read, or the user's card (Mine).
@@ -213,15 +222,19 @@ func (r NeedRow) Yours() bool { return !r.card() || r.Mine() }
 
 // Tickable reports a list item d ticks (dev todo done): the user's card, or their own item asked to start, not an ask.
 func (r NeedRow) Tickable() bool {
-	return r.card() && len(r.Options) == 0 && (r.Mine() || r.StartedAt != 0 && r.On == "")
+	return r.card() && len(r.Options) == 0 && (r.Mine() || r.ownStarted())
 }
 
 // Startable reports a list item s starts (dev todo start), as the web board offers it: a To do card or a late start,
 // not an ask; on the manager's own list only the user's; a closed boss's only while the manager runs, which takes it.
 func (r NeedRow) Startable(managerRuns bool) bool {
-	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine() || r.On == "") && (!r.Closed || managerRuns) &&
+	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine() || r.ownStarted()) && (!r.Closed || managerRuns) &&
 		(r.StartLate || r.Column == ColumnTodo)
 }
+
+// ownStarted reports the user's own item asked to start: its status says starting only then (todo.Own), whoever the
+// card is now.
+func (r NeedRow) ownStarted() bool { return r.Status == StatusStarting }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.
 func (r NeedRow) ClosedHint() string {
