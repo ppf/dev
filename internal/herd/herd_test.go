@@ -798,7 +798,10 @@ func TestPromptAskRules(t *testing.T) {
 			"Plain to do items (not asks) aren't questions", "only the user's own pick or words answer it",
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
-			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state"}},
+			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
+			"Before handing on the user's own new idea or request", "With real cons or a conflict on the lists",
+			"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
+			"you decide nothing for a project"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
