@@ -984,12 +984,9 @@ func TestNeedsYourCards(t *testing.T) {
 	m.needs = []NeedList{
 		{Boss: "boss-dev", Items: []NeedItem{
 			{ID: 1, Text: "Plain", Status: StatusYours, Column: ColumnTodo, Assignee: you},
-			{ID: 2, Text: "Doing", Status: StatusYours, Column: ColumnProgress, Assignee: you, Doing: &struct{ Text string }{"x"}},
+			{ID: 2, Text: "Doing", Status: StatusYours, Column: ColumnProgress, Assignee: you, Doing: &NeedDoing{"x"}},
 			{ID: 3, Text: "Merged", Status: StatusCheck, Column: ColumnReview, Assignee: you, NeedsYou: true},
-			{ID: 4, Text: "Started", Status: StatusStarting, StatusOn: "boss-dev", Column: ColumnProgress, Assignee: boss, Started: &struct {
-				At int64
-				To string
-			}{1, "boss-dev"}},
+			{ID: 4, Text: "Started", Status: StatusStarting, StatusOn: "boss-dev", Column: ColumnProgress, Assignee: boss, Started: &NeedStarted{1, "boss-dev"}},
 			{ID: 5, Text: "Parked", On: "boss", Status: StatusIdle, StatusOn: "boss-dev", Column: ColumnTodo, Assignee: boss},
 			{ID: 6, Text: "Marek", On: "Marek", Status: StatusWaiting, StatusOn: "Marek", Column: ColumnWaiting, Assignee: boss, WaitingFor: "Marek"},
 			{ID: 7, Text: "Worker", On: "w1", Status: StatusWorking, StatusOn: "w1", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w1"}},
@@ -1031,6 +1028,7 @@ func TestNeedRowGates(t *testing.T) {
 		{"manager's own", with(boss, func(r *NeedRow) { r.Boss = Manager }), false, false, false},
 		{"mine on the manager's", with(mine, func(r *NeedRow) { r.Boss = Manager }), true, true, false},
 		{"closed, no manager", with(mine, func(r *NeedRow) { r.Closed = true }), true, false, false},
+		{"mine started late on the manager's", with(boss, func(r *NeedRow) { r.Boss, r.On, r.StartedAt, r.StartLate = Manager, "", 1, true }), true, true, false},
 		{"closed, manager runs", with(mine, func(r *NeedRow) { r.Closed = true }), true, true, true},
 		{"session", NeedRow{Kind: NeedDialog, Session: "w"}, false, false, true},
 	} {
@@ -1040,5 +1038,20 @@ func TestNeedRowGates(t *testing.T) {
 		if got := tt.r.Startable(tt.managerRuns); got != tt.start {
 			t.Errorf("%s: startable %v", tt.name, got)
 		}
+	}
+}
+
+// Need you counts a session waiting on the user once: its worker's blocked card counts by the session's row; a card of
+// the user's or a late start counts by itself.
+func TestCountNeedYouOnce(t *testing.T) {
+	worker := NeedAssignee{Kind: AssigneeWorker, Name: "w1"}
+	rows := []NeedRow{
+		{Kind: NeedDialog, Session: "w1"},
+		{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: worker, NeedsYou: true},
+		{Kind: NeedListAsk, Boss: "b", Column: ColumnTodo, Assignee: you, NeedsYou: true, Options: []string{"a"}},
+		{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeBoss, Name: "b"}, NeedsYou: true, StartLate: true},
+	}
+	if c := Count(rows); c != (Tally{NeedYou: 3, Mine: 1}) {
+		t.Errorf("tally %+v, want 3 need you, 1 mine", c)
 	}
 }

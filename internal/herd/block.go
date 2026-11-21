@@ -23,8 +23,8 @@ type optSpan struct {
 // minBlockRows is the fewest rows above the bottom row TO DO shows in.
 const minBlockRows = 6
 
-// namesFrom is the narrowest pane whose rows name whom their status is on: narrower ones keep the status word alone,
-// as does a row whose text would keep under minTextBesideName beside it.
+// namesFrom is the narrowest pane whose rows name whom a start went to and a card's other half (right's named):
+// narrower ones leave them off, as does a row whose text would keep under minTextBesideName beside it.
 const (
 	namesFrom         = 80
 	minTextBesideName = 20
@@ -344,7 +344,7 @@ func (r needRow) mark() string {
 
 // right is what the row says at its right edge, and its colour: a start's "sent to boss-dev · 3m" or "start not picked
 // up", else a Review card's check, a worker's state, whom it waits for, or the user's card's age or "till 10:00"; then
-// a check its word doesn't say ("⚠ …"), "boss closed" and its other half ("⇄ #4"), left off with named false.
+// a check its word doesn't say ("⚠ …"), "boss closed" and its other half ("⇄ #4"); whom a start went to and ⇄ left off with named false.
 func (r needRow) right(now time.Time, named bool) (text, colour string) {
 	if r.fold != nil || r.Kind == sidebar.NeedDialog || r.Kind == sidebar.NeedAsk || r.Kind == sidebar.NeedUnread {
 		return "", ""
@@ -381,7 +381,7 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 		add("till " + wait.Clock(time.Unix(r.Until, 0), now))
 		colour = sidebar.Muted
 	case r.Check != nil && r.Check.Kind == sidebar.CheckBossClosed:
-		// Said by the chip below
+		// "boss closed" below says it
 		colour = sidebar.Muted
 	default:
 		add(r.Age(now))
@@ -400,8 +400,8 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 }
 
 // needLines are row r's lines, w columns: its mark, its label padded to labelW, its text (wrapped when selected,
-// else cut), its status at the right edge (right), its options (optionLines), then a selected row's action words,
-// on the selection band. Waiting on others' fold row is its title, count and whom it waits on.
+// else cut), what it says at the right edge (right), its options (optionLines), then a selected row's action words,
+// on the selection band. Waiting's fold row is its title, count and whom it waits on.
 func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []string, spans [][]optSpan) {
 	if r.fold != nil {
 		arrow := "▸"
@@ -422,7 +422,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 	now := m.clk.Now()
 	right, colour := r.right(now, w >= namesFrom)
 	if right != "" && room-ansi.StringWidth(right)-2 < minTextBesideName {
-		// Narrow: the status word keeps the edge, whom it names goes
+		// Narrow: whom a start went to and ⇄ go
 		right, colour = r.right(now, false)
 	}
 	if right != "" && room-ansi.StringWidth(right)-2 >= min(sidebar.MinTextAfterAge, room/2) {
@@ -570,7 +570,7 @@ func (m Model) optionLines(r needRow, w int, selected bool, lines []string, span
 // action is a word on an expanded row that does what its key does.
 type action struct{ word, key, hint string }
 
-// actions are what the selected row offers: Start a To do card (sidebar.NeedRow.Startable: a closed boss's while the
+// actions are what the selected row offers: Start a To do card or a late start (sidebar.NeedRow.Startable: a closed boss's while the
 // manager runs) and Tick the user's (Tickable), Reply to a question, Go to the session or the list's boss; a closed
 // boss's row no Go, but how to reopen it.
 func (m Model) actions(r needRow) (out []action, note string) {

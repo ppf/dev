@@ -58,15 +58,15 @@ func (s Session) Rank() Rank {
 }
 
 // ListCount is what a boss's to do list adds to the roll-ups, by its items' statuses: asks to decide, the user's own
-// plain items, and those on someone else; a closed boss's items and a moved PR's count in none, as TO DO's header has it.
+// plain items, and those on someone else; a closed boss's items and a moved PR's count in none (TO DO counts by card: Tally).
 type ListCount struct {
 	Asks, Plain, On int
 	Unread          bool // the list wasn't read
-	Closed          bool // its boss session is gone: the manager's roll-up takes it (its items count in none, as TO DO's header has it)
+	Closed          bool // its boss session is gone: the manager's roll-up takes it (its items count in none)
 }
 
 // Add counts an open item by its status: none (on someone whose workers weren't read) is on someone; the boss's own
-// (on boss: todo.Boss) on no one else.
+// (on boss: todo.Boss) in none.
 func (c *ListCount) Add(it NeedItem) {
 	switch status := it.Status; {
 	case it.Done, status == StatusCheck, status == StatusBossClosed, it.On == "boss":
@@ -230,8 +230,8 @@ func (r Rollup) Parts() []string {
 	return ps
 }
 
-// The words of the counts the user acts on, alike on the roll lines and the sidebar's TO DO: "need you" only for
-// sessions waiting on the user, "decide" for asks, "to do" for the user's own items.
+// The roll lines' count words: "need you" for sessions waiting on the user, "decide" for asks, "to do" for the user's
+// own items; TO DO's headers say "need you" and "mine" (MineWord).
 const (
 	NeedYouWord = "need you"
 	DecideWord  = "decide"

@@ -208,8 +208,8 @@ func TestRollLineListAsk(t *testing.T) {
 	}
 }
 
-// A roll line says what TO DO counts for the subtree (Count), in the same words: asks to decide, the user's own plain
-// items to do (one filed on the boss's own name too: its status is yours); an item on someone else is "on others".
+// A roll line counts by status: asks to decide, the user's own plain items to do (one filed on the boss's own name
+// too: its status is yours), an item on someone else on others; TO DO counts the same list by card: need you, mine.
 func TestRollLineMatchesToDo(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
@@ -485,8 +485,8 @@ func TestRollLineNarrowKeepsSomething(t *testing.T) {
 	}
 }
 
-// The manager's roll-up counts its closed bosses' lists as its TO DO does: their items in neither decide nor to do,
-// a list not read only as ⚠; no other boss's does.
+// The manager's roll-up leaves its closed bosses' items out of decide and to do, a list not read only ⚠; its TO DO
+// counts them by card; no other boss's roll-up takes them.
 func TestSubtreeClosedLists(t *testing.T) {
 	sessions := subtreeSessions()
 	needs := []NeedList{

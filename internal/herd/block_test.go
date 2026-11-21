@@ -99,7 +99,7 @@ func TestBlockFoldWaiting(t *testing.T) {
 	}
 }
 
-// At 64 columns the label column shrinks to 12 and the status word keeps the right edge without whom it names.
+// At 64 columns the label column shrinks to 12 and a worker's state keeps the right edge.
 func TestBlockNarrow(t *testing.T) {
 	m := blockBoard(t)
 	m.width = 64
@@ -417,7 +417,7 @@ func TestBlockStart(t *testing.T) {
 		t.Error("s started a Review card")
 	}
 	note := rows[i]
-	note.Boss, note.Assignee = Manager, sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: Manager}
+	note.Boss, note.On, note.Assignee = Manager, "boss", sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: Manager}
 	if acts, _ := m.actions(note); slices.ContainsFunc(acts, func(a action) bool { return a.key == "s" }) {
 		t.Errorf("manager's own note offers Start: %v", acts)
 	}
@@ -506,5 +506,51 @@ func TestBlockByColumn(t *testing.T) {
 	}
 	if strings.Contains(all, "\n Done  ") {
 		t.Errorf("a Done group:\n%s", all)
+	}
+}
+
+// s on a closed boss's row starts it through the manager; with no manager running, startNeed only says how to reopen it.
+func TestBlockStartClosedKey(t *testing.T) {
+	m := blockBoard(t)
+	var started []int
+	m.startList = func(boss string, id int, text string) (string, error) {
+		started = append(started, id)
+		return "", nil
+	}
+	rows := m.needRows()
+	i := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
+	m.needMode, m.needIdx, m.needKey = true, i, rows[i].sig
+	// The manager's board goes with the manager: no key reaches this, startNeed still refuses it
+	all := m.snap.all
+	m.snap.all = slices.DeleteFunc(slices.Clone(all), func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
+	next, cmd := m.startNeed(rows[i])
+	if cmd != nil || next.(Model).msg.text != rows[i].ClosedHint() {
+		t.Errorf("s, no manager: cmd %v msg %q", cmd != nil, next.(Model).msg.text)
+	}
+	m.snap.all = all
+	if _, cmd := keys(m, "s"); cmd == nil {
+		t.Fatal("s, manager runs: nothing sent")
+	} else {
+		cmd()
+	}
+	if !slices.Equal(started, []int{rows[i].ID}) {
+		t.Errorf("started %v, want #%d", started, rows[i].ID)
+	}
+}
+
+// A Review card says its check once, gold, no ⚠; a gone worker's card says gone.
+func TestReviewRight(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	r := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedOn, Boss: "b", Column: sidebar.ColumnReview, Status: sidebar.StatusCheck,
+		Assignee: sidebar.NeedAssignee{Kind: sidebar.AssigneeWorker, Name: "w"}, Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 4, Since: now.Unix()}}}
+	for _, named := range []bool{true, false} {
+		if got, colour := r.right(now, named); got != r.Check.Short(now) || colour != sidebar.Gold {
+			t.Errorf("named %v: %q", named, got)
+		}
+	}
+	gone := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedOn, Boss: "b", Column: sidebar.ColumnTodo, Status: sidebar.StatusGone,
+		Assignee: sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: "b"}}}
+	if got, _ := gone.right(now, true); got != "gone" {
+		t.Errorf("gone = %q", got)
 	}
 }

@@ -66,13 +66,10 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 			Column: it.Column, Assignee: sidebar.NeedAssignee{Kind: it.Assignee.Kind, Name: it.Assignee.Name}, WaitingFor: it.WaitingFor,
 			NeedsYou: it.NeedsYou, PartOf: it.PartOf}
 		if it.Started != nil {
-			out[i].Started = &struct {
-				At int64
-				To string
-			}{it.Started.At, it.Started.To}
+			out[i].Started = &sidebar.NeedStarted{At: it.Started.At, To: it.Started.To}
 		}
 		if it.Doing != nil {
-			out[i].Doing = &struct{ Text string }{it.Doing.Text}
+			out[i].Doing = &sidebar.NeedDoing{Text: it.Doing.Text}
 		}
 	}
 	return out
@@ -150,7 +147,7 @@ func (m Model) listRows() []needRow {
 }
 
 // assigneeLabel is a list item's label: its assignee, "you" for the user's ("project › you" on a manager's board); this
-// board's boss "boss" ("manager" on the manager's), another boss by its project; a worker by its name less its
+// board's boss "boss" ("manager" on the manager's), another boss by its name less boss-; a worker by its name less its
 // project, "project › who" on a manager's board.
 func (s snapshot) assigneeLabel(r sidebar.NeedRow, manager bool) string {
 	a := r.Assignee
@@ -335,7 +332,7 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// tickNeed ticks the user's own list item through dev todo done; like an answer, its row goes or fails.
+// tickNeed ticks a Tickable row (the user's card or own started item) through dev todo done; like an answer, its row goes or fails.
 func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 	if !r.Tickable() {
 		m.msg = info("d ticks your own item, not an ask; g/⏎ goes to " + r.Session)
@@ -351,7 +348,7 @@ func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 	return m, listCmd(r.Boss, "Ticked ", func() (string, error) { return tick(r.Boss, r.ID, r.Text) })
 }
 
-// startNeed asks for a To do card to be started through dev todo start (sidebar.NeedRow.Startable): its boss, or the
+// startNeed asks for a To do card or a late start to be started through dev todo start (sidebar.NeedRow.Startable): its boss, or the
 // manager for a closed boss's; a second start says when the first went.
 func (m Model) startNeed(r needRow) (tea.Model, tea.Cmd) {
 	switch {

@@ -61,19 +61,27 @@ type NeedItem struct {
 	StatusOn string `json:"status_on"`
 	// Started is when the user asked to start it (dev todo start), unix seconds, and whom the start went to; StartLate
 	// once no one took it up in time
-	Started *struct {
-		At int64
-		To string
-	} `json:"started"`
-	StartLate bool `json:"start_late"`
-	Quiet     bool `json:"quiet"` // a test item (dev todo add --quiet): counted nowhere
+	Started   *NeedStarted `json:"started"`
+	StartLate bool         `json:"start_late"`
+	Quiet     bool         `json:"quiet"` // a test item (dev todo add --quiet): counted nowhere
 	// Column, Assignee, WaitingFor and NeedsYou are its card's place on the boards (todo.Placement)
-	Column     string                 `json:"column"`
-	Assignee   NeedAssignee           `json:"assignee"`
-	WaitingFor string                 `json:"waiting_for"`
-	NeedsYou   bool                   `json:"needs_you"`
-	Doing      *struct{ Text string } `json:"doing"`   // what its doer said it does now
-	PartOf     int                    `json:"part_of"` // its other half's id
+	Column     string       `json:"column"`
+	Assignee   NeedAssignee `json:"assignee"`
+	WaitingFor string       `json:"waiting_for"`
+	NeedsYou   bool         `json:"needs_you"`
+	Doing      *NeedDoing   `json:"doing"`   // what its doer said it does now
+	PartOf     int          `json:"part_of"` // its other half's id
+}
+
+// NeedStarted is when the user asked to start an item, unix seconds, and whom the start went to (todo.Started).
+type NeedStarted struct {
+	At int64  `json:"at"`
+	To string `json:"to"`
+}
+
+// NeedDoing is what an item's doer said it does now (todo.Doing).
+type NeedDoing struct {
+	Text string `json:"text"`
 }
 
 // NeedAssignee is whose a card is (todo.Assignee): Kind AssigneeYou, AssigneeBoss or AssigneeWorker, Name its session.
@@ -84,12 +92,6 @@ type NeedAssignee struct {
 
 // Mine reports an open card the user's (assignee you).
 func (it NeedItem) Mine() bool { return !it.Done && it.Assignee.Kind == AssigneeYou }
-
-// Own reports an open item that is the user's: one with a status that names no one, or starting (naming whom the
-// start went to).
-func (it NeedItem) Own() bool {
-	return it.Status != "" && (it.StatusOn == "" || it.Status == StatusStarting)
-}
 
 // NeedCounts are the lists' counts for the roll-ups (Subtree), by boss.
 func NeedCounts(needs []NeedList) map[string]ListCount {
@@ -106,15 +108,15 @@ func NeedCounts(needs []NeedList) map[string]ListCount {
 	return out
 }
 
-// NeedKind is what a TO DO row is, in the order rows sort within a status.
+// NeedKind is what a TO DO row is, in the order rows sort last within a group (after cardOrder).
 type NeedKind int
 
 const (
 	NeedDialog  NeedKind = iota // a session's open dialog
 	NeedAsk                     // a turn that ended on a question (an asks note)
-	NeedListAsk                 // a list item with options
-	NeedPlain                   // a list item without options
-	NeedOn                      // a list item on a worker or a person
+	NeedListAsk                 // the user's card with options
+	NeedPlain                   // the user's card without options
+	NeedOn                      // a card not the user's: the boss's, a worker's, a person's
 	NeedUnread                  // a list that wasn't read: Text says why
 )
 
@@ -177,7 +179,8 @@ func Count(rows []NeedRow) Tally {
 		if r.Quiet {
 			continue
 		}
-		if r.Kind == NeedDialog || r.Kind == NeedAsk || r.NeedsYou {
+		// A blocked worker's card counts by its session's row
+		if r.Kind == NeedDialog || r.Kind == NeedAsk || r.NeedsYou && r.Assignee.Kind != AssigneeWorker {
 			t.NeedYou++
 		}
 		if r.Mine() {
@@ -216,7 +219,7 @@ func (r NeedRow) Tickable() bool {
 // Startable reports a list item s starts (dev todo start), as the web board offers it: a To do card or a late start,
 // not an ask; on the manager's own list only the user's; a closed boss's only while the manager runs, which takes it.
 func (r NeedRow) Startable(managerRuns bool) bool {
-	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine()) && (!r.Closed || managerRuns) &&
+	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine() || r.On == "") && (!r.Closed || managerRuns) &&
 		(r.StartLate || r.Column == ColumnTodo)
 }
 
@@ -452,8 +455,8 @@ func focusBoard(c *tmux.Client, client, board string, from Origin) error {
 	return err
 }
 
-// NeedRows are the rows of TO DO from sessions in Order and the bosses' lists, sorted by group (Group), status
-// (Statuses) and kind (NeedKind), in sessions' and lists' order within one: each session waiting on a dialog or on
+// NeedRows are the rows of TO DO from sessions in Order and the bosses' lists, sorted by group (Group), the
+// web board's order within a column (cardOrder) and kind (NeedKind), in sessions' and lists' order within one: each session waiting on a dialog or on
 // the question its turn ended on, each open item, each list not read. root scopes them to its board: the sessions
 // under it (its own question is on its screen) and its and their lists; "" takes them all.
 func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
@@ -605,7 +608,7 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session (the boards' row to its board), 1-9 answers an
-// open ask, d ticks a plain item, space opens a list item in its popup (dev todo show), b the board (dev todo board),
+// open ask, d ticks the user's card (Tickable), space opens a list item in its popup (dev todo show), b the board (dev todo board),
 // esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
