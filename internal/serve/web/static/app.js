@@ -969,10 +969,11 @@ function drop(e, end = false) {
 document.addEventListener('pointerdown', press);
 document.addEventListener('pointermove', e => {
   if (!drag || e.pointerId !== drag.id) return;
-  if (!drag.lifted && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < DRAG_PX) return;
-  if (!drag.lifted && !drag.el.isConnected) drag = null; // redrawn since the press
-  else if (!drag.lifted) lift();
-  if (drag) follow(e);
+  if (!drag.lifted) {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < DRAG_PX) return;
+    if (!drag.el.isConnected) return void (drag = null); // redrawn since the press
+    lift();
+  }
   follow(e);
 });
 document.addEventListener('pointerup', e => { if (drag && e.pointerId === drag.id) drop(e); });
@@ -1003,7 +1004,7 @@ document.addEventListener('keydown', e => {
     const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
     if (!x || drag?.lifted) return;
     e.preventDefault();
-    const next = COLUMNS[COLUMNS.findIndex(c => c.key === columnOf(x)) + (e.key === 'ArrowRight' ? 1 : -1)];
+    const next = COLUMNS[COLUMNS.findIndex(col => col.key === columnOf(x)) + (e.key === 'ArrowRight' ? 1 : -1)];
     if (next && !x.moving) move(x, next.key);
     return;
   }
