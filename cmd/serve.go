@@ -98,7 +98,11 @@ another origin's (Sec-Fetch-Site, Origin) is refused instead.`, serve.DefaultPor
 				_ = ln.Close()
 				return err
 			}
-			defer forget()
+			defer func() {
+				if err := forget(); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev serve: its address record stays: "+err.Error())
+				}
+			}()
 			out := cmd.OutOrStdout()
 			loopback := ap.Addr().IsLoopback()
 			where := "on the phone"
@@ -156,8 +160,8 @@ func newServePairCmd() *cobra.Command {
 		Short: "Print a one-time code that pairs a phone with dev serve",
 		Long: fmt.Sprintf(`Print the URL to open on the phone and a one-time code to enter there, valid %d minutes and once (5 wrong
 codes or a new dev serve pair void it): the running
-dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on; when that is
-loopback only, it needs no pairing and a phone can't reach it, so pair writes no code and says so and how to restart
+dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on (with several,
+each one a phone can reach); when that is loopback only, it needs no pairing and a phone can't reach it, so pair writes no code and says so and how to restart
 dev serve (one from an older dev, which still wants pairing there, it says to restart). Errors when dev serve is not
 running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
 		Args: cobra.NoArgs,
@@ -172,11 +176,13 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 			if err != nil {
 				return err
 			}
-			ap, err := serve.ServedAddr(dir)
+			live, err := serve.Served(dir, ownIP, time.Second)
 			if err != nil {
 				return err
 			}
-			if ap.Addr().IsLoopback() {
+			urls := phoneURLs(live)
+			if len(urls) == 0 {
+				ap := live[0].Addr
 				if err := unpairedBoard(ap); err != nil {
 					return err
 				}
@@ -187,11 +193,23 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "open http://%s/ on the phone and enter the code %s (valid %d minutes, once)\n", ap, code, int(serve.CodeTTL.Minutes()))
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "open %s on the phone and enter the code %s (valid %d minutes, once)\n", strings.Join(urls, " or "), code, int(serve.CodeTTL.Minutes()))
 			return err
 		},
 	}
 	return cmd
+}
+
+// phoneURLs is the page's URL on each dev serve a phone can reach (not loopback): any of them takes the code, the
+// state folder's.
+func phoneURLs(live []serve.Running) []string {
+	var urls []string
+	for _, r := range live {
+		if !r.Addr.Addr().IsLoopback() {
+			urls = append(urls, "http://"+r.Addr.String()+"/")
+		}
+	}
+	return urls
 }
 
 // unpairedBoard errors when the dev serve on loopback ap still wants a session: one from before loopback needed no

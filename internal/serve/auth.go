@@ -19,7 +19,9 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -33,8 +35,10 @@ const (
 	cookieAge    = 400 * 24 * time.Hour // browsers' cap
 	maxDevice    = 40
 	codeFile     = "pair.json"
-	addrFile     = "addr.json"
-	sessionFile  = "sessions.json"
+	addrDir      = "addr" // one record per running dev serve
+	// legacyAddrFile is the one record dev serve kept before v0.74.0
+	legacyAddrFile = "addr.json"
+	sessionFile    = "sessions.json"
 )
 
 // Auth is the phone page's pairing and sessions, kept in Dir, which dev serve pair and unpair write too. The Mac
@@ -88,68 +92,205 @@ func NewCode(dir string, now time.Time) (string, error) {
 	return code[:4] + " " + code[4:], nil
 }
 
-// RecordAddr writes the address the running dev serve listens on to dir, for dev serve pair; the func removes it
-// unless another dev serve has recorded its own since.
-func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+// RecordAddr records the address the running dev serve listens on in dir, one record per serve (addrDir/<address>.json,
+// with its pid), for dev serve pair and dev boss, and drops records whose process is gone; the func removes its record
+// unless another dev serve has since recorded that address.
+func RecordAddr(dir string, ap netip.AddrPort) (func() error, error) {
+	unlock, err := lock(dir)
+	if err != nil {
 		return nil, err
 	}
-	if err := writeFile(dir, addrFile, ap.String()); err != nil {
+	defer unlock()
+	recs := filepath.Join(dir, addrDir)
+	if err := os.MkdirAll(recs, 0o700); err != nil {
 		return nil, err
 	}
-	return func() {
-		var cur string
-		if readFile(dir, addrFile, &cur) == nil && cur == ap.String() {
-			_ = os.Remove(filepath.Join(dir, addrFile))
+	pid := os.Getpid()
+	names, err := recordNames(recs)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		var r addrRecord
+		if err := readFile(recs, name, &r); err != nil {
+			if unreadable(err) {
+				continue // readers skip it; the next serve on its address replaces it
+			}
+			return nil, err
 		}
+		if gone(r.Pid) {
+			if err := os.Remove(filepath.Join(recs, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, err
+			}
+		}
+	}
+	own := ap.String() + ".json"
+	if err := writeFile(recs, own, addrRecord{Addr: ap.String(), Pid: pid}); err != nil {
+		return nil, err
+	}
+	var legacy string
+	if readFile(dir, legacyAddrFile, &legacy) == nil && legacy == ap.String() {
+		if err := os.Remove(filepath.Join(dir, legacyAddrFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	return func() error {
+		unlock, err := lock(dir)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		var r addrRecord
+		switch err := readFile(recs, own, &r); {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil
+		case err != nil:
+			return err
+		case r.Pid != pid:
+			return nil
+		}
+		return os.Remove(filepath.Join(recs, own))
 	}, nil
+}
+
+type addrRecord struct {
+	Addr string `json:"addr"`
+	Pid  int    `json:"pid"`
+}
+
+// recordNames is the records in recs, not writeFile's temp files.
+func recordNames(recs string) ([]string, error) {
+	entries, err := os.ReadDir(recs)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".json") {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// unreadable: a record gone meanwhile, or one no dev serve wrote whole.
+func unreadable(err error) bool {
+	_, syntax := errors.AsType[*json.SyntaxError](err)
+	_, typ := errors.AsType[*json.UnmarshalTypeError](err)
+	return errors.Is(err, fs.ErrNotExist) || syntax || typ
+}
+
+// gone is whether no process has pid (EPERM: one runs, another user's).
+func gone(pid int) bool {
+	return pid > 0 && errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
 // ErrNotRunning is Served's error when no dev serve answers: no record, or nothing answers /v1/health there.
 var ErrNotRunning = errors.New("dev serve is not running")
 
-// ServedAddr is the address the running dev serve recorded in dir; ErrNotRunning when none runs.
-func ServedAddr(dir string) (netip.AddrPort, error) {
-	ap, _, err := Served(dir, time.Second)
-	return ap, err
+// Running is a dev serve that answers: its address and the version its /v1/health names.
+type Running struct {
+	Addr    netip.AddrPort
+	Version string
 }
 
-// Served is ServedAddr with the version its /v1/health names, waiting at most timeout for it.
-func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
-	var s string
-	if err := readFile(dir, addrFile, &s); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return netip.AddrPort{}, "", fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
-		}
-		_, syntax := errors.AsType[*json.SyntaxError](err)
-		_, typ := errors.AsType[*json.UnmarshalTypeError](err)
-		if syntax || typ { // a record no dev serve wrote whole
-			return netip.AddrPort{}, "", fmt.Errorf("%w: %v", ErrNotRunning, err)
-		}
-		return netip.AddrPort{}, "", err
-	}
-	ap, err := netip.ParseAddrPort(s)
+// Served is every dev serve recorded in dir that answers on an address of this Mac (local), phone-reachable ones
+// (not loopback) first, then by address; it waits at most timeout for them. ErrNotRunning when none answers.
+func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]Running, error) {
+	recs := filepath.Join(dir, addrDir)
+	names, err := recordNames(recs)
 	if err != nil {
-		return ap, "", fmt.Errorf("%w: %s: %v", ErrNotRunning, filepath.Join(dir, addrFile), err)
+		return nil, err
 	}
+	var addrs []netip.AddrPort
+	var readErr error
+	add := func(err error, addr string, pid int) {
+		switch {
+		case unreadable(err):
+		case err != nil:
+			readErr = errors.Join(readErr, err)
+		case gone(pid):
+		default:
+			if ap, err := netip.ParseAddrPort(addr); err == nil && local(ap.Addr()) && !slices.Contains(addrs, ap) {
+				addrs = append(addrs, ap)
+			}
+		}
+	}
+	for _, name := range names {
+		var r addrRecord
+		err := readFile(recs, name, &r)
+		add(err, r.Addr, r.Pid)
+	}
+	var legacy string // a dev serve from before one record each, not reloaded yet
+	err = readFile(dir, legacyAddrFile, &legacy)
+	add(err, legacy, 0)
+
+	live := make([]*Running, len(addrs))
+	var wg sync.WaitGroup
+	for i, ap := range addrs {
+		wg.Go(func() {
+			if v, ok := health(ap, timeout); ok {
+				live[i] = &Running{Addr: ap, Version: v}
+			}
+		})
+	}
+	wg.Wait()
+	var running []Running
+	for _, r := range live {
+		if r != nil {
+			running = append(running, *r)
+		}
+	}
+	if len(running) > 0 {
+		slices.SortFunc(running, phoneFirst)
+		return running, nil
+	}
+	switch {
+	case readErr != nil:
+		return nil, readErr
+	case len(addrs) == 0:
+		return nil, fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
+	}
+	tried := make([]string, len(addrs))
+	for i, ap := range addrs {
+		tried[i] = ap.String()
+	}
+	return nil, fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, strings.Join(tried, ", "))
+}
+
+// phoneFirst orders dev serves a phone can reach (not loopback) first, then by address.
+func phoneFirst(a, b Running) int {
+	if la, lb := a.Addr.Addr().IsLoopback(), b.Addr.Addr().IsLoopback(); la != lb {
+		if lb {
+			return -1
+		}
+		return 1
+	}
+	return a.Addr.Compare(b.Addr)
+}
+
+// health is the version a dev serve on ap names on /v1/health, if one answers there within timeout.
+func health(ap netip.AddrPort, timeout time.Duration) (string, bool) {
 	// A Transport without Proxy: HTTP_PROXY must not take a check of this Mac's own address
-	notRunning := fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, s)
 	resp, err := (&http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true},
 		// Only a direct answer counts: another program on a stale record's port could redirect to one
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get("http://" + s + "/v1/health")
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get("http://" + ap.String() + "/v1/health")
 	if err != nil {
-		return ap, "", notRunning
+		return "", false
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var health struct {
+	var h struct {
 		OK      bool
 		Version string
 	}
 	// Another program on a stale record's port answers no {"ok":true,"version":…}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&health) != nil || !health.OK || health.Version == "" {
-		return ap, "", notRunning
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&h) != nil || !h.OK || h.Version == "" {
+		return "", false
 	}
-	return ap, health.Version, nil
+	return h.Version, true
 }
 
 // Unpair drops the session of device, or every session when device is "", and returns the devices dropped.

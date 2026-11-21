@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"net/netip"
 	"os"
@@ -17,6 +18,7 @@ import (
 type fakeStart struct {
 	runs     int // served calls that fail before one answers; -1: never answers
 	version  string
+	at       string // where it answers; "": 127.0.0.1:18417
 	spawned  [][]string
 	env      []string
 	exit     bool   // the spawned serve exits at once
@@ -31,15 +33,14 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 	return &starter{
 		getenv: func(k string) string { return f.envValue[k] },
 		uid:    501, dir: filepath.Join(t.TempDir(), "serve"), home: t.TempDir(), exe: "/bin/dev", own: "(devel) abc",
-		served: func(string, time.Duration) (netip.AddrPort, string, error) {
+		served: func(string, time.Duration) ([]serve.Running, error) {
 			if f.runs != 0 {
 				f.runs--
-				return netip.AddrPort{}, "", serve.ErrNotRunning
+				return nil, serve.ErrNotRunning
 			}
-			return netip.MustParseAddrPort("127.0.0.1:18417"), f.version, nil
+			return []serve.Running{{Addr: netip.MustParseAddrPort(cmp.Or(f.at, "127.0.0.1:18417")), Version: f.version}}, nil
 		},
 		alive: func(string) (bool, error) { return f.alive, nil },
-		local: func(netip.Addr) bool { return true },
 		bind:  func(string) error { return f.bindErr },
 		spawn: func(exe string, args, env []string, log, _ *os.File) (<-chan struct{}, error) {
 			f.spawned = append(f.spawned, append([]string{exe}, args...))
@@ -78,9 +79,10 @@ func TestAutoServeStarts(t *testing.T) {
 }
 
 func TestAutoServeDefaultAddr(t *testing.T) {
-	f := &fakeStart{runs: 1, envValue: map[string]string{}}
-	if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil {
-		t.Fatal(err)
+	f := &fakeStart{runs: 1, at: "127.0.0.1:8417", envValue: map[string]string{}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || !strings.HasPrefix(out.String(), "dev serve started: http://127.0.0.1:8417/") {
+		t.Fatalf("err %v, out %q", err, out.String())
 	}
 	if want := [][]string{{"/bin/dev", "serve", "--awake=false", "--addr", "127.0.0.1:8417"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
 		t.Fatalf("spawned %q, want %q", f.spawned, want)
@@ -124,20 +126,32 @@ func TestAutoServePrivateRunning(t *testing.T) {
 	}
 }
 
-func TestAutoServeOtherMachine(t *testing.T) {
-	f := &fakeStart{version: "(devel) abc", envValue: map[string]string{}}
+// #146: a hand-run dev serve beside dev boss's own: either answering is enough, and a start names its own
+func TestAutoServeTwo(t *testing.T) {
+	lan := serve.Running{Addr: netip.MustParseAddrPort("192.168.1.50:8417"), Version: "v0.71.0"}
+	own := serve.Running{Addr: netip.MustParseAddrPort("127.0.0.1:18417"), Version: "v0.71.0"}
+	f := &fakeStart{envValue: map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:18417"}}
 	s := f.starter(t)
-	answered := false
-	s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
-		if !answered { // the stale record's address answers from elsewhere, then the new one's own
-			answered = true
-			return netip.MustParseAddrPort("192.168.1.50:8417"), "(devel) abc", nil
-		}
-		return netip.MustParseAddrPort("127.0.0.1:18417"), "(devel) abc", nil
+	s.served = func(string, time.Duration) ([]serve.Running, error) { return []serve.Running{lan, own}, nil }
+	var out bytes.Buffer
+	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 || strings.Count(out.String(), "v0.71.0 runs") != 1 {
+		t.Fatalf("two answering: err %v, out %q, spawned %q", err, out.String(), f.spawned)
 	}
-	s.local = func(ip netip.Addr) bool { return ip.IsLoopback() }
-	if err := s.ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
-		t.Fatalf("err %v, spawned %q", err, f.spawned)
+
+	calls := 0
+	s.served = func(string, time.Duration) ([]serve.Running, error) {
+		switch calls++; calls {
+		case 1:
+			return nil, serve.ErrNotRunning
+		case 2: // a hand-run one starts meanwhile: not the one dev boss started
+			return []serve.Running{lan}, nil
+		}
+		return []serve.Running{lan, own}, nil
+	}
+	out.Reset()
+	if err := s.ensure(&out); err != nil || len(f.spawned) != 1 || calls < 3 ||
+		out.String() != "dev serve started: http://127.0.0.1:18417/ (this Mac only, no pairing needed)\n" {
+		t.Fatalf("start beside a hand-run one: err %v, out %q, calls %d", err, out.String(), calls)
 	}
 }
 
@@ -152,15 +166,8 @@ func TestAutoServeAddr(t *testing.T) {
 }
 
 func TestAutoServeLAN(t *testing.T) {
-	f := &fakeStart{runs: 1, envValue: map[string]string{}}
+	f := &fakeStart{runs: 1, at: "192.168.1.89:8417", envValue: map[string]string{"DEV_SERVE_ADDR": "192.168.1.89:8417"}}
 	s := f.starter(t)
-	s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
-		if f.runs > 0 {
-			f.runs--
-			return netip.AddrPort{}, "", serve.ErrNotRunning
-		}
-		return netip.MustParseAddrPort("192.168.1.89:8417"), "", nil
-	}
 	var out bytes.Buffer
 	if err := s.ensure(&out); err != nil {
 		t.Fatal(err)
@@ -282,7 +289,7 @@ func TestAutoServeFails(t *testing.T) {
 		}
 	})
 	t.Run("exits, another took the port", func(t *testing.T) {
-		f := &fakeStart{runs: 2, exit: true, envValue: map[string]string{}}
+		f := &fakeStart{runs: 2, exit: true, at: "127.0.0.1:8417", envValue: map[string]string{}}
 		var out bytes.Buffer
 		if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 {
 			t.Fatalf("err %v, out %q", err, out.String())
@@ -302,10 +309,10 @@ func TestAutoServeFails(t *testing.T) {
 	t.Run("record unreadable", func(t *testing.T) {
 		f := &fakeStart{envValue: map[string]string{}}
 		s := f.starter(t)
-		s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
-			return netip.AddrPort{}, "", errors.New("addr.json: permission denied")
+		s.served = func(string, time.Duration) ([]serve.Running, error) {
+			return nil, errors.New("addr/127.0.0.1:8417.json: permission denied")
 		}
-		if err := s.ensure(&bytes.Buffer{}); err == nil || err.Error() != "addr.json: permission denied" || len(f.spawned) > 0 {
+		if err := s.ensure(&bytes.Buffer{}); err == nil || err.Error() != "addr/127.0.0.1:8417.json: permission denied" || len(f.spawned) > 0 {
 			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})
