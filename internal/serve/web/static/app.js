@@ -483,7 +483,7 @@ function card(x) {
 // doneRow is a finished card on one line, read-only: no sheet, no buttons.
 function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
-  const named = project(list) + ' #' + it.id + ', ' + (who === ME ? 'you' : who) + ': ' + it.text;
+  const named = project(list) + ' #' + it.id + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
     el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('span', { class: 't' }, it.text),
@@ -546,9 +546,8 @@ function columns(ls) {
 // swipe is the phone's board: a tab per column, with its count and what needs the user, over the columns side by side,
 // one a screen, the next peeking in.
 function swipe(ls) {
-  // A finger on the lanes takes over from a tab's smooth scroll
-  const lanes = el('div', { class: 'lanes', onscroll: () => laneInView(lanes), onpointerdown: () => { landing = ''; } },
-    ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
+  const lanes = el('div', { class: 'lanes', onscroll: () => laneInView(lanes) },
+    ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
     return el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
@@ -558,41 +557,28 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// landing is the lane a tab's smooth scroll heads for: the lanes it passes on the way are not swiped to.
-let landing = '';
-
 // showLane scrolls the phone's lanes to column k's.
 function showLane(k, smooth) {
   const lanes = document.querySelector('#view .lanes'), lane = lanes?.querySelector('[data-k="' + k + '"]');
   if (!lane) return;
-  const left = lane.offsetLeft - lanes.firstElementChild.offsetLeft;
-  // No scroll, no event to clear it by
-  landing = smooth && Math.abs(Math.min(left, lanes.scrollWidth - lanes.clientWidth) - lanes.scrollLeft) > 2 ? k : '';
-  lanes.scrollTo({ left, behavior: smooth ? 'smooth' : 'instant' });
+  lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: smooth ? 'smooth' : 'instant' });
   land(lanes, k);
 }
 
-// laneInView takes the lane a swipe settled on (the last one can't scroll to its start).
+// laneInView takes the lane most in view (the last one can't scroll to its start).
 function laneInView(lanes) {
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
   const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1, i = end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w);
-  if (!end && Math.abs(lanes.scrollLeft - i * w) > 2) return;
-  if (landing) {
-    if (COLUMNS[i].key === landing) landing = '';
-    return;
-  }
   if (COLUMNS[i].key !== state.lane) land(lanes, COLUMNS[i].key);
 }
 
-// land makes column k's lane the one shown (the others out of the Tab order and cut to a screen), its tab marked and in
-// view, the page back up to the tabs when scrolled past them.
+// land makes column k's lane the one shown (the others cut to its height), its tab marked and in view, the page back up
+// to the tabs when scrolled past them.
 function land(lanes, k) {
   const moved = k !== state.lane, tabs = lanes.previousElementSibling;
   state.lane = k;
-  for (const l of lanes.children) {
-    l.classList.toggle('on', l.dataset.k === k);
-    l.inert = l.dataset.k !== k;
-  }
+  for (const l of lanes.children) l.classList.toggle('on', l.dataset.k === k);
+  lanes.style.setProperty('--shown', lanes.querySelector('[data-k="' + k + '"]').offsetHeight + 'px');
   if (moved && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView();
   for (const t of document.querySelectorAll('#view .tab')) {
     const on = t.dataset.f === 'tab:' + k;
@@ -788,11 +774,16 @@ function render() {
       const f = document.activeElement?.dataset?.f;
       // and each column keeps its scroll, the phone's filter strip its own
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
-      const strip = view.querySelector('.filters')?.scrollLeft || 0;
+      const strip = view.querySelector('.filters')?.scrollLeft || 0, swiped = view.querySelector('.lanes')?.scrollLeft;
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
-      if (!wide.matches) showLane(state.lane, false);
+      // The lanes back where they were, even mid-swipe; else at the lane last shown
+      const lanes = view.querySelector('.lanes');
+      if (lanes && swiped !== undefined) {
+        lanes.scrollTo({ left: swiped, behavior: 'instant' });
+        land(lanes, state.lane);
+      } else if (lanes) showLane(state.lane, false);
       if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
       state.noteShown = state.note;
