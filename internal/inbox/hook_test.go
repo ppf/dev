@@ -41,7 +41,7 @@ func namedTmux(t *testing.T, name, todoHerd string) *tmux.Client {
 }
 
 // who is the line the reminders end with, asking who does each item.
-const who = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>."
+const who = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user)."
 
 // The boss's open to do list comes with the worker notes it hands over: blocking a Stop, as a prompt's context,
 // and alone with a prompt that is a batch Deliver pasted; never without notes, nor with an empty list.

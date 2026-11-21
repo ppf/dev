@@ -795,13 +795,13 @@ func TestPromptAskRules(t *testing.T) {
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
 			"The question starts \"<project> #<n>: \" and holds the item text word for word", "each option's detail (after \" | \") in its description", `the item's context as "- " lines`,
-			"Plain to do items (not asks) aren't questions", "only the user's own pick or words answer it",
+			"Plain to do items (not asks) aren't questions", "only the user's own pick (typed under Other too) answers it", "a message they typed here answers no item",
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
 			"Before handing on the user's own new idea or request", "With real cons or a conflict on the lists",
 			"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
-			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly", "your own task --on boss, one a person owes --waiting-for <who>"}},
+			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {

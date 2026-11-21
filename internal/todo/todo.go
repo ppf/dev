@@ -1119,7 +1119,7 @@ func (l List) lines(limit int, now time.Time) string {
 func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
 
 // whoLine asks a boss to say who does each item, as the reminders end.
-const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>."
+const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user)."
 
 // Reminder is the items ticked by themselves (tickedText), then the open items for a boss reading worker notes at now,
 // numbered, with a line asking it to tick what the notes closed; "" when none ticked and none is open.

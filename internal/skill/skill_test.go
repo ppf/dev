@@ -171,6 +171,7 @@ func TestAskRules(t *testing.T) {
 		"**One question per call, in order.** Re-read `dev todo --all` right before each",
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
+		"a message the user typed here answers no item (dev refuses it): ask that item as a question",
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
@@ -208,8 +209,10 @@ func TestTodoOwnerRule(t *testing.T) {
 
 func TestTodoNoteRule(t *testing.T) {
 	for name, text := range byName {
-		if strings.Contains(text, "dev todo") && (!strings.Contains(text, "dev todo note decided|said|risk") || !strings.Contains(text, "`state` holds your standing state off the board")) {
-			t.Errorf("%s/SKILL.md: dev todo rule without dev todo note", name)
+		for _, want := range []string{"dev todo note decided|said|risk", "`state` holds your standing state off the board"} {
+			if strings.Contains(text, "dev todo") && !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: note rule missing %q", name, want)
+			}
 		}
 	}
 }

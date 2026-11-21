@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// The manager relays the user's answer with --via manager: only from its coordinator pane, only for an item older than
-// the user's latest prompt there (a batch dev pasted isn't one), and the boss's note quotes that prompt. --all keeps
+// The manager relays the user's answer with --via manager: only from its coordinator pane, only from their pick in its
+// AskUserQuestion (not a typed message, nor a batch dev pasted), only for an item older than that pick, and the boss's
+// note quotes it. --all keeps
 // the other bosses when one's list can't be read, marking that one.
 func TestTodoAnswerViaManager(t *testing.T) {
 	tmp := t.TempDir()
@@ -56,15 +57,34 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		}
 	}
 
+	// The user's pick in the manager's AskUserQuestion; a dismissed question keeps nothing
+	ask := func(question, answers string) {
+		t.Helper()
+		in := `{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"` + question + `"}]` + answers + `}}`
+		if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, in, "state", "working"); err != nil {
+			t.Fatalf("❌ manager pick: %v %s", err, stderr)
+		}
+	}
+	merge := func() (string, string, error) {
+		return dev(claude(pane["manager"]), "", "todo", "answer", "boss-a", "1", "Merge", "--via", "manager", "--question", "Merge #148?")
+	}
+
 	refused("before any prompt", claude(pane["manager"]), "hasn't prompted the manager yet")
 	prompt("what's waiting?")
+	ask("boss-a #1: Merge #148?", `,"answers":{"boss-a #1: Merge #148?":"Merge"}`)
 	time.Sleep(1100 * time.Millisecond)
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait"); err != nil {
 		t.Fatal(err, stderr)
 	}
-	refused("an item newer than the prompt", claude(pane["manager"]), "newer than the user's latest prompt")
+	if _, stderr, err := merge(); err == nil || !strings.Contains(stderr, "newer than the user's latest prompt") {
+		t.Errorf("❌ an item newer than the pick: %v %q", err, stderr)
+	}
 	time.Sleep(1100 * time.Millisecond)
+	// Only a pick answers an item: a typed message can't be tied to one
 	prompt("merge 148, wait on the API one")
+	if _, stderr, err := merge(); err == nil || !strings.Contains(stderr, "a typed message, not a pick: ask the item as a one-click question") {
+		t.Errorf("❌ a typed message: %v %q", err, stderr)
+	}
 	prompt("[dev boss inbox] 1 worker update(s):\n- boss-b waits on you: #1 Deploy?")
 	refused("from another boss", claude(pane["boss-a"]), "only in the manager's coordinator pane")
 	// A Claude can't type the user's words into the manager
@@ -79,31 +99,24 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		t.Errorf("❌ --via boss-b: %v %q", err, stderr)
 	}
 
-	out, stderr, err := dev(claude(pane["manager"]), "", "todo", "answer", "boss-a", "1", "Merge", "--via", "manager")
+	ask("boss-a #1: Merge #148?", `,"answers":{"boss-a #1: Merge #148?":"Merge"}`)
+	out, stderr, err := merge()
 	if err != nil || out != "#1 answered, sent to boss-a\n" {
 		t.Fatalf("❌ answer via manager: %q %v %s", out, err, stderr)
 	}
 	waitFor(t, "boss-a gets the quoted answer", func() bool {
 		data, _ := os.ReadFile(filepath.Join(tmp, "boss-a.log"))
-		return strings.Contains(string(data), `- you answered #1 "Merge #148?" via manager ("merge 148, wait on the API one"): Merge`)
+		return strings.Contains(string(data), `- you answered #1 "Merge #148?" via manager ("boss-a #1: Merge #148? picked Merge"): Merge`)
 	})
 
-	// The user's pick in the manager's AskUserQuestion answers one item; a dismissed question keeps nothing
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Rebase #150?", "--option", "Rebase (Recommended)", "--option", "Leave it"); err != nil {
 		t.Fatal(err, stderr)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	ask := func(answers string) {
-		t.Helper()
-		in := `{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"boss-a #2: Rebase #150?"}]` + answers + `}}`
-		if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, in, "state", "working"); err != nil {
-			t.Fatalf("❌ manager pick: %v %s", err, stderr)
-		}
-	}
-	ask(`,"answers":{"boss-a #2: Rebase #150?":"Rebase"}`)
-	ask("")
-	// #2, added after the typed prompt, goes through on the pick: only with --question naming the item the pick asked
-	// and the option it picked; a refused answer leaves the pick for the right one
+	ask("boss-a #2: Rebase #150?", `,"answers":{"boss-a #2: Rebase #150?":"Rebase"}`)
+	ask("boss-a #2: Rebase #150?", "")
+	// #2 goes through on the pick: only with --question naming the item the pick asked and the option it picked; a
+	// refused answer leaves the pick for the right one
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Tag it?", "--option", "Tag"); err != nil {
 		t.Fatal(err, stderr)
 	}

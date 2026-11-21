@@ -545,12 +545,14 @@ func TestTodoAnswerRefused(t *testing.T) {
 // user left the item open.
 func TestPickFor(t *testing.T) {
 	pick := func(q, a string) *inbox.Prompt { return &inbox.Prompt{Pick: true, Question: q, Answer: a} }
+	typed := &inbox.Prompt{Text: "dev #7: merge it"}
 	for _, tt := range []struct {
 		name     string
 		pick     *inbox.Prompt
 		question string
 		want     string
 	}{
+		{"typed message", typed, "Merge #148?", "a typed message, not a pick"},
 		{"its item", pick("dev #7: Merge #148? (CI green)", "Merge"), "Merge #148?", ""},
 		{"boss name", pick("boss-dev #7: Merge #148?", "Merge"), "Merge #148?", ""},
 		{"no --question", pick("dev #7: Merge #148?", "Merge"), "", "needs --question"},
