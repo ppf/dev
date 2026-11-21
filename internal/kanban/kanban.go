@@ -67,7 +67,7 @@ type card struct {
 
 // key is the card's identity across reads: ids restart, so a finished #3 is not an open #3.
 func (c card) key() string {
-	return c.boss + "\x00" + strconv.Itoa(c.it.ID) + "\x00" + strconv.FormatBool(c.done) + "\x00" + strconv.FormatInt(c.doneAt, 10)
+	return c.boss + "\x00" + strconv.Itoa(c.it.ID) + "\x00" + strconv.FormatBool(c.done)
 }
 
 // column is the card's sidebar column as the model placed it (todo.Owner.place); one it didn't name is In progress,
@@ -170,6 +170,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fix()
 		return m, nil
 	case tickMsg:
+		// A read still under way is not stacked on: a slow server would pile them up
+		if m.reads > m.shown {
+			return m, tick()
+		}
 		read := m.read()
 		return m, tea.Batch(read, tick())
 	case tea.KeyMsg:
@@ -709,7 +713,7 @@ const (
 // selected), its rule, then its cards from top, "↑ n more" and "+n more" where some don't show; and what each line is.
 func (m Model) column(i int, cs []card, sel bool, cw int, now time.Time) ([]string, []int) {
 	colour, rule := "", sidebar.Faint
-	if slices.ContainsFunc(cs, card.needsYou) {
+	if slices.ContainsFunc(cs, func(c card) bool { return c.needsYou() && !c.it.Quiet }) {
 		colour, rule = sidebar.Red, sidebar.Red
 	}
 	title := sidebar.ColumnTitles[sidebar.Columns[i]]
@@ -774,12 +778,18 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	for _, l := range title {
 		lines = append(lines, style+l+reset)
 	}
-	foot := []string{sidebar.Muted + "@" + assignee(c) + reset}
+	who := sidebar.Muted + "@" + assignee(c) + reset
+	var chips []string
+	for _, ch := range mk.chips {
+		chips = append(chips, ch.colour+ch.text+reset)
+	}
+	foot := append([]string{who}, chips...)
+	if it.WaitingFor != "" {
+		// The person first: a narrow card cuts the tail
+		foot = append(chips, who)
+	}
 	if it.Quiet {
 		foot = append([]string{sidebar.Muted + "TEST" + reset}, foot...)
-	}
-	for _, ch := range mk.chips {
-		foot = append(foot, ch.colour+ch.text+reset)
 	}
 	if len(it.Options) > 0 && !c.done {
 		foot = append(foot, sidebar.Muted+strconv.Itoa(len(it.Options))+" options"+reset)

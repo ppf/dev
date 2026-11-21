@@ -473,8 +473,12 @@ func (m Model) facts(in int, now time.Time) []string {
 		facts = append(facts, [2]string{"status", sidebar.StatusColours[it.Status] + status + reset})
 	}
 	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
+	doing := it.Now
 	if it.Doing != nil {
-		facts = append(facts, [2]string{"doing", it.Doing.Text})
+		doing = it.Doing.Text
+	}
+	if doing != "" {
+		facts = append(facts, [2]string{"doing", doing})
 	}
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})

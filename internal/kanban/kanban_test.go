@@ -835,3 +835,25 @@ func TestCheckState(t *testing.T) {
 		t.Errorf("❌ approved colour %q", c)
 	}
 }
+
+// A test item that asks for the user doesn't turn its column's head red, as the top line doesn't count it.
+func TestQuietHeadNotRed(t *testing.T) {
+	ask := todo.Shown{ID: 1, Text: "T?", Quiet: true, Placement: todo.Placement{Column: sidebar.ColumnTodo, NeedsYou: true}}
+	m, _ := board(t, []List{{Boss: "boss-x", Items: []todo.Shown{ask}}}, 200, 30)
+	if strings.Contains(strings.Join(m.lines(time.Now()), "\n"), sidebar.Red+"▸ To do") {
+		t.Error("❌ a quiet ask reddens its column")
+	}
+}
+
+// A tick while a read is still under way starts no second one.
+func TestTickDoesNotStack(t *testing.T) {
+	m, _ := board(t, fixture(1), 200, 30)
+	m.reads++ // one started, not landed
+	if next, _ := m.Update(tickMsg{}); next.(Model).reads != m.reads {
+		t.Error("❌ a tick started a read over one under way")
+	}
+	m.shown = m.reads
+	if next, _ := m.Update(tickMsg{}); next.(Model).reads != m.reads+1 {
+		t.Error("❌ a tick started no read")
+	}
+}
