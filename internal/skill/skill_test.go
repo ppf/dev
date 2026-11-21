@@ -174,8 +174,8 @@ func TestAskRules(t *testing.T) {
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
-		"**Assess the user's ideas before handing them on.**", "With real cons, ask the user first",
-		"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user typed is relayed",
+		"**Assess the user's ideas before handing them on.**", "(when unsure whether one is real, it is), ask the user first",
+		"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user gave, typed or picked, is relayed", "the pick decides the hand-on", "needs no assessment",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)
