@@ -29,7 +29,6 @@ const state = {
   picks: {}, // item key → {option, text}: kept across polls
   more: false, // To do shown whole, past TODO_SHOWN
   lane: 'todo', // the phone's column in view
-  refit: false, // a filter just changed: the phone leaves a lane it emptied
   allWho: false, // every assignee chip shown, past WHO_SHOWN
   scroll: {}, // column key → its cards' scroll, kept across redraws
   filter: { project: '', who: [], needs: false }, // model.js matches
@@ -94,9 +93,9 @@ const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.opti
 const startable = (l, it) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (!l.closed || !!state.board?.manager_runs)
   && (!!it.start_late || it.column === 'todo' && ['yours', 'boss closed'].includes(it.status)); // as todo.Start: a late start, else a To do card
 const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
-// The user marks their own item, no ask, in progress (todo.SetDoing); the page offers it on To do cards only, not a desktop
-// list's, nor one being started.
-const doable = (l, it) => !desktop(l) && own(l, it) && !it.options?.length && it.column === 'todo' && !it.doing && !it.started;
+// The user marks their own item (the Mac's assignee: you), no ask, in progress (todo.SetDoing); the page offers it on To do
+// cards only, not a desktop list's, nor one being started.
+const doable = (l, it) => !desktop(l) && it.assignee?.kind === 'you' && !it.options?.length && it.column === 'todo' && !it.doing && !it.started;
 const receiver = l => l.closed ? 'the manager' : l.boss;
 
 // An option is a string "label | detail", ending " (Recommended)" for the pick the boss recommends, either side of
@@ -487,7 +486,7 @@ function doneRow(x) {
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
     el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
-    el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'),
+    el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
 
@@ -566,13 +565,21 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// refilter draws the board for a filter just changed (board() moves the phone off a lane it emptied), the lanes' scroll
-// settled now: its lane would undo the move.
+// refilter draws the board for a filter just changed: on the phone a swipe under way takes its lane first, and a lane
+// the filter emptied gives way to the first drawn with cards.
 function refilter() {
-  clearTimeout(settling);
-  settling = 0;
-  state.refit = true;
+  const before = document.querySelector('#view .lanes');
+  if (settling && before) {
+    clearTimeout(settling);
+    settling = 0;
+    laneInView(before);
+  }
   render();
+  const lanes = document.querySelector('#view .lanes');
+  if (lanes && !lanes.querySelector('.lane.on .card')) {
+    const next = [...lanes.children].find(l => l.querySelector('.card'));
+    if (next) showLane(next.dataset.k, false);
+  }
 }
 
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
@@ -631,8 +638,6 @@ function board() {
   for (const x of all) if (kindOf(x) === 'boss' || !kinds.get(whoOf(x))) kinds.set(whoOf(x), kindOf(x));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
   const ls = lanes(all.filter(x => matches(x, state.filter))).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
-  if (state.refit && !wide.matches && !ls.find(l => l.key === state.lane).xs.length) state.lane = ls.find(l => l.xs.length)?.key || state.lane;
-  state.refit = false;
   const out = [...listErrors(), filters(projects, ws, kinds), ...(wide.matches ? [columns(ls)] : swipe(ls))];
   if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
