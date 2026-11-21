@@ -799,8 +799,8 @@ func TestPromptAskRules(t *testing.T) {
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
-			"Before handing on the user's own new idea or request", "With real cons (when unsure whether one is real, it is;",
-			"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user gave, typed or picked, is relayed", "the pick decides the hand-on", "a typed change amends the request: the boss gets both", "work in the same message still counts", "needs no written assessment", "options \"Hand it on\" and \"Drop it\"", "one you can't check goes in the unverified part only"}},
+			"Before handing on the user's own new idea or request", "one you doubt but can check counts",
+			"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user gave, typed or picked, is relayed", "the pick decides the hand-on", "a typed change goes on only if it says to", "work in the same message still counts", "needs no written assessment", "options \"Hand it on\" and \"Drop it\"", "goes in the unverified part and asks nothing"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
