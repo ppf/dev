@@ -100,6 +100,8 @@ func (m Model) bottom() []string {
 		return []string{sidebar.HintRow(m.msg.text, w)}
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
+	case m.reload.Err != nil:
+		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	}
 	if m.needMode {
 		rows := m.needRows()
@@ -109,13 +111,16 @@ func (m Model) bottom() []string {
 		}
 		switch {
 		case m.needIdx < len(rows) && rows[m.needIdx].fold != nil:
-			return []string{sidebar.HintRow("j/k move  ⏎ open or fold  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move  ⏎ open or fold  t fold to do  esc cards  b board")
 		case m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain:
-			return []string{sidebar.HintRow("j/k move  s start  d tick (stays till ticked)"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move  s start  d tick (stays till ticked)" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		case m.needIdx < len(rows) && (rows[m.needIdx].Kind == sidebar.NeedOn || rows[m.needIdx].Kind == sidebar.NeedUnread || rows[m.needIdx].Closed):
-			return []string{sidebar.HintRow("j/k move"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		}
-		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+		return m.hintRow("j/k move  1-9 answer  m reply" + open + "  g/⏎ go  t fold to do  esc cards  b board")
+	}
+	if m.reload.Flash != "" {
+		return []string{sidebar.HintRow("↻ dev "+m.reload.Flash, w)}
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
@@ -149,7 +154,15 @@ func (m Model) bottom() []string {
 			hint += then
 		}
 	}
-	return []string{sidebar.HintRow(pages+hint, w)}
+	return m.hintRow(pages + hint)
+}
+
+// hintRow is the bottom row of keys, then what holds a ready reload: after the keys, which a narrow pane keeps.
+func (m Model) hintRow(keys string) []string {
+	if h := m.held(); h != "" {
+		keys += "  " + h
+	}
+	return []string{sidebar.HintRow(keys, m.width)}
 }
 
 // boxRows is the reply box bound to t, boxed like t's card in t's colour: a top border naming what it does and

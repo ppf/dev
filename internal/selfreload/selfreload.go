@@ -9,8 +9,8 @@
 //     the version this process was exec'd into (DEV_RELOADED_TO, the loop guard); `<exe> --version`
 //     exits 0 within 5 s and prints it; the kill switch is off. Then it waits a random 0 to
 //     Options.Stagger. A failed check is retried next poll; a repeated warning is passed on once.
-//   - Exec(Ready, args) error: re-checks the kill switch, that Exe is still the file checked, and the
-//     canary, then syscall.Exec(exe, args) with DEV_RELOADED_TO=<version> (set, not appended). It
+//   - Exec(Ready, args, set...) error: re-checks the kill switch, that Exe is still the file checked, and the
+//     canary, then syscall.Exec(exe, args) with DEV_RELOADED_TO=<version> and set's KEY=VALUE (set, not appended). It
 //     returns only on failure: the caller keeps running the old version and says so; it must never exit
 //     to reload. Watch's channel is closed by then: after any Exec error, call Watch again to keep
 //     watching (ErrNotNow: refused without trying).
@@ -323,8 +323,9 @@ func (w *watcher) warn(err error) {
 	}
 }
 
-// Exec replaces this process with r's binary run with args (args[0] included); it returns only on failure.
-func Exec(r Ready, args []string) error {
+// Exec replaces this process with r's binary run with args (args[0] included) and set's KEY=VALUE entries in
+// its environment; it returns only on failure.
+func Exec(r Ready, args []string, set ...string) error {
 	w := r.w
 	if w == nil {
 		return errors.New("selfreload: Exec without a Ready from Watch")
@@ -362,6 +363,10 @@ func Exec(r Ready, args []string) error {
 	}
 	env := setEnv(os.Environ(), envReloadedTo, r.Version)
 	env = setEnv(env, envCanary, canary)
+	for _, kv := range set {
+		k, v, _ := strings.Cut(kv, "=")
+		env = setEnv(env, k, v)
+	}
 	err := w.execve(w.o.Exe, args, env)
 	if err == nil { // only a test double returns from a successful exec
 		return nil

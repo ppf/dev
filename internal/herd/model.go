@@ -19,6 +19,7 @@ import (
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
@@ -132,6 +133,8 @@ type Model struct {
 	folds         map[string]bool // by session: the user's fold of its card, over the default (see tile.folded)
 	expands       map[string]bool // by session: its card shows more of its screen (v)
 	size          paneSize        // how fit last sized the pane
+	restoredSize  paneSize        // size as a reload carried it, taken at the first refresh; unlisted when none
+	restored      bool            // carried by a reload: until the first refresh, no card is new to Asking
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
 	todoFolded    bool            // TO DO shows as its header only (t)
@@ -149,6 +152,7 @@ type Model struct {
 	startList  func(boss string, id int, text string) (string, error)             // dev todo start
 	openItem   func(client, boss string, id int, text string) error               // dev todo show
 	openBoard  func(client string, bosses []string) error                         // dev todo board
+	reload     selfreload.Pane                                                    // a held Ready waits for idle (see idle)
 }
 
 // paneSize is how fit last sized the previews pane.
@@ -172,7 +176,10 @@ type lookups interface {
 
 type tickMsg struct{}
 
-// watchMsg runs the inbox watch (stuck workers, deferred delivery) every watchInterval.
+// watchDueMsg runs the inbox watch (stuck workers, deferred delivery), every watchInterval.
+type watchDueMsg struct{}
+
+// watchMsg is the inbox watch's outcome.
 type watchMsg struct{ err error }
 
 const watchInterval = 15 * time.Second
@@ -185,25 +192,18 @@ type refreshMsg struct {
 	err    error
 }
 
-// Run shows the previews in pane until its pane closes or Ctrl-C.
-func Run(c *tmux.Client, pane string) error {
-	if _, err := tea.NewProgram(newModel(c, pane), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
-		return fmt.Errorf("boss: %w", err)
-	}
-	return nil
-}
-
 // newModel is the previews in pane.
 func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
 	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true,
-		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed, startList: sidebar.StartNeed, openItem: sidebar.OpenItem, openBoard: sidebar.OpenBoard}
+		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed, startList: sidebar.StartNeed, openItem: sidebar.OpenItem, openBoard: sidebar.OpenBoard,
+		reload: selfreload.NewPane(selfreload.Version())}
 }
 
 // Init starts the first refresh, which sizes the pane (see fit).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), m.watchLater())
+	return tea.Batch(m.refresh(), m.watchLater(), m.reload.Init())
 }
 
 // fit sizes the pane once the first refresh is in: collapsed while it has nothing to show, else its share of the
@@ -233,9 +233,7 @@ func (m *Model) fit() {
 
 // watchLater runs inbox.Watch after watchInterval.
 func (m Model) watchLater() tea.Cmd {
-	return tea.Tick(watchInterval, func(time.Time) tea.Msg {
-		return watchMsg{err: inbox.Watch(m.c, control.RealClock, m.pane)}
-	})
+	return tea.Tick(watchInterval, func(time.Time) tea.Msg { return watchDueMsg{} })
 }
 
 // Update routes refreshes, size and input, then fits the pane.
@@ -248,12 +246,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // update is Update before the fit.
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Quitting to reload: tea.Quit lands later, and anything started meanwhile would be cut off by the exec
+	if m.reload.Quitting() {
+		return m, nil
+	}
+	if cmd, ok := m.reload.Update(msg); ok {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, m.refresh()
 	case refreshMsg:
 		if m.size == unlisted {
-			m.size = unsized
+			// A reload's carried size: no refit of a width the user dragged, no focus handed back
+			m.size = cmp.Or(m.restoredSize, unsized)
 		}
 		if msg.err != nil {
 			m.err = msg.err
@@ -261,11 +267,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// A card entering Asking shows screenRows of its screen again, where it asks
 			for _, t := range msg.snap.tiles {
 				was := slices.IndexFunc(m.snap.tiles, func(u tile) bool { return u.sess.Name == t.sess.Name })
-				if t.section() == needsYouSection && (was < 0 || m.snap.tiles[was].section() != needsYouSection) {
+				if t.section() == needsYouSection && !m.restored && (was < 0 || m.snap.tiles[was].section() != needsYouSection) {
 					delete(m.expands, t.sess.Name)
 				}
 			}
-			m.snap, m.err = msg.snap, nil
+			m.snap, m.err, m.restored = msg.snap, nil, false
 			if msg.msgs != nil {
 				m.msgs = msg.msgs
 			}
@@ -294,6 +300,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// Here only: a refresh in flight may have cleared the sidebar's ask to focus TO DO
+		if quit := m.reload.Reload(m.idle()); quit != nil {
+			return m, quit
+		}
 		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -304,7 +314,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fixNeeds()
 		return m, nil
 	case tea.KeyMsg:
-		m.focused, m.inputs = true, m.inputs+1
+		m.focused, m.inputs, m.reload.Err = true, m.inputs+1, nil
 		return m.handleKey(msg)
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
@@ -333,6 +343,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.needKey, m.needDone = m.needDone, ""
 		}
 		return m, nil
+	case watchDueMsg:
+		c, pane := m.c, m.pane
+		return m, m.reload.Busy.Run(func() tea.Msg { return watchMsg{err: inbox.Watch(c, control.RealClock, pane)} })
 	case watchMsg:
 		if msg.err != nil {
 			m.msg = alert("❌ inbox: " + msg.err.Error())
