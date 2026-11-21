@@ -309,8 +309,16 @@ func TestCardMarks(t *testing.T) {
 	if out := render(boss, 80); !strings.Contains(out, "waiting for Carl · @boss-beta follows up") {
 		t.Errorf("❌ live boss's waiting card:\n%s", out)
 	}
-	if out := render(closed, 80); strings.Contains(out, "follows up @") || strings.Contains(out, "@") && !strings.Contains(out, "no one follows up") {
+	closedBoss := boss
+	closedBoss.closed = true
+	if out := render(closedBoss, 80); !strings.Contains(out, "waiting for Carl · no one follows up") || strings.Contains(out, "@boss-beta") {
 		t.Errorf("❌ closed boss's waiting card:\n%s", out)
+	}
+	worker := mk(base, func(s *todo.Shown) {
+		s.WaitingFor, s.Assignee = "Carl", todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "beta-fix"}
+	})
+	if out := render(worker, 80); !strings.Contains(out, "@beta-fix") || strings.Contains(out, "follows up @") {
+		t.Errorf("❌ worker's waiting card:\n%s", out)
 	}
 	boss.done = true
 	if out := render(boss, 80); strings.Contains(out, "follows up") || !strings.Contains(out, "@boss-beta") {

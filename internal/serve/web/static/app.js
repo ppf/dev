@@ -719,18 +719,19 @@ function listErrors() {
   return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
-// statusRow is the item's column, with its status after it when that adds to it: "yours", "waiting" and "boss closed"
-// say what the column and the rows below say.
+// statusRow is the item's column, with its status after it when that adds to it ("start not picked up" overrides it):
+// "yours", a person's "waiting" and "boss closed" say what the column and the rows below say.
 function statusRow(x) {
-  const col = COLUMNS.find(c => c.key === columnOf(x)).title, st = x.it.start_late ? 'start not picked up' : x.it.status;
-  if (x.done || !st || ['yours', 'waiting', 'boss closed'].includes(st)) return col;
-  // The session it names when the card is not on it (a worker gone: the card is back on its boss)
-  const on = x.it.status_on;
-  return col + ' · ' + st + (on && on !== whoOf(x) ? ' · ' + on : '');
+  const { it } = x, col = titleOf(columnOf(x)), st = it.start_late ? 'start not picked up' : it.status;
+  if (x.done || !st) return col;
+  const word = ['yours', 'boss closed'].includes(st) || st === 'waiting' && it.waiting_for ? '' : st;
+  // The session it names when the card is not on it (a worker gone, a closed boss's: the card is on its boss); a person is in the rows below
+  const on = !it.waiting_for && it.status_on !== whoOf(x) ? it.status_on : '';
+  return [col, word, on].filter(Boolean).join(' · ');
 }
 
-// whoRows say who an item is on: for one waiting on a person, that person and who follows up (its boss's assignee,
-// no one when the boss is closed); else the assignee.
+// whoRows say who an item is on: for one waiting on a person, that person and who follows up (the boss it is on, no one
+// when that boss is closed); else the assignee.
 function whoRows(x) {
   const { list, it } = x, who = whoOf(x);
   if (!it.waiting_for || kindOf(x) !== 'boss') return [['On', who === ME ? 'you' : who]];

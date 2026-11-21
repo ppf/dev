@@ -611,12 +611,28 @@ func TestFactsWaitingFor(t *testing.T) {
 		want []string
 		not  []string
 	}{
-		{"live boss", waiting(false), []string{"column  Waiting", "waiting Alicja Serafin", "follows @boss-vitay"}, []string{"@boss-vitay ·", "status", "check"}},
-		{"closed boss", waiting(true), []string{"column  Waiting", "waiting Alicja Serafin", "follows no one (boss-vitay is closed)", "list    boss-vitay (closed)"}, []string{"status", "check", "boss closed ·"}},
+		{"live boss", waiting(false), []string{"column  Waiting", "waiting Alicja Serafin", "follows @boss-vitay"}, []string{"@boss-vitay ·", "status ", "check "}},
+		{"closed boss", waiting(true), []string{"column  Waiting", "waiting Alicja Serafin", "follows no one (boss-vitay is closed)", "list    boss-vitay (closed)"}, []string{"status ", "check ", "boss closed ·"}},
 		{"on a worker", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix", On: "dev-x", Status: sidebar.StatusWorking, StatusOn: "dev-x", Session: &todo.Session{ID: "$4", Name: "dev-x"},
-			Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}, []string{"column  In progress · @dev-x", "status  working · dev-x"}, []string{"waiting", "follows"}},
+			Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}, []string{"column  In progress · @dev-x", "status  working · dev-x"}, []string{"waiting ", "follows "}},
 		{"the user's own", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 8, Text: "Mine", Status: sidebar.StatusYours,
-			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}, []string{"column  To do · @you", "status  yours"}, []string{"waiting", "follows"}},
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}, []string{"column  To do · @you", "status  yours"}, []string{"waiting ", "follows "}},
+		{"a closed boss's plain item", Item{Boss: "boss-dev", Closed: true, Shown: todo.Shown{ID: 7, Text: "Plain", Status: sidebar.StatusBossClosed, Check: &sidebar.Check{Kind: sidebar.CheckBossClosed},
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}, []string{"column  To do · @boss-dev", "list    boss-dev (closed)"}, []string{"status ", "check ", "waiting ", "follows "}},
+		{"a closed boss's item linked to a worker", Item{Boss: "boss-dev", Closed: true, Shown: todo.Shown{ID: 7, Text: "Linked", On: "dev-x", Status: sidebar.StatusBossClosed, StatusOn: "dev-x",
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}, []string{"status  dev-x"}, []string{"boss closed ·", "status  boss"}},
+		{"waiting, its status not waiting", func() Item {
+			it := waiting(false)
+			it.Status, it.StatusOn = sidebar.StatusBlocked, "boss-vitay"
+			return it
+		}(), []string{"waiting Alicja Serafin", "follows @boss-vitay", "status  blocked"}, nil},
+		{"a ticked one keeps its assignee", func() Item {
+			it := waiting(false)
+			it.Done = true
+			return it
+		}(), []string{"column  Waiting · @boss-vitay"}, []string{"waiting ", "follows ", "status "}},
+		{"waiting for, on a worker", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix", On: "dev-x", Status: sidebar.StatusWaiting, StatusOn: "dev-x", Session: &todo.Session{ID: "$4", Name: "dev-x"},
+			Placement: todo.Placement{Column: sidebar.ColumnProgress, WaitingFor: "Carl", Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}, []string{"column  In progress · @dev-x", "status  waiting · dev-x"}, []string{"waiting Carl", "follows "}},
 	} {
 		v := ansi.Strip(New(c.it, Actions{}, false).View(Width, 40, now))
 		for _, w := range c.want {

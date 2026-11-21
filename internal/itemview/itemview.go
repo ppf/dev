@@ -515,16 +515,28 @@ func (m Model) listLines(in int) []string {
 	return out
 }
 
+// statusText is the status row: the status, the session it names and when a start went. A person's wait is said by the
+// waiting and follows rows, a closed boss by the list row: only what they leave out stays.
+func (m Model) statusText(waiting bool, now time.Time) string {
+	it := m.it
+	var parts []string
+	switch {
+	case it.Status == sidebar.StatusBossClosed, waiting && it.Status == sidebar.StatusWaiting:
+	default:
+		parts = append(parts, cmp.Or(it.Status, "—"))
+	}
+	if it.StatusOn != "" && it.StatusOn != it.Boss && !waiting {
+		parts = append(parts, it.StatusOn)
+	}
+	if it.Started != nil {
+		parts = append(parts, "sent to "+it.Started.To+" "+sidebar.AgeSpan(now.Sub(time.Unix(it.Started.At, 0)))+" ago")
+	}
+	return strings.Join(parts, " · ")
+}
+
 // facts are the item's column and assignee, status, link, list and age, and its tick time and check when it has them.
 func (m Model) facts(in int, now time.Time) []string {
 	it := m.it
-	status := cmp.Or(it.Status, "—")
-	if it.StatusOn != "" && it.StatusOn != it.Boss {
-		status += " · " + it.StatusOn
-	}
-	if it.Started != nil {
-		status += " · sent to " + it.Started.To + " " + sidebar.AgeSpan(now.Sub(time.Unix(it.Started.At, 0))) + " ago"
-	}
 	list := it.Boss
 	if it.Closed {
 		list += " (closed)"
@@ -532,21 +544,18 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Added != 0 {
 		list += " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago"
 	}
-	column := columnTitle(it.Column) + " · @" + m.assignee()
+	var facts [][2]string
 	waiting := !it.Done && it.WaitingFor != "" && it.Assignee.Kind == sidebar.AssigneeBoss
-	if waiting {
-		column = columnTitle(it.Column)
-	}
-	facts := [][2]string{{"column", column}}
 	if waiting {
 		followUp := "@" + m.assignee()
 		if it.Closed {
 			followUp = "no one (" + m.assignee() + " is closed)"
 		}
-		facts = append(facts, [2]string{"waiting", it.WaitingFor}, [2]string{"follows", followUp})
+		facts = append(facts, [2]string{"column", columnTitle(it.Column)}, [2]string{"waiting", it.WaitingFor}, [2]string{"follows", followUp})
+	} else {
+		facts = append(facts, [2]string{"column", columnTitle(it.Column) + " · @" + m.assignee()})
 	}
-	// A person's wait and a closed boss are said by the column and the rows above
-	if !it.Done && !(waiting && it.Status == sidebar.StatusWaiting) && it.Status != sidebar.StatusBossClosed {
+	if status := m.statusText(waiting, now); !it.Done && status != "" {
 		facts = append(facts, [2]string{"status", sidebar.StatusColours[it.Status] + status + reset})
 	}
 	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
