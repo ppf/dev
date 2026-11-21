@@ -54,7 +54,7 @@ type starter struct {
 // autoServe is dev boss's dev serve: started detached when none answers, unless off; never fails the boss, a
 // line on stderr says what went wrong. Never under test: it would start the test binary.
 func autoServe(stderr io.Writer, off bool) {
-	if off || os.Getenv("DEV_NO_SERVE") != "" || testing.Testing() {
+	if off || os.Getenv("DEV_NO_SERVE") == "1" || testing.Testing() {
 		return
 	}
 	s, err := newStarter()
@@ -99,7 +99,7 @@ func newStarter() (*starter, error) {
 func (s *starter) ensure(stderr io.Writer) error {
 	deadline := time.Now().Add(s.wait)
 	served := func(most time.Duration) (netip.AddrPort, string, error) {
-		return s.served(s.dir, min(most, max(time.Until(deadline), 50*time.Millisecond)))
+		return s.served(s.dir, min(most, max(time.Until(deadline), 300*time.Millisecond)))
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
@@ -160,9 +160,17 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	var env []string
 	for _, k := range autoServeEnv {
-		if v := s.getenv(k); v != "" {
-			env = append(env, k+"="+v)
+		v := s.getenv(k)
+		if v == "" {
+			continue
 		}
+		// It runs in /: a relative folder would be another one there
+		if strings.HasSuffix(k, "_HOME") || strings.HasSuffix(k, "_DIR") || k == "TMUX_TMPDIR" {
+			if v, err = filepath.Abs(v); err != nil {
+				return err
+			}
+		}
+		env = append(env, k+"="+v)
 	}
 	exited, err := s.spawn(s.exe, args, env, log)
 	if err != nil {
@@ -223,25 +231,29 @@ func startLock(dir string, deadline time.Time) (func(), bool, error) {
 
 // defaultServer: dev boss talks to tmux's default server (TMUX_TMPDIR unset or /tmp; $TMUX, when set, its default socket).
 func (s *starter) defaultServer() bool {
-	if d := strings.TrimSuffix(s.getenv("TMUX_TMPDIR"), "/"); d != "" && d != "/tmp" && d != "/private/tmp" {
-		return false
+	if t := s.getenv("TMUX"); t != "" { // tmux takes its socket from $TMUX before TMUX_TMPDIR
+		socket, _, _ := strings.Cut(t, ",")
+		want := filepath.Join("/tmp", "tmux-"+strconv.Itoa(s.uid), "default")
+		return socket == want || socket == "/private"+want
 	}
-	t := s.getenv("TMUX")
-	if t == "" {
-		return true
-	}
-	socket, _, _ := strings.Cut(t, ",")
-	want := filepath.Join("/tmp", "tmux-"+strconv.Itoa(s.uid), "default")
-	return socket == want || socket == "/private"+want
+	d := strings.TrimSuffix(s.getenv("TMUX_TMPDIR"), "/")
+	return d == "" || d == "/tmp" || d == "/private/tmp"
 }
 
 // lastLine is the last line written to path after offset from, without its "❌ "; "exited" when none.
 func lastLine(path string, from int64) string {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return err.Error()
 	}
-	b = b[min(from, int64(len(b))):]
+	defer func() { _ = f.Close() }()
+	if _, err := f.Seek(from, io.SeekStart); err != nil {
+		return err.Error()
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return err.Error()
+	}
 	lines := strings.Split(strings.TrimSpace(string(bytes.ToValidUTF8(b, nil))), "\n")
 	if l := strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "❌ "); l != "" {
 		return l

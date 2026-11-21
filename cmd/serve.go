@@ -59,11 +59,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			// Before the listen: a reload's exec drops it, and a dev boss in that gap would start a second one
-			release, err := serve.Alive(dir)
+			alive, err := serve.Alive(dir)
 			if err != nil {
 				return err
 			}
-			defer release()
+			defer func() { _ = alive.Close() }()
+			aliveFile = alive
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
 				return err
@@ -343,6 +344,9 @@ func ownIP(ip netip.Addr) bool {
 	})
 }
 
+// aliveFile is serve.Alive's lock, kept across a reload's exec so no dev boss sees none running meanwhile.
+var aliveFile *os.File
+
 // caffeinate is the running caffeinate's pid (0: none), handed to the process a reload execs.
 var caffeinate atomic.Int64
 
@@ -420,9 +424,19 @@ func serveReloading(parent context.Context, ln net.Listener, cfg serve.Config, o
 			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d", os.Getpid(), caffeinate.Load())); err != nil {
 				return err
 			}
+			if aliveFile != nil {
+				if err := serve.KeepAcrossExec(aliveFile, true); err != nil {
+					return err
+				}
+			}
 			err = execReload(r, a)
 			if uerr := os.Unsetenv(envServeReexec); uerr != nil {
 				return uerr
+			}
+			if aliveFile != nil {
+				if kerr := serve.KeepAcrossExec(aliveFile, false); kerr != nil {
+					return kerr
+				}
 			}
 			if errors.Is(err, selfreload.ErrNotNow) {
 				hold(r.Version, err.Error())

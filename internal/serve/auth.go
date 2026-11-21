@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -120,7 +122,9 @@ func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return netip.AddrPort{}, "", fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
 		}
-		if _, ok := errors.AsType[*json.SyntaxError](err); ok { // a record cut short: no dev serve wrote it whole
+		_, syntax := errors.AsType[*json.SyntaxError](err)
+		_, typ := errors.AsType[*json.UnmarshalTypeError](err)
+		if syntax || typ { // a record no dev serve wrote whole
 			return netip.AddrPort{}, "", fmt.Errorf("%w: %v", ErrNotRunning, err)
 		}
 		return netip.AddrPort{}, "", err
@@ -394,8 +398,8 @@ func lock(dir string) (func(), error) {
 	return func() { _ = f.Close() }, nil
 }
 
-// Alive marks a running dev serve on dir until the func (or its exit or exec): a shared lock on dir/alive.
-func Alive(dir string) (func(), error) {
+// Alive marks a running dev serve on dir until the file is closed (or the process exits): a shared lock on dir/alive.
+func Alive(dir string) (*os.File, error) {
 	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_CREATE|os.O_RDONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -404,7 +408,17 @@ func Alive(dir string) (func(), error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
 	}
-	return func() { _ = f.Close() }, nil
+	return f, nil
+}
+
+// KeepAcrossExec has Alive's file (and its lock) survive an exec (on) or not: a reload holds it throughout.
+func KeepAcrossExec(f *os.File, on bool) error {
+	flag := unix.FD_CLOEXEC
+	if on {
+		flag = 0
+	}
+	_, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, flag)
+	return err
 }
 
 // AnyAlive is whether a dev serve holds dir's Alive lock, answering or not.

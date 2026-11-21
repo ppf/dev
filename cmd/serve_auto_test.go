@@ -103,6 +103,7 @@ func TestAutoServeRunning(t *testing.T) {
 func TestAutoServeSkips(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"TMUX_TMPDIR":    {"TMUX_TMPDIR": "/tmp/x"},
+		"TMUX first":     {"TMUX": "/tmp/x/default,1,0", "TMUX_TMPDIR": "/tmp"},
 		"private socket": {"TMUX": "/tmp/tmux-501/it,1,0"},
 		"other uid":      {"TMUX": "/tmp/tmux-502/default,1,0"},
 	} {
@@ -181,9 +182,12 @@ func TestStartLock(t *testing.T) {
 
 func TestAutoServeDefaultSocket(t *testing.T) {
 	for _, socket := range []string{"/tmp/tmux-501/default", "/private/tmp/tmux-501/default"} {
-		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0", "TMUX_TMPDIR": "/tmp/"}}
+		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0", "TMUX_TMPDIR": "/tmp/custom", "XDG_STATE_HOME": "rel"}}
 		if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
 			t.Errorf("%s: err %v, spawned %q", socket, err, f.spawned)
+		}
+		if abs, _ := filepath.Abs("rel"); !slices.Contains(f.env, "XDG_STATE_HOME="+abs) || !slices.Contains(f.env, "TMUX_TMPDIR=/tmp/custom") {
+			t.Errorf("%s: env %q", socket, f.env)
 		}
 	}
 }

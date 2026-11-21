@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/sidebar"
@@ -262,8 +264,13 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 	}
 	r := &reloadRun{addr: ln.Addr().String(), watches: make(chan struct{}, 10), execs: make(chan []string, 10),
 		errc: make(chan error, 1), stderr: &syncBuffer{}}
+	alive, err := serve.Alive(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliveFile = alive
 	watch, exec := watchReload, execReload
-	t.Cleanup(func() { watchReload, execReload = watch, exec })
+	t.Cleanup(func() { watchReload, execReload, aliveFile = watch, exec, nil; _ = alive.Close() })
 	watchReload = func(ctx context.Context, _ selfreload.Options) <-chan selfreload.Ready {
 		r.watches <- struct{}{}
 		ch := make(chan selfreload.Ready, 1)
@@ -289,6 +296,9 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 		// The socket stays bound, so a connection waits unanswered
 		if _, err := (&http.Client{Timeout: 200 * time.Millisecond}).Get("http://" + r.addr + "/v1/health"); err == nil {
 			t.Error("still serving at exec")
+		}
+		if fl, err := unix.FcntlInt(alive.Fd(), unix.F_GETFD, 0); err != nil || fl&unix.FD_CLOEXEC != 0 {
+			t.Errorf("alive lock not kept across the exec: flags %d, %v", fl, err)
 		}
 		r.execs <- args
 		return execErr

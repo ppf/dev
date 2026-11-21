@@ -289,12 +289,14 @@ func TestServed(t *testing.T) {
 	if _, _, err := Served(t.TempDir(), time.Second); !errors.Is(err, ErrNotRunning) {
 		t.Errorf("no record: %v", err)
 	}
-	bad := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bad, addrFile), []byte(`"127.0.`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Served(bad, time.Second); !errors.Is(err, ErrNotRunning) {
-		t.Errorf("corrupt record: %v", err)
+	for _, rec := range []string{`"127.0.`, `{}`} {
+		bad := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bad, addrFile), []byte(rec), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Served(bad, time.Second); !errors.Is(err, ErrNotRunning) {
+			t.Errorf("corrupt record %s: %v", rec, err)
+		}
 	}
 }
 
@@ -303,8 +305,11 @@ func TestAlive(t *testing.T) {
 	if alive, err := AnyAlive(dir); err != nil || alive {
 		t.Fatalf("none: %v %v", alive, err)
 	}
-	release, err := Alive(dir)
+	first, err := Alive(dir)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := KeepAcrossExec(first, true); err != nil {
 		t.Fatal(err)
 	}
 	second, err := Alive(dir) // a second dev serve on the same folder
@@ -314,8 +319,8 @@ func TestAlive(t *testing.T) {
 	if alive, err := AnyAlive(dir); err != nil || !alive {
 		t.Fatalf("held: %v %v", alive, err)
 	}
-	release()
-	second()
+	_ = first.Close()
+	_ = second.Close()
 	if alive, err := AnyAlive(dir); err != nil || alive {
 		t.Fatalf("released: %v %v", alive, err)
 	}
