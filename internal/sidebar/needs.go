@@ -567,7 +567,9 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "ctrl+c":
-		return m, m.reload.Quit()
+		// Before m is read: the quit marks its reload
+		quit := m.reload.Quit()
+		return m, quit
 	case " ":
 		if row.Boss == "" || row.Kind == NeedUnread || row.Kind == needBoard {
 			showMessage(m.c, m.client(), "space opens a list item")

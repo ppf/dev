@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ppf/dev/internal/selfreload"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -312,12 +313,13 @@ func TestCarryLeavesOut(t *testing.T) {
 	if len(r.drafts) != 0 {
 		t.Errorf("a reply kept for a closed session carried: %v", r.drafts)
 	}
-	// Its pane replaced, a long one would hold the reload for good
+	// Its pane replaced, or its card off this board, a long one would hold the reload for good
 	t0 := m.snap.tiles[0]
-	m.snap.all = append(m.snap.all, t0.sess)
-	m.drafts = map[string]replyBox{t0.sess.Name: {pane: t0.pane + "x", ed: editor{text: []rune(strings.Repeat("x", maxState))}}}
+	m.snap.all = append(m.snap.all, t0.sess, sidebar.Session{Name: "elsewhere"})
+	long := editor{text: []rune(strings.Repeat("x", maxState))}
+	m.drafts = map[string]replyBox{t0.sess.Name: {pane: t0.pane + "x", ed: long}, "elsewhere": {ed: long}}
 	if !m.fits() {
-		t.Error("a reply kept for a replaced pane counted against the bound")
+		t.Error("a reply kept for a replaced pane or a card off the board counted against the bound")
 	}
 }
 
@@ -353,7 +355,8 @@ func TestResizeBeforeFirstRefreshUndoesCarriedCollapse(t *testing.T) {
 // A kept reply too long to carry holds the reload, rather than failing the exec on the environment's size.
 func TestReloadHeldByStateOverBound(t *testing.T) {
 	m := ready(t, board4())
-	m.drafts = map[string]replyBox{"docs-api": {ed: editor{text: []rune(strings.Repeat("x", maxState+1))}}}
+	m.snap.tiles[index(m.snap.tiles, "docs-api")].pane = "%1"
+	m.drafts = map[string]replyBox{"docs-api": {pane: "%1", ed: editor{text: []rune(strings.Repeat("x", maxState+1))}}}
 	m, quit := refreshed(m)
 	if quit {
 		t.Fatal("reloaded with state over the bound")

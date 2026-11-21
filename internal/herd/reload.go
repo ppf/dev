@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/ppf/dev/internal/selfreload"
-	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -100,11 +99,8 @@ func (m Model) carry() []string {
 		c.Msg, c.Alert = m.msg.text, true
 	}
 	for name, b := range m.drafts {
-		if !slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == name }) {
-			continue // its session is closed: it can't be sent
-		}
-		if i := slices.IndexFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name }); i >= 0 && m.snap.tiles[i].pane != b.pane {
-			continue // its pane was replaced: open won't bring it back
+		if !slices.ContainsFunc(m.snap.tiles, func(t tile) bool { return t.sess.Name == name && t.pane == b.pane }) {
+			continue // its card is gone or its pane replaced: open won't bring it back
 		}
 		if c.Drafts == nil {
 			c.Drafts = map[string]draft{}
