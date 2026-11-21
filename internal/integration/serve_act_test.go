@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,6 +22,9 @@ type actItem struct {
 	Done   bool   `json:"done"`
 	Answer string `json:"answer"`
 	Status string `json:"status"`
+	// as the page sends them back as seen
+	Doing   json.RawMessage `json:"doing"`
+	Started json.RawMessage `json:"started"`
 }
 
 type actList struct {
@@ -290,6 +294,36 @@ func TestServeAnswerDone(t *testing.T) {
 	}
 	if !strings.Contains(bt.String(), `you were asked to start #5 "Keep me"`) {
 		t.Errorf("❌ boss-a's notes after the start: %s", bt)
+	}
+
+	// I'm on it and stop with seen as the board shows the item: taken; sent again after the change, refused
+	seen := func(id int) string {
+		t.Helper()
+		_, _, lists := board("")
+		for _, l := range lists {
+			for _, it := range l.Items {
+				if l.Boss == "boss-a" && it.ID == id && !it.Done {
+					return `{"doing":` + cmp.Or(string(it.Doing), "null") + `,"started":` + cmp.Or(string(it.Started), "null") + `}`
+				}
+			}
+		}
+		t.Fatalf("❌ boss-a #%d not on the board", id)
+		return ""
+	}
+	started := seen(5)
+	if !strings.Contains(started, `"boss-a"`) {
+		t.Fatalf("❌ #5's start not on the board: %s", started)
+	}
+	for _, body := range []string{`"doing":"on it"`, `"stop":true`} {
+		call := `{"boss":"boss-a","id":5,"text":"Keep me","seen":` + seen(5) + `,` + body + `}`
+		if code, out := post("v1/doing", call, true); code != http.StatusOK {
+			t.Fatalf("❌ doing %s with the board's seen: %d %s", body, code, out)
+		}
+	}
+	code, body = post("v1/doing", `{"boss":"boss-a","id":5,"text":"Keep me","seen":`+started+`,"doing":"again"}`, true)
+	refused("doing with a seen since changed", code, body, "changed since it was read")
+	if code, body := post("v1/doing", `{"boss":"boss-nope","id":1,"text":"x","seen":{},"doing":"y"}`, true); code != http.StatusNotFound || !strings.Contains(body, "no list for boss-nope") {
+		t.Errorf("❌ page doing under an unknown boss: %d %s, want 404", code, body)
 	}
 
 	// A closed boss's list that can't be read is no missing list: not done (500), not 404

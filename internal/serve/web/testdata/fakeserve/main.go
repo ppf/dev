@@ -301,7 +301,7 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// same reports seen (JSON, null for none) the item's stored value v.
+// same reports whether seen (JSON, null for none) equals the item's stored value v.
 func same(seen json.RawMessage, v any) bool {
 	stored, _ := json.Marshal(v)
 	var a, b any

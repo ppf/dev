@@ -85,8 +85,8 @@ func TestTodoAddPartOf(t *testing.T) {
 	}
 }
 
-// The page's doing: no list and no session is 404, an item not the user's or changed since the page read it 409; no
-// tmux server reached.
+// The page's doing: no list whose closed lists weren't read (no tmux under test) is no 404, an item not the user's or
+// changed since the page read it 409; no tmux server reached. A missing list's 404: the integration test.
 func TestPageDoing(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
@@ -95,8 +95,8 @@ func TestPageDoing(t *testing.T) {
 	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
 	run(t, "", "todo", "add", "mine")
 	var ref serve.Refused
-	if err := pageDoing(io.Discard)("boss-nope", 1, "x", todo.Seen{}, "y", false); !errors.As(err, &ref) || ref.Code != http.StatusNotFound {
-		t.Errorf("no list: %v, want 404", err)
+	if err := pageDoing(io.Discard)("boss-nope", 1, "x", todo.Seen{}, "y", false); err == nil || errors.As(err, &ref) {
+		t.Errorf("no list, closed lists not read: %v, want an error, not a refusal", err)
 	}
 	if err := pageDoing(io.Discard)("local_boss", 1, "theirs", todo.Seen{}, "y", false); !errors.As(err, &ref) || ref.Code != http.StatusConflict || !strings.Contains(err.Error(), "not the user's") {
 		t.Errorf("not the user's: %v, want 409", err)

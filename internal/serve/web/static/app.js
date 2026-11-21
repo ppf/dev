@@ -355,10 +355,10 @@ const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true, seen: 
 const ACTS = { tick, start, doing: onIt, stop: offIt };
 
 // leave closes item k's sheet with note, when it is still the one shown, and reads the board again; a drop's note
-// shows by the drop (move).
+// move shows at the foot of the screen.
 function leave(k, note) {
   if (state.moves[k]) {
-    // shown by the drop
+    // move shows it at the foot
   } else if (state.shown?.k === k) {
     state.shown = null;
     go('#/', note);

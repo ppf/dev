@@ -782,17 +782,15 @@ func listStore(boss string, adopt bool, stderr io.Writer) (s todo.Store, closed 
 	}
 	gone, ok, cerr := todo.ClosedStore(tmux.New(), boss, time.Now())
 	switch {
-	case cerr != nil && ok:
-		return s, false, errors.Join(err, unreadList{cerr})
 	case cerr != nil:
-		return s, false, errors.Join(err, cerr)
+		return s, false, errors.Join(err, unreadList{cerr})
 	case !ok:
 		return s, false, err
 	}
 	return gone, true, nil
 }
 
-// unreadList is listStore's error for a closed boss's list found but not read: not a missing list.
+// unreadList is listStore's error for closed lists not read: not a missing list.
 type unreadList struct{ error }
 
 func (e unreadList) Unwrap() error { return e.error }

@@ -46,6 +46,7 @@ func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 		switch {
 		case err != nil && !errors.As(err, new(unreadList)) && !running(tmux.New(), boss):
 			// A closed boss's list leaves once its last item is ticked: that and an unknown boss look the same
+			log.Printf("dev serve: %v", err)
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		case err != nil:
 			return err
@@ -71,6 +72,7 @@ func pageDoing(stderr io.Writer) func(boss string, id int, text string, seen tod
 		_, err := userDoing(c, boss, id, text, &seen, doing, stop, stderr)
 		switch {
 		case errors.As(err, new(noList)) && !errors.As(err, new(unreadList)) && !running(c, boss):
+			log.Printf("dev serve: %v", err)
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		case errors.As(err, new(notTold)):
 			log.Printf("dev serve: %v", err)
