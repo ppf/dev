@@ -94,7 +94,8 @@ func (w *watch) etag(was string) string {
 }
 
 // events is GET /v1/events, a server-sent event stream: "board" with the board's ETag at once and on each change,
-// "ping" every beatEvery. It ends when the session is gone or the server shuts down (the request's context).
+// "ping" every beatEvery. It ends when the Guard refuses it (a session gone) or the server shuts down (the request's
+// context).
 func (cfg Config) events(wt *watch) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := http.NewResponseController(w)

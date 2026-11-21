@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -217,8 +218,10 @@ func TestBoardCounts(t *testing.T) {
 // On a loopback bind (Guard SameOrigin) the board, its stream and the POSTs need no session, but refuse what a browser
 // marks as another site's, reads too; the Host check still holds.
 func TestSameOrigin(t *testing.T) {
+	fast(t, 10*time.Millisecond, time.Second)
 	var done []string
-	h := Handler(Config{Version: "v1", Now: time.Now, Lists: func() (json.RawMessage, error) { return json.RawMessage(lists), nil },
+	var reads atomic.Int32
+	h := Handler(Config{Version: "v1", Now: time.Now, Lists: func() (json.RawMessage, error) { reads.Add(1); return json.RawMessage(lists), nil },
 		Done:  func(_ string, _ int, text string) error { done = append(done, text); return nil },
 		Guard: SameOrigin, Pair: http.NotFoundHandler()})
 	req := func(method, path string, header ...string) *httptest.ResponseRecorder {
@@ -261,8 +264,12 @@ func TestSameOrigin(t *testing.T) {
 	if h.ServeHTTP(w, r); w.Code != http.StatusMisdirectedRequest {
 		t.Errorf("Host evil.example: %d, want 421", w.Code)
 	}
-	fast(t, 10*time.Millisecond, time.Second)
-	if tag, ok := open(t, server(t, h).URL).next("board", time.Second); !ok || tag == "" {
+	s := open(t, server(t, h).URL)
+	if tag, ok := s.next("board", time.Second); !ok || tag == "" {
 		t.Errorf("events with no session: %q %v, want the board's ETag", tag, ok)
+	}
+	_ = s.res.Body.Close()
+	if !settles(&reads, 2*time.Second) { // the watch has stopped before fast's cleanup puts the timers back
+		t.Fatal("the board is still read with no stream open")
 	}
 }

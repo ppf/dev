@@ -167,10 +167,16 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 	return cmd
 }
 
-// unpairedBoard errors when the dev serve on loopback ap still wants a session for its board: one from before loopback
-// needed no pairing, which a reload hasn't replaced.
+// unpairedBoard errors when the dev serve on loopback ap still wants a session: one from before loopback needed no
+// pairing, which a reload hasn't replaced. An empty tick asks it without a board read: its Guard answers 401 before
+// the body's 400.
 func unpairedBoard(ap netip.AddrPort) error {
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + ap.String() + "/v1/board")
+	req, err := http.NewRequest(http.MethodPost, "http://"+ap.String()+"/v1/done", strings.NewReader(`{}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Dev-Page", "1")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return fmt.Errorf("dev serve on %s: %w", ap, err)
 	}
