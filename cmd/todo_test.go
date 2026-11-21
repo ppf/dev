@@ -263,8 +263,10 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
 		t.Errorf("local_old after a refused add: %q, want it not taken over", got)
 	}
-	if got := run(t, "", "todo"); got != "1\t☐\told open item\n" {
-		t.Errorf("first dev todo: %q, want local_old's list", got)
+	// One its trial accepts is written once, on the list taken over
+	run(t, "", "todo", "add", "new")
+	if got := run(t, "", "todo"); got != "1\t☐\told open item\n2\t☐\tnew\n" {
+		t.Errorf("first dev todo: %q, want local_old's list and the new item once", got)
 	}
 	if got := run(t, "", "todo", "--boss", "local_old"); got != "" {
 		t.Errorf("local_old after the take-over: %q, want empty", got)

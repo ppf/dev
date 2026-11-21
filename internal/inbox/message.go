@@ -378,7 +378,9 @@ func (b Boss) Send(c *tmux.Client, clk control.Clock, n Note) (queued bool, err 
 	if _, err := b.Box.Add(n, clk.Now()); err != nil {
 		return false, err
 	}
-	return true, Deliver(c, clk, b)
+	// A failed lookup keeps its note, and isn't this send's failure: Watch and the hooks report it
+	_ = b.Box.WithdrawTicked(listItem(c, clk.Now()))
+	return true, deliver(c, clk, b)
 }
 
 // Answer is the note telling a boss the user answered its item id, question text, with answer.
@@ -489,7 +491,7 @@ func doingKey(n Note) (boss string, id int, ok bool) {
 	return rest[:i], id, err == nil
 }
 
-// listItem is WithdrawTicked's lookup on c's server: open item id of boss's list, live or closed.
+// listItem is WithdrawTicked's lookup on c's server: open item id of boss's list, live or closed (no session).
 func listItem(c *tmux.Client, now time.Time) func(string, int) (string, bool, error) {
 	return func(boss string, id int) (string, bool, error) {
 		var s todo.Store
@@ -497,6 +499,9 @@ func listItem(c *tmux.Client, now time.Time) func(string, int) (string, bool, er
 			if s, err = todo.ForPane(c, pane); err != nil {
 				return "", false, err
 			}
+		} else if _, missing := c.Run("has-session", "-t", tmux.SessionTarget(boss)); missing == nil {
+			// Live but not read: not a closed boss's list
+			return "", false, err
 		} else {
 			closed, ok, err := todo.ClosedStore(c, boss, now)
 			if err != nil || !ok {

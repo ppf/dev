@@ -148,8 +148,8 @@ func Own(on string, session *Session, boss string) bool {
 	return on == "" || session == nil && boss != "" && on != Boss && strings.EqualFold(on, boss)
 }
 
-// linked is when dev todo add began linking --on to a worker session (v0.57.0): an unlinked item added since is a
-// person's, never a worker started later under that name.
+// linked is a cut-off just after dev todo add began linking --on to a worker session (v0.57.0): an unlinked item added
+// since is a person's, never a worker started later under that name.
 var linked = time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC).Unix()
 
 // worker is the live worker it is on: its linked session by id (a desktop app session's ID, else a tmux session's

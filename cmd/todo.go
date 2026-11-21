@@ -878,7 +878,7 @@ func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 }
 
 // tryAdoptable runs try on a trial (todo.Store.Trial) of the earlier list a desktop app boss's first write takes over
-// (desktopTodo), so a refused write takes over nothing; nil when it is a tmux boss's list, or none is taken over. One
+// (desktopTodo), so a refused write takes over nothing; nil for --boss or a tmux boss's list, or none taken over. One
 // the lookup can't tell is left to desktopTodo, which says why.
 func tryAdoptable(boss string, try func(todo.Store) error) error {
 	pane, id, err := todoBoss(boss)
