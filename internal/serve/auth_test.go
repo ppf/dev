@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -253,5 +254,20 @@ func TestUnpair(t *testing.T) {
 	}
 	if got, err := Unpair(s.dir, ""); err != nil || strings.Join(got, ",") != "pad" || board(pad) != 401 {
 		t.Errorf("unpair all: %v %v", got, err)
+	}
+}
+
+func TestServed(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(Handler(Config{Version: "v0.72.0", Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler()}))
+	defer srv.Close()
+	ap := netip.MustParseAddrPort(srv.Listener.Addr().String())
+	forget, err := RecordAddr(dir, ap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forget()
+	if got, v, err := Served(dir); err != nil || got != ap || v != "v0.72.0" {
+		t.Fatalf("got %v %q %v", got, v, err)
 	}
 }

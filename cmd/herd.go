@@ -18,7 +18,7 @@ import (
 )
 
 func newHerdCmd() *cobra.Command {
-	var previews, background, adopt bool
+	var previews, background, adopt, noServe bool
 	var timeout time.Duration
 	var start agent.Start
 	cmd := &cobra.Command{
@@ -37,7 +37,10 @@ with); it keeps them when dev restarts it.
 dev runs in, prints its name and waits until its Claude registered (as dev agent start does); an existing
 boss is only printed. With --adopt, run in the manager's pane, an existing boss no live session started becomes
 the manager's as if it had started it: its news goes up to the manager, it shows in the manager's --mine list and
-previews, and it keeps its workers and list.`,
+previews, and it keeps its workers and list.
+Each one (not --adopt) starts dev serve, the phone page, detached with --awake=false when none answers: on its
+default address, or DEV_SERVE_ADDR; only on tmux's default server unless DEV_SERVE_ADDR is set, not when its launchd
+agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is one ⚠ line; the boss opens anyway.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,6 +62,7 @@ previews, and it keeps its workers and list.`,
 				return errors.New("--background needs a project: dev boss <project> --background")
 			}
 			if len(args) == 0 {
+				autoServe(cmd.ErrOrStderr(), noServe)
 				return openManager(cmd, c, start, timeout)
 			}
 			projects, _, err := loadProjects(cmd)
@@ -72,6 +76,9 @@ previews, and it keeps its workers and list.`,
 			dir, err := p.Dir()
 			if err != nil {
 				return err
+			}
+			if !adopt {
+				autoServe(cmd.ErrOrStderr(), noServe)
 			}
 			// A detached boss skips the first-run restore, which switches clients (as dev agent start does)
 			if background {
@@ -88,6 +95,7 @@ previews, and it keeps its workers and list.`,
 	_ = cmd.Flags().MarkHidden("previews")
 	cmd.Flags().BoolVar(&background, "background", false, "create the boss detached and wait until its Claude registered")
 	cmd.Flags().BoolVar(&adopt, "adopt", false, "with --background in the manager's pane: make an existing boss no live session started the manager's")
+	cmd.Flags().BoolVar(&noServe, "no-serve", false, "don't start dev serve (also DEV_NO_SERVE=1)")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background or no terminal, give up when no Claude registered within this")
 	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd

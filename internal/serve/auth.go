@@ -106,25 +106,35 @@ func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
 
 // ServedAddr is the address the running dev serve recorded in dir; an error when none runs (no record, or nothing answers /v1/health there).
 func ServedAddr(dir string) (netip.AddrPort, error) {
+	ap, _, err := Served(dir)
+	return ap, err
+}
+
+// Served is ServedAddr with the version its /v1/health names.
+func Served(dir string) (netip.AddrPort, string, error) {
 	var s string
 	if err := readFile(dir, addrFile, &s); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return netip.AddrPort{}, errors.New("dev serve is not running: start it first (a dev serve started before this version must be restarted)")
+			return netip.AddrPort{}, "", errors.New("dev serve is not running: start it first (a dev serve started before this version must be restarted)")
 		}
-		return netip.AddrPort{}, err
+		return netip.AddrPort{}, "", err
 	}
 	ap, err := netip.ParseAddrPort(s)
 	if err != nil {
-		return ap, fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
+		return ap, "", fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
 	}
+	var health struct{ Version string }
 	resp, err := (&http.Client{Timeout: time.Second}).Get("http://" + s + "/v1/health")
 	if err == nil {
-		_ = resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode == http.StatusOK {
+			_ = json.NewDecoder(resp.Body).Decode(&health)
+		}
 	}
 	if err != nil || resp.StatusCode != http.StatusOK {
-		return ap, fmt.Errorf("dev serve is not running: it does not answer on %s", s)
+		return ap, "", fmt.Errorf("dev serve is not running: it does not answer on %s", s)
 	}
-	return ap, nil
+	return ap, health.Version, nil
 }
 
 // Unpair drops the session of device, or every session when device is "", and returns the devices dropped.
