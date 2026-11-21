@@ -31,27 +31,28 @@ func blockBoard(t *testing.T) Model {
 	return m
 }
 
-// The block: whose items and the split count in its header, then the groups in sidebar.Groups order, each row's
-// status word at its right edge naming whom it's on, Waiting on others folded to its count and whom it waits on.
+// The block: whose items and the counts in its header, then Needs you and the columns but Done in board order, each
+// row labelled by its assignee, a worker's state at its right edge, Waiting folded to its count and whom it waits on.
 func TestBlockGroups(t *testing.T) {
 	m := blockBoard(t)
 	lines := plain(m.render())
-	if got := strings.TrimRight(lines[0], " "); got != " TO DO · all bosses   2 need you · 1 to decide · 2 yours · n" {
+	if got := strings.TrimRight(lines[0], " "); got != " TO DO · all bosses   3 need you · 4 mine · n" {
 		t.Errorf("header = %q", got)
 	}
 	var titles []string
 	for _, l := range lines {
-		for _, title := range []string{"Needs you", "To decide", "Yours", "In progress", "Waiting on others", "Check", "Boss closed"} {
+		for _, title := range []string{"Needs you", "To do", "In progress", "Waiting", "Review", "Done"} {
 			if strings.HasPrefix(strings.TrimLeft(l, " ▸▾"), title+"  ") {
 				titles = append(titles, title)
 			}
 		}
 	}
-	if want := []string{"Needs you", "To decide", "Yours", "In progress", "Waiting on others", "Boss closed"}; !slices.Equal(titles, want) {
+	if want := []string{"Needs you", "To do", "In progress", "Waiting"}; !slices.Equal(titles, want) {
 		t.Errorf("titles %q, want %q", titles, want)
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"Deploy the cache fix", "working · noc-pr", " ▸ Waiting on others  3   Carl · reviewers ×2", "Ask Mara for the API key", "boss closed"} {
+	for _, want := range []string{"noc › pr       Deploy the cache fix", "working", " ▸ Waiting  3   Carl · reviewers ×2",
+		"kite › you     Ask Mara for the API key", "boss closed", "noc › you      Release now?"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
 		}
@@ -60,16 +61,19 @@ func TestBlockGroups(t *testing.T) {
 		t.Errorf("Waiting on others shows its rows while folded:\n%s", all)
 	}
 	head := m.render()[0]
-	if !strings.Contains(head, sidebar.Red+"1 to decide") || strings.Contains(head, sidebar.Red+"2 yours") {
-		t.Errorf("only the decide number red: %q", head)
+	if !strings.Contains(head, sidebar.Red+"3 need you") || strings.Contains(head, sidebar.Red+"4 mine") {
+		t.Errorf("only the need you number red: %q", head)
+	}
+	if strings.Contains(all, "boss closed · boss closed") {
+		t.Errorf("boss closed said twice:\n%s", all)
 	}
 	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Deploy the cache fix") })
-	if !strings.Contains(m.render()[i], sectionColours[workingSection]+"working · noc-pr") {
+	if !strings.Contains(m.render()[i], sectionColours[workingSection]+"working") {
 		t.Errorf("status word in the working colour: %q", m.render()[i])
 	}
 }
 
-// ⏎ or a click on Waiting on others' row opens it under its row, ⏎ again folds it; its rows wait on whom they name.
+// ⏎ or a click on Waiting's row opens it under its row, ⏎ again folds it; its rows wait on whom they name.
 func TestBlockFoldWaiting(t *testing.T) {
 	m := blockBoard(t)
 	m.height = 60
@@ -80,7 +84,7 @@ func TestBlockFoldWaiting(t *testing.T) {
 	}
 	m, _ = keys(m, "enter")
 	all := strings.Join(plain(m.render()), "\n")
-	if !m.waitOpen || !strings.Contains(all, " ▾ Waiting on others  3") || !strings.Contains(all, "Second review A") || !strings.Contains(all, "waiting · reviewers") {
+	if !m.waitOpen || !strings.Contains(all, " ▾ Waiting  3") || !strings.Contains(all, "Second review A") || !strings.Contains(all, "waiting for reviewers") {
 		t.Fatalf("open:\n%s", all)
 	}
 	m, _ = keys(m, "enter")
@@ -88,7 +92,7 @@ func TestBlockFoldWaiting(t *testing.T) {
 		t.Error("⏎ again didn't fold it")
 	}
 	lines := plain(m.render())
-	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "Waiting on others") })
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "▸ Waiting") })
 	next, _ := m.Update(tea.MouseMsg{X: 4, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if m = next.(Model); !m.waitOpen {
 		t.Error("a click didn't open it")
@@ -116,7 +120,7 @@ func TestBlockNarrow(t *testing.T) {
 
 // Many items keep the block in half the pane: each group shows as many rows as the others, "+N more" for the rest,
 // every group's title on screen; the selected row stays shown, expanded with its action words (no Go to boss on the
-// board's own list: its boss is here; this one is the manager's, so no Start either).
+// board's own list: its boss is here; the user's own on the manager's list starts, as on the web board).
 func TestBlockBudget(t *testing.T) {
 	m := blockBoard(t)
 	for i := range 20 {
@@ -130,7 +134,7 @@ func TestBlockBudget(t *testing.T) {
 	if len(block) > gh/2 {
 		t.Errorf("block %d lines in %d rows:\n%s", len(block), gh, all)
 	}
-	for _, want := range []string{"Yours  22", "In progress  1", "Boss closed  1", "more"} {
+	for _, want := range []string{"To do  24", "In progress  1", "Waiting  3", "more"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
 		}
@@ -143,7 +147,7 @@ func TestBlockBudget(t *testing.T) {
 	}
 	block, _, _ = m.needBlock(gh)
 	all = strings.Join(plain(block), "\n")
-	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Tick      d tick · space open · esc back") {
+	if !strings.Contains(all, "Chore 19") || !strings.Contains(all, "Start   Tick      s start · d tick · space open · esc back") {
 		t.Errorf("selected row not shown with its actions:\n%s", all)
 	}
 }
@@ -181,7 +185,7 @@ func TestBlockActionClick(t *testing.T) {
 	}
 }
 
-// An item an older dev filed on its own boss's name is the user's: Yours, tickable with d.
+// An item an older dev filed on its own boss's name is the user's: mine, tickable with d.
 func TestBlockOwnName(t *testing.T) {
 	m := blockBoard(t)
 	m.snap.asks[0].Items = append(m.snap.asks[0].Items, todo.Shown{ID: 9, Text: "Filed on its boss", On: "boss-noc"})
@@ -191,8 +195,8 @@ func TestBlockOwnName(t *testing.T) {
 	if i < 0 || rows[i].Kind != sidebar.NeedPlain || rows[i].Status != sidebar.StatusYours {
 		t.Fatalf("row %+v, want the user's own", rows)
 	}
-	if c := m.tally(); c.ToDo != 3 {
-		t.Errorf("tally %+v, want 3 yours", c)
+	if c := m.tally(); c.Mine != 5 {
+		t.Errorf("tally %+v, want 5 mine", c)
 	}
 	var ticked [][2]any
 	m.tickList = func(boss string, id int, text string) (string, error) {
@@ -283,18 +287,18 @@ func TestBlockShortFirstRow(t *testing.T) {
 // A header too wide keeps its counts and key in, leaving out whose items.
 func TestBlockHeadNarrow(t *testing.T) {
 	m := blockBoard(t)
-	m.width = 50
-	if got := strings.TrimRight(plain(m.render())[0], " "); got != " TO DO   2 need you · 1 to decide · 2 yours · n" {
+	m.width = 40
+	if got := strings.TrimRight(plain(m.render())[0], " "); got != " TO DO   3 need you · 4 mine · n" {
 		t.Errorf("header = %q", got)
 	}
 }
 
-// An item on a worker keeps a check its status doesn't say: "working · noc-pr · ⚠ unchanged 3d".
+// An item on a worker keeps a check its state doesn't say: "working · ⚠ unchanged 3d".
 func TestBlockOnCheck(t *testing.T) {
 	m := blockBoard(t)
 	m.snap.asks[0].Items[2].Check = &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: m.clk.Now().Add(-72 * time.Hour).Unix()}
 	m.snap.rollUp()
-	if all := strings.Join(plain(m.render()), "\n"); !strings.Contains(all, "working · noc-pr · ⚠ unchanged 3d") {
+	if all := strings.Join(plain(m.render()), "\n"); !strings.Contains(all, "working · ⚠ unchanged 3d") {
 		t.Errorf("check missing:\n%s", all)
 	}
 }
@@ -306,7 +310,7 @@ func TestBlockShortSweep(t *testing.T) {
 	count := func(block []string) (shown, more int) {
 		for _, l := range plain(block) {
 			if strings.HasPrefix(l, " ● ") || strings.HasPrefix(l, " ? ") || strings.HasPrefix(l, " ☐ ") || strings.HasPrefix(l, " ○ ") ||
-				strings.HasPrefix(l, " ▸ Waiting") {
+				strings.HasPrefix(l, " · ") || strings.HasPrefix(l, " ▸ Waiting") {
 				shown++
 			}
 			if f := strings.Fields(l); len(f) == 2 && f[1] == "more" {
@@ -329,7 +333,7 @@ func TestBlockShortSweep(t *testing.T) {
 		}
 		// The fold row stands for its rows
 		shown, more := count(block)
-		if strings.Contains(all, "Waiting on others") {
+		if strings.Contains(all, "▸ Waiting") {
 			shown += len(rows[slices.IndexFunc(rows, func(r needRow) bool { return r.fold != nil })].fold) - 1
 		}
 		if shown+more != total {
@@ -341,7 +345,7 @@ func TestBlockShortSweep(t *testing.T) {
 			block, _, _ := m.needBlock(gh)
 			text := r.Text
 			if r.fold != nil {
-				text = "Waiting on others"
+				text = "Waiting"
 			}
 			if all := strings.Join(plain(block), "\n"); !strings.Contains(all, ansi.Truncate(text, 10, "")) {
 				t.Errorf("gh %d: selected row %d %q hidden:\n%s", gh, i, text, all)
@@ -350,8 +354,9 @@ func TestBlockShortSweep(t *testing.T) {
 	}
 }
 
-// s on the user's own row asks for it to be started; the row then shows under Starting, whom it went to and since
-// when, "start not picked up" once late, with no Start word; a closed boss's row offers Start only while the manager runs.
+// s on a To do card asks for it to be started; the row then shows In progress, the boss's, whom it went to and since
+// when, Tick kept for the user's own, Start back once late ("start not picked up"); a closed boss's row offers Start
+// only while the manager runs; Review and the manager's own cards don't start.
 func TestBlockStart(t *testing.T) {
 	m := blockBoard(t)
 	var started [][2]any
@@ -375,7 +380,7 @@ func TestBlockStart(t *testing.T) {
 	for _, tt := range []struct {
 		late       bool
 		want, acts string
-	}{{false, "sent to boss-noc · 2m", "Start   Tick   Go to boss      s start"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
+	}{{false, "sent to boss-noc · 2m", "Tick   Go to boss      d tick"}, {true, "start not picked up", "Start   Tick   Go to boss      s start"}} {
 		m := blockBoard(t)
 		for j, it := range m.snap.asks[0].Items {
 			if it.Text == "DM David" {
@@ -386,37 +391,44 @@ func TestBlockStart(t *testing.T) {
 		m.snap.rollUp()
 		rows := m.needRows()
 		i := slices.IndexFunc(rows, func(r needRow) bool { return r.Text == "DM David" })
-		if rows[i].Status != sidebar.StatusStarting || rows[i].Kind != sidebar.NeedPlain {
+		if rows[i].Status != sidebar.StatusStarting || rows[i].Column != sidebar.ColumnProgress || !rows[i].Tickable() {
 			t.Fatalf("row %+v, want the user's own, starting", rows[i])
 		}
-		if c := m.tally(); c.ToDo != 1 {
-			t.Errorf("tally %+v, want 1 yours: a starting item isn't", c)
+		if c := m.tally(); c.Mine != 3 {
+			t.Errorf("tally %+v, want 3 mine: a starting item is the boss's", c)
 		}
 		m, _ = keys(m, "n")
 		for range i {
 			m, _ = keys(m, "j")
 		}
 		all := strings.Join(plain(m.render()), "\n")
-		if !strings.Contains(all, "Starting  1") || !strings.Contains(all, tt.want) || !strings.Contains(all, "         "+tt.acts) {
-			t.Errorf("late %v: want Starting, %q and %q:\n%s", tt.late, tt.want, tt.acts, all)
+		if !strings.Contains(all, "In progress  2") || !strings.Contains(all, "· noc            DM David") || !strings.Contains(all, tt.want) ||
+			!strings.Contains(all, "         "+tt.acts) {
+			t.Errorf("late %v: want In progress, the boss's, %q and %q:\n%s", tt.late, tt.want, tt.acts, all)
+		}
+		if rows[i].Yours() {
+			t.Error("a starting row is in the sidebar's TO DO")
 		}
 	}
 
-	if (needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting}}).Yours() {
-		t.Error("a starting row is in the sidebar's TO DO")
-	}
 	check := rows[i]
-	check.Status = sidebar.StatusCheck
+	check.Column = sidebar.ColumnReview
 	if _, cmd := m.startNeed(check); cmd != nil {
-		t.Error("s started an item whose PR moved")
+		t.Error("s started a Review card")
 	}
 	note := rows[i]
-	note.Boss = Manager
+	note.Boss, note.Assignee = Manager, sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: Manager}
 	if acts, _ := m.actions(note); slices.ContainsFunc(acts, func(a action) bool { return a.key == "s" }) {
 		t.Errorf("manager's own note offers Start: %v", acts)
 	}
 	if _, cmd := m.startNeed(note); cmd != nil {
 		t.Error("s started the manager's own note")
+	}
+	// A boss's own To do card starts too, not only the user's
+	parked := rows[i]
+	parked.Assignee = sidebar.NeedAssignee{Kind: sidebar.AssigneeBoss, Name: "boss-noc"}
+	if acts, _ := m.actions(parked); !slices.ContainsFunc(acts, func(a action) bool { return a.key == "s" }) {
+		t.Errorf("a boss's To do card offers no Start: %v", acts)
 	}
 	closed := slices.IndexFunc(rows, func(r needRow) bool { return r.Closed })
 	m.snap.all = slices.DeleteFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == sidebar.Manager })
@@ -429,10 +441,11 @@ func TestBlockStart(t *testing.T) {
 	}
 }
 
-// A starting row names whom the start went to only where names fit, and keeps a moved PR's warning.
+// A started row names whom the start went to only where names fit, and keeps a moved PR's warning; one not the
+// user's says so too, late or not.
 func TestStartingRight(t *testing.T) {
 	now := time.Unix(1700000000, 0)
-	r := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting, StatusOn: "boss-x",
+	r := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedPlain, Status: sidebar.StatusStarting, StartedTo: "boss-x",
 		StartedAt: now.Add(-2 * time.Minute).Unix()}}
 	if got, _ := r.right(now, true); got != "sent to boss-x · 2m" {
 		t.Errorf("named = %q", got)
@@ -440,5 +453,58 @@ func TestStartingRight(t *testing.T) {
 	r.Check = &sidebar.Check{Kind: sidebar.CheckMerged, PR: 18, Since: now.Unix()}
 	if got, _ := r.right(now, false); !strings.HasPrefix(got, "sent · 2m · ⚠ ") {
 		t.Errorf("narrow, PR moved = %q", got)
+	}
+	parked := needRow{NeedRow: sidebar.NeedRow{Kind: sidebar.NeedOn, Status: sidebar.StatusIdle, StatusOn: "boss-x", StartedTo: "boss-x",
+		StartedAt: now.Add(-12 * time.Minute).Unix(), StartLate: true}}
+	if got, colour := parked.right(now, true); got != "start not picked up" || colour != sidebar.Red {
+		t.Errorf("a boss's late start = %q", got)
+	}
+}
+
+// Every list row sits in its item's column as the model placed it (todo.Placement, set by the refresh as dev todo
+// --all --json sets it): the own list's, a boss's and a closed boss's alike; a boss's own item is the boss's, a moved
+// PR's in Review, the user's doing in In progress with its doing text, a ticked one in none.
+func TestBlockByColumn(t *testing.T) {
+	m := blockBoard(t)
+	now := m.clk.Now()
+	m.snap.todo.Items = append(m.snap.todo.Items, todo.Shown{ID: 7, Text: "Parked", On: todo.Boss},
+		todo.Shown{ID: 8, Text: "Ticked", Done: true})
+	m.snap.asks[0].Items = append(m.snap.asks[0].Items,
+		todo.Shown{ID: 9, Text: "Merged", Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 4, Since: now.Unix()}},
+		todo.Shown{ID: 10, Text: "On it", Doing: &todo.Doing{Text: "drafting", At: now.Unix()}, PartOf: 2})
+	m.snap.rollUp()
+	placed := map[string]todo.Shown{}
+	for _, l := range append([]todo.BossList{{Boss: m.snap.name, List: m.snap.todo}}, m.snap.asks...) {
+		for _, it := range l.Items {
+			placed[l.Boss+"#"+strconv.Itoa(it.ID)] = it
+		}
+	}
+	m.waitOpen = true
+	n := 0
+	for _, r := range m.needRows() {
+		if r.Boss == "" || r.fold != nil {
+			continue
+		}
+		n++
+		it := placed[r.Boss+"#"+strconv.Itoa(r.ID)]
+		if it.Column == "" || r.Column != it.Column || r.Group() != slices.Index(sidebar.Columns, it.Column) || r.Assignee.Kind != it.Assignee.Kind {
+			t.Errorf("%s #%d %q: row %s/%s, item %s/%s", r.Boss, r.ID, r.Text, r.Column, r.Assignee.Kind, it.Column, it.Assignee.Kind)
+		}
+		if r.Text == "Ticked" {
+			t.Error("a ticked item shown")
+		}
+	}
+	if n != 11 {
+		t.Errorf("%d list rows, want 11", n)
+	}
+	m.height = 60
+	all := strings.Join(plain(m.render()), "\n")
+	for _, want := range []string{"Review  1", "· manager        Parked", "On it  ▸ drafting", "⇄ #2"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("%q missing:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "\n Done  ") {
+		t.Errorf("a Done group:\n%s", all)
 	}
 }

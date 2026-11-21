@@ -798,8 +798,8 @@ func TestViewManagerBossSameGroup(t *testing.T) {
 func TestWorkerlessBossRollLine(t *testing.T) {
 	sessions := []Session{{Name: "boss-solo", Group: "dev", ID: "$1", Boss: true, Agent: "Claude", State: "idle"}}
 	m := Model{snap: snapshot{width: 40, height: 20, current: "x", sessions: sessions}, needs: []NeedList{{Boss: "boss-solo", Items: []NeedItem{
-		{ID: 1, Text: "Merge?", Options: []string{"Merge", "Wait"}, Status: StatusDecide},
-		{ID: 2, Text: "Call Vince", Status: StatusYours},
+		{ID: 1, Text: "Merge?", Options: []string{"Merge", "Wait"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true},
+		{ID: 2, Text: "Call Vince", Status: StatusYours, Column: ColumnTodo, Assignee: you},
 	}}}}
 	lines := m.render().lines
 	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(ansi.Strip(l), "1 decide · 1 to do") })

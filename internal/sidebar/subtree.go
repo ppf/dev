@@ -65,10 +65,11 @@ type ListCount struct {
 	Closed          bool // its boss session is gone: the manager's roll-up takes it (its items count in none, as TO DO's header has it)
 }
 
-// Add counts an open item by its status: none (on someone whose workers weren't read) is on someone.
-func (c *ListCount) Add(done bool, status string) {
-	switch {
-	case done, status == StatusCheck, status == StatusBossClosed:
+// Add counts an open item by its status: none (on someone whose workers weren't read) is on someone; the boss's own
+// (on boss: todo.Boss) on no one else.
+func (c *ListCount) Add(it NeedItem) {
+	switch status := it.Status; {
+	case it.Done, status == StatusCheck, status == StatusBossClosed, it.On == "boss":
 	case status == StatusDecide:
 		c.Asks++
 	case status == StatusYours:
