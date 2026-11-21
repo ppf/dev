@@ -213,3 +213,56 @@ func TestBoardCounts(t *testing.T) {
 		t.Errorf("counts %+v, want %+v", b.Counts, want)
 	}
 }
+
+// On a loopback bind (Guard SameOrigin) the board, its stream and the POSTs need no session, but refuse what a browser
+// marks as another site's, reads too; the Host check still holds.
+func TestSameOrigin(t *testing.T) {
+	var done []string
+	h := Handler(Config{Version: "v1", Now: time.Now, Lists: func() (json.RawMessage, error) { return json.RawMessage(lists), nil },
+		Done:  func(_ string, _ int, text string) error { done = append(done, text); return nil },
+		Guard: SameOrigin, Pair: http.NotFoundHandler()})
+	req := func(method, path string, header ...string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://127.0.0.1:8417"+path, strings.NewReader(`{"boss":"b","id":1,"text":"Read"}`))
+		r.Header.Set("X-Dev-Page", "1")
+		for i := 0; i < len(header); i += 2 {
+			r.Header.Set(header[i], header[i+1])
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, hd := range [][]string{nil, {"Sec-Fetch-Site", "same-origin"}, {"Sec-Fetch-Site", "none"}, {"Origin", "http://127.0.0.1:8417"},
+		{"Sec-Fetch-Site", "same-origin", "Origin", "http://127.0.0.1:8417"}} {
+		if w := req(http.MethodGet, "/v1/board", hd...); w.Code != http.StatusOK {
+			t.Errorf("board %v: %d %s, want 200", hd, w.Code, w.Body)
+		}
+		if w := req(http.MethodPost, "/v1/done", hd...); w.Code != http.StatusOK {
+			t.Errorf("done %v: %d %s, want 200", hd, w.Code, w.Body)
+		}
+	}
+	if len(done) != 5 {
+		t.Errorf("ticks: %v, want 5", done)
+	}
+	for _, hd := range [][]string{{"Sec-Fetch-Site", "cross-site"}, {"Sec-Fetch-Site", "same-site"}, {"Origin", "https://evil.example"},
+		{"Origin", "http://127.0.0.1:3000"}, {"Origin", "null"}, {"Sec-Fetch-Site", "same-origin", "Origin", "https://evil.example"}} {
+		for _, c := range []struct{ method, path string }{{http.MethodGet, "/v1/board"}, {http.MethodGet, "/v1/events"}, {http.MethodPost, "/v1/done"},
+			{http.MethodPost, "/v1/answer"}, {http.MethodPost, "/v1/start"}, {http.MethodPost, "/v1/doing"}} {
+			if w := req(c.method, c.path, hd...); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "another site's request") {
+				t.Errorf("%s %s %v: %d %s, want 403", c.method, c.path, hd, w.Code, w.Body)
+			}
+		}
+	}
+	if len(done) != 5 {
+		t.Errorf("ticks after refusals: %v, want 5", done)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/v1/board", nil)
+	r.Host = "evil.example:8417"
+	w := httptest.NewRecorder()
+	if h.ServeHTTP(w, r); w.Code != http.StatusMisdirectedRequest {
+		t.Errorf("Host evil.example: %d, want 421", w.Code)
+	}
+	fast(t, 10*time.Millisecond, time.Second)
+	if tag, ok := open(t, server(t, h).URL).next("board", time.Second); !ok || tag == "" {
+		t.Errorf("events with no session: %q %v, want the board's ETag", tag, ok)
+	}
+}

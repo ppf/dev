@@ -35,7 +35,7 @@ type Config struct {
 	// Doing marks the user's own item id in progress with doing, or ends it (stop), while it still reads text, and tells
 	// its boss (the manager for a closed one).
 	Doing func(boss string, id int, text, doing string, stop bool) error
-	// Guard wraps every /v1 call but health and pair, on every bind: Auth.Session. Required.
+	// Guard wraps every /v1 call but health and pair: Auth.Session, or SameOrigin on a loopback bind. Required.
 	Guard func(http.Handler) http.Handler
 	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.
 	Pair http.Handler
@@ -83,6 +83,19 @@ func ipHost(next http.Handler) http.Handler {
 		}
 		if _, err := netip.ParseAddr(strings.Trim(host, "[]")); err != nil && host != "localhost" {
 			writeError(w, http.StatusMisdirectedRequest, "open the page by the Mac's IP address, as dev serve prints it")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// SameOrigin is the Guard on a loopback bind, in place of a paired session: it refuses a request, reads too, that a
+// browser marks as sent from another site (Sec-Fetch-Site) or whose Origin isn't this server.
+func SameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		site, origin := r.Header.Get("Sec-Fetch-Site"), r.Header.Get("Origin")
+		if (site != "" && site != "same-origin" && site != "none") || (origin != "" && origin != "http://"+r.Host) {
+			writeError(w, http.StatusForbidden, "another site's request: open the page at its own address")
 			return
 		}
 		next.ServeHTTP(w, r)

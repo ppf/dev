@@ -12,13 +12,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/ppf/dev/internal/serve"
 )
 
-// dev serve's /v1/board needs a paired session, also on loopback; after pairing with a code from serve.NewCode (what
-// dev serve pair writes), its lists are what dev todo --all --json prints.
+// dev serve's /v1/board on loopback needs no pairing but refuses another site's request; its lists are what dev todo
+// --all --json prints.
 func TestServeBoard(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
@@ -56,17 +53,19 @@ func TestServeBoard(t *testing.T) {
 		}
 		return resp, string(body)
 	}
-	boardReq := func(cookies ...*http.Cookie) *http.Request {
+	boardReq := func(header ...string) *http.Request {
 		req, _ := http.NewRequest(http.MethodGet, url+"v1/board", nil)
-		for _, c := range cookies {
-			req.AddCookie(c)
+		for i := 0; i < len(header); i += 2 {
+			req.Header.Set(header[i], header[i+1])
 		}
 		return req
 	}
-	if resp, body := do(boardReq()); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "isn't paired") {
-		t.Fatalf("❌ /v1/board unpaired: %d %s", resp.StatusCode, body)
+	for _, h := range [][]string{{"Origin", "https://evil.example"}, {"Sec-Fetch-Site", "cross-site"}} {
+		if resp, body := do(boardReq(h...)); resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "another site's request") {
+			t.Fatalf("❌ /v1/board with %v: %d %s, want 403", h, resp.StatusCode, body)
+		}
 	}
-	resp, body := do(boardReq(pairServe(t, url, filepath.Join(tmp, "state"))))
+	resp, body := do(boardReq("Sec-Fetch-Site", "same-origin"))
 	var board struct {
 		Lists any `json:"lists"`
 	}
@@ -109,23 +108,4 @@ func startServe(t *testing.T, s *server, env ...string) string {
 		t.Fatalf("❌ dev serve printed %q", line)
 	}
 	return url
-}
-
-// pairServe pairs a phone with the dev serve at url through a code as dev serve pair writes it under stateHome, and
-// is the session cookie.
-func pairServe(t *testing.T, url, stateHome string) *http.Cookie {
-	t.Helper()
-	code, err := serve.NewCode(filepath.Join(stateHome, "dev", "serve"), time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.Post(url+"v1/pair", "application/json", strings.NewReader(`{"code":"`+code+`","device":"phone"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
-		t.Fatalf("❌ /v1/pair: %d", resp.StatusCode)
-	}
-	return resp.Cookies()[0]
 }
