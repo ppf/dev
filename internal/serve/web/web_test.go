@@ -94,7 +94,9 @@ func TestNoDirectoryListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
+	if err := res.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("/fonts/: %d, want 404", res.StatusCode)
 	}
