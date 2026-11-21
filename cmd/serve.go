@@ -442,8 +442,8 @@ func serveReloading(parent context.Context, ln net.Listener, cfg serve.Config, o
 				return err
 			}
 			if aliveFile != nil {
-				if err := serve.KeepAcrossExec(aliveFile, true); err != nil {
-					return err
+				if kerr := serve.KeepAcrossExec(aliveFile, true); kerr != nil {
+					fmt.Fprintf(stderr, "⚠ dev serve: alive lock not kept across the reload: %v\n", kerr)
 				}
 			}
 			err = execReload(r, a)

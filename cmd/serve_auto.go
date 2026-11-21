@@ -176,8 +176,8 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		env = append(env, k+"="+v)
 	}
-	// Off the default server (DEV_SERVE_ADDR set) it reads the boss's one: its socket, no session of its own
-	if t := s.getenv("TMUX"); t != "" && !s.defaultServer() {
+	// It reads the boss's tmux server (TMUX before TMUX_TMPDIR, as tmux does): its socket, no session of its own
+	if t := s.getenv("TMUX"); t != "" {
 		socket, _, _ := strings.Cut(t, ",")
 		env = append(env, "TMUX="+socket+",0,-1")
 	}

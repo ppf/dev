@@ -68,8 +68,8 @@ func TestAutoServeStarts(t *testing.T) {
 	if want := [][]string{{"/bin/dev", "serve", "--awake=false", "--addr", "127.0.0.1:18417"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
 		t.Fatalf("spawned %q, want %q", f.spawned, want)
 	}
-	if !slices.Equal(f.env, []string{"PATH=/bin"}) {
-		t.Fatalf("env %q: want PATH only", f.env)
+	if !slices.Equal(f.env, []string{"PATH=/bin", "TMUX=/private/tmp/tmux-501/default,0,-1"}) {
+		t.Fatalf("env %q: want PATH and the boss's socket only", f.env)
 	}
 	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (pair this browser: dev serve pair)\n" {
 		t.Fatalf("got %q", got)
