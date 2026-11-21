@@ -155,7 +155,8 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		return err
 	}
-	want, err := netip.ParseAddrPort(addr) // "": dev serve's own default, any address
+	want, err := netip.ParseAddrPort(addr)                      // "": dev serve's own default, any address
+	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
 	if err == nil && want.Port() == 0 {
 		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")
 	}
@@ -213,21 +214,21 @@ func (s *starter) ensure(stderr io.Writer) error {
 	ended := false
 	for time.Now().Before(deadline) {
 		// After an exit too: a second dev boss's dev serve may have taken the port first
-		if live, err := served(300 * time.Millisecond); err == nil {
-			if i := slices.IndexFunc(live, func(r serve.Running) bool { return addr == "" || r.Addr == want }); i >= 0 {
-				if !ended {
-					ap := live[i].Addr
-					hint := "pair a phone: dev serve pair"
-					if ap.Addr().IsLoopback() {
-						hint = "this Mac only, no pairing needed"
-					}
-					fmt.Fprintf(stderr, "dev serve started: http://%s/ (%s)\n", ap, hint)
-					if _, kind, err := serve.Check(ap.String()); err == nil && kind == serve.LAN {
-						fmt.Fprintln(stderr, "⚠ "+serve.LANNotice)
-					}
+		live, err := served(300 * time.Millisecond)
+		i := slices.IndexFunc(live, func(r serve.Running) bool { return addr == "" || r.Addr == want })
+		if err == nil && i >= 0 {
+			if !ended {
+				ap := live[i].Addr
+				hint := "pair a phone: dev serve pair"
+				if ap.Addr().IsLoopback() {
+					hint = "this Mac only, no pairing needed"
 				}
-				return nil
+				fmt.Fprintf(stderr, "dev serve started: http://%s/ (%s)\n", ap, hint)
+				if _, kind, err := serve.Check(ap.String()); err == nil && kind == serve.LAN {
+					fmt.Fprintln(stderr, "⚠ "+serve.LANNotice)
+				}
 			}
+			return nil
 		}
 		select {
 		case <-exited:

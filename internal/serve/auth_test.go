@@ -346,7 +346,6 @@ func addrsOf(rs []Running) []netip.AddrPort {
 	return aps
 }
 
-// deadPid is the pid of a process that has ended.
 func deadPid(t *testing.T) int {
 	t.Helper()
 	c := exec.Command("true")
@@ -392,7 +391,7 @@ func TestServedMany(t *testing.T) {
 		b.srv.Close() // no forget
 		want(t, dir, a)
 		crashed := filepath.Join(dir, addrDir, b.ap.String()+".json")
-		if err := writeFile(filepath.Dir(crashed), filepath.Base(crashed), addrRecord{Addr: b.ap.String(), Pid: deadPid(t)}); err != nil {
+		if err := writeFile(filepath.Join(dir, addrDir), b.ap.String()+".json", addrRecord{Addr: b.ap.String(), Pid: deadPid(t)}); err != nil {
 			t.Fatal(err)
 		}
 		want(t, dir, a)
