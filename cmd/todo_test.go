@@ -253,11 +253,20 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	if _, _, err := execute(t, "", "todo", "add", "x", "--waiting-for", "me"); err == nil {
 		t.Error("add --waiting-for me: not refused")
 	}
+	// Refused by the list it would take over: nothing taken over
+	if _, _, err := execute(t, "", "todo", "add", "x", "--part-of", "9"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
+		t.Errorf("add --part-of 9: %v, want refused by local_old's list", err)
+	}
+	if _, _, err := execute(t, "", "todo", "add", "--replaces", "9", "--on", "me"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
+		t.Errorf("add --replaces 9: %v, want refused by local_old's list", err)
+	}
 	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
 		t.Errorf("local_old after a refused add: %q, want it not taken over", got)
 	}
-	if got := run(t, "", "todo"); got != "1\t☐\told open item\n" {
-		t.Errorf("first dev todo: %q, want local_old's list", got)
+	// One its trial accepts is written once, on the list taken over
+	run(t, "", "todo", "add", "new")
+	if got := run(t, "", "todo"); got != "1\t☐\told open item\n2\t☐\tnew\n" {
+		t.Errorf("first dev todo: %q, want local_old's list and the new item once", got)
 	}
 	if got := run(t, "", "todo", "--boss", "local_old"); got != "" {
 		t.Errorf("local_old after the take-over: %q, want empty", got)

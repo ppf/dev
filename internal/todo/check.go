@@ -375,6 +375,9 @@ func (s Store) TakeTicked(now time.Time, take func(Ticked) bool, tell func([]Tic
 // keepTold carries what old's boss was told (Nudges) over to it, which replaced it keeping its text, link and who does
 // it: a reason isn't told again; its PR's moves count from its next lookup, its age from now.
 func (s Store) keepTold(old, it Item) error {
+	if s.trial {
+		return nil
+	}
 	facts, err := s.readChecks()
 	if err != nil || facts[old.key()].Told == nil {
 		return err

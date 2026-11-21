@@ -131,7 +131,7 @@ func TestTodoDesktopStatus(t *testing.T) {
 	for text, w := range map[string]string{
 		"Fix W":        "todo {Kind:boss Name:boss Running:true} ",
 		"Run":          "progress {Kind:worker Name:Busy Running:true} ",
-		"Pick":         "progress {Kind:worker Name:Asks Running:true} ",
+		"Pick":         "progress {Kind:worker Name:Asks Running:false} ",
 		"Staging":      "waiting {Kind:boss Name:boss Running:true} Marek",
 		"Answer Vince": "todo {Kind:you Name: Running:false} ",
 		"Broken":       "progress {Kind:worker Name:local_broken Running:false} ",
