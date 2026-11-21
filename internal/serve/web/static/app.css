@@ -164,8 +164,9 @@ a { color: var(--act); }
 .card.done .ok { color: var(--s-done); font-weight: 700; flex: none; }
 .card.done .num, .card.done .age { flex: none; font-size: var(--fs-meta); color: var(--meta); white-space: nowrap; }
 .card.done .t { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; } /* whole, under its meta: no hover needed to read it */
-.card.done .pn { flex: 0 1 auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); color: var(--meta); }
-.card.done .age { margin-left: auto; } /* age and avatar at the row's end */
+.card.done .pn { flex: 0 1 auto; max-width: 50%; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); color: var(--meta); }
+.card.done .age, .card.done .av { margin-left: auto; } /* age and avatar at the row's end */
+.card.done .age + .av { margin-left: 0; }
 
 /* phone: one column per screen, a tab per column; the next peeks at the right edge */
 .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 6px calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--edge); }

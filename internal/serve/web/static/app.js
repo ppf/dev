@@ -565,21 +565,15 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// refilter draws the board for a filter just changed: on the phone a swipe under way takes its lane first, and a lane
-// the filter emptied gives way to the first drawn with cards.
+// refilter draws the board for a filter just changed; on the phone a lane the filter emptied gives way to the first drawn
+// with cards. A redraw held by a scroll under way moves no lane.
 function refilter() {
-  const before = document.querySelector('#view .lanes');
-  if (settling && before) {
-    clearTimeout(settling);
-    settling = 0;
-    laneInView(before);
-  }
+  const sig = state.sig;
   render();
   const lanes = document.querySelector('#view .lanes');
-  if (lanes && !lanes.querySelector('.lane.on .card')) {
-    const next = [...lanes.children].find(l => l.querySelector('.card'));
-    if (next) showLane(next.dataset.k, false);
-  }
+  if (state.sig === sig || !lanes || lanes.querySelector('.lane.on .card')) return;
+  const next = [...lanes.children].find(l => l.querySelector('.card'));
+  if (next) showLane(next.dataset.k, false);
 }
 
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
