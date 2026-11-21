@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ppf/dev/internal/selfreload"
 )
 
 func TestInputMove(t *testing.T) {
@@ -98,7 +100,7 @@ func inputRun(cmd tea.Cmd) tea.Msg {
 	if cmd == nil {
 		return nil
 	}
-	return cmd()
+	return selfreload.Done(cmd())
 }
 
 func TestInputMoveKeys(t *testing.T) {

@@ -113,15 +113,7 @@ type Model struct {
 	needIdx            int
 	needKey            string
 
-	// Self-reload: a held Ready waits for idle; reloadNow quits the program for Run to exec it
-	running     counter        // actions running off the update loop
-	watch       func() tea.Cmd // starts a watcher, its Ready as a readyMsg; set by run, nil in tests
-	ready       *selfreload.Ready
-	reloadNow   *selfreload.Ready
-	reloadErr   error  // a failed reload or watcher check, kept on the bottom row until the next key
-	reloadFlash string // the version a reload just brought, shown for reloadFlashFor
-	failedTo    string // the version whose exec failed last, fails times in a row
-	fails       int
+	reload selfreload.Pane // a held Ready waits for idle; Busy counts the actions running off the update loop
 }
 
 // tickMsg starts a refresh.
@@ -146,46 +138,33 @@ func newModel(c *tmux.Client, pane string) Model {
 		host = ""
 	}
 	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed, openItem: OpenItem, openBoard: OpenBoard,
-		running: newCounter(), reloadFlash: reloadedTo(selfreload.Version())}
+		reload: selfreload.NewPane(selfreload.Version())}
 }
 
 // Init starts the first refresh at once, as bash refreshed before its first render.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.refresh(), m.readNeeds(true), m.watchCmd()}
-	if m.reloadFlash != "" {
-		cmds = append(cmds, tea.Tick(reloadFlashFor, func(time.Time) tea.Msg { return flashDoneMsg{} }))
-	}
-	return tea.Batch(cmds...)
+	return tea.Batch(m.refresh(), m.readNeeds(true), m.reload.Init())
 }
 
 // Update routes refreshes to the model and input to the actions.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = selfreload.Done(msg)
+	if cmd, ok := m.reload.Update(msg); ok {
+		if quit := m.reload.Reload(m.idle()); quit != nil {
+			return m, quit
+		}
+		return m, cmd
+	}
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, m.refresh()
 	case refreshMsg:
 		m = m.apply(msg)
 		m.fixNeeds()
-		m, quit := m.maybeReload()
-		if quit != nil {
+		if quit := m.reload.Reload(m.idle()); quit != nil {
 			return m, quit
 		}
 		return m, tick()
-	case readyMsg:
-		r := selfreload.Ready(msg)
-		if m.gaveUp(r.Version) {
-			// A new watcher checks the same file at once: look again much later, for a newer release
-			return m, tea.Tick(rewatchAfter, func(time.Time) tea.Msg { return rewatchMsg{} })
-		}
-		// The watcher's checks passed: its last warning is gone
-		m.ready, m.reloadErr = &r, nil
-		return m.maybeReload()
-	case reloadWarnMsg:
-		m.reloadErr = fmt.Errorf("reload: %w", msg.err)
-		return m, nil
-	case flashDoneMsg:
-		m.reloadFlash = ""
-		return m, nil
 	case needsTickMsg:
 		return m, m.readNeeds(true)
 	case needsMsg:
@@ -217,15 +196,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg, tea.MouseMsg:
 		// Quitting to reload: tea.Quit lands later, and an action started meanwhile would be cut off by the exec
-		if m.reloadNow != nil {
+		if m.reload.Quitting() {
 			return m, nil
 		}
 		if k, ok := msg.(tea.KeyMsg); ok {
 			return m.handleKey(k)
 		}
 		return m.handleMouse(msg.(tea.MouseMsg))
-	case rewatchMsg:
-		return m, m.watchCmd()
 	}
 	return m, nil
 }

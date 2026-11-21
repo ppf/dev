@@ -3,6 +3,7 @@ package selfreload
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -623,8 +626,12 @@ func TestExecEnvAndError(t *testing.T) {
 	}
 	t.Setenv(envReloadedTo, "v0.9.0")
 	t.Setenv(envCanary, oldV)
-	if err := Exec(ready, []string{"dev"}); err != nil {
+	t.Setenv("DEV_STATE", "old")
+	if err := Exec(ready, []string{"dev"}, "DEV_STATE={\"a\":\"b=c\"}", envReloadedTo+"="); err != nil {
 		t.Fatal(err)
+	}
+	if v, n := envValue(r.execs[0], "DEV_STATE"); v != `{"a":"b=c"}` || n != 1 {
+		t.Errorf("DEV_STATE = %q (%d entries), want the one set", v, n)
 	}
 	if v, n := envValue(r.execs[0], envReloadedTo); v != newV || n != 1 {
 		t.Errorf("%s = %q (%d entries), want %q once", envReloadedTo, v, n, newV)
@@ -706,5 +713,42 @@ func TestWatchClosesOnCancel(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("channel not closed after cancel")
+	}
+}
+
+// Keep is open across the exec only: close-on-exec cleared for the execve, set again after it fails.
+func TestExecKeep(t *testing.T) {
+	r := newRig(t)
+	ready, ok := r.step(t)
+	if !ok {
+		t.Fatal("no Ready")
+	}
+	f, err := os.Create(filepath.Join(t.TempDir(), "alive"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	cloexec := func() bool {
+		fl, err := unix.FcntlInt(f.Fd(), unix.F_GETFD, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fl&unix.FD_CLOEXEC != 0
+	}
+	ready.w.o.Keep = f
+	ready.w.execve = func(_ string, _ []string, env []string) error {
+		if cloexec() {
+			t.Error("close-on-exec still set at the exec")
+		}
+		if v, _ := envValue(env, EnvKept); v != fmt.Sprint(f.Fd()) {
+			t.Errorf("%s = %q, want %d", EnvKept, v, f.Fd())
+		}
+		return errors.New("permission denied")
+	}
+	if err := Exec(ready, []string{"dev"}); err == nil {
+		t.Fatal("no error")
+	}
+	if !cloexec() {
+		t.Error("close-on-exec not set again after a failed exec")
 	}
 }

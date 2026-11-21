@@ -11,8 +11,8 @@ import (
 var (
 	// checkEvery is how often the board is read while a stream is open: the sidebars read it every 2 s.
 	checkEvery = time.Second
-	// beatEvery is how often a stream says it is alive (the page takes one quiet for 40 s as dropped) and checks its
-	// session again, so an unpaired phone's stream ends.
+	// beatEvery is how often a stream says it is alive (the page takes one quiet for 40 s as dropped) and checks the
+	// Guard again, so an unpaired phone's stream ends.
 	beatEvery = 15 * time.Second
 )
 
@@ -94,7 +94,8 @@ func (w *watch) etag(was string) string {
 }
 
 // events is GET /v1/events, a server-sent event stream: "board" with the board's ETag at once and on each change,
-// "ping" every beatEvery. It ends when the session is gone or the server shuts down (the request's context).
+// "ping" every beatEvery. It ends when the Guard refuses it (a session gone) or the server shuts down (the request's
+// context).
 func (cfg Config) events(wt *watch) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := http.NewResponseController(w)

@@ -39,6 +39,7 @@ func TestMain(m *testing.M) {
 	// Every server, client and script inherits it: tmux draws UTF-8 only in a UTF-8 locale, and bash's
 	// ${#x} counts bytes otherwise, so "·" and "●" lines would pad differently from dev's.
 	os.Setenv("LC_ALL", "en_US.UTF-8")
+	os.Setenv("DEV_NO_SERVE", "1") // no dev boss here starts a dev serve
 	killServers(func(pid int) bool { return !alive(pid) })
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)

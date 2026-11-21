@@ -84,9 +84,8 @@ func TestServeAnswerDone(t *testing.T) {
 	must([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "ask", "Ship it?", "--option", "Yes")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	url := startServe(t, s, user...)
-	var cookie *http.Cookie
 
-	post := func(path, body string, page bool) (int, string) {
+	post := func(path, body string, page bool, origin ...string) (int, string) {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodPost, url+path, strings.NewReader(body))
 		if err != nil {
@@ -95,8 +94,8 @@ func TestServeAnswerDone(t *testing.T) {
 		if page {
 			req.Header.Set("X-Dev-Page", "1")
 		}
-		if cookie != nil {
-			req.AddCookie(cookie)
+		for _, o := range origin {
+			req.Header.Set("Origin", o)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -118,7 +117,6 @@ func TestServeAnswerDone(t *testing.T) {
 		if etag != "" {
 			req.Header.Set("If-None-Match", etag)
 		}
-		req.AddCookie(cookie)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -175,14 +173,16 @@ func TestServeAnswerDone(t *testing.T) {
 			t.Errorf("❌ %s: %d %s, want 409 with one of %q", name, code, body, want)
 		}
 	}
-	// Unpaired, an answer or tick is refused on loopback too, and nothing changes
+	// On loopback no pairing: another site's answer or tick is refused instead, and nothing changes
+	_, etag, _ := board("")
 	for _, path := range []string{"v1/answer", "v1/done"} {
-		if code, body := post(path, `{"boss":"boss-a","id":3,"question":"Read the plan","option":"x","text":"Read the plan"}`, true); code != http.StatusUnauthorized {
-			t.Errorf("❌ %s unpaired: %d %s, want 401", path, code, body)
+		if code, body := post(path, `{"boss":"boss-a","id":3,"question":"Read the plan","option":"x","text":"Read the plan"}`, true, "https://evil.example"); code != http.StatusForbidden {
+			t.Errorf("❌ %s from another site: %d %s, want 403", path, code, body)
 		}
 	}
-	cookie = pairServe(t, url, filepath.Join(tmp, "state"))
-	_, etag, _ := board("")
+	if code, now, _ := board(etag); code != http.StatusNotModified {
+		t.Errorf("❌ board after refused calls: %d %s, want 304", code, now)
+	}
 
 	// Page → board: answer
 	if code, body := post("v1/answer", `{"boss":"boss-a","id":1,"question":"Merge #148?","option":"Merge"}`, false); code != http.StatusForbidden {

@@ -2,10 +2,12 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -253,5 +255,70 @@ func TestUnpair(t *testing.T) {
 	}
 	if got, err := Unpair(s.dir, ""); err != nil || strings.Join(got, ",") != "pad" || board(pad) != 401 {
 		t.Errorf("unpair all: %v %v", got, err)
+	}
+}
+
+func TestServed(t *testing.T) {
+	health := func(w http.ResponseWriter, body string, code int) { w.WriteHeader(code); _, _ = w.Write([]byte(body)) }
+	for _, tt := range []struct {
+		name, body string
+		code       int
+		version    string
+		running    bool
+	}{
+		{"dev serve", `{"ok":true,"version":"v0.72.0"}`, 200, "v0.72.0", true},
+		{"no version", `{"ok":true}`, 200, "", false},
+		{"another program", `hello`, 200, "", false},
+		{"500", `{"ok":true}`, 500, "", false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { health(w, tt.body, tt.code) }))
+		dir := t.TempDir()
+		ap := netip.MustParseAddrPort(srv.Listener.Addr().String())
+		if _, err := RecordAddr(dir, ap); err != nil {
+			t.Fatal(err)
+		}
+		got, v, err := Served(dir, time.Second)
+		if tt.running && (err != nil || got != ap || v != tt.version) || !tt.running && !errors.Is(err, ErrNotRunning) {
+			t.Errorf("%s: %v %q %v", tt.name, got, v, err)
+		}
+		srv.Close()
+		if _, _, err := Served(dir, time.Second); !errors.Is(err, ErrNotRunning) {
+			t.Errorf("%s closed: %v", tt.name, err)
+		}
+	}
+	if _, _, err := Served(t.TempDir(), time.Second); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("no record: %v", err)
+	}
+	for _, rec := range []string{`"127.0.`, `{}`} {
+		bad := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bad, addrFile), []byte(rec), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Served(bad, time.Second); !errors.Is(err, ErrNotRunning) {
+			t.Errorf("corrupt record %s: %v", rec, err)
+		}
+	}
+}
+
+func TestAlive(t *testing.T) {
+	dir := t.TempDir()
+	if alive, err := AnyAlive(dir); err != nil || alive {
+		t.Fatalf("none: %v %v", alive, err)
+	}
+	first, err := Alive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Alive(dir) // a second dev serve on the same folder
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alive, err := AnyAlive(dir); err != nil || !alive {
+		t.Fatalf("held: %v %v", alive, err)
+	}
+	_ = first.Close()
+	_ = second.Close()
+	if alive, err := AnyAlive(dir); err != nil || alive {
+		t.Fatalf("released: %v %v", alive, err)
 	}
 }

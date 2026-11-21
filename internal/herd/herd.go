@@ -249,6 +249,14 @@ func openDetached(c *tmux.Client, session, project, dir string, start, fresh age
 	return false, checkExisting(c, session, start)
 }
 
+// Check is Open's refusal of an existing session, without opening it: one that isn't a boss, or another start.
+func Check(c *tmux.Client, session string, start agent.Start) error {
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(session)); err != nil {
+		return nil
+	}
+	return checkExisting(c, session, start)
+}
+
 // checkExisting refuses an existing session that isn't a boss, or one started with other --model/--effort than start.
 func checkExisting(c *tmux.Client, session string, start agent.Start) error {
 	mark, err := c.Run("show-option", "-qv", "-t", tmux.SessionTarget(session), OptHerd)

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/selfreload"
@@ -41,7 +42,9 @@ func newServeCmd() *cobra.Command {
 		Long: fmt.Sprintf(`Serve every dev boss's to do list, as dev todo --all --json has it, to a page on the phone: GET /v1/health,
 GET /v1/board, GET /v1/events (the board changed: an event stream), POST /v1/pair, and POST /v1/answer, /v1/done, /v1/start and /v1/doing, which answer, tick, start and mark in progress or end it as dev todo answer --question, done --text, start and doing do. It listens on the Mac's tailnet address (100.64.0.0/10) when it has one, else on its private LAN
 address, port %d; --addr takes a loopback, tailnet or private LAN ip:port, never 0.0.0.0, :: or a public
-address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind, loopback too: dev serve pair.`, serve.DefaultPort),
+address. Plain HTTP. On a tailnet or LAN address, /v1/board, /v1/events and the answer, done, start and doing POSTs
+need a paired phone: dev serve pair. On a loopback address they need no pairing: a request a browser marks as
+another origin's (Sec-Fetch-Site, Origin) is refused instead.`, serve.DefaultPort),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if install || uninstall {
@@ -55,6 +58,37 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			if err != nil {
 				return err
 			}
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return err
+			}
+			// After a reload the caffeinate started before it still waits on this pid, and the alive lock it kept is open
+			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
+			kept := 0
+			if v := os.Getenv(selfreload.EnvKept); v != "" {
+				if kept, err = strconv.Atoi(v); err != nil {
+					return fmt.Errorf("%s=%q: %w", selfreload.EnvKept, v, err)
+				}
+			}
+			for _, k := range []string{envServeReexec, selfreload.EnvKept} {
+				if err := os.Unsetenv(k); err != nil {
+					return err
+				}
+			}
+			// Before the listen, so a dev boss sees this one starting
+			alive, err := serve.Alive(dir)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = alive.Close() }()
+			if os.Getenv(envStartFd) == "3" && alive.Fd() != 3 { // the dev boss's start lock: one holds now
+				_ = os.NewFile(3, "start").Close()
+			}
+			if err := os.Unsetenv(envStartFd); err != nil {
+				return err
+			}
+			if reloaded && kept > 2 {
+				closeKept(kept, alive, cmd.ErrOrStderr())
+			}
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
 				return err
@@ -66,12 +100,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			}
 			defer forget()
 			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
-			// After a reload the caffeinate started before it still waits on this pid
-			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
-			if err := os.Unsetenv(envServeReexec); err != nil {
-				return err
+			loopback := ap.Addr().IsLoopback()
+			where := "on the phone"
+			if loopback {
+				where = "in a browser on this Mac, no pairing needed (a phone can't reach it)"
 			}
+			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ "+where)
 			switch {
 			case reloaded && awakeAlive(pid):
 				caffeinate.Store(int64(pid))
@@ -84,7 +118,9 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			if kind == serve.LAN {
 				fmt.Fprintln(out, "⚠ "+serve.LANNotice)
 			}
-			fmt.Fprintln(out, "pair a phone: dev serve pair")
+			if !loopback {
+				fmt.Fprintln(out, "pair a phone: dev serve pair")
+			}
 			// Off the serving path: a hung tmux server must not hold up the page
 			go func() {
 				if _, err := tmux.New().Run("list-sessions"); tmux.IsNoServer(err) {
@@ -96,11 +132,11 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			stderr := cmd.ErrOrStderr()
-			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(),
+			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(), Keep: alive, // no dev boss sees none running meanwhile
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
 			bound := ln.Addr().(*net.TCPAddr).AddrPort()
 			args := func() ([]string, error) { return reexecArgs(os.Args, addr, bound, ownIP(bound.Addr())) }
-			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir), o, args, out, stderr)
+			return serveReloading(cmd.Context(), ln, serveConfig(stderr, dir, loopback), o, args, out, stderr)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "the ip:port to listen on: loopback, tailnet or private LAN")
@@ -121,7 +157,8 @@ func newServePairCmd() *cobra.Command {
 		Long: fmt.Sprintf(`Print the URL to open on the phone and a one-time code to enter there, valid %d minutes and once (5 wrong
 codes or a new dev serve pair void it): the running
 dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on; when that is
-loopback only, a phone can't reach it, so pair says so and how to restart dev serve. Errors when dev serve is not
+loopback only, it needs no pairing and a phone can't reach it, so pair writes no code and says so and how to restart
+dev serve (one from an older dev, which still wants pairing there, it says to restart). Errors when dev serve is not
 running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -139,24 +176,51 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 			if err != nil {
 				return err
 			}
+			if ap.Addr().IsLoopback() {
+				if err := unpairedBoard(ap); err != nil {
+					return err
+				}
+				_, err = fmt.Fprint(cmd.OutOrStdout(), loopbackMessage(ap, restartHint()))
+				return err
+			}
 			code, err := serve.NewCode(dir, time.Now())
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(cmd.OutOrStdout(), pairMessage(ap, code, restartHint()))
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "open http://%s/ on the phone and enter the code %s (valid %d minutes, once)\n", ap, code, int(serve.CodeTTL.Minutes()))
 			return err
 		},
 	}
 	return cmd
 }
 
-// pairMessage tells where to open the page: the phone's URL when ap is reachable from it, else why not and restartHint.
-func pairMessage(ap netip.AddrPort, code, restartHint string) string {
-	ttl := int(serve.CodeTTL.Minutes())
-	if ap.Addr().IsLoopback() {
-		return fmt.Sprintf("dev serve listens on %s only: a phone can't reach it. %s\nOn this Mac: open http://%s/ and enter the code %s (valid %d minutes, once)\n", ap.Addr(), restartHint, ap, code, ttl)
+// unpairedBoard errors when the dev serve on loopback ap still wants a session: one from before loopback needed no
+// pairing, which a reload hasn't replaced. An empty tick asks it without a board read: its Guard answers 401 before
+// the body's 400.
+func unpairedBoard(ap netip.AddrPort) error {
+	req, err := http.NewRequest(http.MethodPost, "http://"+ap.String()+"/v1/done", strings.NewReader(`{}`))
+	if err != nil {
+		return err
 	}
-	return fmt.Sprintf("open http://%s/ on the phone and enter the code %s (valid %d minutes, once)\n", ap, code, ttl)
+	req.Header.Set("X-Dev-Page", "1")
+	resp, err := (&http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	if err != nil {
+		return fmt.Errorf("dev serve on %s: %w", ap, err)
+	}
+	_ = resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusBadRequest:
+		return nil
+	case http.StatusUnauthorized:
+		return fmt.Errorf("the dev serve on %s is from an older dev and still wants pairing on loopback: restart it", ap)
+	}
+	return fmt.Errorf("dev serve on %s answered %s to an empty tick, not 400: restart it", ap, resp.Status)
+}
+
+// loopbackMessage is pair's answer for a dev serve on loopback only: no pairing there, and a phone can't reach it.
+func loopbackMessage(ap netip.AddrPort, restartHint string) string {
+	return fmt.Sprintf("dev serve listens on %s only: no pairing needed, open http://%s/ in a browser on this Mac.\nA phone can't reach it: %s\n", ap.Addr(), ap, restartHint)
 }
 
 // restartHint is how to restart dev serve so a phone can reach it: its default bind when this Mac has one, else --addr.
@@ -220,9 +284,14 @@ func bind(addr string) (netip.AddrPort, serve.Kind, error) {
 	return serve.Default(addrs, serve.DefaultRoute)
 }
 
-// serveConfig reads the board from dev todo --all --json's code on the default tmux server, for paired phones.
-func serveConfig(stderr io.Writer, dir string) serve.Config {
+// serveConfig reads the board from dev todo --all --json's code on the default tmux server: for paired phones; when the
+// bound address is loopback, for any request a browser doesn't mark as another origin's.
+func serveConfig(stderr io.Writer, dir string, loopback bool) serve.Config {
 	auth := &serve.Auth{Dir: dir, Now: time.Now}
+	guard := auth.Session
+	if loopback {
+		guard = serve.SameOrigin
+	}
 	return serve.Config{
 		Version:     selfreload.Version(),
 		Now:         time.Now,
@@ -232,7 +301,7 @@ func serveConfig(stderr io.Writer, dir string) serve.Config {
 		Done:        pageDone(stderr),
 		Start:       pageStart(stderr),
 		Doing:       pageDoing(stderr),
-		Guard:       auth.Session,
+		Guard:       guard,
 		Pair:        http.HandlerFunc(auth.Pair),
 		Page:        web.Handler(),
 	}
@@ -287,6 +356,24 @@ func (u *unrepeated) Write(p []byte) (int, error) {
 	}
 	u.seen[string(p)] = now
 	return u.w.Write(p)
+}
+
+// closeKept closes fd, the alive lock a reload kept open across its exec, once this process holds alive: only when
+// it is that file (raw fd, no *os.File whose finalizer would close a reused number later); else it only gets
+// close-on-exec, so no child keeps it.
+func closeKept(fd int, alive *os.File, stderr io.Writer) {
+	var a, b unix.Stat_t
+	if err := unix.Fstat(fd, &a); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+		return
+	}
+	if err := unix.Fstat(int(alive.Fd()), &b); err != nil || a.Dev != b.Dev || a.Ino != b.Ino {
+		syscall.CloseOnExec(fd)
+		return
+	}
+	if err := syscall.Close(fd); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+	}
 }
 
 // envServeReexec is "<pid> <caffeinate pid>" across a reload: that process doesn't start a second caffeinate.
