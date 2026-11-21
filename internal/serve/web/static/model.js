@@ -113,3 +113,50 @@ const doneAt = x => x.it.done_at || Infinity;
 
 // urgency orders by the soonest due first, then the oldest.
 const urgency = (a, b) => (!a.until - !b.until) || (a.until || 0) - (b.until || 0) || (a.added || 0) - (b.added || 0);
+
+const TICKABLE = ['yours', 'starting', 'check', 'boss closed'];
+// A desktop app boss's list is read here, never answered, ticked or started: the Mac refuses it.
+const desktop = l => l.boss.startsWith('local_');
+// own is whether the item is the user's, as todo.Own has it.
+const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.toLowerCase());
+const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
+// A closed boss's item starts only while the manager runs, as on the tmux boards.
+const startable = (l, it, managerRuns) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (!l.closed || !!managerRuns)
+  && (!!it.start_late || it.column === 'todo' && ['yours', 'boss closed'].includes(it.status)); // as todo.Start: a late start, else a To do card
+const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
+// The user marks their own item (the Mac's assignee: you), no ask, in progress (todo.SetDoing); the page offers it on To do
+// cards only, not a desktop list's, nor one being started.
+const doable = (l, it) => !desktop(l) && it.assignee?.kind === 'you' && !it.options?.length && it.column === 'todo' && !it.doing && !it.started;
+const receiver = l => l.closed ? 'the manager' : l.boss;
+
+// verdict is what dropping card x from column from on column to does: null for nothing (the same column), {act, hint}
+// for the call a sheet button makes (doing, stop, start, tick), or {why} when it is refused. Waiting and Review are set
+// by a session or a PR, Done reopens nothing yet; managerRuns: a closed boss's card starts only through the manager.
+function verdict(x, from, to, managerRuns) {
+  if (from === to) return null;
+  const { list: l, it } = x, ask = !!it.options?.length, mine = whoOf(x) === ME;
+  const no = why => ({ why });
+  if (from === 'done') return no('reopen is not built yet');
+  if (to === 'waiting') return no('set by the session');
+  if (to === 'review') return no('set by the PR');
+  if (desktop(l)) return no("a desktop app boss's card: change it in its chat");
+  if (to === 'done') {
+    if (ask) return no('answer it instead');
+    if (tickable(l, it)) return { act: 'tick', hint: 'tick it as done' };
+    return no(mine ? 'not tickable from the page' : l.boss + ' ticks it');
+  }
+  if (from === 'waiting') return no('the session moves it out of Waiting');
+  if (from === 'review') return no('the PR moves it out of Review');
+  if (to === 'progress') {
+    if (ask) return no('answer it: open the card');
+    if (doable(l, it)) return { act: 'doing', hint: "you're on it: no session starts" };
+    if (l.boss === 'manager') return no("the manager's own card: ask the manager in its session");
+    if (l.closed && !managerRuns) return no(l.boss + ' is closed and no manager runs to start it');
+    if (!mine && it.column === 'todo') return { act: 'start', hint: receiver(l) + ' starts a worker on it' };
+    return no('not startable from the page');
+  }
+  // In progress → To do
+  if (mine && it.doing) return { act: 'stop', hint: "you're off it: back to To do" };
+  if (it.started) return no(it.started.to + ' was asked to start it');
+  return no((mine ? 'you are' : whoOf(x) + ' is') + ' working on it');
+}

@@ -11,16 +11,16 @@ function node() {
   return n;
 }
 const els = {};
-let version = 'v1', tag = 'A', status = 200, text = '';
+let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200;
 const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
-  lists: [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
-const calls = [], media = { matches: false, addEventListener() {} };
+  lists: lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
+const calls = [], posts = [], media = { matches: false, addEventListener() {} };
 const ctx = {
   console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
-    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [], querySelector: () => null },
-  window: { addEventListener() {}, scrollTo() {} },
+    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [], querySelector: () => null, body: node() },
+  window: { addEventListener() {}, scrollTo() {} }, innerWidth: 1280, innerHeight: 800,
   location: { hash: '#/', reloads: 0, reload() { this.reloads++; } },
   matchMedia: () => media,
   CSS: { escape: s => s },
@@ -28,6 +28,10 @@ const ctx = {
   fetch: async (p, opts) => {
     calls.push(p);
     if (p === '/v1/health') return res(200, { ok: true, version: 'v1' });
+    if (opts.method === 'POST') {
+      posts.push([p, opts.body]);
+      return postStatus === 200 ? res(200, { ok: true }) : res(postStatus, { error: 'refused by the Mac' });
+    }
     if (status !== 200) return res(status, { error: 'no' });
     const etag = 'W/"' + tag + version + '"';
     if (opts.headers['If-None-Match'] === etag) return res(304, null, etag);
@@ -167,7 +171,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
     && needCards.every(c => c.children[0].className === 'flag' && !walk(c, x => /\btag hot\b/.test(x.className || '') && /needs you|decide/.test(x.children.join(''))).length));
   const doable = run("cards(state.board).filter(x => !x.done && doable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
   check("I'm on it: own To do cards, no ask, not desktop, not doing or starting: " + doable, JSON.stringify(doable) === JSON.stringify(['boss-garden#6', 'boss-garden#7', 'boss-kitchen#7', 'boss-shed#2']));
-  const startable = run("cards(state.board).filter(x => !x.done && startable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
+  const startable = run("cards(state.board).filter(x => !x.done && startable(x.list, x.it, state.board.manager_runs)).map(x => x.list.boss + '#' + x.it.id)");
   check('Start: own To do cards only (not the one marked doing in In progress): ' + startable, !startable.includes('boss-garden#12') && startable.includes('boss-garden#6'));
   const byHref = h => drawnCards().find(c => walk(c, x => x.attrs?.href === h).length);
   const textOf = n => (n.children || []).map(c => typeof c === 'string' ? c : textOf(c)).join('');
@@ -189,5 +193,58 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   run('state.board = late');
   check('the flag says why: a start not picked up', textOf(drawnCards()[0].children[0]) === 'Needs you · start not picked up');
   media.matches = false;
+
+  // A drop: the button's request, the card shown in its target until a board read after it settles it; a refusal puts it back and says why
+  const you = { kind: 'you' };
+  const mine = (column, more) => ({ id: 1, text: 'Order the hoses', status: 'yours', column, assignee: you, ...more });
+  const worker = { id: 2, text: 'Fit the hoses', status: 'working', on: 'dev-x', session: { name: 'dev-x' }, column: 'progress', assignee: { kind: 'worker', name: 'dev-x', running: true } };
+  lists = [{ boss: 'boss-a', items: [mine('todo'), worker] }];
+  tag = 'D1';
+  es().on.board({ data: 'W/"D1v2"' });
+  await settle();
+  ctx.location.hash = '#/';
+  run('render()');
+  const laneOf = id => lanes().find(l => walk(l, c => /^card\b/.test(c.className || '') && walk(c, a => a.attrs?.href === '#/item/boss-a/' + id).length).length)?.attrs['data-k'];
+  const cardFor = id => drawnCards().find(c => walk(c, a => a.attrs?.href === '#/item/boss-a/' + id).length);
+  check('drop setup: #1 in To do', laneOf(1) === 'todo');
+  posts.length = 0;
+  lists = [{ boss: 'boss-a', items: [mine('progress', { doing: { text: '', at: 1 } }), worker] }]; // the Mac, once it took the call
+  tag = 'D2';
+  const moving = run("move(find('boss-a', 1), 'progress')");
+  check('a drop shows the card in its target, pending: ' + laneOf(1), laneOf(1) === 'progress' && /\bmoving\b/.test(cardFor(1).className) && run("state.moves['boss-a/1'].to") === 'progress');
+  await moving;
+  await settle();
+  check('a drop on In progress sends what I\'m on it sends: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/doing'
+    && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 1, text: 'Order the hoses', doing: '' }));
+  check('the board read after it settles the card', !Object.keys(run('state.moves')).length && laneOf(1) === 'progress' && !/\bmoving\b/.test(cardFor(1).className));
+  const dropped = posts[0];
+  lists = [{ boss: 'boss-a', items: [mine('todo'), worker] }];
+  tag = 'D3';
+  es().on.board({ data: 'W/"D3v2"' });
+  await settle();
+  posts.length = 0;
+  await run("onIt(find('boss-a', 1).list, find('boss-a', 1).it)");
+  await settle();
+  check('the button sends the same', JSON.stringify(posts[0]) === JSON.stringify(dropped));
+
+  lists = [{ boss: 'boss-a', items: [mine('progress', { doing: { text: '', at: 1 } }), worker] }];
+  tag = 'D4';
+  es().on.board({ data: 'W/"D4v2"' });
+  await settle();
+  posts.length = 0;
+  postStatus = 409;
+  await run("move(find('boss-a', 1), 'todo')");
+  await settle();
+  const last = cls => ctx.document.body.children.filter(c => c.className === cls).at(-1)?.children.join('');
+  check('a drop on To do of a card you are on sends stop: ' + JSON.stringify(posts), posts.length === 1 && JSON.parse(posts[0][1]).stop === true);
+  check('a 409 puts it back, with the reason: ' + laneOf(1) + ' ' + last('refuse'), laneOf(1) === 'progress' && !Object.keys(run('state.moves')).length
+    && last('refuse') === 'refused by the Mac' && last('toast') === 'Not moved · #1 stays in In progress');
+  postStatus = 200;
+  posts.length = 0;
+  await run("move(find('boss-a', 2), 'done')");
+  check('a refused drop sends nothing, says why, leaves the card', !posts.length && last('refuse') === 'boss-a ticks it' && laneOf(2) === 'progress');
+  await run("move(find('boss-a', 2), 'waiting')");
+  check('Waiting refuses: set by the session', last('refuse') === 'set by the session' && !posts.length);
+  lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
