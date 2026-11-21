@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -340,5 +341,108 @@ func TestTodoBoardReopen(t *testing.T) {
 	i := slices.IndexFunc(items, func(it item) bool { return it.ID == 1 })
 	if i < 0 || items[i].Done || items[i].Column != "todo" || items[i].Text != "Ship it" || items[i].Link != "https://example.com/pull/7" || len(finished) != 0 {
 		t.Errorf("❌ after: items %+v finished %+v: want #1 open in To do with its text and link, none finished", items, finished)
+	}
+}
+
+// i on the user's own To do card in the popup's item view asks what they do now: ⏎ moves it to In progress with that
+// doing line, on the card, in its item view and in dev todo --all --json, its boss told; i again stops it, back to To
+// do; esc in the field leaves it as it was.
+func TestTodoBoardDoing(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	log := filepath.Join(tmp, "boss-a.log")
+	s.T("new-session", "-d", "-s", "boss-a", "-x", "200", "-y", "60", "bash", script, "", log)
+	s.T("set-option", "-t", "=boss-a:", "@dev_herd", "1")
+	pane := s.T("display", "-t", "=boss-a:", "-p", "#{pane_id}")
+	reg := exec.Command(devBin, "state", "idle")
+	reg.Env = s.scriptEnv("TMUX_PANE=" + pane)
+	reg.Stdin = strings.NewReader(`{"hook_event_name":"SessionStart"}`)
+	if out, err := reg.CombinedOutput(); err != nil {
+		t.Fatalf("❌ register: %v %s", err, out)
+	}
+	waitFor(t, "the stub boss drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", pane), "Try") })
+	cmd := exec.Command(devBin, "todo", "add", "Send the cert")
+	cmd.Env = s.scriptEnv("TMUX_PANE="+pane, "CLAUDECODE=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("❌ add: %v %s", err, out)
+	}
+	type item struct {
+		ID     int    `json:"id"`
+		Column string `json:"column"`
+		Doing  *struct {
+			Text string `json:"text"`
+		} `json:"doing"`
+	}
+	first := func() item {
+		t.Helper()
+		cmd := exec.Command(devBin, "todo", "--all", "--json")
+		cmd.Env = s.scriptEnv("TMUX_PANE=", "CLAUDECODE=")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lists []struct {
+			Items []item `json:"items"`
+		}
+		if err := json.Unmarshal(out, &lists); err != nil || len(lists) != 1 || len(lists[0].Items) != 1 {
+			t.Fatalf("❌ --all --json: %v %s", err, out)
+		}
+		return lists[0].Items[0]
+	}
+
+	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_BOARD_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "board", "--client", "none")
+	view := s.T("display", "-t", "=boss-a:2", "-p", "#{pane_id}")
+	capture := func() string { return s.T("capture-pane", "-p", "-t", view) }
+	waitFor(t, "the board drawn", func() bool { return slices.Contains(popupColumns(capture())["todo"], "a#1") })
+	s.T("send-keys", "-t", view, "Space")
+	waitFor(t, "the item view", func() bool { return strings.Contains(capture(), "I'm on it") })
+
+	// esc leaves the field, and the item, as they were
+	s.T("send-keys", "-t", view, "i")
+	s.T("send-keys", "-t", view, "-l", "not this")
+	waitFor(t, "the field typed in", func() bool {
+		return strings.Contains(capture(), "not this") && strings.Contains(capture(), "⏎ on it · esc back")
+	})
+	s.T("send-keys", "-t", view, "Escape")
+	waitFor(t, "the field left, the item view still open", func() bool {
+		return !strings.Contains(capture(), "not this") && strings.Contains(capture(), "i  I'm on it")
+	})
+	if it := first(); it.Column != "todo" || it.Doing != nil {
+		t.Fatalf("❌ after esc: %+v, want To do, no doing line", it)
+	}
+
+	s.T("send-keys", "-t", view, "i")
+	s.T("send-keys", "-t", view, "-l", "mailing ops")
+	waitFor(t, "the field typed in", func() bool { return strings.Contains(capture(), "mailing ops") })
+	t.Logf("item view, the field typed in:\n%s", capture())
+	s.T("send-keys", "-t", view, "Enter")
+	began := time.Now()
+	for !slices.Contains(popupColumns(capture())["progress"], "a#1") || !strings.Contains(capture(), "mailing ops") {
+		if time.Since(began) > 5*time.Second {
+			t.Fatalf("❌ a#1 not In progress with its doing line after 5 s:\n%s", capture())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Logf("In progress after %v:\n%s", time.Since(began).Round(100*time.Millisecond), capture())
+	if it := first(); it.Column != "progress" || it.Doing == nil || it.Doing.Text != "mailing ops" {
+		t.Errorf("❌ --all --json after i: %+v %+v, want In progress doing mailing ops", it, it.Doing)
+	}
+	waitFor(t, "the boss told", func() bool {
+		data, _ := os.ReadFile(log)
+		return strings.Contains(string(data), `the user is on #1 "Send the cert": mailing ops`)
+	})
+
+	// Its item view shows the doing line and Stop; i stops it
+	s.T("send-keys", "-t", view, "Space") // the selection followed the card
+	waitFor(t, "the In progress item view", func() bool {
+		return strings.Contains(capture(), "doing   mailing ops") && strings.Contains(capture(), "i  Stop")
+	})
+	t.Logf("item view, doing:\n%s", capture())
+	s.T("send-keys", "-t", view, "i")
+	waitFor(t, "back in To do", func() bool { return slices.Contains(popupColumns(capture())["todo"], "a#1") })
+	if it := first(); it.Column != "todo" || it.Doing != nil {
+		t.Errorf("❌ --all --json after i again: %+v, want To do, no doing line", it)
 	}
 }

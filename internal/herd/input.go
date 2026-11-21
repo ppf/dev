@@ -158,6 +158,10 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.typeBox(k)
 	}
 	key := k.String()
+	if m.restoredNeed != nil && key != "ctrl+c" {
+		// A reload carried TO DO mode, back at the first refresh: meanwhile the keys would act on the cards
+		return m, nil
+	}
 	m.msg = message{}
 	if m.confirm != "" {
 		target := m.confirm

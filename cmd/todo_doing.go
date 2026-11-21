@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 )
 
 func newTodoDoingCmd(boss *string) *cobra.Command {
-	var question string
+	var question, seenJSON string
 	var stop, fromBoard bool
 	cmd := &cobra.Command{
 		Use:   "doing [<boss>] <n> [text] [--stop]",
@@ -33,8 +34,8 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := strconv.Atoi(args[0]); err == nil {
-				if question != "" || fromBoard {
-					return errors.New("--question and --from-board are the user's form: dev todo doing <boss> <n> --question <the item's text>")
+				if question != "" || fromBoard || seenJSON != "" {
+					return errors.New("--question, --from-board and --seen are the user's form: dev todo doing <boss> <n> --question <the item's text>")
 				}
 				return bossDoing(cmd, *boss, args, stop)
 			}
@@ -56,7 +57,14 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 			if err != nil {
 				return err
 			}
-			to, err := userDoing(tmux.New(), args[0], id, question, nil, text, stop, cmd.ErrOrStderr())
+			var seen *todo.Seen
+			if seenJSON != "" {
+				seen = new(todo.Seen)
+				if err := json.Unmarshal([]byte(seenJSON), seen); err != nil {
+					return fmt.Errorf("--seen: %w", err)
+				}
+			}
+			to, err := userDoing(tmux.New(), args[0], id, question, seen, text, stop, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -68,6 +76,8 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 	cmd.Flags().BoolVar(&stop, "stop", false, "end it")
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button: allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
+	cmd.Flags().StringVar(&seenJSON, "seen", "", `a board's view of the item, {"doing", "started"}: refuse once either changed`)
+	_ = cmd.Flags().MarkHidden("seen")
 	return cmd
 }
 
