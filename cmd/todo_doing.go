@@ -56,7 +56,7 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 			if err != nil {
 				return err
 			}
-			to, err := userDoing(tmux.New(), args[0], id, question, text, stop, cmd.ErrOrStderr())
+			to, err := userDoing(tmux.New(), args[0], id, question, nil, text, stop, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -129,23 +129,23 @@ func bossDoing(cmd *cobra.Command, boss string, args []string, stop bool) error 
 	if err != nil {
 		return err
 	}
-	if _, err := s.SetDoing(id, "", false, doingOf(text, stop), time.Now()); err != nil {
+	if _, err := s.SetDoing(id, "", false, nil, doingOf(text, stop), time.Now()); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d %s\n", id, doingDone(stop))
 	return err
 }
 
-// userDoing marks the user's own item id of boss name's list, while it reads question, as theirs in progress with text,
+// userDoing marks the user's own item id of boss name's list, while it reads question (and is as seen, when given), as theirs in progress with text,
 // or ends it (stop), and tells the boss, or the manager for a closed boss: the one told, "" for no one (none running,
 // its inbox off, a desktop app boss), said on warn. A running one whose inbox couldn't take the note is an error, as
 // it could start a worker on the item.
-func userDoing(c *tmux.Client, name string, id int, question, text string, stop bool, warn io.Writer) (string, error) {
+func userDoing(c *tmux.Client, name string, id int, question string, seen *todo.Seen, text string, stop bool, warn io.Writer) (string, error) {
 	s, closed, err := listStore(name, false, warn)
 	if err != nil {
 		return "", noList{err}
 	}
-	it, err := s.SetDoing(id, question, true, doingOf(text, stop), time.Now())
+	it, err := s.SetDoing(id, question, true, seen, doingOf(text, stop), time.Now())
 	if err != nil {
 		return "", err
 	}

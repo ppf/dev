@@ -136,6 +136,24 @@ say('a session named me is no user', whoOf({ list: live, it: { id: 1, assignee: 
 `)
 }
 
+// The sheet's Start and a drop on In progress agree, on what todo.Start takes: a To do card or a late start, no ask.
+func TestStartable(t *testing.T) {
+	runModel(t, rows+`
+for (const runs of [true, false]) {
+  const starts = ROWS.filter(r => startable(r.list, r.it, runs)).map(r => r.name);
+  say('startable, manager runs ' + runs, starts, runs ? ['1 start late', '2b closed, own', '2c closed, on a session', '3d own', '4c boss', '6 gone'] : ['1 start late', '3d own', '4c boss', '6 gone']);
+  for (const r of ROWS) {
+    const x = card(r.name), v = verdict(x, columnOf(x), 'progress', runs);
+    // Own To do cards are marked doing by a drop: Start stays a button
+    if (v?.act === 'start' && !startable(r.list, r.it, runs) || startable(r.list, r.it, runs) && !doable(r.list, r.it) && columnOf(x) === 'todo' && v?.act !== 'start') {
+      console.log(r.name + ': drop ' + JSON.stringify(v) + ', startable ' + startable(r.list, r.it, runs));
+    }
+  }
+}
+say('the manager\'s own list: the user\'s only', [startable({ boss: 'manager' }, { status: 'idle', on: 'boss', column: 'todo' }, true), startable({ boss: 'manager' }, { status: 'yours', column: 'todo' }, true)], [false, true]);
+`)
+}
+
 // The page's model reads /v1/board as the Go side writes it (cmd's TestBoardGolden): a renamed or dropped field there
 // lands a card in the wrong column, with the wrong assignee or marks.
 func TestModelReadsGolden(t *testing.T) {

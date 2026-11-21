@@ -82,8 +82,8 @@ a { color: var(--act); }
 .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
 .pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--h); }
 .avs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.avbtn { border: 0; background: none; padding: 2px; border-radius: 50%; display: grid; place-items: center; }
-.avbtn.boss { border-radius: 9px; }
+.avbtn { border: 0; background: none; padding: 2px 8px 2px 2px; border-radius: var(--r-ctl); display: flex; align-items: center; gap: 6px; font-size: var(--fs-meta); font-weight: 600; color: var(--ink2); }
+.avbtn .avname { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .avbtn[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ground), 0 0 0 4px var(--act); }
 .avmore { border: 1px solid var(--edge-strong); background: var(--card); border-radius: var(--r-ctl); font-size: var(--fs-meta); font-weight: 600; color: var(--ink2); padding: 4px 8px; }
 .pselect { position: relative; flex: none; display: inline-flex; align-items: center; }
@@ -220,7 +220,7 @@ html.dragging, html.dragging * { cursor: grabbing !important; user-select: none;
   .filters .flabel { display: none; }
   .filter { flex-wrap: nowrap; }
   .avs { flex-wrap: nowrap; }
-  .avbtn { width: 44px; height: 44px; }
+  .avbtn { min-height: 44px; flex: none; }
   .avmore { min-height: 44px; min-width: 44px; }
   .btn-s { height: 44px; padding: 0 14px; font-size: 13.5px; }
   .card .title { font-size: 15px; }

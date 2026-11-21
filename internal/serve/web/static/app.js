@@ -292,10 +292,12 @@ function dropStalePicks() {
   }
 }
 
-// post sends body, one at a time per item; it returns the answer when the Mac took it.
+// post sends body, one at a time per item; it returns the answer when the Mac took it. A drop's refusal shows by the
+// drop (move), not in the note at the board's top; no reply shows there too, as the list needs a look.
 async function post(path, body, k) {
   if (state.pending[k]) return;
   state.pending[k] = true;
+  const dropped = !!state.moves[k];
   let res;
   try {
     res = await call('POST', path, body);
@@ -317,8 +319,8 @@ async function post(path, body, k) {
     return go('#/pair', 'Not sent: pair this phone again, then try again.');
   }
   if (!res.ok) {
-    state.errors[k] = (res.status === 409 && ['/v1/answer', '/v1/done'].includes(path) ? 'Already answered or changed on your Mac: ' : '') + errorOf(res);
-    onBoard(k, state.errors[k]);
+    state.errors[k] = (res.status === 409 && ['/v1/answer', '/v1/done', '/v1/doing'].includes(path) ? 'Already answered or changed on your Mac: ' : '') + errorOf(res);
+    if (!dropped) onBoard(k, state.errors[k]);
     return load();
   }
   return res;
@@ -334,24 +336,30 @@ async function send(list, it) {
   }
 }
 
-// itemCall posts path for item it of list with extra in its body; when the Mac took it, leaves with note: whether it did.
+// itemCall posts path for item it of list with extra in its body; when the Mac took it, leaves with note and returns
+// it ('' when not taken).
 async function itemCall(path, list, it, extra, note) {
   const k = key(list.boss, it.id);
-  const ok = !!await post(path, { boss: list.boss, id: it.id, text: it.text, ...extra }, k);
-  if (ok) leave(k, note + it.text);
-  return ok;
+  if (!await post(path, { boss: list.boss, id: it.id, text: it.text, ...extra }, k)) return '';
+  leave(k, note + it.text);
+  return note + it.text;
 }
 
 const tick = (list, it) => itemCall('/v1/done', list, it, {}, 'Ticked: ');
 const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
-const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '' }, 'On it, in progress: ');
-const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true }, 'Off it: ');
+// seen is the item's doing line and start as drawn: the Mac refuses a doing call once either changed (409)
+const seen = it => ({ doing: it.doing || null, started: it.started || null });
+const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '', seen: seen(it) }, 'On it, in progress: ');
+const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true, seen: seen(it) }, 'Off it: ');
 // What each verdict act calls: the sheet's buttons' own; stop doing has no button yet
 const ACTS = { tick, start, doing: onIt, stop: offIt };
 
-// leave closes item k's sheet with note, when it is still the one shown, and reads the board again.
+// leave closes item k's sheet with note, when it is still the one shown, and reads the board again; a drop's note
+// move shows at the foot of the screen.
 function leave(k, note) {
-  if (state.shown?.k === k) {
+  if (state.moves[k]) {
+    // move shows it at the foot
+  } else if (state.shown?.k === k) {
     state.shown = null;
     go('#/', note);
   } else onBoard(k, note);
@@ -485,7 +493,8 @@ function openCard(x) {
 function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
-  return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named },
+  // Focusable, so a card ticked from the keyboard keeps focus
+  return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
     movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
@@ -499,7 +508,7 @@ function filters(projects, ws, kinds) {
     ? el('div', { class: 'filter' }, el('span', { class: 'flabel' }, 'Project'), el('div', { class: 'seg', role: 'group', 'aria-label': 'Project' },
       all.map(([v, text]) => el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => setProject(v) },
         v && dot(v), text))))
-    : el('label', { class: 'pselect' }, el('select', { 'aria-label': 'Project', 'data-f': 'project', onchange: e => setProject(e.currentTarget.value) },
+    : el('label', { class: 'pselect' }, el('select', { 'aria-label': 'Project', 'data-f': 'project', onchange: e => setProject(e.currentTarget.value), onblur: unpick },
       all.map(([v, text]) => el('option', { value: v, selected: f.project === v }, v ? text : 'All projects'))));
   const shown = state.allWho ? ws : ws.filter(([who], i) => i < WHO_SHOWN || f.who.includes(who)); // a pressed chip stays shown
   return el('div', { class: 'filters' }, projectFilter,
@@ -508,9 +517,36 @@ function filters(projects, ws, kinds) {
         const name = who === ME ? 'Me' : who;
         return el('button', { type: 'button', class: 'avbtn' + (kinds.get(who) === 'boss' ? ' boss' : ''), 'data-f': 'who:' + who, 'aria-pressed': String(f.who.includes(who)),
           title: name + ' · ' + n, 'aria-label': name + ', ' + n + ' cards',
-          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; refilter(); } }, avatar(who, kinds.get(who)));
+          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; refilter(); } }, avatar(who, kinds.get(who)), el('span', { class: 'avname' }, name));
       }),
       ws.length > shown.length && el('button', { type: 'button', class: 'avmore', 'data-f': 'who:more', onclick: () => { state.allWho = true; render(); } }, '+' + (ws.length - shown.length)))));
+}
+
+// picking: a redraw kept the focused project picker (its list may be open on the phone), its options as they were:
+// they are drawn afresh once it loses focus.
+let picking = false;
+function unpick() {
+  if (!picking) return;
+  picking = false;
+  state.sig = '';
+  setTimeout(render);
+}
+
+// redraw puts next in view; a focused project picker stays in place, the rest of its strip drawn afresh around it, as
+// replacing it would close its open list.
+function redraw(view, next) {
+  const picker = document.activeElement?.closest?.('#view .pselect select'), keep = picker?.closest('.filters');
+  const fresh = keep && next.find(n => n.classList?.contains('filters'));
+  if (!fresh) return view.replaceChildren(...next);
+  picking = true;
+  // Its project gone meanwhile: the filter applied (All); a pick under way is left alone
+  if (!fresh.querySelector('option[value="' + CSS.escape(picker.value) + '"]')) picker.value = state.filter.project;
+  const nu = [...fresh.children];
+  [...keep.children].forEach((c, i) => { if (!c.contains(picker) && nu[i]) c.replaceWith(nu[i]); });
+  const i = next.indexOf(fresh);
+  for (const c of [...view.children]) if (c !== keep) c.remove();
+  keep.before(...next.slice(0, i));
+  keep.after(...next.slice(i + 1));
 }
 
 const hidden = n => n > 0 && n + ' hidden by the filters';
@@ -526,6 +562,8 @@ function head(l) {
   return el('h2', { class: 'ch' }, el('span', { class: 'tt' }, el('span', { class: 'sq sq-' + l.key }), l.title, el('span', { class: 'cnt' }, l.xs.length)), meta);
 }
 
+// What the tally's "wait on you" counts (todo place's needs_you)
+const WAIT_ON_YOU = 'Asks to answer, your PRs that moved, starts not picked up, blocked workers';
 const hotCount = l => l.xs.filter(x => needsYou(x) && !x.it.quiet).length;
 
 function body(l) {
@@ -570,7 +608,7 @@ function swipe(ls) {
     const hot = hotCount(l);
     return el('button', { type: 'button', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
       'aria-current': state.lane === l.key && 'true', onclick: () => showLane(l.key) },
-    l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
+    l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'wait on you' }, String(hot)));
   };
   return [el('div', { class: 'tabs', role: 'group', 'aria-label': 'Columns' }, ls.map(tab)), lanes];
 }
@@ -665,8 +703,11 @@ function board() {
   const kinds = new Map();
   for (const x of all) if (kindOf(x) === 'boss' || !kinds.get(whoOf(x))) kinds.set(whoOf(x), kindOf(x));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
-  // A dropped card is filtered as it was: a tick under "need you" stays shown, Ticking…
-  const ls = lanes(raw.filter(x => matches(x, state.filter)).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
+  // A dropped card is filtered as it was: a tick under "wait on you" stays shown, Ticking…, until the board read after
+  // its call settles it, even when a read before its reply has it ticked
+  const onWay = x => !!state.moves[key(x.list.boss, x.it.id)] && !!x.list.items?.includes(x.it);
+  // (a move can change its assignee, not its project)
+  const ls = lanes(raw.filter(x => matches(x, state.filter) || onWay(x) && (!state.filter.project || project(x.list) === state.filter.project)).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
   const out = [...listErrors(), filters(projects, ws, kinds), ...(wide.matches ? [columns(ls)] : swipe(ls))];
   if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
@@ -800,6 +841,10 @@ function sheet(r) {
   }
 }
 
+const byF = f => '[data-f="' + CSS.escape(f) + '"]';
+// twin is the data-f of a card drawn the other way: ticked (a done row), or put back (open)
+const twin = f => f.startsWith('done:') ? f.slice(5) : 'done:' + f;
+
 function render() {
   const r = route(), b = state.board;
   document.getElementById('title').textContent = r.name === 'pair' ? 'Pair with your Mac' : 'Board';
@@ -816,7 +861,7 @@ function render() {
     const n = (count, what) => el('span', null, el('b', null, String(count)), what);
     // What needs the user: a shortcut to those cards, again to all
     const need = el('button', { type: 'button', class: 'need' + (t.need ? ' on' : ''), 'aria-pressed': String(f.needs), 'data-f': 'needs',
-      onclick: () => { f.needs = !f.needs; refilter(f.needs); } }, el('b', null, String(t.need)), 'need you');
+      title: WAIT_ON_YOU, onclick: () => { f.needs = !f.needs; refilter(f.needs); } }, el('b', null, String(t.need)), 'wait on you');
     top.append(need, n(t.mine, 'mine'), n(t.open, 'open'));
     if (focused) need.focus({ preventScroll: true });
     line.append('live · updated ' + hhmm(state.asOf));
@@ -839,11 +884,11 @@ function render() {
       // and each column keeps its scroll, the phone's filter strip its own
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
       const strip = view.querySelector('.filters')?.scrollLeft || 0;
-      view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
+      redraw(view, [...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board()]);
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
       if (!wide.matches) showLane(state.lane);
-      if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
+      if (f) (view.querySelector(byF(f)) || view.querySelector(byF(twin(f))))?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown && !dropping) window.scrollTo(0, 0);
       state.noteShown = state.note;
     }
@@ -881,17 +926,18 @@ async function move(x, to, at, shown) {
   if (!state.reachable) return refuse(x, 'your Mac is not reachable', at);
   state.moves[k] = { to, act: v.act };
   delete state.errors[k];
-  let ok = false;
+  let said = '';
   dropping++;
   try {
     render();
-    ok = await ACTS[v.act](x.list, x.it);
+    said = await ACTS[v.act](x.list, x.it);
   } finally {
     dropping--;
-    state.noteShown = state.note; // the button's note, shown without scrolling the board away from the drop
     if (state.moves[k]?.after === undefined) delete state.moves[k]; // never left for good
   }
-  if (!ok && !state.unpaired) refuse(x, state.errors[k] || state.note || 'not moved', at, to); // unpaired: Pair says why
+  // At the foot of the screen, not in the note at the board's top: that may be scrolled away
+  if (said) flash(el('div', { class: 'toast' }, said));
+  else if (!state.unpaired) refuse(x, state.errors[k] || 'not moved', at, to); // unpaired: Pair says why
 }
 
 let flashTimer = 0;
@@ -899,17 +945,21 @@ let flashTimer = 0;
 // refuse says why card x stays where it is: a callout at at (else under the card) and a line at the foot, for a few seconds;
 // to: the column a failed call was for, which the Mac may have saved it in anyway (its boss not told).
 function refuse(x, why, at, to) {
-  for (const n of document.querySelectorAll('body > .refuse, body > .toast')) n.remove();
   at ||= anchor(x);
   // Where it is now: an unanswered call may have moved it after all
   const now = x.done ? x : find(x.list.boss, x.it.id);
   const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': Math.min(at.y, innerHeight - 140) + 'px' } }, why);
   // gone from the open items after a tick with no reply: ticked, likely; after a refusal: someone else's change
   const moved = !!to && (now ? columnOf(now) === to : to === 'done' && why === NO_REPLY);
-  const toast = el('div', { class: 'toast' }, (moved ? 'Moved, with a problem' : 'Not moved') + ' · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
-  document.body.append(call, toast);
+  flash(call, el('div', { class: 'toast' }, (moved ? 'Moved, with a problem' : 'Not moved') + ' · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open')));
+}
+
+// flash shows nodes (a callout, a toast at the foot) for a few seconds, in place of the last ones.
+function flash(...nodes) {
+  for (const n of document.querySelectorAll('body > .refuse, body > .toast')) n.remove();
+  document.body.append(...nodes);
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { call.remove(); toast.remove(); }, FLASH_MS);
+  flashTimer = setTimeout(() => { for (const n of nodes) n.remove(); }, FLASH_MS);
 }
 
 // anchor is the point under card x as drawn, else the middle of the screen.

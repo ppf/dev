@@ -39,22 +39,22 @@ func TestSetDoing(t *testing.T) {
 		{9, "", true, d("x"), "no open item 9"},
 		{1, "mine", true, d(strings.Repeat("x", MaxDoing+1)), "at most 100"},
 	} {
-		if _, err := s.SetDoing(tt.id, tt.text, tt.user, tt.doing, now); err == nil || !strings.Contains(err.Error(), tt.want) || !errors.As(err, new(Refused)) {
+		if _, err := s.SetDoing(tt.id, tt.text, tt.user, nil, tt.doing, now); err == nil || !strings.Contains(err.Error(), tt.want) || !errors.As(err, new(Refused)) {
 			t.Errorf("SetDoing(%d, %q, user %v): %v, want Refused %q", tt.id, tt.text, tt.user, err, tt.want)
 		}
 	}
-	it, err := s.SetDoing(1, "mine", true, d("  sending\tthe cert "), now)
+	it, err := s.SetDoing(1, "mine", true, nil, d("  sending\tthe cert "), now)
 	if err != nil || it.Doing == nil || *it.Doing != (Doing{Text: "sending the cert", At: now.Unix()}) {
 		t.Fatalf("user SetDoing = %+v, %v", it.Doing, err)
 	}
-	if _, err := s.SetDoing(2, "", false, d(""), now); err != nil {
+	if _, err := s.SetDoing(2, "", false, nil, d(""), now); err != nil {
 		t.Fatal(err)
 	}
 	f, _ := s.read()
 	if f.Items[0].Doing == nil || f.Items[0].Doing.Text != "sending the cert" || f.Items[1].Doing == nil || f.Items[1].Doing.Text != "" {
 		t.Errorf("stored: %+v / %+v, want both doing", f.Items[0].Doing, f.Items[1].Doing)
 	}
-	if it, err := s.SetDoing(1, "", true, nil, now); err != nil || it.Doing != nil {
+	if it, err := s.SetDoing(1, "", true, nil, nil, now); err != nil || it.Doing != nil {
 		t.Errorf("stop = %+v, %v", it.Doing, err)
 	}
 	if f, _ := s.read(); f.Items[0].Doing != nil {
@@ -71,10 +71,10 @@ func TestDoingPlaced(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.SetDoing(1, "mine", true, &Doing{Text: "x"}, now); err != nil {
+	if _, err := s.SetDoing(1, "mine", true, nil, &Doing{Text: "x"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetDoing(2, "", false, &Doing{}, now); err != nil {
+	if _, err := s.SetDoing(2, "", false, nil, &Doing{}, now); err != nil {
 		t.Fatal(err)
 	}
 	l := read(t, s, now)
@@ -97,11 +97,11 @@ func TestDoingEnds(t *testing.T) {
 		}
 	}
 	for id, text := range map[int]string{1: "a", 2: "b", 3: "c", 4: "d"} {
-		if _, err := s.SetDoing(id, text, true, &Doing{Text: "on it"}, now); err != nil {
+		if _, err := s.SetDoing(id, text, true, nil, &Doing{Text: "on it"}, now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.SetDoing(5, "", false, &Doing{Text: "on it"}, now); err != nil {
+	if _, err := s.SetDoing(5, "", false, nil, &Doing{Text: "on it"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Done([]int{1}, now); err != nil {
@@ -237,10 +237,10 @@ func TestDoingLines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.SetDoing(1, "send the cert", true, &Doing{Text: "mailing ops"}, now); err != nil {
+	if _, err := s.SetDoing(1, "send the cert", true, nil, &Doing{Text: "mailing ops"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetDoing(2, "", false, &Doing{}, now); err != nil {
+	if _, err := s.SetDoing(2, "", false, nil, &Doing{}, now); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, s, now).lines(0, now)
@@ -262,7 +262,7 @@ func TestDoingDoneOnAndRestate(t *testing.T) {
 		}
 	}
 	for id, text := range map[int]string{1: "a", 2: "b"} {
-		if _, err := s.SetDoing(id, text, true, &Doing{Text: "on it"}, now); err != nil {
+		if _, err := s.SetDoing(id, text, true, nil, &Doing{Text: "on it"}, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -294,10 +294,10 @@ func TestDoingStartAskTicked(t *testing.T) {
 	if _, _, err := s.Start(placed(t, s, Owner{Name: "boss-x"}, 1, now), "a", "boss-x", now); err != nil {
 		t.Fatal(err)
 	}
-	if it, err := s.SetDoing(1, "a", true, &Doing{Text: "mine after all"}, now); err != nil || it.Started != nil {
+	if it, err := s.SetDoing(1, "a", true, nil, &Doing{Text: "mine after all"}, now); err != nil || it.Started != nil {
 		t.Errorf("doing after a start: %+v, %v; want the start ended", it.Started, err)
 	}
-	if _, err := s.SetDoing(2, "b", true, &Doing{}, now); err != nil {
+	if _, err := s.SetDoing(2, "b", true, nil, &Doing{}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Replace(2, Item{Text: "b?", Options: []string{"x", "y"}}, now); err != nil {
@@ -407,5 +407,42 @@ func TestPartOfOthersKept(t *testing.T) {
 	}
 	if got[1] != 2 || got[2] != 1 || got[3] != 4 {
 		t.Errorf("part_of = %v, want 1⇄2 kept beside 3⇄4", got)
+	}
+}
+
+// A board's doing is refused once the item's start or doing line changed since the board read it: the same words set
+// again later too.
+func TestSetDoingSeen(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, it := range []Item{{Text: "a"}, {Text: "b"}} {
+		if _, err := s.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started, _, err := s.Start(placed(t, s, Owner{Name: "boss-x"}, 1, now), "a", "boss-x", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetDoing(1, "a", true, &Seen{}, &Doing{Text: "x"}, now); err == nil || !errors.As(err, new(Refused)) || !strings.Contains(err.Error(), "changed since it was read") {
+		t.Errorf("started since: %v, want Refused", err)
+	}
+	if _, err := s.SetDoing(1, "a", true, &Seen{Started: started.Started}, &Doing{Text: "x"}, now); err != nil {
+		t.Errorf("start as seen: %v", err)
+	}
+	first, err := s.SetDoing(2, "b", true, &Seen{}, &Doing{Text: "on it"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetDoing(2, "b", true, nil, &Doing{Text: "on it"}, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for _, seen := range []*Seen{{}, {Doing: first.Doing}} {
+		if _, err := s.SetDoing(2, "b", true, seen, nil, now); err == nil || !strings.Contains(err.Error(), "changed since it was read") {
+			t.Errorf("stop seen %+v: %v, want Refused", seen.Doing, err)
+		}
+	}
+	if it, err := s.SetDoing(2, "b", true, &Seen{Doing: &Doing{Text: "on it", At: now.Add(time.Minute).Unix()}}, nil, now); err != nil || it.Doing != nil {
+		t.Errorf("stop as seen: %+v, %v", it.Doing, err)
 	}
 }

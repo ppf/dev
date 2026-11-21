@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -165,6 +166,11 @@ type request struct {
 	Option   string `json:"option"`
 	Doing    string `json:"doing"`
 	Stop     bool   `json:"stop"`
+	// Seen: the doing call's precondition, as todo.SetDoing's; raw, compared with the item's as stored
+	Seen *struct {
+		Doing   json.RawMessage `json:"doing"`
+		Started json.RawMessage `json:"started"`
+	} `json:"seen"`
 }
 
 // act checks the page's header and finds the open item the request names, then hands it to f under the lock.
@@ -277,6 +283,10 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 		return 409, fmt.Sprintf("item %d is on %s, not the user's", req.ID, on)
 	case len(options) > 0:
 		return 409, fmt.Sprintf("item %d is a question: answer it", req.ID)
+	case req.Seen == nil:
+		return 400, "no seen"
+	case !same(req.Seen.Doing, it["doing"]) || !same(req.Seen.Started, it["started"]):
+		return 409, fmt.Sprintf("item %d changed since it was read: look at the list again", req.ID)
 	case req.Stop && it["doing"] == nil:
 		return 409, fmt.Sprintf("item %d isn't marked doing", req.ID)
 	case req.Stop:
@@ -291,11 +301,24 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 	return 200, ""
 }
 
-// mac changes an item as the Mac's own dev todo would: {"boss","id"} ticks it, with "text" it rewords it.
+// same reports whether seen (JSON, null for none) equals the item's stored value v.
+func same(seen json.RawMessage, v any) bool {
+	stored, _ := json.Marshal(v)
+	var a, b any
+	_ = json.Unmarshal(seen, &a)
+	_ = json.Unmarshal(stored, &b)
+	return reflect.DeepEqual(a, b)
+}
+
+// mac changes an item as the Mac's own dev todo would: {"boss","id"} ticks it, with "text" it rewords it, with "doing"
+// sets its doing line (dev todo doing).
 func (s *server) mac(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Dev-Page", "1")
 	s.act(func(req request, it map[string]any) (int, string) {
-		if req.Text != "" {
+		if req.Doing != "" {
+			it["doing"] = map[string]any{"text": req.Doing, "at": time.Now().Unix()}
+			it["column"] = "progress"
+		} else if req.Text != "" {
 			it["text"] = req.Text
 		} else {
 			it["done"] = true
