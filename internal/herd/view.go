@@ -44,7 +44,8 @@ func (m Model) render() []string {
 	copy(lines[gh-len(msgs):], msgs)
 	board, bh := lines[len(top):gh-len(msgs)], gh-len(top)-len(msgs)
 	if len(m.snap.tiles) == 0 {
-		if bh > 0 {
+		// Before a reload's first good refresh the workers aren't read yet, not gone
+		if bh > 0 && !m.restored {
 			board[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 		}
 		return lines
@@ -96,6 +97,9 @@ func (m Model) bottom() []string {
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
 	case m.msg.alert:
 		return []string{sidebar.AlertRow(m.msg.text, w)}
+	case m.reload.Err != nil:
+		// Before info: the key that clears one clears it too, unseen
+		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	case m.msg.text != "":
 		return []string{sidebar.HintRow(m.msg.text, w)}
 	case m.err != nil:
@@ -109,13 +113,13 @@ func (m Model) bottom() []string {
 		}
 		switch {
 		case m.needIdx < len(rows) && rows[m.needIdx].fold != nil:
-			return []string{sidebar.HintRow("j/k move  ⏎ open or fold  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move  ⏎ open or fold  t fold to do  esc cards  b board")
 		case m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain:
-			return []string{sidebar.HintRow("j/k move  s start  d tick (stays till ticked)"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move  s start  d tick (stays till ticked)" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		case m.needIdx < len(rows) && (rows[m.needIdx].Kind == sidebar.NeedOn || rows[m.needIdx].Kind == sidebar.NeedUnread || rows[m.needIdx].Closed):
-			return []string{sidebar.HintRow("j/k move"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+			return m.hintRow("j/k move" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		}
-		return []string{sidebar.HintRow("j/k move  1-9 answer  m reply"+open+"  g/⏎ go  t fold to do  esc cards  b board", w)}
+		return m.hintRow("j/k move  1-9 answer  m reply" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 	}
 	pages := ""
 	sel := index(tiles, m.selected)
@@ -149,7 +153,23 @@ func (m Model) bottom() []string {
 			hint += then
 		}
 	}
-	return []string{sidebar.HintRow(pages+hint, w)}
+	return m.hintRow(pages + hint)
+}
+
+// hintRow is the bottom row of keys with what holds a ready reload: before them, so a narrow pane shows it, but
+// after TO DO's keys, which the user is using.
+func (m Model) hintRow(keys string) []string {
+	if m.reload.Flash != "" && !m.needMode {
+		keys = "↻ dev " + m.reload.Flash + "  " + keys
+	}
+	switch h := m.held(); {
+	case h == "":
+	case m.needMode:
+		keys += "  " + h
+	default:
+		keys = h + "  " + keys
+	}
+	return []string{sidebar.HintRow(keys, m.width)}
 }
 
 // boxRows is the reply box bound to t, boxed like t's card in t's colour: a top border naming what it does and

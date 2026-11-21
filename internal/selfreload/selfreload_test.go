@@ -623,8 +623,12 @@ func TestExecEnvAndError(t *testing.T) {
 	}
 	t.Setenv(envReloadedTo, "v0.9.0")
 	t.Setenv(envCanary, oldV)
-	if err := Exec(ready, []string{"dev"}); err != nil {
+	t.Setenv("DEV_STATE", "old")
+	if err := Exec(ready, []string{"dev"}, "DEV_STATE={\"a\":\"b=c\"}", envReloadedTo+"="); err != nil {
 		t.Fatal(err)
+	}
+	if v, n := envValue(r.execs[0], "DEV_STATE"); v != `{"a":"b=c"}` || n != 1 {
+		t.Errorf("DEV_STATE = %q (%d entries), want the one set", v, n)
 	}
 	if v, n := envValue(r.execs[0], envReloadedTo); v != newV || n != 1 {
 		t.Errorf("%s = %q (%d entries), want %q once", envReloadedTo, v, n, newV)

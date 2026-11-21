@@ -11,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -534,7 +535,7 @@ func TestCardButtons(t *testing.T) {
 	}
 	if _, cmd := clickAt(m, at("PR #95")+1, y); cmd == nil {
 		t.Error("PR: nothing opened")
-	} else if msg := cmd().(actionMsg); !strings.Contains(msg.msg.text, "no browser") {
+	} else if msg := selfreload.Done(cmd()).(actionMsg); !strings.Contains(msg.msg.text, "no browser") {
 		t.Errorf("PR: %q", msg.msg.text)
 	}
 	m.open(m.snap.tiles[1])

@@ -279,7 +279,7 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 		}()
 		return ch
 	}
-	execReload = func(rd selfreload.Ready, args []string) error {
+	execReload = func(rd selfreload.Ready, args []string, _ ...string) error {
 		if rd.Version != "v2.0.0" {
 			t.Errorf("exec into %q", rd.Version)
 		}

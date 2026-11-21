@@ -50,7 +50,11 @@ previews, and it keeps its workers and list.`,
 				if pane == "" {
 					return errors.New("Must run inside tmux")
 				}
-				return herd.Run(c, pane)
+				exe, err := os.Executable()
+				if err != nil {
+					return fmt.Errorf("boss: binary path for reload: %w", err)
+				}
+				return herd.Run(c, pane, exe, os.Args)
 			}
 			if adopt && !background {
 				return errors.New("--adopt needs --background: dev boss <project> --background --adopt")
