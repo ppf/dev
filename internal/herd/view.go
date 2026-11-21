@@ -111,13 +111,22 @@ func (m Model) bottom() []string {
 		if m.needIdx < len(rows) && rows[m.needIdx].opens() {
 			open = "  space open"
 		}
+		var r needRow
+		if m.needIdx < len(rows) {
+			r = rows[m.needIdx]
+		}
 		switch {
-		case m.needIdx < len(rows) && rows[m.needIdx].fold != nil:
+		case r.fold != nil:
 			return m.hintRow("j/k move  ⏎ open or fold  t fold to do  esc cards  b board")
-		case m.needIdx < len(rows) && rows[m.needIdx].Kind == sidebar.NeedPlain:
-			return m.hintRow("j/k move  s start  d tick (stays till ticked)" + open + "  g/⏎ go  t fold to do  esc cards  b board")
-		case m.needIdx < len(rows) && (rows[m.needIdx].Kind == sidebar.NeedOn || rows[m.needIdx].Kind == sidebar.NeedUnread || rows[m.needIdx].Closed):
-			return m.hintRow("j/k move" + open + "  g/⏎ go  t fold to do  esc cards  b board")
+		case r.Kind == sidebar.NeedPlain || r.Kind == sidebar.NeedOn || r.Kind == sidebar.NeedUnread || r.Closed:
+			keys := "j/k move"
+			if r.Startable(m.managerRuns()) {
+				keys += "  s start"
+			}
+			if r.Tickable() {
+				keys += "  d tick (stays till ticked)"
+			}
+			return m.hintRow(keys + open + "  g/⏎ go  t fold to do  esc cards  b board")
 		}
 		return m.hintRow("j/k move  1-9 answer  m reply" + open + "  g/⏎ go  t fold to do  esc cards  b board")
 	}
