@@ -59,17 +59,39 @@ type NeedItem struct {
 	// someone whose workers weren't read
 	Status   string `json:"status"`
 	StatusOn string `json:"status_on"`
-	// Started is when the user asked to start it (dev todo start), unix seconds; StartLate once no one took it up in time
-	Started   *struct{ At int64 } `json:"started"`
-	StartLate bool                `json:"start_late"`
-	Quiet     bool                `json:"quiet"` // a test item (dev todo add --quiet): counted nowhere
+	// Started is when the user asked to start it (dev todo start), unix seconds, and whom the start went to; StartLate
+	// once no one took it up in time
+	Started   *NeedStarted `json:"started"`
+	StartLate bool         `json:"start_late"`
+	Quiet     bool         `json:"quiet"` // a test item (dev todo add --quiet): counted nowhere
+	// Column, Assignee, WaitingFor and NeedsYou are its card's place on the boards (todo.Placement)
+	Column     string       `json:"column"`
+	Assignee   NeedAssignee `json:"assignee"`
+	WaitingFor string       `json:"waiting_for"`
+	NeedsYou   bool         `json:"needs_you"`
+	Doing      *NeedDoing   `json:"doing"`   // what its doer said it does now
+	PartOf     int          `json:"part_of"` // its other half's id
 }
 
-// Own reports an open item that is the user's: one with a status that names no one, or starting (naming whom the
-// start went to).
-func (it NeedItem) Own() bool {
-	return it.Status != "" && (it.StatusOn == "" || it.Status == StatusStarting)
+// NeedStarted is when the user asked to start an item, unix seconds, and whom the start went to (todo.Started).
+type NeedStarted struct {
+	At int64  `json:"at"`
+	To string `json:"to"`
 }
+
+// NeedDoing is what an item's doer said it does now (todo.Doing).
+type NeedDoing struct {
+	Text string `json:"text"`
+}
+
+// NeedAssignee is whose a card is (todo.Assignee): Kind AssigneeYou, AssigneeBoss or AssigneeWorker, Name its session.
+type NeedAssignee struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// Mine reports an open card the user's (assignee you).
+func (it NeedItem) Mine() bool { return !it.Done && it.Assignee.Kind == AssigneeYou }
 
 // NeedCounts are the lists' counts for the roll-ups (Subtree), by boss.
 func NeedCounts(needs []NeedList) map[string]ListCount {
@@ -78,7 +100,7 @@ func NeedCounts(needs []NeedList) map[string]ListCount {
 		c := ListCount{Unread: l.Error != "", Closed: l.Closed}
 		for _, it := range l.Items {
 			if !it.Quiet {
-				c.Add(it.Done, it.Status)
+				c.Add(it)
 			}
 		}
 		out[l.Boss] = c
@@ -86,15 +108,15 @@ func NeedCounts(needs []NeedList) map[string]ListCount {
 	return out
 }
 
-// NeedKind is what a TO DO row is, in the order rows sort within a status.
+// NeedKind is what a TO DO row is, in the order rows sort last within a group (after cardOrder).
 type NeedKind int
 
 const (
 	NeedDialog  NeedKind = iota // a session's open dialog
 	NeedAsk                     // a turn that ended on a question (an asks note)
-	NeedListAsk                 // a list item with options
-	NeedPlain                   // a list item without options
-	NeedOn                      // a list item on a worker or a person
+	NeedListAsk                 // the user's card with options
+	NeedPlain                   // the user's card without options
+	NeedOn                      // a card not the user's: the boss's, a worker's, a person's
 	NeedUnread                  // a list that wasn't read: Text says why
 )
 
@@ -118,10 +140,21 @@ type NeedRow struct {
 	// Status is the list item's (Statuses), none for a session's; StatusOn the worker or person it names
 	Status   string
 	StatusOn string
-	// StartedAt is when the user asked to start the list item, unix seconds (0: not asked); StartLate once no one took it up
+	// StartedAt is when the user asked to start the list item, unix seconds (0: not asked), StartedTo whom it went to;
+	// StartLate once no one took it up
 	StartedAt int64
+	StartedTo string
 	StartLate bool
-	Quiet     bool // a test item: Count leaves it out, its text shows after a TEST tag (Tag)
+	Quiet     bool  // a test item: Count leaves it out, its text shows after a TEST tag (Tag)
+	Added     int64 // when the list item was added, unix seconds
+	// Column, Assignee, WaitingFor and NeedsYou are the list item's card's place (NeedItem); Doing its doing text,
+	// PartOf its other half's id
+	Column     string
+	Assignee   NeedAssignee
+	WaitingFor string
+	NeedsYou   bool
+	Doing      string
+	PartOf     int
 }
 
 // Tag is text after a muted TEST tag when quiet: a test item's, on every board.
@@ -132,45 +165,76 @@ func Tag(quiet bool, text string) string {
 	return muted + "TEST" + reset + " " + text
 }
 
-// Tally is what TO DO's rows count, as its header, the sidebar's and the roll lines (Rollup) say it: the sessions
-// that need the user, the asks to decide, the user's own plain items.
-type Tally struct{ NeedYou, Decide, ToDo int }
+// Tally is what TO DO's rows count, as the boss pane's and the sidebar's headers say it (the web board's tally, plus
+// the sessions): what needs the user (sessions waiting on them, cards marked needs you), the user's cards.
+type Tally struct{ NeedYou, Mine int }
+
+// MineWord is the user's cards' count's word: "N mine".
+const MineWord = "mine"
 
 // Count tallies rows, test items left out.
 func Count(rows []NeedRow) Tally {
 	var t Tally
+	asking := map[string]bool{}
 	for _, r := range rows {
-		switch {
-		case r.Quiet:
-		case r.Kind == NeedDialog || r.Kind == NeedAsk:
+		if r.Kind == NeedDialog || r.Kind == NeedAsk {
+			asking[r.Session] = true
+		}
+	}
+	for _, r := range rows {
+		if r.Quiet {
+			continue
+		}
+		// A blocked worker's card counts by its session's row, when it has one (not after a failed turn)
+		if r.Kind == NeedDialog || r.Kind == NeedAsk || r.NeedsYou && !(r.Assignee.Kind == AssigneeWorker && asking[r.Assignee.Name]) {
 			t.NeedYou++
-		case r.Status == StatusDecide:
-			t.Decide++
-		case r.Status == StatusYours:
-			t.ToDo++
+		}
+		if r.Mine() {
+			t.Mine++
 		}
 	}
 	return t
 }
 
-// Group is the row's index in Groups: -1 for a session's (Needs you, first), In progress for an item on someone with
-// no status (its workers weren't read), len(Groups) for a list not read, after them.
+// card reports a list item's card: not a session's, nor a list not read.
+func (r NeedRow) card() bool { return r.Boss != "" && r.Kind != NeedUnread }
+
+// Mine reports a list item's card the user's (assignee you).
+func (r NeedRow) Mine() bool { return r.card() && r.Assignee.Kind == AssigneeYou }
+
+// Group is the row's block: -1 for a session's (Needs you, first), its column's index in Columns for a list item's
+// (In progress for a column it doesn't know, as the web board), len(Columns) for a list not read, after them.
 func (r NeedRow) Group() int {
-	switch g := GroupOf(r.Status); {
-	case r.Kind == NeedDialog || r.Kind == NeedAsk:
+	switch r.Kind {
+	case NeedDialog, NeedAsk:
 		return -1
-	case r.Kind == NeedUnread:
-		return len(Groups)
-	case g < 0:
-		return GroupOf(StatusWorking)
-	default:
-		return g
+	case NeedUnread:
+		return len(Columns)
 	}
+	if i := slices.Index(Columns, r.Column); i >= 0 {
+		return i
+	}
+	return slices.Index(Columns, ColumnProgress)
 }
 
-// Yours reports a row the user acts on: a session's, a list not read, or an item of the user's own (NeedItem.Own) not yet
-// asked to start.
-func (r NeedRow) Yours() bool { return r.Kind != NeedOn && r.Status != StatusStarting }
+// Yours reports a row the user acts on: a session's, a list not read, or the user's card (Mine).
+func (r NeedRow) Yours() bool { return !r.card() || r.Mine() }
+
+// Tickable reports a list item d ticks (dev todo done): the user's card, or their own item asked to start, not an ask.
+func (r NeedRow) Tickable() bool {
+	return r.card() && len(r.Options) == 0 && (r.Mine() || r.ownStarted())
+}
+
+// Startable reports a list item s starts (dev todo start), as the web board offers it: a To do card or a late start,
+// not an ask; on the manager's own list only the user's; a closed boss's only while the manager runs, which takes it.
+func (r NeedRow) Startable(managerRuns bool) bool {
+	return r.card() && len(r.Options) == 0 && (r.Boss != Manager || r.Mine() || r.ownStarted()) && (!r.Closed || managerRuns) &&
+		(r.StartLate || r.Column == ColumnTodo)
+}
+
+// ownStarted reports the user's own item asked to start: its status says starting only then (todo.Own), whoever the
+// card is now.
+func (r NeedRow) ownStarted() bool { return r.Status == StatusStarting }
 
 // ClosedHint is what a key on a closed boss's row says instead of acting.
 func (r NeedRow) ClosedHint() string {
@@ -345,13 +409,18 @@ func (m Model) needRows() []NeedRow {
 	return append(out, slices.DeleteFunc(all, func(r NeedRow) bool { return shown[r.key()] })...)
 }
 
-// yourRows are NeedRows under root the user acts on (Yours).
+// yourRows are NeedRows under root the user acts on (Yours): the sessions', then the user's cards needing them, then
+// the rest in column order, the lists not read last.
 func (m Model) yourRows(root string) []NeedRow {
-	return slices.DeleteFunc(NeedRows(m.snap.sessions, m.needs, root), func(r NeedRow) bool { return !r.Yours() })
+	rows := slices.DeleteFunc(NeedRows(m.snap.sessions, m.needs, root), func(r NeedRow) bool { return !r.Yours() })
+	slices.SortStableFunc(rows, func(a, b NeedRow) int {
+		return cmp.Or(cmp.Compare(min(a.Group(), 0), min(b.Group(), 0)), cmp.Compare(boolRank(a.NeedsYou), boolRank(b.NeedsYou)))
+	})
+	return rows
 }
 
-// needCounts is the sidebar's TO DO header after its title: what its rows and the boards' count, as the roll lines say
-// it, "N need you" and "N decide" red, "N to do" muted; "" for none.
+// needCounts is the sidebar's TO DO header after its title: what its rows and the boards' count, "N need you" red,
+// "N mine" muted; "" for none.
 func (m Model) needCounts() string {
 	t := Count(m.yourRows(""))
 	var parts []string
@@ -361,8 +430,7 @@ func (m Model) needCounts() string {
 		}
 	}
 	add(t.NeedYou, red, NeedYouWord)
-	add(t.Decide, red, DecideWord)
-	add(t.ToDo, muted, ToDoWord)
+	add(t.Mine, muted, MineWord)
 	return strings.Join(parts, muted+" · "+reset)
 }
 
@@ -400,8 +468,8 @@ func focusBoard(c *tmux.Client, client, board string, from Origin) error {
 	return err
 }
 
-// NeedRows are the rows of TO DO from sessions in Order and the bosses' lists, sorted by group (Group), status
-// (Statuses) and kind (NeedKind), in sessions' and lists' order within one: each session waiting on a dialog or on
+// NeedRows are the rows of TO DO from sessions in Order and the bosses' lists, sorted by group (Group), the
+// web board's order within a column (cardOrder) and kind (NeedKind), in sessions' and lists' order within one: each session waiting on a dialog or on
 // the question its turn ended on, each open item, each list not read. root scopes them to its board: the sessions
 // under it (its own question is on its screen) and its and their lists; "" takes them all.
 func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
@@ -460,15 +528,19 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 			}
 			row.Kind, row.ID, row.Text, row.Options, row.Check, row.Updated = NeedPlain, it.ID, it.Text, it.Options, it.Check, 0
 			row.Until, row.On, row.Status, row.StatusOn, row.Context = it.Until, it.On, it.Status, it.StatusOn, it.Context
-			row.StartedAt, row.StartLate, row.Quiet = 0, it.StartLate, it.Quiet
+			row.StartedAt, row.StartedTo, row.StartLate, row.Quiet, row.Added = 0, "", it.StartLate, it.Quiet, it.Added
+			row.Column, row.Assignee, row.WaitingFor, row.NeedsYou, row.Doing, row.PartOf = it.Column, it.Assignee, it.WaitingFor, it.NeedsYou, "", it.PartOf
 			if it.Started != nil {
-				row.StartedAt = it.Started.At
+				row.StartedAt, row.StartedTo = it.Started.At, it.Started.To
+			}
+			if it.Doing != nil {
+				row.Doing = it.Doing.Text
 			}
 			if l.Stale {
 				row.Updated = cmp.Or(it.Added, l.Updated)
 			}
 			switch {
-			case !it.Own():
+			case !it.Mine():
 				row.Kind = NeedOn
 			case len(it.Options) > 0:
 				row.Kind = NeedListAsk
@@ -477,10 +549,25 @@ func NeedRows(sessions []Session, lists []NeedList, root string) []NeedRow {
 		}
 	}
 	slices.SortStableFunc(rows, func(a, b NeedRow) int {
-		return cmp.Or(cmp.Compare(a.Group(), b.Group()), cmp.Compare(slices.Index(Statuses, a.Status), slices.Index(Statuses, b.Status)),
-			cmp.Compare(a.Kind, b.Kind))
+		return cmp.Or(cmp.Compare(a.Group(), b.Group()), cardOrder(a, b), cmp.Compare(a.Kind, b.Kind))
 	})
 	return rows
+}
+
+// cardOrder orders cards within a column as the web board's lanes do: what needs the user first, then in To do the
+// user's, then the soonest due (Until), then the oldest.
+func cardOrder(a, b NeedRow) int {
+	first := func(x, y bool) int { return cmp.Compare(boolRank(x), boolRank(y)) }
+	return cmp.Or(first(a.NeedsYou, b.NeedsYou), first(a.Column == ColumnTodo && a.Mine(), b.Column == ColumnTodo && b.Mine()),
+		first(a.Until != 0, b.Until != 0), cmp.Compare(a.Until, b.Until), cmp.Compare(a.Added, b.Added))
+}
+
+// boolRank sorts true first.
+func boolRank(b bool) int {
+	if b {
+		return 0
+	}
+	return 1
 }
 
 // Boards are the bosses whose boards show TO DO for the sessions under them: a manager, and each top-level boss
@@ -534,7 +621,7 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedsKey: j/k move, ⏎ opens a row, then goes to its session (the boards' row to its board), 1-9 answers an
-// open ask, d ticks a plain item, space opens a list item in its popup (dev todo show), b the board (dev todo board),
+// open ask, d ticks the user's card (Tickable), space opens a list item in its popup (dev todo show), b the board (dev todo board),
 // esc/q leaves.
 func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
@@ -581,10 +668,10 @@ func (m Model) handleNeedsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		client, open := m.client(), m.openBoard
 		return m, m.runAction(client, func() error { return open(client, nil) })
 	case "d":
-		if row.Kind != NeedPlain {
-			showMessage(m.c, m.client(), "d ticks a plain item")
+		if !row.Tickable() {
+			showMessage(m.c, m.client(), "d ticks your own item, not an ask")
 		}
-		if m.answering || row.Kind != NeedPlain || row.key() == m.ticked {
+		if m.answering || !row.Tickable() || row.key() == m.ticked {
 			return m, nil
 		}
 		m.answering, m.ticked = true, row.key()
@@ -855,7 +942,7 @@ func (m Model) needsHint() string {
 		return " " + faint + "⏎ go · esc back" + reset
 	case ask:
 		hint = "j/k ⏎ options"
-	case row.Kind == NeedPlain:
+	case row.Tickable():
 		hint = "d tick (stays till ticked)"
 	default:
 		hint = "j/k ⏎ expand"

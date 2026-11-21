@@ -151,16 +151,18 @@ func TestSubtreeGrandchild(t *testing.T) {
 }
 
 // Only an open item counts, by its status: an ask to decide, the user's own plain item, else on others; a closed
-// boss's or a moved PR's in none.
+// boss's, a moved PR's or the boss's own (on boss) in none.
 func TestListCountAdd(t *testing.T) {
 	var c ListCount
-	c.Add(false, StatusDecide)
-	c.Add(false, StatusYours)
-	c.Add(true, "")
-	c.Add(false, StatusWorking)
-	c.Add(false, "")
-	c.Add(false, StatusBossClosed)
-	c.Add(false, StatusCheck)
+	c.Add(NeedItem{Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true})
+	c.Add(NeedItem{Status: StatusYours, Column: ColumnTodo, Assignee: you})
+	c.Add(NeedItem{Done: true})
+	c.Add(NeedItem{Status: StatusWorking, Column: ColumnProgress, On: "dev-w"})
+	c.Add(NeedItem{On: "Carl"})
+	c.Add(NeedItem{Status: StatusBossClosed})
+	c.Add(NeedItem{Status: StatusCheck, Column: ColumnReview})
+	c.Add(NeedItem{Status: StatusIdle, Column: ColumnProgress, StatusOn: "boss-dev", On: "boss"})
+	c.Add(NeedItem{Status: StatusWorking, Column: ColumnProgress, StatusOn: "boss-dev", On: "boss"})
 	if c != (ListCount{Asks: 1, Plain: 1, On: 2}) {
 		t.Errorf("count = %+v", c)
 	}
@@ -180,7 +182,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM", Status: StatusYours}}}}))["boss"]
+	r := Subtree(s.sessions, NeedCounts([]NeedList{{Boss: "boss", Items: []NeedItem{{ID: 1, Text: "DM", Status: StatusYours, Column: ColumnTodo, Assignee: you}}}}))["boss"]
 	if got, _ := rollLine(r, 60); ansi.Strip(got) != "1 working ⚠ · 1 to do · 1 waiting" {
 		t.Errorf("roll-up line = %q", ansi.Strip(got))
 	}
@@ -189,7 +191,7 @@ func TestSubtreeFromPanes(t *testing.T) {
 // NeedCounts counts open items on no one, asks apart, and on others; a list not read is unread.
 func TestNeedCounts(t *testing.T) {
 	got := NeedCounts([]NeedList{
-		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide}, {ID: 2, Status: StatusYours}, {ID: 3, Done: true}, {ID: 4, On: "w", Status: StatusWaiting, StatusOn: "w"}}},
+		{Boss: "a", Items: []NeedItem{{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true}, {ID: 2, Status: StatusYours, Column: ColumnTodo, Assignee: you}, {ID: 3, Done: true}, {ID: 4, On: "w", Status: StatusWaiting, Column: ColumnWaiting, StatusOn: "w"}}},
 		{Boss: "b", Error: "bad json"},
 	})
 	if got["a"] != (ListCount{Asks: 1, Plain: 1, On: 1}) || got["b"] != (ListCount{Unread: true}) {
@@ -206,13 +208,14 @@ func TestRollLineListAsk(t *testing.T) {
 	}
 }
 
-// A roll line says what TO DO counts for the subtree (Count), in the same words: asks to decide, the user's own plain
-// items to do (one filed on the boss's own name too: its status is yours); an item on someone else is "on others".
+// A roll line counts by status: asks to decide, the user's own plain items to do (one filed on the boss's own name
+// too: its status is yours), an item on someone else on others; TO DO counts the same list by card: need you, mine.
 func TestRollLineMatchesToDo(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}, {Name: "w", ID: "$2", StartedBy: "b", Depth: 1, Agent: "Claude", State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
-		{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide}, {ID: 2, Status: StatusYours}, {ID: 3, On: "b", Status: StatusYours},
-		{ID: 4, On: "w", Status: StatusIdle, StatusOn: "w"},
+		{ID: 1, Options: []string{"x", "y"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true},
+		{ID: 2, Status: StatusYours, Column: ColumnTodo, Assignee: you}, {ID: 3, On: "b", Status: StatusYours, Column: ColumnTodo, Assignee: you},
+		{ID: 4, On: "w", Status: StatusIdle, StatusOn: "w", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w"}},
 	}}
 	r := Subtree(ss, NeedCounts([]NeedList{list}))["b"]
 	got, _ := rollLine(r, 60)
@@ -222,8 +225,8 @@ func TestRollLineMatchesToDo(t *testing.T) {
 	if !strings.HasPrefix(got, red+"1 decide"+reset) || !strings.Contains(got, muted+"2 to do"+reset) {
 		t.Errorf("decide red, to do muted: %q", got)
 	}
-	if c := Count(NeedRows(ss, []NeedList{list}, "")); c != (Tally{Decide: 1, ToDo: 2}) {
-		t.Errorf("TO DO = %+v, want 1 decide, 2 to do", c)
+	if c := Count(NeedRows(ss, []NeedList{list}, "")); c != (Tally{NeedYou: 1, Mine: 3}) {
+		t.Errorf("TO DO = %+v, want 1 need you, 3 mine", c)
 	}
 	// Plain items alone say "to do", the state left to the row above
 	r = Subtree(ss, map[string]ListCount{"b": {Plain: 2}})["b"]
@@ -482,15 +485,18 @@ func TestRollLineNarrowKeepsSomething(t *testing.T) {
 	}
 }
 
-// The manager's roll-up counts its closed bosses' lists as its TO DO does: their items in neither decide nor to do,
-// a list not read only as ⚠; no other boss's does.
+// The manager's roll-up leaves its closed bosses' items out of decide and to do, a list not read only ⚠; its TO DO
+// counts them by card; no other boss's roll-up takes them.
 func TestSubtreeClosedLists(t *testing.T) {
 	sessions := subtreeSessions()
 	needs := []NeedList{
-		{Boss: "boss-noc", Items: []NeedItem{{ID: 1, Text: "a", Options: []string{"Yes"}, Status: StatusDecide}, {ID: 2, Text: "b", Status: StatusYours}}},
-		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "c", Status: StatusYours}}},
-		{Boss: "boss-old", Closed: true, Items: []NeedItem{{ID: 1, Text: "d", Status: StatusBossClosed}, {ID: 2, Text: "e", Status: StatusBossClosed}, {ID: 3, Text: "f", On: "Ana", Status: StatusBossClosed, StatusOn: "Ana"},
-			{ID: 4, Text: "g", Options: []string{"Yes"}, Status: StatusBossClosed}, {ID: 5, Text: "h", Done: true}}},
+		{Boss: "boss-noc", Items: []NeedItem{{ID: 1, Text: "a", Options: []string{"Yes"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true},
+			{ID: 2, Text: "b", Status: StatusYours, Column: ColumnTodo, Assignee: you}}},
+		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "c", Status: StatusYours, Column: ColumnTodo, Assignee: you}}},
+		{Boss: "boss-old", Closed: true, Items: []NeedItem{{ID: 1, Text: "d", Status: StatusBossClosed, Column: ColumnTodo, Assignee: you},
+			{ID: 2, Text: "e", Status: StatusBossClosed, Column: ColumnTodo, Assignee: you},
+			{ID: 3, Text: "f", On: "Ana", Status: StatusBossClosed, StatusOn: "Ana", Column: ColumnWaiting, Assignee: NeedAssignee{Kind: AssigneeBoss, Name: "boss-old"}, WaitingFor: "Ana"},
+			{ID: 4, Text: "g", Options: []string{"Yes"}, Status: StatusBossClosed, Column: ColumnTodo, Assignee: you}, {ID: 5, Text: "h", Done: true}}},
 	}
 	rolls := Subtree(sessions, NeedCounts(needs))
 	if got, want := rolls[Manager].Text(), "1 need you · 1 decide · 7 working · 2 to do"; got != want {
@@ -506,8 +512,9 @@ func TestSubtreeClosedLists(t *testing.T) {
 			yours = append(yours, row)
 		}
 	}
-	if c := Count(yours); c != (Tally{NeedYou: r.Questions, Decide: r.Decide, ToDo: r.ToDo}) {
-		t.Errorf("TO DO %+v, roll-up %d need you · %d decide · %d to do", c, r.Questions, r.Decide, r.ToDo)
+	// TO DO counts by the cards, as the web board: the closed boss's cards on the user too
+	if c := Count(yours); c != (Tally{NeedYou: r.Questions + r.Decide, Mine: 6}) {
+		t.Errorf("TO DO %+v, want %d need you · 6 mine", c, r.Questions+r.Decide)
 	}
 }
 
@@ -516,8 +523,9 @@ func TestSubtreeClosedLists(t *testing.T) {
 func TestQuietCountsNowhere(t *testing.T) {
 	ss := []Session{{Name: "b", ID: "$1", Boss: true, State: agent.Idle}}
 	list := NeedList{Boss: "b", Items: []NeedItem{
-		{ID: 1, Text: "test?", Options: []string{"x", "y"}, Status: StatusDecide, Quiet: true}, {ID: 2, Text: "test", Status: StatusYours, Quiet: true},
-		{ID: 3, Text: "real", Status: StatusYours},
+		{ID: 1, Text: "test?", Options: []string{"x", "y"}, Status: StatusDecide, Quiet: true, Column: ColumnTodo, Assignee: you, NeedsYou: true},
+		{ID: 2, Text: "test", Status: StatusYours, Quiet: true, Column: ColumnTodo, Assignee: you},
+		{ID: 3, Text: "real", Status: StatusYours, Column: ColumnTodo, Assignee: you},
 	}}
 	counts := NeedCounts([]NeedList{list})
 	if counts["b"] != (ListCount{Plain: 1}) {
@@ -527,8 +535,8 @@ func TestQuietCountsNowhere(t *testing.T) {
 		t.Errorf("roll-up %+v: a test ask needs no one", r)
 	}
 	rows := NeedRows(ss, []NeedList{list}, "")
-	if c := Count(rows); c != (Tally{ToDo: 1}) {
-		t.Errorf("TO DO = %+v, want 1 to do", c)
+	if c := Count(rows); c != (Tally{Mine: 1}) {
+		t.Errorf("TO DO = %+v, want 1 mine", c)
 	}
 	for _, r := range rows {
 		if r.Quiet != (r.ID != 3) {

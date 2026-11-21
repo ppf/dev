@@ -13,6 +13,9 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
+// you is the user as a card's assignee.
+var you = NeedAssignee{Kind: AssigneeYou}
+
 type answerCall struct {
 	boss     string
 	id       int
@@ -38,10 +41,10 @@ func needsModel(calls *[]answerCall) Model {
 			{Name: "w1", Group: "dev", Project: "dev", ID: "$2", StartedBy: "boss-dev", Depth: 1, Agent: "Claude", State: "waiting"},
 		}},
 		needs: []NeedList{{Boss: "boss-dev", Items: []NeedItem{
-			{ID: 1, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}, Status: StatusDecide},
+			{ID: 1, Text: "Merge #148?", Options: []string{"Merge (Recommended)", "Wait"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true},
 			{ID: 2, Text: "Ticked", Done: true},
-			{ID: 3, Text: "Staging", On: "Marek", Status: StatusWaiting, StatusOn: "Marek"},
-			{ID: 4, Text: "Call Vince", Status: StatusYours},
+			{ID: 3, Text: "Staging", On: "Marek", Status: StatusWaiting, Column: ColumnWaiting, StatusOn: "Marek"},
+			{ID: 4, Text: "Call Vince", Status: StatusYours, Column: ColumnTodo, Assignee: you},
 		}}},
 		needsAnswer: func(boss string, id int, question, option string) (string, error) {
 			*calls = append(*calls, answerCall{boss, id, question, option})
@@ -96,7 +99,7 @@ func TestNeedsRender(t *testing.T) {
 	m := deciding(needsModel(&calls))
 	f := m.render()
 	plain := func(i int) string { return strings.TrimRight(ansi.Strip(f.lines[i]), " ") }
-	for i, want := range []string{" TO DO  1 need you · 1 decide · 1 to do", "", " w1  ● w1", " dev  ? Merge #148?", " dev  ☐ Call Vince", "", " SESSIONS                           +"} {
+	for i, want := range []string{" TO DO  2 need you · 2 mine · n", "", " w1  ● w1", " dev  ? Merge #148?", " dev  ☐ Call Vince", "", " SESSIONS                           +"} {
 		if got := plain(i); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
@@ -104,7 +107,7 @@ func TestNeedsRender(t *testing.T) {
 	if f.header != 6 || len(f.needs) != 3 || f.needs[1] != (needHit{line: 3, idx: 1}) {
 		t.Errorf("header %d, hits %v", f.header, f.needs)
 	}
-	if !strings.Contains(f.lines[0], bold+"TO DO") || !strings.Contains(f.lines[0], red+"1 need you") || !strings.Contains(f.lines[2], red+"●") {
+	if !strings.Contains(f.lines[0], bold+"TO DO") || !strings.Contains(f.lines[0], red+"2 need you") || !strings.Contains(f.lines[2], red+"●") {
 		t.Errorf("colours: %q %q", f.lines[0], f.lines[2])
 	}
 
@@ -142,7 +145,7 @@ func TestNeedsRenderBudget(t *testing.T) {
 	m := needsModel(&calls)
 	var items []NeedItem
 	for i := 1; i <= 30; i++ {
-		items = append(items, NeedItem{ID: i, Text: "item", Status: StatusYours})
+		items = append(items, NeedItem{ID: i, Text: "item", Status: StatusYours, Column: ColumnTodo, Assignee: you})
 	}
 	m.needs = []NeedList{{Boss: "boss-dev", Items: items}}
 	m.snap.height = 20
@@ -256,7 +259,7 @@ func TestNeedsStaleRow(t *testing.T) {
 	m, _ := key(needsModel(&calls), "n")
 	m, _ = key(m, "enter")
 	// The boss's list emptied and #1 is a newer ask
-	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Release now?", Options: []string{"Now", "Later"}, Status: StatusDecide}}}}})
+	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Release now?", Options: []string{"Now", "Later"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true}}}}})
 	m = next.(Model)
 	if m.needOpen {
 		t.Error("options stayed open on a different ask")
@@ -366,7 +369,7 @@ func TestNeedsCursorFollowsRow(t *testing.T) {
 	m, _ := key(needsModel(&calls), "n")
 	m, _ = key(m, "j")
 	want := m.needKey
-	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 4, Text: "Call Vince", Status: StatusYours}}}}})
+	next, _ := m.Update(needsMsg{lists: []NeedList{{Boss: "boss-dev", Items: []NeedItem{{ID: 4, Text: "Call Vince", Status: StatusYours, Column: ColumnTodo, Assignee: you}}}}})
 	m = next.(Model)
 	if m.needIdx != 0 || m.needKey != want {
 		t.Errorf("idx %d key %q, want 0 and %q", m.needIdx, m.needKey, want)
@@ -404,7 +407,7 @@ func TestNeedsStaleHeader(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
 	m.needsErr = errors.New("boom")
-	if got := ansi.Strip(m.render().lines[0]); !strings.Contains(got, "TO DO  1 decide · 1 to do (stale)") {
+	if got := ansi.Strip(m.render().lines[0]); !strings.Contains(got, "TO DO  1 need you · 2 mine (stale)") {
 		t.Errorf("header = %q", got)
 	}
 }
@@ -496,7 +499,7 @@ func TestNeedsLabelIsProject(t *testing.T) {
 	if sessions[1].Group != "nocworx-core" || sessions[1].Project != "nocworx-core" || sessions[1].Root != "manager" {
 		t.Fatalf("order: %+v", sessions[1])
 	}
-	lists := []NeedList{{Boss: "boss-nocworx-core", Items: []NeedItem{{ID: 1, Text: "Call", Status: StatusYours}}}}
+	lists := []NeedList{{Boss: "boss-nocworx-core", Items: []NeedItem{{ID: 1, Text: "Call", Status: StatusYours, Column: ColumnTodo, Assignee: you}}}}
 	if r := NeedRows(sessions, lists, "manager"); len(r) != 1 || r[0].Project != "nocworx-core" || r[0].Who != "boss" {
 		t.Errorf("rows = %+v", r)
 	}
@@ -534,7 +537,7 @@ func TestNeedsDialogText(t *testing.T) {
 func TestNeedsExpandPlainAndDialog(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
-	m.needs[0].Items = []NeedItem{{ID: 4, Text: "Be reachable Tuesday night and Wednesday morning for the rollout", Status: StatusYours}}
+	m.needs[0].Items = []NeedItem{{ID: 4, Text: "Be reachable Tuesday night and Wednesday morning for the rollout", Status: StatusYours, Column: ColumnTodo, Assignee: you}}
 	m, _ = key(m, "n")
 	m, _ = key(m, "enter")
 	all := ansi.Strip(strings.Join(m.render().lines, "\n"))
@@ -628,8 +631,8 @@ func boardModel(calls *[]answerCall) Model {
 		{Name: "vitay", Group: "vitay", ID: "$6", Agent: "Claude", State: "waiting", Deciding: true},
 	})
 	m.needs = []NeedList{
-		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Merge?", Options: []string{"Yes", "No"}, Status: StatusDecide}}},
-		{Boss: "boss-solo", Items: []NeedItem{{ID: 1, Text: "Call Vince", Status: StatusYours}}},
+		{Boss: "boss-dev", Items: []NeedItem{{ID: 1, Text: "Merge?", Options: []string{"Yes", "No"}, Status: StatusDecide, Column: ColumnTodo, Assignee: you, NeedsYou: true}}},
+		{Boss: "boss-solo", Items: []NeedItem{{ID: 1, Text: "Call Vince", Status: StatusYours, Column: ColumnTodo, Assignee: you}}},
 	}
 	return m
 }
@@ -652,7 +655,7 @@ func TestNeedsBoardLine(t *testing.T) {
 		t.Fatalf("rows = %+v", r)
 	}
 	f := m.render()
-	if got := strings.TrimRight(ansi.Strip(f.lines[0]), " "); !strings.HasPrefix(got, " TO DO  1 need you · 1 decide · 1 to do") || f.header != 2 {
+	if got := strings.TrimRight(ansi.Strip(f.lines[0]), " "); !strings.HasPrefix(got, " TO DO  2 need you · 2 mine") || f.header != 2 {
 		t.Errorf("line %q header %d", got, f.header)
 	}
 	var ran []string
@@ -692,7 +695,7 @@ func TestNeedsBoardLine(t *testing.T) {
 	// A session under no boss shows here, under the boards' row
 	m.snap.sessions[5].Deciding = true
 	f = m.render()
-	for i, want := range []string{" TO DO  2 need you · 1 decide · 1 to do", "", " board  → 3 on the board", " vitay  ● vitay"} {
+	for i, want := range []string{" TO DO  3 need you · 2 mine", "", " board  → 3 on the board", " vitay  ● vitay"} {
 		if got := strings.TrimRight(ansi.Strip(f.lines[i]), " "); !strings.HasPrefix(got, want) {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
@@ -862,7 +865,7 @@ func TestNeedsTickClosed(t *testing.T) {
 	var calls []answerCall
 	m := needsModel(&calls)
 	m.snap.sessions = nil
-	m.needs = []NeedList{{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 3, Text: "Ask Mara", Status: StatusBossClosed}}}}
+	m.needs = []NeedList{{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 3, Text: "Ask Mara", Status: StatusBossClosed, Column: ColumnTodo, Assignee: you}}}}
 	var ticked [][2]any
 	m.needsDone = func(boss string, id int, text string) (string, error) {
 		ticked = append(ticked, [2]any{boss, id})
@@ -969,5 +972,102 @@ func TestNeedsOpenQuietWraps(t *testing.T) {
 	}
 	if got := strings.Join(words, " "); !strings.Contains(got, "TEST Should the page keep its filters across reloads?") {
 		t.Errorf("lines = %q", got)
+	}
+}
+
+// The sidebar's TO DO is the user's cards (assignee you) in any column, a closed boss's too, after the sessions: the
+// ones needing the user first; a started item, the boss's own, a worker's or a person's are not in it.
+func TestNeedsYourCards(t *testing.T) {
+	var calls []answerCall
+	m := deciding(needsModel(&calls))
+	boss := NeedAssignee{Kind: AssigneeBoss, Name: "boss-dev"}
+	m.needs = []NeedList{
+		{Boss: "boss-dev", Items: []NeedItem{
+			{ID: 1, Text: "Plain", Status: StatusYours, Column: ColumnTodo, Assignee: you},
+			{ID: 2, Text: "Doing", Status: StatusYours, Column: ColumnProgress, Assignee: you, Doing: &NeedDoing{"x"}},
+			{ID: 3, Text: "Merged", Status: StatusCheck, Column: ColumnReview, Assignee: you, NeedsYou: true},
+			{ID: 4, Text: "Started", Status: StatusStarting, StatusOn: "boss-dev", Column: ColumnProgress, Assignee: boss, Started: &NeedStarted{1, "boss-dev"}},
+			{ID: 5, Text: "Parked", On: "boss", Status: StatusIdle, StatusOn: "boss-dev", Column: ColumnTodo, Assignee: boss},
+			{ID: 6, Text: "Marek", On: "Marek", Status: StatusWaiting, StatusOn: "Marek", Column: ColumnWaiting, Assignee: boss, WaitingFor: "Marek"},
+			{ID: 7, Text: "Worker", On: "w1", Status: StatusWorking, StatusOn: "w1", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w1"}},
+			{ID: 8, Text: "Ticked", Done: true, Column: ColumnDone, Assignee: you},
+		}},
+		{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 1, Text: "Closed", Status: StatusBossClosed, Column: ColumnTodo, Assignee: you}}},
+	}
+	var got []string
+	for _, r := range m.needRows() {
+		got = append(got, r.Text)
+	}
+	if want := []string{"w1", "Merged", "Plain", "Closed", "Doing"}; !slices.Equal(got, want) {
+		t.Errorf("rows %q, want %q", got, want)
+	}
+	if got := ansi.Strip(m.needCounts()); got != "2 need you · 4 mine" {
+		t.Errorf("counts %q", got)
+	}
+}
+
+// d ticks the user's card or their own started item, never an ask; s starts a To do card or a late start, not an ask,
+// on the manager's list only the user's, a closed boss's only while the manager runs.
+func TestNeedRowGates(t *testing.T) {
+	mine := NeedRow{Kind: NeedPlain, Boss: "boss-dev", Column: ColumnTodo, Assignee: you}
+	boss := NeedRow{Kind: NeedOn, Boss: "boss-dev", Column: ColumnTodo, On: "boss", Assignee: NeedAssignee{Kind: AssigneeBoss, Name: "boss-dev"}}
+	with := func(r NeedRow, f func(*NeedRow)) NeedRow { f(&r); return r }
+	for _, tt := range []struct {
+		name        string
+		r           NeedRow
+		tick, start bool
+		managerRuns bool
+	}{
+		{"mine", mine, true, true, false},
+		{"mine in review", with(mine, func(r *NeedRow) { r.Column = ColumnReview }), true, false, false},
+		{"ask", with(mine, func(r *NeedRow) { r.Kind, r.Options = NeedListAsk, []string{"a", "b"} }), false, false, false},
+		{"boss's own", boss, false, true, false},
+		{"own started", with(boss, func(r *NeedRow) { r.On, r.Status, r.StartedAt, r.Column = "", StatusStarting, 1, ColumnProgress }), true, false, false},
+		{"own started late", with(boss, func(r *NeedRow) {
+			r.On, r.Status, r.StartedAt, r.StartLate, r.Column = "", StatusStarting, 1, true, ColumnProgress
+		}), true, true, false},
+		{"worker's", with(boss, func(r *NeedRow) { r.Column, r.Assignee = ColumnProgress, NeedAssignee{Kind: AssigneeWorker, Name: "w"} }), false, false, false},
+		{"manager's own", with(boss, func(r *NeedRow) { r.Boss = Manager }), false, false, false},
+		{"mine on the manager's", with(mine, func(r *NeedRow) { r.Boss = Manager }), true, true, false},
+		{"closed, no manager", with(mine, func(r *NeedRow) { r.Closed = true }), true, false, false},
+		{"legacy own started (on its boss's name)", with(boss, func(r *NeedRow) {
+			r.On, r.Status, r.StartedAt, r.Column = "boss-dev", StatusStarting, 1, ColumnProgress
+		}), true, false, false},
+		{"mine started late on the manager's", with(boss, func(r *NeedRow) {
+			r.Boss, r.On, r.Status, r.StartedAt, r.StartLate = Manager, "", StatusStarting, 1, true
+		}), true, true, false},
+		{"closed, manager runs", with(mine, func(r *NeedRow) { r.Closed = true }), true, true, true},
+		{"session", NeedRow{Kind: NeedDialog, Session: "w"}, false, false, true},
+	} {
+		if got := tt.r.Tickable(); got != tt.tick {
+			t.Errorf("%s: tickable %v", tt.name, got)
+		}
+		if got := tt.r.Startable(tt.managerRuns); got != tt.start {
+			t.Errorf("%s: startable %v", tt.name, got)
+		}
+	}
+}
+
+// Need you counts a session waiting on the user once: its worker's blocked card counts by the session's row; a card of
+// the user's or a late start counts by itself.
+func TestCountNeedYouOnce(t *testing.T) {
+	worker := NeedAssignee{Kind: AssigneeWorker, Name: "w1"}
+	rows := []NeedRow{
+		{Kind: NeedDialog, Session: "w1"},
+		{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: worker, NeedsYou: true},
+		{Kind: NeedListAsk, Boss: "b", Column: ColumnTodo, Assignee: you, NeedsYou: true, Options: []string{"a"}},
+		{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeBoss, Name: "b"}, NeedsYou: true, StartLate: true},
+	}
+	if c := Count(rows); c != (Tally{NeedYou: 3, Mine: 1}) {
+		t.Errorf("tally %+v, want 3 need you, 1 mine", c)
+	}
+	// A worker resting after a failed turn has no session row: its card counts
+	failed := NeedRow{Kind: NeedOn, Boss: "b", Column: ColumnProgress, Assignee: NeedAssignee{Kind: AssigneeWorker, Name: "w2"}, NeedsYou: true}
+	if c := Count(append(rows, failed)); c.NeedYou != 4 {
+		t.Errorf("tally %+v, want 4 need you", c)
+	}
+	// A column a board doesn't know sits in In progress, as on the web board
+	if g := (NeedRow{Kind: NeedOn, Boss: "b", Column: "later"}).Group(); g != slices.Index(Columns, ColumnProgress) {
+		t.Errorf("unknown column's group %d", g)
 	}
 }

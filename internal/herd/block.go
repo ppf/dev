@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,26 +23,30 @@ type optSpan struct {
 // minBlockRows is the fewest rows above the bottom row TO DO shows in.
 const minBlockRows = 6
 
-// namesFrom is the narrowest pane whose rows name whom their status is on: narrower ones keep the status word alone,
-// as does a row whose text would keep under minTextBesideName beside it.
+// namesFrom is the narrowest pane whose rows name whom a start went to and a card's other half (right's named):
+// narrower ones leave them off, as does a row whose text would keep under minTextBesideName beside it.
 const (
 	namesFrom         = 80
 	minTextBesideName = 20
 )
 
-// groupTitle is group g's title (sidebar.NeedRow.Group) and colour: Needs you for the sessions, Not read for lists.
+// columnColours are the block's column titles' colours, the web board's: In progress gold, Waiting green.
+var columnColours = map[string]string{sidebar.ColumnProgress: sidebar.Gold, sidebar.ColumnWaiting: sidebar.Green}
+
+// groupTitle is group g's title (sidebar.NeedRow.Group) and colour: Needs you for the sessions, a column's title for
+// its cards, Not read for lists.
 func groupTitle(g int) (title, colour string) {
 	switch {
 	case g < 0:
 		return "Needs you", sidebar.Red
-	case g >= len(sidebar.Groups):
+	case g >= len(sidebar.Columns):
 		return "Not read", sidebar.Gold
 	}
-	group := sidebar.Groups[g]
-	return group.Title, sidebar.StatusColours[group.Statuses[0]]
+	c := sidebar.Columns[g]
+	return sidebar.ColumnTitles[c], columnColours[c]
 }
 
-// blockHead is TO DO's header: whose items, the counts (red where the user decides), and the own list's age at the
+// blockHead is TO DO's header: whose items, the counts (red what needs the user), and the own list's age at the
 // right, dimmed once stale; ▸ first while folded (t), "· n" while its keys act on the cards.
 func (m Model) blockHead(t sidebar.Tally, w int) string {
 	whose := m.snap.name + " and its workers"
@@ -52,15 +57,11 @@ func (m Model) blockHead(t sidebar.Tally, w int) string {
 	if m.todoFolded {
 		left = " " + rule + "▸" + reset
 	}
-	counts := ""
+	need := sidebar.Muted
 	if t.NeedYou > 0 {
-		counts += sidebar.Red + strconv.Itoa(t.NeedYou) + " " + sidebar.NeedYouWord + reset + sidebar.Muted + " · " + reset
+		need = sidebar.Red
 	}
-	decide := sidebar.Muted
-	if t.Decide > 0 {
-		decide = sidebar.Red
-	}
-	counts += decide + strconv.Itoa(t.Decide) + " to decide" + reset + sidebar.Muted + " · " + reset + strconv.Itoa(t.ToDo) + " yours"
+	counts := need + strconv.Itoa(t.NeedYou) + " " + sidebar.NeedYouWord + reset + sidebar.Muted + " · " + reset + strconv.Itoa(t.Mine) + " " + sidebar.MineWord
 	if !m.needMode {
 		counts += rule + " · n" + reset
 	}
@@ -84,7 +85,7 @@ func (m Model) blockHead(t sidebar.Tally, w int) string {
 	return padRow(ansi.Truncate(left, w-ansi.StringWidth(right), "…")+reset+strings.Repeat(" ", max(0, w-ansi.StringWidth(left)-ansi.StringWidth(right)))+right, w)
 }
 
-// blockGroup is one group of the block as laid out: its title line, or for Waiting on others the fold row heading it
+// blockGroup is one group of the block as laid out: its title line, or for Waiting the fold row heading it
 // (head, else -1), and its rows' indexes.
 type blockGroup struct {
 	title string
@@ -93,7 +94,7 @@ type blockGroup struct {
 }
 
 // needBlock is TO DO at the top of the pane, in about half the gh rows (more for a long selected row; none under
-// 6): its header, then each group's (sidebar.Groups) title and rows (needLines), every group cut alike to fit, the
+// 6): its header, then each group's (Needs you, the columns but Done, Not read) title and rows (needLines), every group cut alike to fit, the
 // selected row kept, "+N more" for the rest; at is each line's row, -1 for none; spans each line's clickable words.
 func (m Model) needBlock(gh int) (lines []string, at []int, spans [][]optSpan) {
 	rows := m.needRows()
@@ -317,10 +318,10 @@ func cutsAlike(rows []needRow, w int) bool {
 	return false
 }
 
-// mark is the row's mark: ● a dialog, ? a question or ask, ☐ the user's item, ● in its status's colour on a worker,
-// ◌ waiting on others, ○ a check or a closed boss's, ⚠ a list not read.
+// mark is the row's mark: ● a dialog, ? a question or ask, ☐ the user's card (red when it needs them), a red ● on any
+// other card needing them, ◌ in Waiting (muted on a worker not read), ○ in Review, ● in its status's colour on a
+// worker, · the boss's, ⚠ a list not read.
 func (r needRow) mark() string {
-	colour := sidebar.StatusColours[r.Status]
 	switch {
 	case r.Kind == sidebar.NeedDialog:
 		return sidebar.Red + "●" + reset
@@ -328,71 +329,91 @@ func (r needRow) mark() string {
 		return sidebar.Gold + bold + "?" + reset
 	case r.Kind == sidebar.NeedUnread:
 		return sidebar.Gold + "⚠" + reset
-	case r.Status == sidebar.StatusWaiting:
-		return colour + "◌" + reset
-	case r.Status == sidebar.StatusCheck || r.Status == sidebar.StatusBossClosed:
-		return colour + "○" + reset
-	case r.Kind == sidebar.NeedOn && r.Status == "":
+	case r.Mine() && r.NeedsYou:
+		return sidebar.Red + "☐" + reset
+	case r.Mine():
+		return "☐"
+	case r.NeedsYou:
+		return sidebar.Red + "●" + reset
+	case r.Column == sidebar.ColumnWaiting:
+		return sidebar.Green + "◌" + reset
+	case r.Column == sidebar.ColumnReview:
+		return sidebar.Gold + "○" + reset
+	case r.Assignee.Kind == sidebar.AssigneeWorker && r.Status == "":
 		return sidebar.Muted + "◌" + reset
-	case r.Kind == sidebar.NeedOn:
-		return colour + "●" + reset
+	case r.Assignee.Kind == sidebar.AssigneeWorker:
+		return sidebar.StatusColours[r.Status] + "●" + reset
 	}
-	return "☐"
+	return sidebar.Muted + "·" + reset
 }
 
-// right is what the row says at its right edge, and its colour: the status word first, then whom it names (left
-// off with named false): "working · boss-dev", "#18 merged 2d · boss closed", "on Carl" with no status; the user's
-// own item its check, a stale list's age or when it ticks by itself ("till 10:00").
+// right is what the row says at its right edge, and its colour: a start's "sent to boss-dev · 3m" or "start not picked
+// up", else a Review card's check, a worker's state, whom it waits for, or the user's card's age or "till 10:00"; then
+// a check its word doesn't say ("⚠ …"), "boss closed" and its other half ("⇄ #4"); whom a start went to and ⇄ left off with named false.
 func (r needRow) right(now time.Time, named bool) (text, colour string) {
-	who := ""
-	if named {
-		who = r.StatusOn
-	}
-	with := func(word, more string) string {
-		if more == "" {
-			return word
-		}
-		return word + " · " + more
-	}
-	switch {
-	case r.fold != nil || r.Kind == sidebar.NeedDialog || r.Kind == sidebar.NeedAsk || r.Kind == sidebar.NeedUnread:
+	if r.fold != nil || r.Kind == sidebar.NeedDialog || r.Kind == sidebar.NeedAsk || r.Kind == sidebar.NeedUnread {
 		return "", ""
-	case r.Kind == sidebar.NeedOn && r.Status == "":
-		return "on " + r.On, sidebar.Muted
-	case r.Status == sidebar.StatusCheck && r.Check != nil:
-		more := who
-		if r.Closed && named {
-			more = "boss closed"
-		}
-		return with(r.Check.Short(now), more), sidebar.StatusColours[r.Status]
-	case r.Kind == sidebar.NeedOn && r.Check != nil && r.Check.Kind != sidebar.CheckBossClosed:
-		// A check its status doesn't say (unchanged, a failing lookup, a moved PR on a blocked or gone worker)
-		return with(with(r.Status, who), "⚠ "+r.Check.Short(now)), sidebar.StatusColours[r.Status]
-	case r.Kind == sidebar.NeedOn || r.Status == sidebar.StatusBossClosed:
-		return with(r.Status, who), sidebar.StatusColours[r.Status]
-	case r.Status == sidebar.StatusStarting:
-		text, colour := "sent", sidebar.StatusColours[r.Status]
-		if who != "" {
-			text = "sent to " + who
-		}
-		text = with(text, wait.Span(now.Sub(time.Unix(r.StartedAt, 0))))
-		if r.StartLate {
-			text, colour = "start not picked up", sidebar.Red
-		}
-		if r.Check != nil && r.Check.Kind != sidebar.CheckBossClosed {
-			// Its status hides a moved PR, as a worker's does
-			text = with(text, "⚠ "+r.Check.Short(now))
-		}
-		return text, colour
-	case r.Until != 0 && r.Age(now) == "":
-		return "till " + wait.Clock(time.Unix(r.Until, 0), now), sidebar.Muted
 	}
-	return r.Age(now), r.Tone().Colour()
+	var parts []string
+	add := func(p string) {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	// A check the first word doesn't say: a moved PR, a failing lookup, unchanged
+	check := r.Check != nil && r.Check.Kind != sidebar.CheckBossClosed
+	switch {
+	case r.StartedAt != 0 && r.StartLate:
+		add("start not picked up")
+		colour = sidebar.Red
+	case r.StartedAt != 0:
+		sent := "sent"
+		if named && r.StartedTo != "" {
+			sent += " to " + r.StartedTo
+		}
+		add(sent + " · " + wait.Span(now.Sub(time.Unix(r.StartedAt, 0))))
+		colour = sidebar.Gold
+	case r.Column == sidebar.ColumnReview && check:
+		add(r.Check.Short(now))
+		colour, check = sidebar.Gold, false
+		if named && r.WaitingFor != "" {
+			add("waiting for " + r.WaitingFor)
+		}
+	case r.Assignee.Kind == sidebar.AssigneeWorker && r.Status == "":
+		// Its boss's workers weren't read, as the web board's ?
+		add("?")
+		colour = sidebar.Muted
+	case r.Assignee.Kind == sidebar.AssigneeWorker || r.Status == sidebar.StatusGone:
+		add(r.Status)
+		colour = sidebar.StatusColours[r.Status]
+	case r.WaitingFor != "":
+		add("waiting for " + r.WaitingFor)
+		colour = sidebar.Green
+	case r.Until != 0 && r.Age(now) == "":
+		add("till " + wait.Clock(time.Unix(r.Until, 0), now))
+		colour = sidebar.Muted
+	case r.Check != nil && r.Check.Kind == sidebar.CheckBossClosed:
+		// "boss closed" below says it
+		colour = sidebar.Muted
+	default:
+		add(r.Age(now))
+		colour, check = r.Tone().Colour(), false
+	}
+	if check {
+		add("⚠ " + r.Check.Short(now))
+	}
+	if r.Closed {
+		add("boss closed")
+	}
+	if named && r.PartOf != 0 {
+		add("⇄ #" + strconv.Itoa(r.PartOf))
+	}
+	return strings.Join(parts, " · "), colour
 }
 
 // needLines are row r's lines, w columns: its mark, its label padded to labelW, its text (wrapped when selected,
-// else cut), its status at the right edge (right), its options (optionLines), then a selected row's action words,
-// on the selection band. Waiting on others' fold row is its title, count and whom it waits on.
+// else cut), what it says at the right edge (right), its options (optionLines), then a selected row's action words,
+// on the selection band. Waiting's fold row is its title, count and whom it waits on.
 func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []string, spans [][]optSpan) {
 	if r.fold != nil {
 		arrow := "▸"
@@ -413,7 +434,7 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 	now := m.clk.Now()
 	right, colour := r.right(now, w >= namesFrom)
 	if right != "" && room-ansi.StringWidth(right)-2 < minTextBesideName {
-		// Narrow: the status word keeps the edge, whom it names goes
+		// Narrow: whom a start went to and ⇄ go
 		right, colour = r.right(now, false)
 	}
 	if right != "" && room-ansi.StringWidth(right)-2 >= min(sidebar.MinTextAfterAge, room/2) {
@@ -422,6 +443,9 @@ func (m Model) needLines(r needRow, labelW, w int, selected bool) (lines []strin
 		right = ""
 	}
 	text := sidebar.Tag(r.Quiet, strings.Join(strings.Fields(r.Text), " "))
+	if r.Doing != "" {
+		text += "  " + sidebar.Gold + "▸ " + strings.Join(strings.Fields(r.Doing), " ") + reset
+	}
 	if selected {
 		parts := strings.Split(ansi.Wrap(text, room, ""), "\n")
 		lines = []string{pre + parts[0]}
@@ -558,27 +582,20 @@ func (m Model) optionLines(r needRow, w int, selected bool, lines []string, span
 // action is a word on an expanded row that does what its key does.
 type action struct{ word, key, hint string }
 
-// actions are what the selected row offers: Start (on a starting row too, so the words stay put once started) and Tick
-// the user's item, Reply to a question, Go to the session or the list's boss; a closed boss's row only Tick, and Start
-// while the manager runs, then how to reopen it.
+// actions are what the selected row offers: Start a To do card or a late start (sidebar.NeedRow.Startable: a closed boss's while the
+// manager runs) and Tick the user's (Tickable), Reply to a question, Go to the session or the list's boss; a closed
+// boss's row no Go, but how to reopen it.
 func (m Model) actions(r needRow) (out []action, note string) {
-	tick := action{"Tick", "d", "d tick"}
-	start := action{"Start", "s", "s start"}
+	if r.Startable(m.managerRuns()) {
+		out = append(out, action{"Start", "s", "s start"})
+	}
+	if r.Tickable() {
+		out = append(out, action{"Tick", "d", "d tick"})
+	}
 	if r.Closed {
-		if r.Kind == sidebar.NeedPlain {
-			if r.Status != sidebar.StatusCheck && m.managerRuns() {
-				out = append(out, start)
-			}
-			out = append(out, tick)
-		}
 		return out, r.ClosedHint()
 	}
 	switch r.Kind {
-	case sidebar.NeedPlain:
-		if r.Status != sidebar.StatusCheck && r.Boss != Manager {
-			out = append(out, start)
-		}
-		out = append(out, tick)
 	case sidebar.NeedDialog, sidebar.NeedAsk:
 		if m.answerable(r) {
 			out = append(out, action{"Reply", "m", "m reply"})
@@ -626,12 +643,13 @@ func (m Model) actionLine(r needRow, in, w int) (string, []optSpan) {
 	return line + "      " + rule + tail + reset, spans
 }
 
-// waitingOn is whom the Waiting on others rows wait on, in their order, "×n" for more than one: "Carl · reviewers ×3".
+// waitingOn is whom the Waiting rows wait on, in their order, "×n" for more than one: "Carl · reviewers ×3"; a
+// worker in a planned wait by its name.
 func waitingOn(rows []sidebar.NeedRow) string {
 	var names []string
 	n := map[string]int{}
 	for _, r := range rows {
-		who := r.StatusOn
+		who := cmp.Or(r.WaitingFor, r.Assignee.Name)
 		if n[who] == 0 {
 			names = append(names, who)
 		}

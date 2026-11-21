@@ -90,8 +90,9 @@ func keys(m Model, ks ...string) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// The manager's block lists every descendant's dialog, then turn-ending questions, then list asks, then plain
-// items (its own list's first, as "manager"), each labelled "project › who", with the options its keys send.
+// The manager's block lists every descendant's dialog, then turn-ending questions, then the To do column: the ask
+// needing the user first, then the user's (its own list's first), each labelled "project › who", with the options its
+// keys send.
 func TestNeedsRows(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
@@ -108,9 +109,9 @@ func TestNeedsRows(t *testing.T) {
 	if w := []want{
 		{sidebar.NeedDialog, "noc › triage", "allow Bash: rm -rf build", []string{"Yes", "No"}},
 		{sidebar.NeedAsk, "dev", vpnAskPlain, []string{"Done", "Skip"}},
-		{sidebar.NeedListAsk, "noc", "Release now?", []string{"Now", "Later"}},
-		{sidebar.NeedPlain, "manager", "Call Vince", nil},
-		{sidebar.NeedPlain, "noc", "DM David", nil},
+		{sidebar.NeedListAsk, "noc › you", "Release now?", []string{"Now", "Later"}},
+		{sidebar.NeedPlain, "manager › you", "Call Vince", nil},
+		{sidebar.NeedPlain, "noc › you", "DM David", nil},
 	}; !slices.EqualFunc(got, w, func(a, b want) bool {
 		return a.kind == b.kind && a.label == b.label && a.text == b.text && slices.Equal(a.options, b.options)
 	}) {
@@ -175,7 +176,8 @@ func TestNeedsWorkerNamedBoss(t *testing.T) {
 	}
 }
 
-// A boss's own board scopes the block to its workers and list, labelled by who, its own question left out.
+// A boss's own board scopes the block to its workers and list, labelled by who (the user's items "you"), its own
+// question left out.
 func TestNeedsBossBoard(t *testing.T) {
 	rows := managerRows()
 	rows[5].Note = inbox.Note{Kind: inbox.Asks, Text: "Connect the VPN?"}.Summary()
@@ -190,32 +192,32 @@ func TestNeedsBossBoard(t *testing.T) {
 	for _, r := range m.needRows() {
 		got = append(got, r.label+": "+r.Text)
 	}
-	if want := []string{"noc-triage: Bash: echo hi", "boss: Release now?"}; !slices.Equal(got, want) {
+	if want := []string{"noc-triage: Bash: echo hi", "you: Release now?"}; !slices.Equal(got, want) {
 		t.Errorf("rows %q, want %q", got, want)
 	}
 }
 
-// The block sits above the cards: header (whose, the split count), the groups, a row per item with its options under
+// The block sits above the cards: header (whose, the counts), Needs you and the columns, a row per item with its options under
 // it; its cards fold to a row pointing at it; n focuses it, wrapping the selected row's text.
 func TestNeedsRender(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
 	lines := plain(m.render())
 	for i, want := range []string{
-		" TO DO · all bosses   2 need you · 1 to decide · 2 yours · n",
+		" TO DO · all bosses   3 need you · 3 mine · n",
 		"",
 		" Needs you  2",
-		" ● noc › triage  allow Bash: rm -rf build",
+		" ● noc › triage   allow Bash: rm -rf build",
 		"     1 Yes   2 No",
-		" ? dev           Reply Done once it's connected, or Skip to leave the lw check…",
+		" ? dev            Reply Done once it's connected, or Skip to leave the lw chec…",
 	} {
 		if got := strings.TrimRight(lines[i], " "); got != want {
 			t.Errorf("line %d = %q, want %q", i, got, want)
 		}
 	}
 	all := strings.Join(lines, "\n")
-	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc           Release now?", "     1 Now   2 Later", " ☐ manager       Call Vince",
-		" To decide  1", " Yours  2", "noc-triage  via boss-noc  Bash prompt · in the block ↑", "n to do"} {
+	for _, want := range []string{"     1 Done   2 Skip   m reply", " ? noc › you      Release now?", "     1 Now   2 Later", " ☐ manager › you  Call Vince",
+		" To do  3", "noc-triage  via boss-noc  Bash prompt · in the block ↑", "n to do"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("%q missing:\n%s", want, all)
 		}
@@ -741,7 +743,7 @@ func TestNeedsTick(t *testing.T) {
 
 	ask := selectKind(t, needsBoard(t, &answered), sidebar.NeedListAsk)
 	ask.tickList = func(string, int, string) (string, error) { t.Error("d ticked an ask"); return "", nil }
-	if ask, cmd := keys(ask, "d"); cmd != nil || !strings.Contains(ask.msg.text, "plain item") {
+	if ask, cmd := keys(ask, "d"); cmd != nil || !strings.Contains(ask.msg.text, "not an ask") {
 		t.Errorf("d on an ask: cmd %v msg %q", cmd != nil, ask.msg.text)
 	}
 
@@ -940,8 +942,8 @@ func TestNeedsClickTruncatedOptions(t *testing.T) {
 	}
 }
 
-// A closed boss's list on the manager's board: its rows labelled by project, under Boss closed, its word muted at
-// the right edge; an expanded row offers Tick and says how to reopen the boss.
+// A closed boss's list on the manager's board: the user's rows labelled "project › you", in To do, "boss closed"
+// muted at the right edge; an expanded row offers Tick and says how to reopen the boss.
 func TestNeedsClosedBoss(t *testing.T) {
 	var answered []listAnswer
 	m := needsBoard(t, &answered)
@@ -954,11 +956,11 @@ func TestNeedsClosedBoss(t *testing.T) {
 			row = r
 		}
 	}
-	if row.label != "kite" {
-		t.Fatalf("closed boss's row = %+v, want label kite", row)
+	if row.label != "kite › you" {
+		t.Fatalf("closed boss's row = %+v, want label kite › you", row)
 	}
 	lines, _ := m.needLines(row, 12, 80, false)
-	if !strings.Contains(lines[0], sidebar.Muted+"boss closed") || row.Group() != sidebar.GroupOf(sidebar.StatusBossClosed) {
+	if !strings.Contains(lines[0], sidebar.Muted+"boss closed") || row.Column != sidebar.ColumnTodo {
 		t.Errorf("line %q, want boss closed muted, in its group", lines[0])
 	}
 	m.needMode = true
@@ -1009,7 +1011,7 @@ func TestNeedsAskContext(t *testing.T) {
 	for i, l := range lines[y+1 : y+5] {
 		got[i] = strings.TrimRight(l, " ")
 	}
-	in := strings.Repeat(" ", strings.Index(lines[y], "Release now?"))
+	in := strings.Repeat(" ", ansi.StringWidth(lines[y][:strings.Index(lines[y], "Release now?")]))
 	want := []string{in + "- main moved 3 commits", in + "- ~/memo.md", "     1 ★ Now   CI green", "     2 Later   after Friday"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expanded:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

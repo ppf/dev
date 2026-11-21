@@ -20,7 +20,7 @@ type needRow struct {
 	label string
 	tile  int               // the tile it answers through; -1 for a list's row, or a session not on the board
 	sig   string            // the row as shown, its dialog's too: a key acts only on the row its selection was made on
-	fold  []sidebar.NeedRow // Waiting on others' fold row: the rows it stands for, shown under it only while open (waitOpen)
+	fold  []sidebar.NeedRow // Waiting's fold row: the rows it stands for, shown under it only while open (waitOpen)
 }
 
 // opens reports space opens the row in its popup (dev todo show): a list's read item.
@@ -62,27 +62,37 @@ func needItems(items []todo.Shown) []sidebar.NeedItem {
 	out := make([]sidebar.NeedItem, len(items))
 	for i, it := range items {
 		out[i] = sidebar.NeedItem{ID: it.ID, Text: it.Text, On: it.On, Done: it.Done, Options: it.Options, Context: it.Context, Added: it.Added,
-			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate, Quiet: it.Quiet}
+			Check: it.Check, Until: it.Until, Status: it.Status, StatusOn: it.StatusOn, StartLate: it.StartLate, Quiet: it.Quiet,
+			Column: it.Column, Assignee: sidebar.NeedAssignee{Kind: it.Assignee.Kind, Name: it.Assignee.Name}, WaitingFor: it.WaitingFor,
+			NeedsYou: it.NeedsYou, PartOf: it.PartOf}
 		if it.Started != nil {
-			out[i].Started = &struct{ At int64 }{it.Started.At}
+			out[i].Started = &sidebar.NeedStarted{At: it.Started.At, To: it.Started.To}
+		}
+		if it.Doing != nil {
+			out[i].Doing = &sidebar.NeedDoing{Text: it.Doing.Text}
 		}
 	}
 	return out
 }
 
-// needRows are TO DO's rows as the block lists them (listRows): Waiting on others folded into one row standing for
-// them, which they follow only while open (waitOpen).
+// waiting reports a row in the Waiting column.
+func waiting(r needRow) bool {
+	return r.Group() == slices.Index(sidebar.Columns, sidebar.ColumnWaiting)
+}
+
+// needRows are TO DO's rows as the block lists them (listRows): the Waiting column folded into one row standing for
+// its cards, which they follow only while open (waitOpen).
 func (m Model) needRows() []needRow {
 	rows := m.listRows()
-	at := slices.IndexFunc(rows, func(r needRow) bool { return r.Status == sidebar.StatusWaiting })
+	at := slices.IndexFunc(rows, waiting)
 	if at < 0 {
 		return rows
 	}
 	fold := needRow{tile: -1, sig: foldSig}
-	fold.Kind, fold.Status = sidebar.NeedOn, sidebar.StatusWaiting
+	fold.Kind, fold.Column = sidebar.NeedOn, sidebar.ColumnWaiting
 	n := 0
 	for _, r := range rows[at:] {
-		if r.Status != sidebar.StatusWaiting {
+		if !waiting(r) {
 			break
 		}
 		fold.fold = append(fold.fold, r.NeedRow)
@@ -95,9 +105,10 @@ func (m Model) needRows() []needRow {
 	return append(out, rows[at+n:]...)
 }
 
-// listRows are this board's TO DO rows: what waits on the user under it and the items its lists handed out,
-// labelled "project › who" on a manager's board ("project" for a boss, "manager" for its own list), "who" on a boss's
-// ("boss" for its own list); a dialog or question on the board says what its card does, with its options.
+// listRows are this board's TO DO rows: what waits on the user under it and the items its lists handed out; a
+// session's labelled "project › who" on a manager's board ("project" for a boss), "who" on a boss's, a list item's by
+// its assignee (assigneeLabel), a list not read by its boss; a dialog or question on the board says what its card
+// does, with its options.
 func (m Model) listRows() []needRow {
 	s := m.snap
 	manager := slices.ContainsFunc(s.all, func(a sidebar.Session) bool { return a.Name == s.name && a.Root == s.name })
@@ -105,6 +116,8 @@ func (m Model) listRows() []needRow {
 	for _, r := range sidebar.NeedRows(s.all, s.needLists(), s.name) {
 		n := needRow{NeedRow: r, tile: -1, label: r.Who}
 		switch {
+		case r.Boss != "" && r.Kind != sidebar.NeedUnread:
+			n.label = s.assigneeLabel(r, manager)
 		case r.Boss == s.name && manager:
 			n.label = s.name
 		case r.Boss == s.name:
@@ -131,6 +144,34 @@ func (m Model) listRows() []needRow {
 		out = append(out, n)
 	}
 	return out
+}
+
+// assigneeLabel is a list item's label: its assignee, "you" for the user's ("project › you" on a manager's board); this
+// board's boss "boss" ("manager" on the manager's), another boss by its name less boss-; a worker by its name less its
+// project, "project › who" on a manager's board.
+func (s snapshot) assigneeLabel(r sidebar.NeedRow, manager bool) string {
+	a := r.Assignee
+	switch {
+	case a.Kind == sidebar.AssigneeYou && manager:
+		return r.Project + " › you"
+	case a.Kind == sidebar.AssigneeYou:
+		return "you"
+	case a.Kind == sidebar.AssigneeBoss && a.Name == s.name && manager:
+		return s.name
+	case a.Kind == sidebar.AssigneeBoss && a.Name == s.name:
+		return "boss"
+	case a.Kind == sidebar.AssigneeBoss:
+		return strings.TrimPrefix(a.Name, "boss-")
+	}
+	project := r.Project
+	if i := slices.IndexFunc(s.all, func(x sidebar.Session) bool { return x.Name == a.Name }); i >= 0 {
+		project = s.all[i].Project
+	}
+	who := strings.TrimPrefix(a.Name, project+"-")
+	if manager {
+		return project + " › " + who
+	}
+	return who
 }
 
 // pickOptions are the labels of p's options as its card's chips say them; a question's free-text and chat entries
@@ -213,9 +254,9 @@ func (m *Model) fixNeeds() {
 }
 
 // handleNeedKey acts on TO DO's selected row: j/k/↓/↑ move (wrapping), 1-9 answer it, m (i) type a reply, d tick the
-// user's item, s start it (dev todo start), space open a list item in its popup (dev todo show), b the board of this
-// board's lists (dev todo board), g/⏎ go to its session
-// (on Waiting on others' fold row open or fold it), esc or n back to the cards, t fold the block back to the cards,
+// user's item, s start a To do card (dev todo start), space open a list item in its popup (dev todo show), b the board
+// of this board's lists (dev todo board), g/⏎ go to its session
+// (on Waiting's fold row open or fold it), esc or n back to the cards, t fold the block back to the cards,
 // ctrl+c quit. An answer key on a row that changed since it was chosen sends nothing.
 func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.needRows()
@@ -257,11 +298,11 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if key == "g" || key == "enter" {
 				m.waitOpen = !m.waitOpen
 			} else {
-				m.msg = info("⏎ opens or folds Waiting on others")
+				m.msg = info("⏎ opens or folds Waiting")
 			}
 			return m, nil
 		}
-		if r.Closed && key != "d" && !(key == "s" && r.Kind == sidebar.NeedPlain && m.managerRuns()) {
+		if r.Closed && key != "d" && key != "s" {
 			m.msg = info(r.ClosedHint())
 			return m, nil
 		}
@@ -291,10 +332,10 @@ func (m Model) handleNeedKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// tickNeed ticks the user's own list item through dev todo done; like an answer, its row goes or fails.
+// tickNeed ticks a Tickable row (the user's card or own started item) through dev todo done; like an answer, its row goes or fails.
 func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
-	if r.Kind != sidebar.NeedPlain {
-		m.msg = info("d ticks your own plain item; g/⏎ goes to " + r.Session)
+	if !r.Tickable() {
+		m.msg = info("d ticks your own item, not an ask; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
 	if m.answering != "" {
@@ -307,11 +348,15 @@ func (m Model) tickNeed(r needRow) (tea.Model, tea.Cmd) {
 	return m, listCmd(r.Boss, "Ticked ", func() (string, error) { return tick(r.Boss, r.ID, r.Text) })
 }
 
-// startNeed asks for the user's own list item to be started through dev todo start: its boss, or the manager for a
-// closed boss's; a second start says when the first went.
+// startNeed asks for a To do card or a late start to be started through dev todo start (sidebar.NeedRow.Startable): its boss, or the
+// manager for a closed boss's; a second start says when the first went.
 func (m Model) startNeed(r needRow) (tea.Model, tea.Cmd) {
-	if r.Kind != sidebar.NeedPlain || r.Status == sidebar.StatusCheck || r.Boss == Manager {
-		m.msg = info("s starts your own plain item; g/⏎ goes to " + r.Session)
+	switch {
+	case r.Closed && !m.managerRuns():
+		m.msg = info(r.ClosedHint())
+		return m, nil
+	case !r.Startable(m.managerRuns()):
+		m.msg = info("s starts a To do card, not an ask; g/⏎ goes to " + r.Session)
 		return m, nil
 	}
 	if m.answering != "" {

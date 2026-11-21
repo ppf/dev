@@ -74,7 +74,7 @@ func TestBossCardOnOthers(t *testing.T) {
 	if r := m.needRows()[i]; r.Kind != sidebar.NeedOn || r.Status != sidebar.StatusWorking || r.StatusOn != "noc-pr" || r.Yours() {
 		t.Errorf("Deploy row %+v, want on noc-pr, working", r.NeedRow)
 	}
-	if c := m.tally(); c.ToDo != 1 || c.Decide != 1 {
+	if c := m.tally(); c.Mine != 2 {
 		t.Errorf("tally %+v: Deploy counted", c)
 	}
 }

@@ -65,9 +65,9 @@ func TestNeedRowsChecks(t *testing.T) {
 	})
 	unchanged := &Check{Kind: CheckUnchanged, Since: now.Add(-5 * 24 * time.Hour).Unix()}
 	lists := []NeedList{
-		{Boss: "boss-orbit", Items: []NeedItem{{ID: 1, Text: "Attach the DPA", Check: unchanged, Status: StatusYours}, {ID: 2, Text: "Review copy", Added: now.Add(-time.Hour).Unix(), Status: StatusYours}}},
-		{Boss: "boss-harbor", Stale: true, Updated: now.Add(-2 * time.Hour).Unix(), Items: []NeedItem{{ID: 1, Text: "VAT", Added: now.Add(-(18*time.Hour + 19*time.Minute)).Unix(), Status: StatusYours}}},
-		{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 3, Text: "Ask Mara", Check: &Check{Kind: CheckBossClosed}, Status: StatusBossClosed}}},
+		{Boss: "boss-orbit", Items: []NeedItem{{ID: 1, Text: "Attach the DPA", Check: unchanged, Status: StatusYours, Column: ColumnTodo, Assignee: you}, {ID: 2, Text: "Review copy", Added: now.Add(-time.Hour).Unix(), Status: StatusYours, Column: ColumnTodo, Assignee: you}}},
+		{Boss: "boss-harbor", Stale: true, Updated: now.Add(-2 * time.Hour).Unix(), Items: []NeedItem{{ID: 1, Text: "VAT", Added: now.Add(-(18*time.Hour + 19*time.Minute)).Unix(), Status: StatusYours, Column: ColumnTodo, Assignee: you}}},
+		{Boss: "boss-kite", Closed: true, Items: []NeedItem{{ID: 3, Text: "Ask Mara", Check: &Check{Kind: CheckBossClosed}, Status: StatusBossClosed, Column: ColumnTodo, Assignee: you}}},
 	}
 	rows := func(root string) []string {
 		var out []string
@@ -76,7 +76,7 @@ func TestNeedRowsChecks(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := strings.Join(rows("manager"), "|"), "orbit Attach the DPA unchanged 5d|orbit Review copy |kite Ask Mara boss closed"; got != want {
+	if got, want := strings.Join(rows("manager"), "|"), "orbit Attach the DPA unchanged 5d|kite Ask Mara boss closed|orbit Review copy "; got != want {
 		t.Errorf("manager rows = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(rows("boss-harbor"), "|"), "harbor VAT 18h 19m"; got != want {
