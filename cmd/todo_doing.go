@@ -34,8 +34,8 @@ A tick, --stop or an --on change ends it; a --replaces keeps it.`,
 		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := strconv.Atoi(args[0]); err == nil {
-				if question != "" || fromBoard {
-					return errors.New("--question and --from-board are the user's form: dev todo doing <boss> <n> --question <the item's text>")
+				if question != "" || fromBoard || seenJSON != "" {
+					return errors.New("--question, --from-board and --seen are the user's form: dev todo doing <boss> <n> --question <the item's text>")
 				}
 				return bossDoing(cmd, *boss, args, stop)
 			}

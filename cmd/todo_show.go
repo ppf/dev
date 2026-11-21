@@ -27,7 +27,7 @@ func newTodoShowCmd(boss *string) *cobra.Command {
 	var client, question string
 	cmd := &cobra.Command{
 		Use:   "show <boss> <n>",
-		Short: "Show item n of a dev boss's list in a popup, as the user: answer it, tick, start, open its link, go to its boss or worker",
+		Short: "Show item n of a dev boss's list in a popup, as the user: answer it, tick, start, mark it in progress, reopen it, open its link, go to its boss or worker",
 		Long: `Show item n on the list of dev boss session <boss> in a tmux popup sized to it, centred on the client: its text,
 context, options or actions, status, link and list. An ask is answered with 1-9, j/k and ⏎, or m in your own words
 (as dev todo answer); your own item is started (s, as dev todo start) or ticked (d, as dev todo done), your own To do
@@ -102,8 +102,8 @@ func showItem(c *tmux.Client, stderr io.Writer, name string, id int, question st
 	return itemview.Item{Boss: name, Closed: bl.Closed, Shown: bl.Items[i]}, nil
 }
 
-// showActions are the view's keys' paths: the boards' dev todo answer, done and start, the browser, and a switch of
-// client.
+// showActions are the view's keys' paths: the boards' dev todo answer, done, start, reopen and doing, the browser, and a
+// switch of client.
 func showActions(c *tmux.Client, client string) itemview.Actions {
 	return itemview.Actions{
 		Answer: sidebar.AnswerNeed,

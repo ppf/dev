@@ -55,8 +55,10 @@ func (f *fakeActs) acts() itemview.Actions {
 			f.ticked = append(f.ticked, fmt.Sprintf("%s#%d", boss, id))
 			return "ticked", nil
 		},
-		Start: func(string, int, string) (string, error) { return "started", nil },
-		Open:  func(string) error { return nil },
+		Start:  func(string, int, string) (string, error) { return "started", nil },
+		Reopen: func(string, int, string) (string, error) { return "reopened", nil },
+		Doing:  func(string, int, string, string, string, bool) (string, error) { return "in progress", nil },
+		Open:   func(string) error { return nil },
 		Switch: func(s string) error {
 			f.switched = s
 			return nil

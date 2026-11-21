@@ -107,7 +107,7 @@ func (m Model) canDoing() bool {
 	it := m.it
 	return m.yourCard() && len(it.Options) == 0 && it.Column == sidebar.ColumnTodo && it.Doing == nil && it.Started == nil
 }
-func (m Model) canStop() bool { return m.yourCard() && m.it.Doing != nil }
+func (m Model) canStop() bool { return m.yourCard() && len(m.it.Options) == 0 && m.it.Doing != nil }
 
 // yourCard is an open item assigned to the user, not a desktop app boss's.
 func (m Model) yourCard() bool {
@@ -191,6 +191,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.busy = ""
 		if msg.err != nil {
 			m.msg = "❌ " + strings.Join(strings.Fields(msg.err.Error()), " ")
+			// I'm on it's field closes: a failure may have marked it anyway (its boss not told), which esc and the
+			// board's next read show
+			if m.typing == "i" {
+				m.typing = ""
+			}
 			return m, nil
 		}
 		m.Done, m.Result = true, msg.out
@@ -323,6 +328,10 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 			if unicode.IsSpace(r) {
 				r = ' '
 			}
+			if m.typing == "i" && len(m.field) >= todo.MaxDoing {
+				m.msg = fmt.Sprintf("At most %d characters", todo.MaxDoing)
+				break
+			}
 			m.field = append(m.field, r)
 		}
 	}
@@ -340,6 +349,9 @@ func (m Model) run(doing string, fn func() (string, error)) (Model, tea.Cmd) {
 
 // project is a list's project as the boards label it: its boss's name less "boss-".
 func project(boss string) string { return strings.TrimPrefix(boss, "boss-") }
+
+// minField is the fewest columns a typed field keeps beside its line's label.
+const minField = 8
 
 // minWidth is the narrowest box View draws.
 const minWidth = 20
@@ -485,6 +497,10 @@ func (m Model) listLines(in int) []string {
 		detail := sidebar.Muted + e.detail + reset
 		if e.key == m.typing {
 			detail = string(m.field) + cursorCell
+			// Too narrow for the label and some of the field: the field alone
+			if in-ansi.StringWidth(mark+e.key+"  "+star+word) < minField {
+				word = ""
+			}
 			if w := in - ansi.StringWidth(mark+e.key+"  "+star+word); ansi.StringWidth(detail) > w {
 				// The field's end, where it's typed
 				detail = ansi.TruncateLeft(detail, ansi.StringWidth(detail)-w+1, "…")

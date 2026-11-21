@@ -543,6 +543,9 @@ func TestDoingKey(t *testing.T) {
 	if !regexp.MustCompile(`i  I'm on it +mailing ops`).MatchString(v) || !strings.Contains(v, "⏎ on it · esc back") {
 		t.Errorf("field view:\n%s", v)
 	}
+	if v := ansi.Strip(press(m, "mail").View(22, 40, now)); !strings.Contains(v, "i  mail") {
+		t.Errorf("field at 22 columns:\n%s", v)
+	}
 	if m := press(m, "mailing", "esc"); m.typing != "" || m.Done || len(r.calls) != 0 {
 		t.Errorf("esc: typing %q done %v calls %v", m.typing, m.Done, r.calls)
 	} else if m = press(m, "i"); len(m.field) != 0 {
@@ -554,6 +557,9 @@ func TestDoingKey(t *testing.T) {
 	r.calls = nil
 	if m := press(New(mine, r.actions(), false), "i", "enter"); !m.Done || !slices.Equal(r.calls, []string{`doing boss-shop Send the cert {"doing":null,"started":null}: `}) {
 		t.Errorf("enter, no text: done %v calls %v", m.Done, r.calls)
+	}
+	if m := press(New(mine, r.actions(), false), "i", strings.Repeat("x", todo.MaxDoing+5)); len(m.field) != todo.MaxDoing || m.msg == "" {
+		t.Errorf("field over %d: %d runes, msg %q", todo.MaxDoing, len(m.field), m.msg)
 	}
 	on := mine
 	on.Column, on.Doing = sidebar.ColumnProgress, &todo.Doing{Text: "mailing ops", At: 1}
