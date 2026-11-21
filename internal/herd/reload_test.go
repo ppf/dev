@@ -25,7 +25,9 @@ func TestIdle(t *testing.T) {
 		{"a reply kept for another card (carried)", Model{drafts: map[string]replyBox{"a": {}}}, true},
 		{"kill asked", Model{confirm: "a"}, false},
 		{"answer in flight", Model{answering: "a"}, false},
-		{"TO DO mode", Model{needMode: true}, false},
+		{"TO DO mode", Model{needMode: true}, true},
+		{"TO DO's answer waiting on its row (carried)", Model{needMode: true, needDone: "a"}, true},
+		{"TO DO on a row with a long text (carried hashed)", Model{needMode: true, needKey: strings.Repeat("x", maxState+1)}, true},
 	} {
 		if got := tc.m.idle(); got != tc.want {
 			t.Errorf("%s: idle() = %v, want %v", tc.name, got, tc.want)
@@ -116,21 +118,71 @@ func TestReloadHeldByKillQuestion(t *testing.T) {
 	}
 }
 
-func TestReloadHeldInTodoModeUntilLeft(t *testing.T) {
-	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n")
-	if !m.needMode {
-		t.Fatal("n left TO DO mode closed")
+// TO DO mode holds nothing a reload would lose: it reloads, and the new process is in TO DO on the same row. The
+// manager's board stays in TO DO, so holding the reload there held it for good.
+func TestReloadInTodoModeKeepsItsRow(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n", "j")
+	if !m.needMode || m.needIdx != 1 {
+		t.Fatalf("TO DO mode %v on row %d, want on row 1", m.needMode, m.needIdx)
 	}
 	m, quit := refreshed(m)
-	if quit || !m.needMode {
-		t.Fatal("reloaded in TO DO mode")
+	if !quit {
+		t.Fatal("no reload in TO DO mode")
 	}
-	if row := ansiStrip(m.bottom())[0]; !strings.HasPrefix(strings.TrimSpace(row), "j/k move") || !strings.Contains(row, "↻ v2") {
-		t.Errorf("bottom row %q: want TO DO's keys first, then the held reload", row)
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	next, _ := n.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	next, _ = next.(Model).Update(refreshMsg{snap: m.snap})
+	n = next.(Model)
+	if !n.needMode || n.needIdx != 1 || n.needKey != m.needKey {
+		t.Fatalf("after the reload: TO DO mode %v on row %d key %q, want on row 1 key %q", n.needMode, n.needIdx, n.needKey, m.needKey)
 	}
-	m, _ = keys(m, "esc")
-	if _, quit = refreshed(m); !quit {
-		t.Fatal("no reload once TO DO mode was left")
+	n.reload.Flash = "v2"
+	if row := ansiStrip(n.bottom())[0]; !strings.HasPrefix(row, " ↻ dev v2  j/k move") {
+		t.Errorf("bottom row %q: want the version reloaded into, then TO DO's keys", row)
+	}
+}
+
+// TO DO left with esc stays left after a reload: its stale row isn't carried.
+func TestReloadAfterTodoLeftStaysOnCards(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n", "j", "esc")
+	m, quit := refreshed(m)
+	if !quit {
+		t.Fatal("no reload")
+	}
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); n.needMode {
+		t.Fatal("back in TO DO after a reload, though it was left")
+	}
+}
+
+// An answer from TO DO waits on its row until it goes, after a reload too: else the cursor would land back on it.
+func TestReloadCarriesTodoAnswer(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n")
+	m.needDone, m.needKey = m.needKey, ""
+	m, quit := refreshed(m)
+	if !quit {
+		t.Fatal("no reload with TO DO's answer on its row")
+	}
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); !n.needMode || n.needDone != m.needDone || n.needKey != "" {
+		t.Fatalf("after the reload: TO DO mode %v, waiting on %q key %q; want waiting on %q, no key", n.needMode, n.needDone, n.needKey, m.needDone)
+	}
+}
+
+// Between the exec and the first refresh, which brings TO DO mode back, keys would act on the cards.
+func TestKeysWaitForCarriedTodo(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n", "j")
+	m, _ = refreshed(m)
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	n, cmd := keys(n, "enter", "t")
+	if cmd != nil || n.todoFolded {
+		t.Fatalf("keys before the first refresh acted: cmd %v, TO DO folded %v", cmd != nil, n.todoFolded)
+	}
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); !n.needMode || n.needIdx != 1 {
+		t.Fatalf("TO DO mode %v on row %d, want on row 1", n.needMode, n.needIdx)
 	}
 }
 
@@ -273,18 +325,23 @@ func TestNoPlaceholderBeforeReloadsFirstRefresh(t *testing.T) {
 	}
 }
 
-// The sidebar's ask to focus TO DO, read by a refresh, wins over a held reload: its exec would lose it.
-func TestReloadHeldByTodoFocusAsk(t *testing.T) {
+// The sidebar's ask to focus TO DO, read by a refresh (which clears it), isn't lost to a reload on that refresh:
+// TO DO's focus is carried.
+func TestReloadCarriesTodoFocusAsk(t *testing.T) {
 	m := ready(t, needsBoard(t, new([]listAnswer)))
 	snap := m.snap
 	snap.needsFocus = true
 	next, cmd := m.Update(refreshMsg{snap: snap, inputs: m.inputs})
 	m = next.(Model)
-	if quits(cmd) || !m.needMode {
-		t.Fatalf("quit %v, TO DO mode %v: want TO DO focused, the reload held", quits(cmd), m.needMode)
+	if !quits(cmd) || !m.needMode {
+		t.Fatalf("quit %v, TO DO mode %v: want TO DO focused and the reload", quits(cmd), m.needMode)
 	}
-	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ v2") {
-		t.Errorf("bottom row %q: want the held reload", row)
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	// The ask was cleared when read: the new process's refresh doesn't see it
+	snap.needsFocus = false
+	next, _ = n.Update(refreshMsg{snap: snap})
+	if n = next.(Model); !n.needMode || n.needKey != m.needKey {
+		t.Fatalf("after the reload: TO DO mode %v key %q, want key %q", n.needMode, n.needKey, m.needKey)
 	}
 }
 

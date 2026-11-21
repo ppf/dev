@@ -1,6 +1,8 @@
 package herd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +32,7 @@ type carried struct {
 	Msg        string           `json:"msg,omitempty"`
 	Alert      bool             `json:"alert,omitempty"`
 	Drafts     map[string]draft `json:"drafts,omitempty"`
+	Need       *needRestore     `json:"need,omitempty"` // TO DO mode's row; nil when the keys act on the cards
 }
 
 // draft is a reply kept for a card (Model.drafts).
@@ -37,6 +40,14 @@ type draft struct {
 	Pane string `json:"pane"`
 	Text string `json:"text"`
 	Pos  int    `json:"pos"`
+}
+
+// needRestore is TO DO mode's cursor a reload carries: an answered row it waits on too, so it isn't answered twice.
+// Rows by sigHash: a sig holds the row's whole text.
+type needRestore struct {
+	Idx  int    `json:"idx,omitempty"`
+	Key  string `json:"key,omitempty"`
+	Done string `json:"done,omitempty"`
 }
 
 // Run shows the previews in pane until its pane closes or Ctrl-C. When a new release of exe is installed it
@@ -62,9 +73,9 @@ func Run(c *tmux.Client, pane, exe string, args []string) error {
 }
 
 // idle: nothing typed, asked, open or in flight would be lost by a reload (Busy counts the commands running);
-// replies kept for cards are carried.
+// replies kept for cards and TO DO mode's row are carried.
 func (m Model) idle() bool {
-	return m.box.session == "" && m.confirm == "" && m.answering == "" && !m.needMode && m.fits()
+	return m.box.session == "" && m.confirm == "" && m.answering == "" && m.fits()
 }
 
 // fits reports the carried state within maxState: a longer one (a long kept reply) could fail the exec on the environment's size.
@@ -80,8 +91,6 @@ func (m Model) held() string {
 	}
 	why := "when idle"
 	switch {
-	case m.needMode:
-		why = "after TO DO (esc)"
 	case m.answering != "":
 		why = "after answering " + m.answering
 	case !m.fits():
@@ -94,6 +103,9 @@ func (m Model) held() string {
 func (m Model) carry() []string {
 	c := carried{Selected: m.selected, Folds: m.folds, Expands: m.expands, TodoFolded: m.todoFolded, WaitOpen: m.waitOpen,
 		History: m.history, Size: m.size}
+	if m.needMode {
+		c.Need = &needRestore{Idx: m.needIdx, Key: sigHash(m.needKey), Done: sigHash(m.needDone)}
+	}
 	if m.msg.alert {
 		// An info line would hide the flash of the version just reloaded into
 		c.Msg, c.Alert = m.msg.text, true
@@ -138,6 +150,7 @@ func (m Model) restore(s string) Model {
 	m.selected, m.folds, m.expands, m.todoFolded, m.waitOpen, m.history = c.Selected, c.Folds, c.Expands, c.TodoFolded, c.WaitOpen, c.History
 	m.msg = message{text: c.Msg, alert: c.Alert}
 	m.restoredSize, m.restored = c.Size, true
+	m.restoredNeed = c.Need
 	for name, d := range c.Drafts {
 		if m.drafts == nil {
 			m.drafts = map[string]replyBox{}
@@ -146,4 +159,22 @@ func (m Model) restore(s string) Model {
 		m.drafts[name] = replyBox{session: name, pane: d.Pane, ed: editor{text: text, pos: min(max(d.Pos, 0), len(text))}, hist: -1}
 	}
 	return m
+}
+
+// sigHash is a TO DO row's sig, bounded for the carried state; "" stays "".
+func sigHash(sig string) string {
+	if sig == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(sig))
+	return hex.EncodeToString(h[:12])
+}
+
+// needSig is the sig of the TO DO row hashing to h; h itself, matching no row, when it's gone or changed.
+func (m Model) needSig(h string) string {
+	rows := m.needRows()
+	if i := slices.IndexFunc(rows, func(r needRow) bool { return sigHash(r.sig) == h }); h != "" && i >= 0 {
+		return rows[i].sig
+	}
+	return h
 }
