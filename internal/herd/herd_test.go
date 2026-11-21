@@ -800,7 +800,7 @@ func TestPromptAskRules(t *testing.T) {
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
 			"Before handing on the user's own new idea or request", "With real cons, ask the user first",
-			"a one-line why", "it decides nothing for a project", "a dev todo ask whose question names that file", "on its \"you answered\" note, hand it on or drop it"}},
+			"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user typed is relayed"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
