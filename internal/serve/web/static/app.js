@@ -516,8 +516,8 @@ function filters(projects, ws, kinds) {
       shown.map(([who, n]) => {
         const name = who === ME ? 'Me' : who;
         return el('button', { type: 'button', class: 'avbtn' + (kinds.get(who) === 'boss' ? ' boss' : ''), 'data-f': 'who:' + who, 'aria-pressed': String(f.who.includes(who)),
-          title: name + ' · ' + n, 'aria-label': name + ', ' + n + ' cards',
-          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; refilter(); } }, avatar(who, kinds.get(who)), el('span', { class: 'avname' }, name));
+          title: name + ' · ' + n + ' open', 'aria-label': name + ', ' + n + ' open',
+          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; refilter(); } }, avatar(who, kinds.get(who)), el('span', { class: 'avname' }, name), el('span', { class: 'avn' + (n ? '' : ' zero') }, String(n)));
       }),
       ws.length > shown.length && el('button', { type: 'button', class: 'avmore', 'data-f': 'who:more', onclick: () => { state.allWho = true; render(); } }, '+' + (ws.length - shown.length)))));
 }
@@ -695,7 +695,7 @@ function board() {
   const projects = [...new Set(all.map(x => project(x.list)))].sort();
   if (!projects.includes(state.filter.project)) state.filter.project = '';
   // A pressed assignee whose cards are gone has no chip left to unpress
-  const ws = whos(all);
+  const ws = whos(all, state.filter.project);
   state.filter.who = state.filter.who.filter(w => ws.some(([k]) => k === w));
   const preset = p => PROJECT_HUES[p.split('-')[0]], others = projects.filter(p => !preset(p));
   hues = new Map(projects.map(p => [p, preset(p) || HUES[others.indexOf(p) % HUES.length]]));
