@@ -546,11 +546,14 @@ function columns(ls) {
 // swipe is the phone's board: a tab per column, with its count and what needs the user, over the columns side by side,
 // one a screen, the next peeking in.
 function swipe(ls) {
-  // The lane is taken once the scroll stops: a tab's smooth scroll lands on no lane it passes
-  let settle = 0;
+  // The lane is taken once the scroll stops (a tab's smooth scroll lands on no lane it passes), and a redraw held meanwhile
   const lanes = el('div', { class: 'lanes', onscroll: () => {
-    clearTimeout(settle);
-    settle = setTimeout(() => { tabbing = false; laneInView(lanes); }, 150);
+    clearTimeout(settling);
+    settling = setTimeout(() => {
+      settling = 0;
+      laneInView(lanes);
+      render();
+    }, 150);
   } },
     ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
@@ -562,12 +565,11 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// tabbing is a tab's smooth scroll under way: state.lane already names where it goes.
-let tabbing = false;
+// settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
+let settling = 0;
 
 // showLane scrolls the phone's lanes to column k's.
 function showLane(k, smooth) {
-  tabbing = smooth;
   const lanes = document.querySelector('#view .lanes'), lane = lanes?.querySelector('[data-k="' + k + '"]');
   if (!lane) return;
   lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: smooth ? 'smooth' : 'instant' });
@@ -576,7 +578,6 @@ function showLane(k, smooth) {
 
 // laneInView takes the lane most in view (the last one can't scroll to its start).
 function laneInView(lanes) {
-  if (!lanes.isConnected) return; // redrawn since
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
   const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1, i = end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w);
   if (COLUMNS[i].key !== state.lane) land(lanes, COLUMNS[i].key);
@@ -780,7 +781,7 @@ function render() {
   // The pair screen keeps what was typed: it is drawn once per visit.
   const sig = r.name === 'pair' ? 'pair' : [state.reachable, state.unpaired, state.etag, state.note, JSON.stringify(state.filter), state.more, state.allWho, wide.matches,
     Math.floor(Date.now() / 60000)].join('\n');
-  if (sig !== state.sig) {
+  if (sig !== state.sig && !(settling && b && r.name !== 'pair')) {
     state.sig = sig;
     const view = document.getElementById('view');
     if (r.name === 'pair') view.replaceChildren(...pairScreen());
@@ -790,9 +791,7 @@ function render() {
       const f = document.activeElement?.dataset?.f;
       // and each column keeps its scroll, the phone's filter strip its own
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
-      const strip = view.querySelector('.filters')?.scrollLeft || 0, swiped = view.querySelector('.lanes');
-      // A swipe cut by the redraw keeps the lane it got to
-      if (swiped && !tabbing) laneInView(swiped);
+      const strip = view.querySelector('.filters')?.scrollLeft || 0;
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
