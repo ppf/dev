@@ -177,6 +177,10 @@ func TestAskRules(t *testing.T) {
 		"**Assess the user's ideas before handing them on.**", "With real cons or a conflict on the lists",
 		"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
 		"you decide nothing for a project",
+		"text typed under Other goes on only if it says to",
+		"ending `the manager asks the user: leave it to the manager` is the manager's",
+		"**A worker's permission prompt or dialog under a boss of yours**",
+		"only the answer after the colon is theirs",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

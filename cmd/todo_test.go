@@ -561,6 +561,9 @@ func TestPickFor(t *testing.T) {
 		{"number prefix", pick("dev #70: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"project suffix", pick("api-dev #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"left open", pick("dev #7: Merge #148?", "leave it open"), "Merge #148?", "the item stays open"},
+		// The manager's own assessment question names no item: never an item's answer, typed under Other neither
+		{"assessment", pick("Hand on the user's idea to cache Merge #148? builds?", "Hand it on"), "Merge #148?", "not boss-dev #7"},
+		{"assessment, Other", pick("Merge #148? cache idea: hand it on?", "merge it and cache the builds"), "Merge #148?", "not boss-dev #7"},
 	} {
 		err := pickFor(tt.pick, "boss-dev", 7, tt.question)
 		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {

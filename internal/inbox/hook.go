@@ -279,11 +279,30 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		// A finished turn ends a run of rate limits
 		resumeErr = unsetResume(c, pane, true)
 	}
+	var handErr error
+	if ok && n.Kind == Decision && w.Herd == "" && w.Outside == "" {
+		n.Handed, handErr = handOver(c, clk, b, w, n)
+	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-	return errors.Join(askErr, resumeErr, err, setNote(c, pane, n.Summary()))
+	return errors.Join(askErr, resumeErr, handErr, err, setNote(c, pane, n.Summary()))
+}
+
+// handOver queues worker w's decision n in the Manager's inbox, and delivers it, when w's boss b runs under the live
+// Manager (b's @dev_started_by, the Manager's inbox on): the Manager asks the user and sends their pick to w itself,
+// so the user is asked once. handed reports it queued there; else b relays it as before.
+func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (handed bool, err error) {
+	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))
+	if !ok || err != nil || m.Name != Manager {
+		return false, err
+	}
+	n.Of, n.Key = b.Name, n.Key+"\x00"+w.Since
+	if _, err := m.Box.Add(n, clk.Now()); err != nil {
+		return false, err
+	}
+	return true, Deliver(c, clk, m)
 }
 
 // asked is what pane's dialog asks (agent.Question.Ask), clipped, when its question (@agent_question) is the

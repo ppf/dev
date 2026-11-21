@@ -75,20 +75,33 @@ type Note struct {
 	Key    string `json:"key"`
 	// Outside marks a worker a coordinator outside tmux started (dev agent start --boss).
 	Outside bool `json:"outside,omitempty"`
+	// Handed marks a decision handed to the Manager too (handOver): it asks the user, not the boss.
+	Handed bool `json:"handed,omitempty"`
+	// Of is the boss of the worker whose decision it is, in the Manager's copy of a Handed note.
+	Of string `json:"of,omitempty"`
 }
 
 // leaveIt ends an Outside note's line.
 const leaveIt = "started by a coordinator outside tmux: leave it to that coordinator"
 
-// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside; a Message's is "message <text>",
+// leaveToManager ends a Handed note's line.
+const leaveToManager = "the manager asks the user: leave it to the manager"
+
+// String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside, leaveToManager when Handed, or
+// for the Manager's copy "<worker> (<boss>'s worker) <kind>: <text>; <what to do>"; a Message's is "message <text>",
 // an Answered's "you answered <text>", a Start's "you were asked to start <text>", a ToDo's "to do <text>", a UserOn's
 // "the user is on <text>".
 func (n Note) String() string {
-	if workerless(n.Kind) {
+	switch {
+	case workerless(n.Kind):
 		return n.Kind + " " + n.Text
-	}
-	if n.Outside {
+	case n.Outside:
 		return n.Worker + " " + n.Summary() + "; " + leaveIt
+	case n.Handed:
+		return n.Worker + " " + n.Summary() + "; " + leaveToManager
+	case n.Of != "":
+		return fmt.Sprintf("%s (%s's worker) %s; ask the user, then send-keys only their pick to %s yourself (its boss leaves it to you)",
+			n.Worker, n.Of, n.Summary(), n.Worker)
 	}
 	return n.Worker + " " + n.Summary()
 }
