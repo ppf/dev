@@ -779,16 +779,20 @@ func Snapshot(c *tmux.Client) error {
 	// The timeout kills save.sh's whole group: a pane dump left behind would keep writing a cut snapshot
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	// A child still holding the output (a hung hook) would keep CombinedOutput waiting past the timeout
+	// A child left holding the output after save.sh exited would keep CombinedOutput waiting: it's killed after this
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil {
-		return fail(c, "save.sh timed out after "+snapshotTimeout.String(), err)
+	if errors.Is(err, exec.ErrWaitDelay) {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	return fail(c, "save.sh failed ("+err.Error()+"): "+strings.TrimSpace(string(out)), err)
+	what := "failed (" + err.Error() + ")"
+	if ctx.Err() != nil {
+		what = "timed out after " + snapshotTimeout.String()
+	}
+	return fail(c, strings.TrimSpace("save.sh "+what+": "+strings.TrimSpace(string(out))), err)
 }
 
 // snapshotGuard is set (=1) in the save.sh Snapshot runs: Snapshot holds the lock through it, so its Save hook

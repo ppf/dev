@@ -392,7 +392,7 @@ func (f firstKey) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (f firstKey) View() string { return "" }
 
-// Two keys a terminal sends in one write reach the view as two, as in its popup.
+// Two keys a terminal sends in one write come as one message, and both run, as in its popup.
 func TestFastKeysPty(t *testing.T) {
 	ptmx, tty, err := pty.Open()
 	if err != nil {

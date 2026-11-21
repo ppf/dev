@@ -1109,33 +1109,28 @@ func TestSnapshotWithoutResurrect(t *testing.T) {
 // a cut snapshot.
 func TestSnapshotTimeout(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
-	scripts := filepath.Join(home, ".tmux", "plugins", "tmux-resurrect", "scripts")
-	if err := os.MkdirAll(scripts, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	pidFile := filepath.Join(home, "child.pid")
-	if err := os.WriteFile(filepath.Join(scripts, "save.sh"), []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidFile+"\nsleep 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	saveScript(t, home, "sleep 30 &\necho $! > "+pidFile+".tmp\nmv "+pidFile+".tmp "+pidFile+"\necho dumping\nsleep 30\n")
 	old := snapshotTimeout
-	snapshotTimeout = 300 * time.Millisecond
+	snapshotTimeout = time.Second
 	t.Cleanup(func() { snapshotTimeout = old })
 	f := &fakeServer{}
 	start := time.Now()
 	err := Snapshot(f.client())
-	if took := time.Since(start); took > 3*time.Second {
+	if took := time.Since(start); took > 4*time.Second {
 		t.Errorf("Snapshot took %v: it waited for save.sh's child", took)
 	}
-	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 300ms") {
+	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 1s: dumping") {
 		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
 	}
 	data, rerr := os.ReadFile(pidFile)
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	pid, perr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if perr != nil || pid <= 0 {
+		t.Fatalf("child pid %q", data)
+	}
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	deadline := time.Now().Add(2 * time.Second)
 	for syscall.Kill(pid, 0) == nil {
@@ -1143,5 +1138,28 @@ func TestSnapshotTimeout(t *testing.T) {
 			t.Fatalf("save.sh's child %d outlived it", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A failing save.sh's warning says how it ended and what it printed.
+func TestSnapshotFailed(t *testing.T) {
+	saveScript(t, t.TempDir(), "echo boom\nexit 3\n")
+	f := &fakeServer{}
+	if err := Snapshot(f.client()); err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh failed (exit status 3): boom") {
+		t.Errorf("Snapshot = %v, calls %q; want the exit and the output", err, f.calls)
+	}
+}
+
+// saveScript makes home the user's home, its tmux-resurrect save.sh running body.
+func saveScript(t *testing.T, home, body string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	scripts := filepath.Join(home, ".tmux", "plugins", "tmux-resurrect", "scripts")
+	if err := os.MkdirAll(scripts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scripts, "save.sh"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
