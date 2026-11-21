@@ -223,7 +223,15 @@ func undimmed(line string) string {
 // flightTimeout into a rest goes back too (Expire), for the paste, and is reported. A coordinator a rate limit
 // stopped (a boss under a boss, OptResumeAt) gets none while its resume is ahead (resumeAhead): its resume prompt's
 // hook hands them over.
+// First the notes that the user is on an item ticked since go (WithdrawTicked); a failed lookup is reported, its note
+// still sent.
 func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
+	werr := b.Box.WithdrawTicked(listItem(c, clk.Now()))
+	return errors.Join(deliver(c, clk, b), werr)
+}
+
+// deliver is Deliver without WithdrawTicked.
+func deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	a, err := control.Resolve(c, b.Name)
 	if err != nil {
 		return err
@@ -256,7 +264,9 @@ func Deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	}
 	done, sendErr := send(c, clk, b, a)
 	if expired {
-		sendErr = errors.Join(fmt.Errorf("inbox: the batch sent over Claude's messaging socket went unshown %s into a rest: pasting it", flightTimeout), sendErr)
+		// Its notes are back in the inbox: what the user was on may have ticked since
+		sendErr = errors.Join(fmt.Errorf("inbox: the batch sent over Claude's messaging socket went unshown %s into a rest: pasting it", flightTimeout), sendErr,
+			b.Box.WithdrawTicked(listItem(c, clk.Now())))
 	}
 	if done {
 		return nil

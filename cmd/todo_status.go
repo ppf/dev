@@ -97,6 +97,9 @@ func desktopOwner(boss string, stderr io.Writer) (todo.Owner, []string) {
 	o := todo.Owner{Workers: make([]sidebar.Session, len(workers))}
 	for i, w := range workers {
 		o.Workers[i] = desktopSession(w)
+		if !w.Running() {
+			o.Stopped = append(o.Stopped, w.ID)
+		}
 	}
 	return o, unreadIDs
 }

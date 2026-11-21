@@ -84,6 +84,8 @@ func TestStatus(t *testing.T) {
 		{"working, PR merged", live, Shown{On: "busy", Session: link("busy"), Check: merged}, StatusCheck, "busy"},
 		{"working", live, Shown{On: "busy", Session: link("busy"), Check: unchanged}, StatusWorking, "busy"},
 		{"unlinked worker by name", live, Shown{On: " BUSY"}, StatusWorking, "busy"},
+		{"unlinked just before linking: the worker by name", live, Shown{On: "busy", Added: linked - 1}, StatusWorking, "busy"},
+		{"unlinked since linking: a person, not a worker of that name", live, Shown{On: "busy", Added: linked}, StatusWaiting, "busy"},
 		{"planned wait", live, Shown{On: "planned", Session: link("planned")}, StatusWaiting, "planned"},
 		{"rate-limit resume", live, Shown{On: "limited", Session: link("limited")}, StatusWaiting, "limited"},
 		{"resting", live, Shown{On: "resting", Session: link("resting")}, StatusIdle, "resting"},

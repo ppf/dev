@@ -80,15 +80,17 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 	if !ok || err != nil {
 		return "", false, err
 	}
+	werr := b.Box.WithdrawTicked(listItem(c, time.Now()))
 	bt, err := b.Box.Take()
 	if err != nil {
-		return "", false, err
+		return "", false, errors.Join(werr, err)
 	}
 	if len(bt.Notes) == 0 && (e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, Header)) {
-		return "", false, nil
+		return "", false, werr
 	}
 	text := bt.String()
 	list, listErr := openList(c, pane)
+	listErr = errors.Join(werr, listErr)
 	switch {
 	case text == "":
 		text = list
