@@ -782,10 +782,10 @@ func Snapshot(c *tmux.Client) error {
 	// A child still holding the output (a hung hook) would keep CombinedOutput waiting past the timeout
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
-	switch {
-	case err == nil:
+	if err == nil {
 		return nil
-	case ctx.Err() != nil:
+	}
+	if ctx.Err() != nil {
 		return fail(c, "save.sh timed out after "+snapshotTimeout.String(), err)
 	}
 	return fail(c, "save.sh failed ("+err.Error()+"): "+strings.TrimSpace(string(out)), err)

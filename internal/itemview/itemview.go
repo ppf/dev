@@ -152,7 +152,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Keys pressed fast come as one: each runs, until one starts an action or closes the view; after m the rest are typed
 		for i, r := range msg.Runes {
 			var cmd tea.Cmd
-			if m, cmd = m.key(string(r)); m.busy != "" || m.Done {
+			m, cmd = m.key(string(r))
+			if m.busy != "" || m.Done {
 				return m, cmd
 			}
 			if m.typing {
