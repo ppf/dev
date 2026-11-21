@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/ppf/dev/internal/todo"
 )
 
 // Refused is an answer, tick or start the list or its boss refused: Code is the HTTP status, Err the reason the page shows.
@@ -35,11 +37,13 @@ type doneReq struct {
 }
 
 type doingReq struct {
-	Boss  string `json:"boss"`
-	ID    int    `json:"id"`
-	Text  string `json:"text"`
-	Doing string `json:"doing"`
-	Stop  bool   `json:"stop"`
+	Boss string `json:"boss"`
+	ID   int    `json:"id"`
+	Text string `json:"text"`
+	// Seen is the item's doing and start as the page showed them: required
+	Seen  *todo.Seen `json:"seen"`
+	Doing string     `json:"doing"`
+	Stop  bool       `json:"stop"`
 }
 
 // fromPage refuses a state-changing call without the page's X-Dev-Page: 1 header, which a cross-site form can't send.
@@ -86,12 +90,15 @@ func (cfg Config) doing(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req, req.check) {
 		return
 	}
-	act(w, cfg.Doing(req.Boss, req.ID, req.Text, req.Doing, req.Stop))
+	act(w, cfg.Doing(req.Boss, req.ID, req.Text, *req.Seen, req.Doing, req.Stop))
 }
 
 func (req *doingReq) check() string {
-	if req.Stop && strings.TrimSpace(req.Doing) != "" {
+	switch {
+	case req.Stop && strings.TrimSpace(req.Doing) != "":
 		return "send what you do now or stop, not both"
+	case req.Seen == nil:
+		return "no seen: send the item's doing and started as the page shows them"
 	}
 	return item(req.Boss, req.ID, req.Text)
 }

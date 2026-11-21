@@ -10,10 +10,17 @@ import (
 // MaxDoing is the longest doing line, in characters: one row under a card.
 const MaxDoing = 100
 
+// Seen is an item's doing line and start as a board showed them: a change made from that board is refused once either
+// changed since.
+type Seen struct {
+	Doing   *Doing   `json:"doing"`
+	Started *Started `json:"started"`
+}
+
 // SetDoing sets what open item id's doer does now (d), or ends it (d nil), ending a start asked for it. user: the user
-// on their own item, not an ask, only while it still reads text; else the boss on its own (OnBoss). Anyone else's
-// item, and ending what isn't set, are refused.
-func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time) (Item, error) {
+// on their own item, not an ask, only while it still reads text, and as seen when given; else the boss on its own
+// (OnBoss). Anyone else's item, and ending what isn't set, are refused.
+func (s Store) SetDoing(id int, text string, user bool, seen *Seen, d *Doing, now time.Time) (Item, error) {
 	var it Item
 	if d != nil {
 		d.Text = Clean(d.Text)
@@ -36,6 +43,8 @@ func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time)
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
 		case !user && !OnBoss(p.On, p.Session):
 			return fmt.Errorf("item %d isn't your own (--on boss): only the boss's own items are marked doing by the boss", id)
+		case seen != nil && (!equal(p.Doing, seen.Doing) || !equal(p.Started, seen.Started)):
+			return fmt.Errorf("item %d changed since it was read: look at the list again", id)
 		case d == nil && p.Doing == nil:
 			return fmt.Errorf("item %d isn't marked doing", id)
 		}
@@ -50,6 +59,9 @@ func (s Store) SetDoing(id int, text string, user bool, d *Doing, now time.Time)
 	}))
 	return it, err
 }
+
+// equal reports a and b both nil, or pointing at equal values.
+func equal[T comparable](a, b *T) bool { return a == b || a != nil && b != nil && *a == *b }
 
 // checkPartOf refuses linking item id (0: one being added) to partner: itself, no open item, or one already linked.
 func (f *file) checkPartOf(id, partner int) error {

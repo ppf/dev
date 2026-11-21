@@ -32,9 +32,9 @@ type Config struct {
 	Answer func(boss string, id int, question, answer string) error
 	Done   func(boss string, id int, text string) error
 	Start  func(boss string, id int, text string) error
-	// Doing marks the user's own item id in progress with doing, or ends it (stop), while it still reads text, and tells
-	// its boss (the manager for a closed one).
-	Doing func(boss string, id int, text, doing string, stop bool) error
+	// Doing marks the user's own item id in progress with doing, or ends it (stop), while it still reads text and its
+	// doing and start are as seen, and tells its boss (the manager for a closed one).
+	Doing func(boss string, id int, text string, seen todo.Seen, doing string, stop bool) error
 	// Guard wraps every /v1 call but health and pair: Auth.Session, or SameOrigin on a loopback bind. Required.
 	Guard func(http.Handler) http.Handler
 	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.

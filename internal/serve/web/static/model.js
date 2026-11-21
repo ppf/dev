@@ -120,9 +120,10 @@ const desktop = l => l.boss.startsWith('local_');
 // own is whether the item is the user's, as todo.Own has it.
 const own = (l, it) => !it.on || (!it.session && it.on.toLowerCase() === l.boss.toLowerCase());
 const answerable = (l, it) => !desktop(l) && it.status === 'decide' && !!it.options?.length;
-// A closed boss's item starts only while the manager runs, as on the tmux boards.
-const startable = (l, it, managerRuns) => !desktop(l) && l.boss !== 'manager' && own(l, it) && !it.options?.length && (!l.closed || !!managerRuns)
-  && (!!it.start_late || it.column === 'todo' && ['yours', 'boss closed'].includes(it.status)); // as todo.Start: a late start, else a To do card
+// startable is what todo.Start takes: a late start, else a To do card, no ask; on the manager's own list only the user's
+// (dev todo start); a closed boss's only while the manager runs, as on the tmux boards.
+const startable = (l, it, managerRuns) => !desktop(l) && (l.boss !== 'manager' || own(l, it)) && !it.options?.length && (!l.closed || !!managerRuns)
+  && (!!it.start_late || it.column === 'todo');
 const tickable = (l, it) => !desktop(l) && !it.on && TICKABLE.includes(it.status);
 // The user marks their own item (the Mac's assignee: you), no ask, in progress (todo.SetDoing); the page offers it on To do
 // cards only, not a desktop list's, nor one being started.
@@ -150,9 +151,9 @@ function verdict(x, from, to, managerRuns) {
   if (to === 'progress') {
     if (ask) return no('answer it: open the card');
     if (doable(l, it)) return { act: 'doing', hint: "you're on it: no session starts" };
-    if (l.boss === 'manager') return no("the manager's own card: ask the manager in its session");
+    if (l.boss === 'manager' && !own(l, it)) return no("the manager's own card: ask the manager in its session");
     if (l.closed && !managerRuns) return no(l.boss + ' is closed and no manager runs to start it');
-    if (!mine && it.column === 'todo') return { act: 'start', hint: receiver(l) + ' starts a worker on it' };
+    if (startable(l, it, managerRuns)) return { act: 'start', hint: receiver(l) + ' starts a worker on it' };
     return no('not startable from the page');
   }
   // In progress → To do

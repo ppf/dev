@@ -13,7 +13,8 @@ import (
 var static embed.FS
 
 // types fixes the page's own types, as a system's mime tables may name JS otherwise.
-var types = map[string]string{".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8"}
+var types = map[string]string{".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8",
+	".ico": "image/x-icon", ".svg": "image/svg+xml"}
 
 // csp lets the page load and call only its own Mac, and no other page frame it.
 const csp = "default-src 'self'; frame-ancestors 'none'"

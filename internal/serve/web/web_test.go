@@ -72,11 +72,13 @@ var external = regexp.MustCompile("(?i)\\b(?:https?|wss?):|[\"'`(=]//|@import")
 
 func TestNoExternalURL(t *testing.T) {
 	for p, b := range embedded(t) {
-		// The fonts and their licence are no code: the URLs in them (the OFL's) request nothing
-		if ext := path.Ext(p); ext == ".woff2" || ext == ".txt" {
+		// The fonts, their licence and the icon are no code: the URLs in them (the OFL's) request nothing
+		if ext := path.Ext(p); ext == ".woff2" || ext == ".txt" || ext == ".ico" {
 			continue
 		}
-		if bad := external.FindString(comment.ReplaceAllString(string(b), "")); bad != "" {
+		// nor does an SVG's namespace
+		code := strings.ReplaceAll(string(b), `xmlns="http://www.w3.org/2000/svg"`, "")
+		if bad := external.FindString(comment.ReplaceAllString(code, "")); bad != "" {
 			t.Errorf("%s has %q: the page makes no request outside the Mac it came from", p, bad)
 		}
 	}
