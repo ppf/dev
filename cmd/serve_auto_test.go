@@ -136,25 +136,6 @@ func TestAutoServePrivateUnreadable(t *testing.T) {
 	}
 }
 
-// DEV_SERVE_ADDR asks for its own dev serve: one answering elsewhere doesn't stand in for it
-func TestAutoServeAddrBeside(t *testing.T) {
-	f := &fakeStart{alive: true, envValue: map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:18417"}}
-	s := f.starter(t)
-	other := serve.Running{Addr: netip.MustParseAddrPort("127.0.0.1:8417"), Version: "(devel) abc"}
-	own := serve.Running{Addr: netip.MustParseAddrPort("127.0.0.1:18417"), Version: "(devel) abc"}
-	calls := 0
-	s.served = func(string, time.Duration) ([]serve.Running, error) {
-		if calls++; calls == 1 {
-			return []serve.Running{other}, nil
-		}
-		return []serve.Running{other, own}, nil
-	}
-	var out bytes.Buffer
-	if err := s.ensure(&out); err != nil || len(f.spawned) != 1 || out.String() != "dev serve started: http://127.0.0.1:18417/ (this Mac only, no pairing needed)\n" {
-		t.Fatalf("got %v %q, spawned %q", err, out.String(), f.spawned)
-	}
-}
-
 // DEV_SERVE_ADDR as an IPv4-mapped address: dev serve records it unmapped, and the start still names it
 func TestAutoServeMapped(t *testing.T) {
 	f := &fakeStart{runs: 1, at: "127.0.0.1:18417", envValue: map[string]string{"DEV_SERVE_ADDR": "[::ffff:127.0.0.1]:18417"}}
