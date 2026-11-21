@@ -479,8 +479,21 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Added != 0 {
 		list += " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago"
 	}
-	facts := [][2]string{{"column", columnTitle(it.Column) + " · @" + m.assignee()}}
-	if !it.Done {
+	column := columnTitle(it.Column) + " · @" + m.assignee()
+	waiting := !it.Done && it.WaitingFor != "" && it.Assignee.Kind == sidebar.AssigneeBoss
+	if waiting {
+		column = columnTitle(it.Column)
+	}
+	facts := [][2]string{{"column", column}}
+	if waiting {
+		followUp := "@" + m.assignee()
+		if it.Closed {
+			followUp = "no one (" + m.assignee() + " is closed)"
+		}
+		facts = append(facts, [2]string{"waiting", it.WaitingFor}, [2]string{"follows", followUp})
+	}
+	// A person's wait and a closed boss are said by the column and the rows above
+	if !it.Done && !(waiting && it.Status == sidebar.StatusWaiting) && it.Status != sidebar.StatusBossClosed {
 		facts = append(facts, [2]string{"status", sidebar.StatusColours[it.Status] + status + reset})
 	}
 	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
@@ -494,7 +507,7 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})
 	}
-	if it.Check != nil {
+	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed {
 		facts = append(facts, [2]string{"check", it.Check.Tone().Colour() + it.Check.Short(now) + reset})
 	}
 	out := make([]string, len(facts))

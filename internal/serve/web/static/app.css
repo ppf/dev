@@ -282,7 +282,7 @@ textarea { min-height: 3.6em; resize: vertical; }
 }
 .facts { border-top: 1px solid var(--edge); }
 .facts div { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--edge); font-size: 13.5px; }
-.facts dt { flex: 0 0 5.2em; color: var(--meta); font-weight: 600; }
+.facts dt { flex: 0 0 6.6em; color: var(--meta); font-weight: 600; }
 .facts dd { margin: 0; min-width: 0; color: var(--ink2); }
 
 .st { font-weight: 600; }

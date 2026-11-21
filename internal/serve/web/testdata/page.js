@@ -365,6 +365,27 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await run('move(' + shipped + ", 'todo')");
   await settle();
   check('Done → To do sends a reopen: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/reopen' && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 7, text: 'Ship it' }));
+
+  // The panel's rows for an item waiting on a person: who it waits on and who follows up, not On: the boss
+  const rowsOf = async (boss, items, closed) => {
+    lists = [{ boss, closed, items }];
+    tag = 'G' + boss + items[0].id + (closed ? 'c' : '');
+    es().on.board({ data: 'W/"' + tag + 'v2"' });
+    await settle();
+    return Object.fromEntries(walk(run("facts(find('" + boss + "', " + items[0].id + '))'), n => n.tag === 'div').map(d => [textOf(d.children[0]), textOf(d.children[1])]));
+  };
+  const person = (extra = {}) => ({ id: 19, text: 'Ask', status: 'waiting', status_on: 'Alicja Serafin', on: 'Alicja Serafin', waiting_for: 'Alicja Serafin', column: 'waiting',
+    assignee: { kind: 'boss', name: 'boss-vitay' }, ...extra });
+  const live = await rowsOf('boss-vitay', [person()], false);
+  check('waiting on a person, live boss: ' + JSON.stringify(live), live.Status === 'Waiting' && live['Waiting for'] === 'Alicja Serafin' && live['Follows up'] === 'boss-vitay' && !('On' in live) && live.List === 'boss-vitay');
+  const shut = await rowsOf('boss-vitay', [person({ status: 'boss closed', check: { kind: 'boss closed' } })], true);
+  check('waiting on a person, closed boss: ' + JSON.stringify(shut), shut.Status === 'Waiting' && shut['Waiting for'] === 'Alicja Serafin' && shut['Follows up'] === 'no one (boss-vitay is closed)' && !('On' in shut) && !('Check' in shut) && shut.List === 'boss-vitay (closed)');
+  const onWorkerRows = await rowsOf('boss-a', [{ id: 5, text: 'Fix', status: 'working', status_on: 'dev-x', on: 'dev-x', column: 'progress', session: { name: 'dev-x' }, assignee: { kind: 'worker', name: 'dev-x', running: true } }], false);
+  check('on a worker: ' + JSON.stringify(onWorkerRows), onWorkerRows.Status === 'In progress · working' && onWorkerRows.On === 'dev-x' && !('Follows up' in onWorkerRows));
+  const goneRows = await rowsOf('boss-a', [{ id: 7, text: 'Fix', status: 'gone', status_on: 'dev-x', on: 'dev-x', column: 'todo', session: { name: 'dev-x' }, assignee: { kind: 'boss', name: 'boss-a' } }], false);
+  check('a worker gone names it: ' + JSON.stringify(goneRows), goneRows.Status === 'To do · gone · dev-x');
+  const mineRows = await rowsOf('boss-a', [{ id: 6, text: 'Mine', status: 'yours', column: 'todo', assignee: { kind: 'you' }, check: { kind: 'merged', pr: 12 } }], false);
+  check('the user\'s own: ' + JSON.stringify(mineRows), mineRows.Status === 'To do' && mineRows.On === 'you' && mineRows.Check === 'merged · PR #12' && !('Waiting for' in mineRows));
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });

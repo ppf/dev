@@ -300,6 +300,20 @@ func TestCardMarks(t *testing.T) {
 	if out := render(closed, 80); !strings.Contains(out, "boss closed") || !strings.Contains(out, "waiting for Carl · no one follows up") {
 		t.Errorf("❌ closed boss's card:\n%s", out)
 	}
+	// An open item waiting on a person names who follows up; a closed boss's names no one, and a ticked one keeps its assignee
+	boss := mk(base, func(s *todo.Shown) {
+		s.WaitingFor, s.Assignee = "Carl", todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-beta"}
+	})
+	if out := render(boss, 80); !strings.Contains(out, "waiting for Carl · @boss-beta follows up") {
+		t.Errorf("❌ live boss's waiting card:\n%s", out)
+	}
+	if out := render(closed, 80); strings.Contains(out, "follows up @") || strings.Contains(out, "@") && !strings.Contains(out, "no one follows up") {
+		t.Errorf("❌ closed boss's waiting card:\n%s", out)
+	}
+	boss.done = true
+	if out := render(boss, 80); strings.Contains(out, "follows up") || !strings.Contains(out, "@boss-beta") {
+		t.Errorf("❌ ticked waiting card:\n%s", out)
+	}
 	// Every card is cardH lines of cw
 	for _, l := range cardLines(closed, true, 30, now) {
 		if ansi.StringWidth(l) != 30 {

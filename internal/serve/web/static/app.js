@@ -719,11 +719,29 @@ function listErrors() {
   return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
+// statusRow is the item's column, with its status after it when that adds to it: "yours", "waiting" and "boss closed"
+// say what the column and the rows below say.
+function statusRow(x) {
+  const col = COLUMNS.find(c => c.key === columnOf(x)).title, st = x.it.start_late ? 'start not picked up' : x.it.status;
+  if (x.done || !st || ['yours', 'waiting', 'boss closed'].includes(st)) return col;
+  // The session it names when the card is not on it (a worker gone: the card is back on its boss)
+  const on = x.it.status_on;
+  return col + ' · ' + st + (on && on !== whoOf(x) ? ' · ' + on : '');
+}
+
+// whoRows say who an item is on: for one waiting on a person, that person and who follows up (its boss's assignee,
+// no one when the boss is closed); else the assignee.
+function whoRows(x) {
+  const { list, it } = x, who = whoOf(x);
+  if (!it.waiting_for || kindOf(x) !== 'boss') return [['On', who === ME ? 'you' : who]];
+  return [['Waiting for', it.waiting_for], ['Follows up', list.closed ? 'no one (' + who + ' is closed)' : who]];
+}
+
 function facts(x) {
   const { list, it } = x;
-  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', whoOf(x) === ME ? 'you' : whoOf(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
+  const rows = [['Status', statusRow(x)], ...whoRows(x), ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
-  if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.check && it.check.kind !== 'boss closed') rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
