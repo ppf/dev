@@ -309,9 +309,6 @@ func TestAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := KeepAcrossExec(first, true); err != nil {
-		t.Fatal(err)
-	}
 	second, err := Alive(dir) // a second dev serve on the same folder
 	if err != nil {
 		t.Fatal(err)

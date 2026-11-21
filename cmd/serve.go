@@ -59,9 +59,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			// After a reload the caffeinate started before it still waits on this pid, and the alive lock it kept is open
-			reloaded, pid, kept := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
-			if err := os.Unsetenv(envServeReexec); err != nil {
-				return err
+			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
+			kept, _ := strconv.Atoi(os.Getenv(selfreload.EnvKept))
+			for _, k := range []string{envServeReexec, selfreload.EnvKept} {
+				if err := os.Unsetenv(k); err != nil {
+					return err
+				}
 			}
 			// Before the listen, so a dev boss sees this one starting
 			alive, err := serve.Alive(dir)
@@ -69,8 +72,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			defer func() { _ = alive.Close() }()
-			aliveFile = alive
-			if kept > 2 {
+			if reloaded && kept > 2 {
 				_ = os.NewFile(uintptr(kept), "alive").Close() // held across the exec only: this process's own one holds now
 			}
 			ln, err := net.Listen("tcp", ap.String())
@@ -109,7 +111,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			stderr := cmd.ErrOrStderr()
-			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(),
+			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(), Keep: alive, // no dev boss sees none running meanwhile
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
 			bound := ln.Addr().(*net.TCPAddr).AddrPort()
 			args := func() ([]string, error) { return reexecArgs(os.Args, addr, bound, ownIP(bound.Addr())) }
@@ -302,23 +304,17 @@ func (u *unrepeated) Write(p []byte) (int, error) {
 	return u.w.Write(p)
 }
 
-// envServeReexec is "<pid> <caffeinate pid> <alive lock fd>" across a reload: that process doesn't start a second
-// caffeinate, and closes the alive lock kept across the exec once it holds its own.
+// envServeReexec is "<pid> <caffeinate pid>" across a reload: that process doesn't start a second caffeinate.
 const envServeReexec = "DEV_SERVE_REEXEC"
 
-// reexecMarker reads envServeReexec: whether this pid re-exec'd itself, its caffeinate's pid and the alive lock's fd
-// kept across the exec (0: none).
-func reexecMarker(v string, pid int) (bool, int, int) {
-	f := strings.Fields(v)
-	if len(f) < 2 || f[0] != strconv.Itoa(pid) {
-		return false, 0, 0
+// reexecMarker reads envServeReexec: whether this pid re-exec'd itself, and its caffeinate's pid (0: none).
+func reexecMarker(v string, pid int) (bool, int) {
+	self, caff, _ := strings.Cut(v, " ")
+	if self != strconv.Itoa(pid) {
+		return false, 0
 	}
-	caff, _ := strconv.Atoi(f[1])
-	kept := 0
-	if len(f) > 2 {
-		kept, _ = strconv.Atoi(f[2])
-	}
-	return true, caff, kept
+	n, _ := strconv.Atoi(caff)
+	return true, n
 }
 
 // reexecArgs is args with --addr pinned to bound (before a "--"), so the new process binds there, not a fresh pick.
@@ -352,9 +348,6 @@ func ownIP(ip netip.Addr) bool {
 		return ok && n.IP.Equal(net.IP(ip.AsSlice()))
 	})
 }
-
-// aliveFile is serve.Alive's lock, kept across a reload's exec so no dev boss sees none running meanwhile.
-var aliveFile *os.File
 
 // caffeinate is the running caffeinate's pid (0: none), handed to the process a reload execs.
 var caffeinate atomic.Int64
@@ -430,25 +423,12 @@ func serveReloading(parent context.Context, ln net.Listener, cfg serve.Config, o
 		default:
 			stop() // a signal from here on ends the process: the exec can't be called off
 			fmt.Fprintf(out, "↻ dev serve: reloading into %s\n", r.Version)
-			var kept uintptr // named to the new process only when it really stays open there
-			if aliveFile != nil {
-				if kerr := serve.KeepAcrossExec(aliveFile, true); kerr != nil {
-					fmt.Fprintf(stderr, "⚠ dev serve: alive lock not kept across the reload: %v\n", kerr)
-				} else {
-					kept = aliveFile.Fd()
-				}
-			}
-			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d %d", os.Getpid(), caffeinate.Load(), kept)); err != nil {
+			if err := os.Setenv(envServeReexec, fmt.Sprintf("%d %d", os.Getpid(), caffeinate.Load())); err != nil {
 				return err
 			}
 			err = execReload(r, a)
 			if uerr := os.Unsetenv(envServeReexec); uerr != nil {
 				return uerr
-			}
-			if aliveFile != nil {
-				if kerr := serve.KeepAcrossExec(aliveFile, false); kerr != nil {
-					fmt.Fprintf(stderr, "⚠ dev serve: alive lock left open to children: %v\n", kerr)
-				}
 			}
 			if errors.Is(err, selfreload.ErrNotNow) {
 				hold(r.Version, err.Error())

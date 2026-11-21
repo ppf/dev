@@ -67,7 +67,8 @@ func TestBossStartsServe(t *testing.T) {
 	}
 
 	out, errOut := run(base, "boss", "hq", "--background", "--timeout", "30s")
-	check(t, "private server, no DEV_SERVE_ADDR", out+errOut+strconv.Itoa(len(pids())), "0 boss-hq\n0")
+	check(t, "private server, no DEV_SERVE_ADDR", out+errOut+strconv.Itoa(len(pids())),
+		"0 boss-hq\n⚠ dev serve not started: this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one\n0")
 	out, errOut = run(append(env, "DEV_NO_SERVE=1"), "boss", "hq", "--background")
 	check(t, "DEV_NO_SERVE", out+errOut+strconv.Itoa(len(pids())), "0 boss-hq\n0")
 	out, errOut = run(env, "boss", "hq", "--background", "--no-serve")

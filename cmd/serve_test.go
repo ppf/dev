@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/sidebar"
@@ -263,13 +261,8 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 	}
 	r := &reloadRun{addr: ln.Addr().String(), watches: make(chan struct{}, 10), execs: make(chan []string, 10),
 		errc: make(chan error, 1), stderr: &syncBuffer{}}
-	alive, err := serve.Alive(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	aliveFile = alive
 	watch, exec := watchReload, execReload
-	t.Cleanup(func() { watchReload, execReload, aliveFile = watch, exec, nil; _ = alive.Close() })
+	t.Cleanup(func() { watchReload, execReload = watch, exec })
 	watchReload = func(ctx context.Context, _ selfreload.Options) <-chan selfreload.Ready {
 		r.watches <- struct{}{}
 		ch := make(chan selfreload.Ready, 1)
@@ -289,15 +282,12 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 		if rd.Version != "v2.0.0" {
 			t.Errorf("exec into %q", rd.Version)
 		}
-		if got := os.Getenv(envServeReexec); got != fmt.Sprintf("%d 0 %d", os.Getpid(), alive.Fd()) {
+		if got := os.Getenv(envServeReexec); got != fmt.Sprintf("%d 0", os.Getpid()) {
 			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
 		}
 		// The socket stays bound, so a connection waits unanswered
 		if _, err := (&http.Client{Timeout: 200 * time.Millisecond}).Get("http://" + r.addr + "/v1/health"); err == nil {
 			t.Error("still serving at exec")
-		}
-		if fl, err := unix.FcntlInt(alive.Fd(), unix.F_GETFD, 0); err != nil || fl&unix.FD_CLOEXEC != 0 {
-			t.Errorf("alive lock not kept across the exec: flags %d, %v", fl, err)
 		}
 		r.execs <- args
 		return execErr
@@ -537,12 +527,12 @@ func TestServeReloadHeldByOpenRequest(t *testing.T) {
 
 func TestReexecMarker(t *testing.T) {
 	for _, tc := range []struct {
-		v          string
-		reloaded   bool
-		caff, kept int
-	}{{"42 77 9", true, 77, 9}, {"42 77", true, 77, 0}, {"42 0 0", true, 0, 0}, {"41 77 9", false, 0, 0}, {"", false, 0, 0}} {
-		if r, c, k := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff || k != tc.kept {
-			t.Errorf("%q: %v %d %d, want %v %d %d", tc.v, r, c, k, tc.reloaded, tc.caff, tc.kept)
+		v        string
+		reloaded bool
+		caff     int
+	}{{"42 77", true, 77}, {"42 0", true, 0}, {"41 77", false, 0}, {"", false, 0}} {
+		if r, c := reexecMarker(tc.v, 42); r != tc.reloaded || c != tc.caff {
+			t.Errorf("%q: %v %d, want %v %d", tc.v, r, c, tc.reloaded, tc.caff)
 		}
 	}
 }

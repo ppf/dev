@@ -44,6 +44,7 @@ type starter struct {
 	exe    string
 	served func(dir string, timeout time.Duration) (netip.AddrPort, string, error) // serve.Served
 	alive  func(dir string) (bool, error)                                          // serve.AnyAlive
+	local  func(netip.Addr) bool                                                   // ownIP
 	bind   func(addr string) error
 	spawn  func(exe string, args, env []string, log *os.File) (exited <-chan struct{}, err error)
 	own    string
@@ -86,6 +87,7 @@ func newStarter() (*starter, error) {
 		exe:    exe,
 		served: serve.Served,
 		alive:  serve.AnyAlive,
+		local:  ownIP,
 		bind:   func(addr string) error { _, _, err := bind(addr); return err },
 		spawn:  spawnServe,
 		own:    selfreload.Version(),
@@ -102,14 +104,18 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
-		return nil
+		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")
 	}
 	unlock, ok, err := startLock(s.dir, deadline)
 	if err != nil || !ok {
 		return err // !ok: another dev boss is starting one still
 	}
 	defer unlock()
-	if _, v, err := served(time.Second); err == nil {
+	ap, v, err := served(time.Second)
+	if err == nil && !s.local(ap.Addr()) { // a stale record whose address another machine has now
+		err = serve.ErrNotRunning
+	}
+	if err == nil {
 		if v != "" && v != s.own {
 			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", v, s.own)
 		}
@@ -221,7 +227,7 @@ func startLock(dir string, deadline time.Time) (func(), bool, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, false, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "start"), os.O_CREATE|os.O_RDONLY, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "start"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, false, err
 	}

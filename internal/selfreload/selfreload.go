@@ -45,6 +45,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -83,7 +85,11 @@ type Options struct {
 	Canary  bool          // take part in the canary (panes; not serve); needs Tmux
 	Stagger time.Duration // longest random wait before Ready
 	Warn    func(error)   // a failed check, called from Watch's goroutines (maybe at once); nil drops it
+	Keep    *os.File      // left open across the exec (named in EnvKept), only for the exec itself; nil: none
 }
+
+// EnvKept is Options.Keep's descriptor in the process an Exec started, set only when it was kept open.
+const EnvKept = "DEV_RELOAD_KEPT_FD"
 
 // Ready says Exe now holds Version and this process may reload into it.
 type Ready struct {
@@ -362,6 +368,14 @@ func Exec(r Ready, args []string) error {
 	}
 	env := setEnv(os.Environ(), envReloadedTo, r.Version)
 	env = setEnv(env, envCanary, canary)
+	if f := w.o.Keep; f != nil {
+		// Only now, past every check that runs a child (tmux): none of them must hold it
+		if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
+			return w.dropClaim(claimed, r.Version, fmt.Errorf("selfreload: keep %s open: %w", f.Name(), err))
+		}
+		defer func() { _, _ = unix.FcntlInt(f.Fd(), unix.F_SETFD, unix.FD_CLOEXEC) }()
+		env = setEnv(env, EnvKept, fmt.Sprint(f.Fd()))
+	}
 	err := w.execve(w.o.Exe, args, env)
 	if err == nil { // only a test double returns from a successful exec
 		return nil

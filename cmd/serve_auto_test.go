@@ -39,6 +39,7 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 			return netip.MustParseAddrPort("127.0.0.1:18417"), f.version, nil
 		},
 		alive: func(string) (bool, error) { return f.alive, nil },
+		local: func(netip.Addr) bool { return true },
 		bind:  func(string) error { return f.bindErr },
 		spawn: func(exe string, args, env []string, log *os.File) (<-chan struct{}, error) {
 			f.spawned = append(f.spawned, append([]string{exe}, args...))
@@ -108,10 +109,27 @@ func TestAutoServeSkips(t *testing.T) {
 		"other uid":      {"TMUX": "/tmp/tmux-502/default,1,0"},
 	} {
 		f := &fakeStart{runs: -1, envValue: env}
-		var out bytes.Buffer
-		if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
-			t.Errorf("%s: err %v, out %q, spawned %q", name, err, out.String(), f.spawned)
+		err := f.starter(t).ensure(&bytes.Buffer{})
+		if err == nil || !strings.HasPrefix(err.Error(), "this boss's tmux server isn't the default one") || len(f.spawned) > 0 {
+			t.Errorf("%s: err %v, spawned %q", name, err, f.spawned)
 		}
+	}
+}
+
+func TestAutoServeOtherMachine(t *testing.T) {
+	f := &fakeStart{version: "(devel) abc", envValue: map[string]string{}}
+	s := f.starter(t)
+	answered := false
+	s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
+		if !answered { // the stale record's address answers from elsewhere, then the new one's own
+			answered = true
+			return netip.MustParseAddrPort("192.168.1.50:8417"), "(devel) abc", nil
+		}
+		return netip.MustParseAddrPort("127.0.0.1:18417"), "(devel) abc", nil
+	}
+	s.local = func(ip netip.Addr) bool { return ip.IsLoopback() }
+	if err := s.ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
+		t.Fatalf("err %v, spawned %q", err, f.spawned)
 	}
 }
 

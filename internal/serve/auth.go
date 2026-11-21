@@ -22,8 +22,6 @@ import (
 	"syscall"
 	"time"
 	"unicode"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -400,7 +398,7 @@ func lock(dir string) (func(), error) {
 
 // Alive marks a running dev serve on dir until the file is closed (or the process exits): a shared lock on dir/alive.
 func Alive(dir string) (*os.File, error) {
-	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_CREATE|os.O_RDONLY, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -411,19 +409,9 @@ func Alive(dir string) (*os.File, error) {
 	return f, nil
 }
 
-// KeepAcrossExec has Alive's file (and its lock) survive an exec (on) or not: a reload holds it throughout.
-func KeepAcrossExec(f *os.File, on bool) error {
-	flag := unix.FD_CLOEXEC
-	if on {
-		flag = 0
-	}
-	_, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, flag)
-	return err
-}
-
 // AnyAlive is whether a dev serve holds dir's Alive lock, answering or not.
 func AnyAlive(dir string) (bool, error) {
-	f, err := os.Open(filepath.Join(dir, "alive"))
+	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_RDWR, 0) // an exclusive flock wants a writable one on NFS
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
