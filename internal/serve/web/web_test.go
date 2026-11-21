@@ -72,6 +72,10 @@ var external = regexp.MustCompile("(?i)\\b(?:https?|wss?):|[\"'`(=]//|@import")
 
 func TestNoExternalURL(t *testing.T) {
 	for p, b := range embedded(t) {
+		// The fonts and their licence are no code: the URLs in them (the OFL's) request nothing
+		if ext := path.Ext(p); ext == ".woff2" || ext == ".txt" {
+			continue
+		}
 		if bad := external.FindString(comment.ReplaceAllString(string(b), "")); bad != "" {
 			t.Errorf("%s has %q: the page makes no request outside the Mac it came from", p, bad)
 		}
@@ -80,5 +84,20 @@ func TestNoExternalURL(t *testing.T) {
 		if !external.MatchString(s) {
 			t.Errorf("external misses %s", s)
 		}
+	}
+}
+
+func TestNoDirectoryListing(t *testing.T) {
+	srv := httptest.NewServer(Handler())
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/fonts/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("/fonts/: %d, want 404", res.StatusCode)
 	}
 }
