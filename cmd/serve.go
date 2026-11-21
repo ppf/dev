@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/selfreload"
@@ -55,6 +56,37 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			if err != nil {
 				return err
 			}
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return err
+			}
+			// After a reload the caffeinate started before it still waits on this pid, and the alive lock it kept is open
+			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
+			kept := 0
+			if v := os.Getenv(selfreload.EnvKept); v != "" {
+				if kept, err = strconv.Atoi(v); err != nil {
+					return fmt.Errorf("%s=%q: %w", selfreload.EnvKept, v, err)
+				}
+			}
+			for _, k := range []string{envServeReexec, selfreload.EnvKept} {
+				if err := os.Unsetenv(k); err != nil {
+					return err
+				}
+			}
+			// Before the listen, so a dev boss sees this one starting
+			alive, err := serve.Alive(dir)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = alive.Close() }()
+			if os.Getenv(envStartFd) == "3" && alive.Fd() != 3 { // the dev boss's start lock: one holds now
+				_ = os.NewFile(3, "start").Close()
+			}
+			if err := os.Unsetenv(envStartFd); err != nil {
+				return err
+			}
+			if reloaded && kept > 2 {
+				closeKept(kept, alive, cmd.ErrOrStderr())
+			}
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
 				return err
@@ -67,11 +99,6 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			defer forget()
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
-			// After a reload the caffeinate started before it still waits on this pid
-			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
-			if err := os.Unsetenv(envServeReexec); err != nil {
-				return err
-			}
 			switch {
 			case reloaded && awakeAlive(pid):
 				caffeinate.Store(int64(pid))
@@ -96,7 +123,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			stderr := cmd.ErrOrStderr()
-			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(),
+			o := selfreload.Options{Exe: exe, Own: selfreload.Version(), Tmux: tmux.New(), Keep: alive, // no dev boss sees none running meanwhile
 				Warn: func(err error) { fmt.Fprintln(stderr, "⚠ dev serve: "+err.Error()) }}
 			bound := ln.Addr().(*net.TCPAddr).AddrPort()
 			args := func() ([]string, error) { return reexecArgs(os.Args, addr, bound, ownIP(bound.Addr())) }
@@ -287,6 +314,24 @@ func (u *unrepeated) Write(p []byte) (int, error) {
 	}
 	u.seen[string(p)] = now
 	return u.w.Write(p)
+}
+
+// closeKept closes fd, the alive lock a reload kept open across its exec, once this process holds alive: only when
+// it is that file (raw fd, no *os.File whose finalizer would close a reused number later); else it only gets
+// close-on-exec, so no child keeps it.
+func closeKept(fd int, alive *os.File, stderr io.Writer) {
+	var a, b unix.Stat_t
+	if err := unix.Fstat(fd, &a); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+		return
+	}
+	if err := unix.Fstat(int(alive.Fd()), &b); err != nil || a.Dev != b.Dev || a.Ino != b.Ino {
+		syscall.CloseOnExec(fd)
+		return
+	}
+	if err := syscall.Close(fd); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+	}
 }
 
 // envServeReexec is "<pid> <caffeinate pid>" across a reload: that process doesn't start a second caffeinate.

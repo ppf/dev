@@ -18,7 +18,7 @@ import (
 )
 
 func newHerdCmd() *cobra.Command {
-	var previews, background, adopt bool
+	var previews, background, adopt, noServe bool
 	var timeout time.Duration
 	var start agent.Start
 	cmd := &cobra.Command{
@@ -37,7 +37,10 @@ with); it keeps them when dev restarts it.
 dev runs in, prints its name and waits until its Claude registered (as dev agent start does); an existing
 boss is only printed. With --adopt, run in the manager's pane, an existing boss no live session started becomes
 the manager's as if it had started it: its news goes up to the manager, it shows in the manager's --mine list and
-previews, and it keeps its workers and list.`,
+previews, and it keeps its workers and list.
+Every dev boss (the manager, a project's boss, --background; not --adopt) starts
+dev serve, the web board, detached with --awake=false when none answers: on 127.0.0.1:8417 (this Mac only), or DEV_SERVE_ADDR; only on tmux's default server unless DEV_SERVE_ADDR is set, not when its launchd
+agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is one ⚠ line; the boss opens anyway.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,8 +65,20 @@ previews, and it keeps its workers and list.`,
 			if background && len(args) == 0 {
 				return errors.New("--background needs a project: dev boss <project> --background")
 			}
+			// A refused boss starts no dev serve: a detached one starts it once it exists, an attached one before the attach
 			if len(args) == 0 {
-				return openManager(cmd, c, start, timeout)
+				if hasTerminal() {
+					if err := herd.Check(c, herd.Manager, start); err != nil {
+						return err
+					}
+					autoServe(cmd.ErrOrStderr(), noServe)
+					return openManager(cmd, c, start, timeout)
+				}
+				if err := openManager(cmd, c, start, timeout); err != nil {
+					return err
+				}
+				autoServe(cmd.ErrOrStderr(), noServe)
+				return nil
 			}
 			projects, _, err := loadProjects(cmd)
 			if err != nil {
@@ -79,12 +94,22 @@ previews, and it keeps its workers and list.`,
 			}
 			// A detached boss skips the first-run restore, which switches clients (as dev agent start does)
 			if background {
-				return openBackground(cmd, c, p.Name, dir, start, timeout, adopt)
+				if err := openBackground(cmd, c, p.Name, dir, start, timeout, adopt); err != nil {
+					return err
+				}
+				if !adopt {
+					autoServe(cmd.ErrOrStderr(), noServe)
+				}
+				return nil
 			}
 			// After the first-run restore, so a saved boss is attached rather than replaced
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 				return err
 			}
+			if err := herd.Check(c, herd.SessionName(p.Name), start); err != nil {
+				return err
+			}
+			autoServe(cmd.ErrOrStderr(), noServe)
 			return herd.Open(c, p.Name, dir, start)
 		},
 	}
@@ -92,6 +117,7 @@ previews, and it keeps its workers and list.`,
 	_ = cmd.Flags().MarkHidden("previews")
 	cmd.Flags().BoolVar(&background, "background", false, "create the boss detached and wait until its Claude registered")
 	cmd.Flags().BoolVar(&adopt, "adopt", false, "with --background in the manager's pane: make an existing boss no live session started the manager's")
+	cmd.Flags().BoolVar(&noServe, "no-serve", false, "don't start dev serve (also DEV_NO_SERVE=1)")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "with --background or no terminal, give up when no Claude registered within this")
 	addStartFlags(cmd, &start, "boss's coordinator")
 	return cmd

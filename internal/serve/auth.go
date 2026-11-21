@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"math/big"
@@ -104,27 +105,51 @@ func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
 	}, nil
 }
 
-// ServedAddr is the address the running dev serve recorded in dir; an error when none runs (no record, or nothing answers /v1/health there).
+// ErrNotRunning is Served's error when no dev serve answers: no record, or nothing answers /v1/health there.
+var ErrNotRunning = errors.New("dev serve is not running")
+
+// ServedAddr is the address the running dev serve recorded in dir; ErrNotRunning when none runs.
 func ServedAddr(dir string) (netip.AddrPort, error) {
+	ap, _, err := Served(dir, time.Second)
+	return ap, err
+}
+
+// Served is ServedAddr with the version its /v1/health names, waiting at most timeout for it.
+func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 	var s string
 	if err := readFile(dir, addrFile, &s); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return netip.AddrPort{}, errors.New("dev serve is not running: start it first (a dev serve started before this version must be restarted)")
+			return netip.AddrPort{}, "", fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
 		}
-		return netip.AddrPort{}, err
+		_, syntax := errors.AsType[*json.SyntaxError](err)
+		_, typ := errors.AsType[*json.UnmarshalTypeError](err)
+		if syntax || typ { // a record no dev serve wrote whole
+			return netip.AddrPort{}, "", fmt.Errorf("%w: %v", ErrNotRunning, err)
+		}
+		return netip.AddrPort{}, "", err
 	}
 	ap, err := netip.ParseAddrPort(s)
 	if err != nil {
-		return ap, fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
+		return ap, "", fmt.Errorf("%w: %s: %v", ErrNotRunning, filepath.Join(dir, addrFile), err)
 	}
-	resp, err := (&http.Client{Timeout: time.Second}).Get("http://" + s + "/v1/health")
-	if err == nil {
-		_ = resp.Body.Close()
+	// A Transport without Proxy: HTTP_PROXY must not take a check of this Mac's own address
+	notRunning := fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, s)
+	resp, err := (&http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true},
+		// Only a direct answer counts: another program on a stale record's port could redirect to one
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get("http://" + s + "/v1/health")
+	if err != nil {
+		return ap, "", notRunning
 	}
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return ap, fmt.Errorf("dev serve is not running: it does not answer on %s", s)
+	defer func() { _ = resp.Body.Close() }()
+	var health struct {
+		OK      bool
+		Version string
 	}
-	return ap, nil
+	// Another program on a stale record's port answers no {"ok":true,"version":…}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&health) != nil || !health.OK || health.Version == "" {
+		return ap, "", notRunning
+	}
+	return ap, health.Version, nil
 }
 
 // Unpair drops the session of device, or every session when device is "", and returns the devices dropped.
@@ -370,6 +395,38 @@ func lock(dir string) (func(), error) {
 		return nil, fmt.Errorf("lock %s: %w", dir, err)
 	}
 	return func() { _ = f.Close() }, nil
+}
+
+// Alive marks a running dev serve on dir until the file is closed (or the process exits): a shared lock on dir/alive.
+func Alive(dir string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
+	}
+	return f, nil
+}
+
+// AnyAlive is whether a dev serve holds dir's Alive lock, answering or not.
+func AnyAlive(dir string) (bool, error) {
+	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_RDWR, 0) // an exclusive flock wants a writable one on NFS
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	switch err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); {
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("lock %s: %w", f.Name(), err)
+	}
+	return false, nil
 }
 
 func readSessions(dir string) ([]session, error) {

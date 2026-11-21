@@ -29,6 +29,7 @@ path = "/tmp/notes"
 func execute(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
 	t.Setenv("TMUX", "")
+	t.Setenv("DEV_NO_SERVE", "1")
 	var out, errOut bytes.Buffer
 	root := newRootCmd()
 	root.SetArgs(args)
