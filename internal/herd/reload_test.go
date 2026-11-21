@@ -135,6 +135,24 @@ func TestReloadInTodoModeKeepsItsRow(t *testing.T) {
 	if !n.needMode || n.needIdx != 1 || n.needKey != m.needKey {
 		t.Fatalf("after the reload: TO DO mode %v on row %d key %q, want on row 1 key %q", n.needMode, n.needIdx, n.needKey, m.needKey)
 	}
+	n.reload.Flash = "v2"
+	if row := ansiStrip(n.bottom())[0]; !strings.HasPrefix(row, " ↻ dev v2  j/k move") {
+		t.Errorf("bottom row %q: want the version reloaded into, then TO DO's keys", row)
+	}
+}
+
+// TO DO left with esc stays left after a reload: its stale row isn't carried.
+func TestReloadAfterTodoLeftStaysOnCards(t *testing.T) {
+	m, _ := keys(ready(t, needsBoard(t, new([]listAnswer))), "n", "j", "esc")
+	m, quit := refreshed(m)
+	if !quit {
+		t.Fatal("no reload")
+	}
+	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	next, _ := n.Update(refreshMsg{snap: m.snap})
+	if n = next.(Model); n.needMode {
+		t.Fatal("back in TO DO after a reload, though it was left")
+	}
 }
 
 // An answer from TO DO waits on its row until it goes: a reload meanwhile would put the cursor back on it.
@@ -304,7 +322,9 @@ func TestReloadCarriesTodoFocusAsk(t *testing.T) {
 		t.Fatalf("quit %v, TO DO mode %v: want TO DO focused and the reload", quits(cmd), m.needMode)
 	}
 	n := Model{width: m.width, height: m.height, clk: m.clk}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
-	next, _ = n.Update(refreshMsg{snap: m.snap})
+	// The ask was cleared when read: the new process's refresh doesn't see it
+	snap.needsFocus = false
+	next, _ = n.Update(refreshMsg{snap: snap})
 	if n = next.(Model); !n.needMode || n.needKey != m.needKey {
 		t.Fatalf("after the reload: TO DO mode %v key %q, want key %q", n.needMode, n.needKey, m.needKey)
 	}

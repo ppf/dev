@@ -165,10 +165,10 @@ func (m Model) bottom() []string {
 	return m.hintRow(pages + hint)
 }
 
-// hintRow is the bottom row of keys with what holds a ready reload: before them, so a narrow pane shows it, but
-// after TO DO's keys, which the user is using.
+// hintRow is the bottom row of keys with a reload's flash or what holds a ready reload: before them, so a narrow pane
+// shows it, but a held reload after TO DO's keys, which the user is using.
 func (m Model) hintRow(keys string) []string {
-	if m.reload.Flash != "" && !m.needMode {
+	if m.reload.Flash != "" {
 		keys = "↻ dev " + m.reload.Flash + "  " + keys
 	}
 	switch h := m.held(); {
