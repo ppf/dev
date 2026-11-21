@@ -889,11 +889,11 @@ func tryAdoptable(boss string, try func(todo.Store) error) error {
 	if err != nil {
 		return err
 	}
+	paths := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
 	s, err := todo.Desktop(id)
 	if err != nil {
 		return err
 	}
-	paths := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
 	from, ok, _ := s.Adoptable(func() (func(string) bool, error) { return desktop.Earlier(paths, id) })
 	if !ok {
 		return nil
