@@ -14,6 +14,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
@@ -368,7 +369,7 @@ func TestReply(t *testing.T) {
 	if m.box.session != "" || cmd == nil || !slices.Equal(m.history, []string{"fix it"}) {
 		t.Fatalf("enter: reply %q, cmd %v, history %q", m.box.session, cmd, m.history)
 	}
-	if msg := cmd().(actionMsg); msg.msg.text != "Sent to b" {
+	if msg := selfreload.Done(cmd()).(actionMsg); msg.msg.text != "Sent to b" {
 		t.Errorf("send: %q", msg.msg.text)
 	}
 	if want := []string{"display-message " + tmux.Format[control.Status](), "paste-buffer %6", "send-keys Enter"}; !slices.Equal(slices.DeleteFunc(slices.Clone(ran), func(s string) bool { return strings.HasPrefix(s, "load-buffer") }), want) {
@@ -380,7 +381,7 @@ func TestReply(t *testing.T) {
 	m, _ = key(m, runes("i"))
 	m, _ = key(m, runes("rm -rf x"))
 	_, cmd = key(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if msg := cmd().(actionMsg); !strings.Contains(msg.msg.text, "agent is gone") || len(ran) != 0 {
+	if msg := selfreload.Done(cmd()).(actionMsg); !strings.Contains(msg.msg.text, "agent is gone") || len(ran) != 0 {
 		t.Errorf("gone agent: %q, ran %q", msg.msg.text, ran)
 	}
 	paneCmd = "claude"
@@ -457,7 +458,7 @@ func TestAskOptionKeys(t *testing.T) {
 	if cmd == nil || m.box.session != "" || m.drafts["b"].ed.String() != "kept" {
 		t.Fatalf("1: cmd %v, box %q, draft %q", cmd != nil, m.box.session, m.drafts["b"].ed.String())
 	}
-	if msg := cmd().(actionMsg); msg.msg.text != "Sent to b" || !slices.Equal(pasted, []string{"Postgres"}) || !slices.Contains(ran, "paste-buffer %6") {
+	if msg := selfreload.Done(cmd()).(actionMsg); msg.msg.text != "Sent to b" || !slices.Equal(pasted, []string{"Postgres"}) || !slices.Contains(ran, "paste-buffer %6") {
 		t.Errorf("1 sent %q, pasted %q, ran %q", msg.msg.text, pasted, ran)
 	}
 	pasted = nil

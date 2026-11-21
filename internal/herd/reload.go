@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/ppf/dev/internal/selfreload"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 const (
 	// envState carries the previews' UI state across a reload's exec
 	envState = "DEV_PREVIEWS_STATE"
-	// maxState bounds envState, so an exec never fails on the environment's size: the oldest replies go first
+	// maxState bounds envState, dropping the oldest replies, so the exec doesn't fail on the environment's size
 	maxState = 32 << 10
 )
 
@@ -51,7 +53,18 @@ func Run(c *tmux.Client, pane, exe string, args []string) error {
 // idle: nothing typed, asked, open or in flight would be lost by a reload (Busy counts the commands running).
 // A draft kept for another card holds it too, until sent or cleared.
 func (m Model) idle() bool {
-	return m.box.session == "" && len(m.drafts) == 0 && m.confirm == "" && m.answering == "" && !m.needMode
+	return m.box.session == "" && !m.drafted() && m.confirm == "" && m.answering == "" && !m.needMode
+}
+
+// drafted reports a kept draft that can still be sent: its session is on the server (only gone from the board,
+// it may come back); one for a closed session can't, and holds nothing.
+func (m Model) drafted() bool {
+	for name := range m.drafts {
+		if slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == name }) {
+			return true
+		}
+	}
+	return false
 }
 
 // held says what holds a ready reload, for the bottom row; "" when none is held.
@@ -66,7 +79,7 @@ func (m Model) held() string {
 		why = "after TO DO (esc)"
 	case m.answering != "":
 		why = "after answering " + m.answering
-	case len(m.drafts) > 0:
+	case m.drafted():
 		why = "once the unsent message goes"
 	}
 	return "↻ " + v + " reloads " + why

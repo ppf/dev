@@ -41,7 +41,7 @@ type flashDoneMsg struct{}
 // watches for a new release, the model holds its Ready until idle (Reload), then RunPane execs it in place.
 type Pane struct {
 	Busy     Busy           // work running off the update loop, which an exec would cut off
-	Err      error          // a failed reload or watcher check, shown until the model clears it
+	Err      error          // a failed reload or watcher check, shown until a key or the watcher's next Ready
 	Flash    string         // the version a reload just brought, shown for FlashFor
 	watch    func() tea.Cmd // starts a watcher, its Ready as a ReadyMsg; set by RunPane, nil in tests
 	ready    *Ready         // held until the model is idle
@@ -96,8 +96,8 @@ func (p Pane) Held() string {
 	return p.ready.Version
 }
 
-// Quitting reports the program quitting to reload: the model must start nothing more (the exec would cut it off)
-// and take no input.
+// Quitting reports the program quitting to reload: the model must take no input and start no action (the exec
+// would cut it off).
 func (p Pane) Quitting() bool { return p.now != nil }
 
 // Reload quits the program to exec into the held Ready, when idle and nothing runs off the update loop.
@@ -145,8 +145,9 @@ func (p Pane) gaveUp(v string) bool {
 
 // RunPane runs m (its Pane at pane(&m)) until the process is killed or the program quits on its own. Once m quits
 // to reload (Pane.Reload) it execs args (args[0] included) into the new release of o.Exe with env(m) set
-// ("KEY=VALUE"; env may be nil); an exec that fails runs m again in-process with the error on Pane.Err. It never
-// returns to reload: a pane's clean exit may close its session. o.Canary, o.Stagger and o.Warn are its own.
+// ("KEY=VALUE"; env may be nil); an exec that fails runs m again in-process with the error on Pane.Err (none for
+// a bare ErrNotNow). It never returns to reload: a pane's clean exit may close its session. o.Canary, o.Stagger
+// and o.Warn are its own.
 func RunPane[M tea.Model](m M, pane func(*M) *Pane, o Options, args []string, env func(M) []string) error {
 	// One context for the process: the canary's ok mark runs in the first Watch for 30 s
 	ctx := context.Background()
@@ -195,8 +196,8 @@ func ReloadedTo(own string) string {
 	return ""
 }
 
-// Busy counts work a pane runs off its update loop (an action, a popup, a prompt being typed); counted from
-// when its command is made, in Update, so Reload never decides between the two. Nil-safe for test models.
+// Busy counts work a pane runs off its update loop (an action, a popup, a reply being sent): from when its command
+// is made in Update until the model takes its message (Done), so no reload falls in between. Nil-safe for test models.
 type Busy struct{ n *atomic.Int32 }
 
 func NewBusy() Busy { return Busy{n: new(atomic.Int32)} }
@@ -214,11 +215,23 @@ func (b Busy) Add(d int32) {
 	}
 }
 
-// Run is fn as a command counted from now until it returns.
+// Run is fn as a command counted from now until the model takes its message (Done).
 func (b Busy) Run(fn func() tea.Msg) tea.Cmd {
 	b.Add(1)
-	return func() tea.Msg {
-		defer b.Add(-1)
-		return fn()
+	return func() tea.Msg { return busyDone{msg: fn(), b: b} }
+}
+
+// busyDone is a Busy command's message, counted until the model takes it.
+type busyDone struct {
+	msg tea.Msg
+	b   Busy
+}
+
+// Done is msg as the model's Update takes it: a Busy command's own message (nil when it has none), no longer counted.
+func Done(msg tea.Msg) tea.Msg {
+	if d, ok := msg.(busyDone); ok {
+		d.b.Add(-1)
+		return d.msg
 	}
+	return msg
 }

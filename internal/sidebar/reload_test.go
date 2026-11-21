@@ -84,8 +84,12 @@ func TestRunActionHoldsReloadUntilDone(t *testing.T) {
 	done := make(chan tea.Msg)
 	go func() { done <- action() }()
 	close(release)
-	<-done
-	if _, cmd = m.Update(refreshMsg{gen: m.gen, err: errors.New("x")}); !quits(cmd) {
+	msg := <-done
+	if _, cmd = m.Update(refreshMsg{gen: m.gen, err: errors.New("x")}); quits(cmd) {
+		t.Fatal("reloaded between the action's end and its message")
+	}
+	next, _ = m.Update(msg)
+	if _, cmd = next.(Model).Update(refreshMsg{gen: m.gen, err: errors.New("x")}); !quits(cmd) {
 		t.Fatal("no reload once the action was done")
 	}
 }

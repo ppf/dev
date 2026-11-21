@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ppf/dev/internal/selfreload"
+	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/tmux"
 )
 
 func TestIdle(t *testing.T) {
@@ -20,7 +22,8 @@ func TestIdle(t *testing.T) {
 	}{
 		{"nothing open", Model{}, true},
 		{"reply box open", Model{box: replyBox{session: "a"}}, false},
-		{"a reply kept for another card", Model{drafts: map[string]replyBox{"a": {}}}, false},
+		{"a reply kept for another card", Model{drafts: map[string]replyBox{"a": {}}, snap: snapshot{all: []sidebar.Session{{Name: "a"}}}}, false},
+		{"a reply kept for a closed session", Model{drafts: map[string]replyBox{"a": {}}}, true},
 		{"kill asked", Model{confirm: "a"}, false},
 		{"answer in flight", Model{answering: "a"}, false},
 		{"TO DO mode", Model{needMode: true}, false},
@@ -44,9 +47,12 @@ func quits(cmd tea.Cmd) bool {
 	return ok
 }
 
-// ready is m holding a Ready for v2.
+// ready is m holding a Ready for v2, its cards' sessions on the server.
 func ready(t *testing.T, m Model) Model {
 	t.Helper()
+	for _, tile := range m.snap.tiles {
+		m.snap.all = append(m.snap.all, tile.sess)
+	}
 	m.reload = selfreload.NewPane("v1")
 	next, cmd := m.Update(selfreload.ReadyMsg{Version: "v2"})
 	if quits(cmd) {
@@ -149,23 +155,28 @@ func TestReloadHeldByAnswerInFlight(t *testing.T) {
 
 func TestReloadHeldByCommandRunning(t *testing.T) {
 	m := ready(t, board4())
-	release := make(chan struct{})
-	action := m.action(func() error { <-release; return nil })
-	_, wd := m.Update(watchDueMsg{})
+	m.c = tmux.NewFake(func([]string) (string, error) { return "", errors.New("no server") })
+	action := m.action(func() error { return errors.New("boom") })
+	_, watch := m.Update(watchDueMsg{})
 	if n := m.reload.Busy.Load(); n != 2 {
 		t.Fatalf("busy %d, want the action and the inbox watch counted from their making", n)
 	}
 	if _, quit := refreshed(m); quit {
 		t.Fatal("reloaded with an action and the inbox watch about to run")
 	}
-	close(release)
-	action()
-	m.reload.Busy.Add(-1) // the inbox watch's command, not run here: it needs a tmux server
-	if wd == nil {
-		t.Fatal("no inbox watch")
+	// Run, their messages not yet taken: a reload now would drop the action's ❌
+	done, watched := action(), watch()
+	if _, quit := refreshed(m); quit {
+		t.Fatal("reloaded before the action's message was taken")
+	}
+	next, _ := m.Update(watched)
+	next, _ = next.(Model).Update(done)
+	m = next.(Model)
+	if !strings.Contains(m.msg.text, "boom") {
+		t.Fatalf("msg %q, want the action's error", m.msg.text)
 	}
 	if _, quit := refreshed(m); !quit {
-		t.Fatal("no reload once the commands were done")
+		t.Fatal("no reload once the commands' messages were taken")
 	}
 }
 
@@ -259,5 +270,20 @@ func TestNoPlaceholderBeforeReloadsFirstRefresh(t *testing.T) {
 	m := Model{width: 60, height: 10}.restore(`{"selected":"a"}`)
 	if got := strings.Join(ansiStrip(m.render()), "\n"); strings.Contains(got, "No worker sessions yet") {
 		t.Errorf("a reload's first frame says the workers are gone:\n%s", got)
+	}
+}
+
+// The sidebar's ask to focus TO DO, read by a refresh, wins over a held reload: its exec would lose it.
+func TestReloadHeldByTodoFocusAsk(t *testing.T) {
+	m := ready(t, needsBoard(t, new([]listAnswer)))
+	snap := m.snap
+	snap.needsFocus = true
+	next, cmd := m.Update(refreshMsg{snap: snap, inputs: m.inputs})
+	m = next.(Model)
+	if quits(cmd) || !m.needMode {
+		t.Fatalf("quit %v, TO DO mode %v: want TO DO focused, the reload held", quits(cmd), m.needMode)
+	}
+	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ v2") {
+		t.Errorf("bottom row %q: want the held reload", row)
 	}
 }

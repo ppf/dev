@@ -44,7 +44,7 @@ func (m Model) render() []string {
 	copy(lines[gh-len(msgs):], msgs)
 	board, bh := lines[len(top):gh-len(msgs)], gh-len(top)-len(msgs)
 	if len(m.snap.tiles) == 0 {
-		// Before a reload's first refresh the workers aren't read yet, not gone
+		// Before a reload's first good refresh the workers aren't read yet, not gone
 		if bh > 0 && !m.restored {
 			board[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 		}
@@ -95,14 +95,15 @@ func (m Model) bottom() []string {
 	switch {
 	case m.confirm != "":
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
+	case m.reload.Err != nil:
+		// Before messages: the key that clears one clears it too, unseen
+		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	case m.msg.alert:
 		return []string{sidebar.AlertRow(m.msg.text, w)}
 	case m.msg.text != "":
 		return []string{sidebar.HintRow(m.msg.text, w)}
 	case m.err != nil:
 		return []string{sidebar.AlertRow(m.err.Error(), w)}
-	case m.reload.Err != nil:
-		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	}
 	if m.needMode {
 		rows := m.needRows()

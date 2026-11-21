@@ -148,6 +148,7 @@ func (m Model) Init() tea.Cmd {
 
 // Update routes refreshes to the model and input to the actions.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = selfreload.Done(msg)
 	if cmd, ok := m.reload.Update(msg); ok {
 		if quit := m.reload.Reload(m.idle()); quit != nil {
 			return m, quit

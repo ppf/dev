@@ -57,11 +57,20 @@ func TestPaneReloadWaitsForIdleAndBusy(t *testing.T) {
 	if quits(p.Reload(false)) {
 		t.Fatal("reloaded while not idle")
 	}
-	done := p.Busy.Run(func() tea.Msg { return nil })
+	cmd := p.Busy.Run(func() tea.Msg { return "out" })
 	if quits(p.Reload(true)) {
 		t.Fatal("reloaded while a command was about to run")
 	}
-	done()
+	msg := cmd()
+	if quits(p.Reload(true)) {
+		t.Fatal("reloaded between the command's end and the model taking its message")
+	}
+	if got := Done(msg); got != "out" {
+		t.Fatalf("Done = %v, want the command's message", got)
+	}
+	if Done("other") != "other" {
+		t.Error("Done changed a message no Busy command sent")
+	}
 	if !quits(p.Reload(true)) || !p.Quitting() {
 		t.Fatal("no reload once idle and nothing runs")
 	}

@@ -134,7 +134,7 @@ type Model struct {
 	expands       map[string]bool // by session: its card shows more of its screen (v)
 	size          paneSize        // how fit last sized the pane
 	restoredSize  paneSize        // size as a reload carried it, taken at the first refresh; unlisted when none
-	restored      bool            // carried by a reload: until the first refresh, no card is new to Asking
+	restored      bool            // carried by a reload: until the first good refresh, no card is new to Asking
 	todo          *todo.Store     // the boss's to do list; nil reads none, unless findTodo
 	findTodo      bool            // refresh looks up todo until it's found
 	todoFolded    bool            // TO DO shows as its header only (t)
@@ -246,6 +246,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // update is Update before the fit.
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = selfreload.Done(msg)
 	// Quitting to reload: tea.Quit lands later, and anything started meanwhile would be cut off by the exec
 	if m.reload.Quitting() {
 		return m, nil
@@ -300,7 +301,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Here only: a refresh in flight may have cleared the sidebar's ask to focus TO DO
+		// Only after a refresh is applied: one in flight may carry (and has cleared) the sidebar's ask to focus TO DO
 		if quit := m.reload.Reload(m.idle()); quit != nil {
 			return m, quit
 		}
