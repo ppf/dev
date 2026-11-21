@@ -539,6 +539,7 @@ function redraw(view, next) {
   const fresh = keep && next.find(n => n.classList?.contains('filters'));
   if (!fresh) return view.replaceChildren(...next);
   picking = true;
+  picker.value = state.filter.project; // a project gone meanwhile: All
   const nu = [...fresh.children];
   [...keep.children].forEach((c, i) => { if (!c.contains(picker) && nu[i]) c.replaceWith(nu[i]); });
   const i = next.indexOf(fresh);
@@ -704,7 +705,7 @@ function board() {
   // A dropped card is filtered as it was: a tick under "wait on you" stays shown, Ticking…, until the board read after
   // its call settles it, even when a read before its reply has it ticked
   const onWay = x => !!state.moves[key(x.list.boss, x.it.id)] && !!x.list.items?.includes(x.it);
-  const ls = lanes(raw.filter(x => matches(x, state.filter) || onWay(x)).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
+  const ls = lanes(raw.filter(x => matches(x, state.filter) || onWay(x) && matches(x, { ...state.filter, needs: false })).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
   const out = [...listErrors(), filters(projects, ws, kinds), ...(wide.matches ? [columns(ls)] : swipe(ls))];
   if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
