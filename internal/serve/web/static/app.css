@@ -106,7 +106,6 @@ a { color: var(--act); }
 .stack { display: flex; flex-direction: column; gap: var(--sp-card-gap); overflow: auto; padding: 4px; margin: -4px; }
 .cfoot { font-size: 13px; color: var(--meta); padding: 18px 6px; text-align: center; }
 .more { display: flex; justify-content: space-between; gap: 8px; width: 100%; border: 1px dashed var(--edge-strong); background: none; border-radius: var(--r-card); padding: 9px 12px; font-size: 13px; font-weight: 600; color: var(--ink2); text-align: left; }
-.more span { font-weight: 500; color: var(--meta); }
 
 /* cards */
 .card { position: relative; flex: none; display: flex; flex-direction: column; gap: 7px; background: var(--card); border: 1px solid var(--edge); border-radius: var(--r-card); box-shadow: var(--shadow); padding: var(--sp-card-pad); transition: border-color .12s; }
@@ -119,7 +118,7 @@ a { color: var(--act); }
 .clab { display: flex; align-items: center; gap: 6px; font-size: var(--fs-meta); color: var(--meta); min-width: 0; }
 .clab .pn { font-weight: 600; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clab .id { flex: none; }
-.clab .st { font-weight: 600; white-space: nowrap; }
+.clab .st { white-space: nowrap; }
 .clab .age { margin-left: auto; white-space: nowrap; }
 .age.old { color: var(--s-wait); font-weight: 650; }
 .card .title {

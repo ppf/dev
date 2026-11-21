@@ -442,8 +442,10 @@ const dot = name => el('span', { class: 'pdot', vars: { '--h': hue(name) } });
 
 // flag is what a card that needs the user says on its top.
 function flag(it) {
-  const why = it.start_late ? 'start not picked up' : ['decide', 'blocked'].includes(it.status) ? it.status : '';
-  return el('div', { class: 'flag' }, 'Needs you' + (why ? ' · ' + why : ''));
+  let why = '';
+  if (it.start_late) why = ' · start not picked up';
+  else if (['decide', 'blocked'].includes(it.status)) why = ' · ' + it.status;
+  return el('div', { class: 'flag' }, 'Needs you' + why);
 }
 
 // card is an open item's card; a finished one is a row.
@@ -543,9 +545,13 @@ function columns(ls) {
 function swipe(ls) {
   const lanes = el('div', { class: 'lanes', onscroll: () => laneInView(lanes) },
     ls.map(l => el('section', { class: 'lane', 'data-k': l.key, 'aria-label': l.title }, body(l))));
-  return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(l => el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
-    'aria-selected': String(state.lane === l.key), onclick: () => showLane(l.key, true) },
-  l.title, el('span', { class: 'n' }, String(l.xs.length)), hotCount(l) > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hotCount(l)))))), lanes];
+  const tab = l => {
+    const hot = hotCount(l);
+    return el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
+      'aria-selected': String(state.lane === l.key), onclick: () => showLane(l.key, true) },
+    l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
+  };
+  return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
 // showLane scrolls the phone's lanes to column k's.
