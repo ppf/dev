@@ -56,6 +56,7 @@ func main() {
 	mux.HandleFunc("POST /v1/answer", s.act(s.answer))
 	mux.HandleFunc("POST /v1/done", s.act(s.done))
 	mux.HandleFunc("POST /v1/start", s.act(s.start))
+	mux.HandleFunc("POST /v1/doing", s.act(s.doing))
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("POST /fake/mac", s.mac)
 	mux.HandleFunc("POST /fake/version", s.version)
@@ -162,6 +163,7 @@ type request struct {
 	Question string `json:"question"`
 	Text     string `json:"text"`
 	Option   string `json:"option"`
+	Doing    string `json:"doing"`
 }
 
 // act checks the page's header and finds the open item the request names, then hands it to f under the lock.
@@ -260,6 +262,24 @@ func (s *server) start(req request, it map[string]any) (int, string) {
 	delete(it, "start_late")
 	delete(it, "needs_you")
 	delete(it, "doing")
+	return 200, ""
+}
+
+// doing marks the user's own item, no ask, in progress as todo.SetDoing does.
+func (s *server) doing(req request, it map[string]any) (int, string) {
+	options, _ := it["options"].([]any)
+	on, _ := it["on"].(string)
+	switch {
+	case req.Text != it["text"]:
+		return 409, fmt.Sprintf("item %d is %q now, not %q: look at the list again", req.ID, it["text"], req.Text)
+	case !todo.Own(on, nil, req.Boss) || it["session"] != nil:
+		return 409, fmt.Sprintf("item %d is on %s, not the user's", req.ID, on)
+	case len(options) > 0:
+		return 409, fmt.Sprintf("item %d is a question: answer it", req.ID)
+	}
+	it["doing"] = map[string]any{"text": req.Doing, "at": time.Now().Unix()}
+	it["column"], it["assignee"] = "progress", map[string]any{"kind": "you"}
+	delete(it, "started")
 	return 200, ""
 }
 

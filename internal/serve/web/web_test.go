@@ -72,6 +72,10 @@ var external = regexp.MustCompile("(?i)\\b(?:https?|wss?):|[\"'`(=]//|@import")
 
 func TestNoExternalURL(t *testing.T) {
 	for p, b := range embedded(t) {
+		// The fonts and their licence are no code: they request nothing
+		if ext := path.Ext(p); ext == ".woff2" || ext == ".txt" {
+			continue
+		}
 		if bad := external.FindString(comment.ReplaceAllString(string(b), "")); bad != "" {
 			t.Errorf("%s has %q: the page makes no request outside the Mac it came from", p, bad)
 		}

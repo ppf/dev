@@ -19,7 +19,7 @@ const ctx = {
   console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
-    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [] },
+    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [], querySelector: () => null },
   window: { addEventListener() {}, scrollTo() {} },
   location: { hash: '#/', reloads: 0, reload() { this.reloads++; } },
   matchMedia: () => media,
@@ -143,9 +143,16 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   run('state.board = fixture; state.filter = { project: "", who: [], needs: false }');
   const walk = (n, f, out = []) => { if (n && typeof n === 'object') { if (f(n)) out.push(n); (n.children || []).forEach(c => walk(c, f, out)); } return out; };
   const drawnCards = () => run('board()').flatMap(n => walk(n, c => /^card\b/.test(c.className || '')));
-  const lanes = () => run('board()').flatMap(n => walk(n, c => c.tag === 'section' || c.tag === 'details'));
+  const lanes = () => run('board()').flatMap(n => walk(n, c => c.tag === 'section'));
   const cardCount = run('cards(state.board).length');
-  check('phone: every card drawn', drawnCards().length === cardCount);
+  const todo = run("lanes(cards(state.board)).find(l => l.key === 'todo').xs");
+  const shownTodo = () => walk(lanes().find(l => l.attrs['data-k'] === 'todo'), c => /^card\b/.test(c.className || ''));
+  check('phone: five lanes in order', JSON.stringify(lanes().map(c => c.attrs['data-k'])) === JSON.stringify(['todo', 'progress', 'waiting', 'review', 'done']));
+  check('To do shows its first ' + run('TODO_SHOWN') + ', what needs you among them', todo.length > run('TODO_SHOWN') && shownTodo().length === run('TODO_SHOWN')
+    && todo.filter(x => run('needsYou')(x)).length <= run('TODO_SHOWN'));
+  check('phone: every other card drawn', drawnCards().length === cardCount - todo.length + run('TODO_SHOWN'));
+  run('state.more = true');
+  check('phone: To do shown whole, every card drawn', drawnCards().length === cardCount);
   media.matches = true;
   check('wide: five columns in order', JSON.stringify(lanes().map(c => c.attrs['data-k'])) === JSON.stringify(['todo', 'progress', 'waiting', 'review', 'done']));
   check('wide: every card drawn', drawnCards().length === cardCount);
@@ -154,6 +161,12 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('needs you: only those cards, as many as the tally', drawnCards().length === run('tally(cards(state.board)).need'));
   run("state.filter = { project: '', who: ['gone-worker'], needs: false }; board()");
   check('a pressed assignee with no card left is dropped', run('state.filter.who.length') === 0 && drawnCards().length === cardCount);
+  run("state.filter = { project: '', who: [], needs: false }");
+  const needCards = drawnCards().filter(c => /\bneed\b/.test(c.className));
+  check('a card that needs you is flagged, no red chip saying it again', needCards.length === run('tally(cards(state.board)).need') + run("cards(state.board).filter(x => needsYou(x) && x.it.quiet).length")
+    && needCards.every(c => c.children[0].className === 'flag' && !walk(c, x => /\btag hot\b/.test(x.className || '') && /needs you|decide/.test(x.children.join(''))).length));
+  const doable = run("cards(state.board).filter(x => !x.done && doable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
+  check("I'm on it: own items, no ask, not desktop, not doing or starting: " + doable, JSON.stringify(doable) === JSON.stringify(['boss-garden#6', 'boss-garden#7', 'boss-kitchen#5', 'boss-kitchen#6', 'boss-kitchen#7', 'boss-shed#2']));
   media.matches = false;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
