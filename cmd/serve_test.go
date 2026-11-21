@@ -150,7 +150,12 @@ func TestServePair(t *testing.T) {
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
 		t.Errorf("no server: %v, want not running", err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	var older atomic.Bool // a dev serve from before loopback needed no pairing
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if older.Load() && r.URL.Path == "/v1/board" {
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
 	defer srv.Close()
 	ln := srv.Listener
 	dir, err := authDir()
@@ -168,6 +173,10 @@ func TestServePair(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pair.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("pair on loopback wrote a code: %v", err)
+	}
+	older.Store(true)
+	if out, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "older dev") || out != "" {
+		t.Errorf("pair on an older loopback serve: %q %v, want restart it", out, err)
 	}
 	forget()
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {

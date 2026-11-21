@@ -131,7 +131,7 @@ func newServePairCmd() *cobra.Command {
 codes or a new dev serve pair void it): the running
 dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on; when that is
 loopback only, it needs no pairing and a phone can't reach it, so pair writes no code and says so and how to restart
-dev serve. Errors when dev serve is not
+dev serve (one from an older dev, which still wants pairing there, it says to restart). Errors when dev serve is not
 running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -150,6 +150,9 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 				return err
 			}
 			if ap.Addr().IsLoopback() {
+				if err := unpairedBoard(ap); err != nil {
+					return err
+				}
 				_, err = fmt.Fprint(cmd.OutOrStdout(), loopbackMessage(ap, restartHint()))
 				return err
 			}
@@ -162,6 +165,20 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 		},
 	}
 	return cmd
+}
+
+// unpairedBoard errors when the dev serve on loopback ap still wants a session for its board: one from before loopback
+// needed no pairing, which a reload hasn't replaced.
+func unpairedBoard(ap netip.AddrPort) error {
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + ap.String() + "/v1/board")
+	if err != nil {
+		return fmt.Errorf("dev serve on %s: %w", ap, err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("the dev serve on %s is from an older dev and still wants pairing on loopback: restart it", ap)
+	}
+	return nil
 }
 
 // loopbackMessage is pair's answer for a dev serve on loopback only: no pairing there, and a phone can't reach it.
