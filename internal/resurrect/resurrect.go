@@ -750,7 +750,7 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 	return entries, agents, startedBy, bosses, starts, waits
 }
 
-const snapshotTimeout = time.Minute
+var snapshotTimeout = time.Minute
 
 // Snapshot runs tmux-resurrect's save.sh after dev closed a session for good, one at a time, each in its own
 // second: save.sh names a snapshot by its second, so a save started in the second of another still writing would
@@ -776,12 +776,26 @@ func Snapshot(c *tmux.Client) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, save, "quiet")
 	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
-	// A child still holding the output (a hung hook) would keep CombinedOutput waiting past the timeout
+	// The timeout kills save.sh's whole group: a pane dump left behind would keep writing a cut snapshot
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	// A child left holding the output after save.sh exited would keep CombinedOutput waiting
 	cmd.WaitDelay = 5 * time.Second
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fail(c, "save.sh failed: "+strings.TrimSpace(string(out)), err)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	// Any child left (held the output past WaitDelay, or outlived a failed save.sh) goes before the lock does
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// save.sh exited 0 (at the deadline, or a child held the output): its snapshot is written
+	if cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		return nil
+	}
+	what := "failed (" + err.Error() + ")"
+	if ctx.Err() != nil {
+		what = "timed out after " + snapshotTimeout.String()
+	}
+	return fail(c, strings.TrimSpace("save.sh "+what+": "+strings.TrimSpace(string(out))), err)
 }
 
 // snapshotGuard is set (=1) in the save.sh Snapshot runs: Snapshot holds the lock through it, so its Save hook
