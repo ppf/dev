@@ -151,16 +151,14 @@ func TestServePair(t *testing.T) {
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
 		t.Errorf("no server: %v, want not running", err)
 	}
-	var older atomic.Bool // a dev serve from before loopback needed no pairing
+	var tick atomic.Int32 // what the serve answers an empty tick: 400 past a loopback Guard
+	tick.Store(http.StatusBadRequest)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path != "/v1/done":
-			_, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`))
-		case older.Load():
-			w.WriteHeader(http.StatusUnauthorized)
-		default:
-			w.WriteHeader(http.StatusBadRequest) // past the Guard: the body names no item
+		if r.URL.Path == "/v1/done" {
+			w.WriteHeader(int(tick.Load()))
+			return
 		}
+		_, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`))
 	}))
 	defer srv.Close()
 	ln := srv.Listener
@@ -180,9 +178,14 @@ func TestServePair(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "pair.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("pair on loopback wrote a code: %v", err)
 	}
-	older.Store(true)
-	if out, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "older dev") || out != "" {
-		t.Errorf("pair on an older loopback serve: %q %v, want restart it", out, err)
+	for code, want := range map[int32]string{http.StatusUnauthorized: "older dev", http.StatusInternalServerError: "answered 500"} {
+		tick.Store(code)
+		if out, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), want) || out != "" {
+			t.Errorf("pair on a loopback serve answering %d: %q %v, want %q", code, out, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pair.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("pair on a refusing loopback serve wrote a code: %v", err)
 	}
 	forget()
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {

@@ -203,7 +203,8 @@ func unpairedBoard(ap netip.AddrPort) error {
 		return err
 	}
 	req.Header.Set("X-Dev-Page", "1")
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 	if err != nil {
 		return fmt.Errorf("dev serve on %s: %w", ap, err)
 	}

@@ -85,6 +85,20 @@ func TestBossStartsServe(t *testing.T) {
 	if len(first) != 1 || !health() {
 		t.Fatalf("serve %v, health %v", first, health())
 	}
+	for site, want := range map[string]int{"": http.StatusOK, "cross-site": http.StatusForbidden} { // what the started line promises
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/board", nil)
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("❌ /v1/board with no session, Sec-Fetch-Site %q: %d, want %d", site, resp.StatusCode, want)
+		}
+	}
 	ppid, _ := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(first[0])).Output()
 	check(t, "reparented", strings.TrimSpace(string(ppid)), "1")
 
