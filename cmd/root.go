@@ -101,6 +101,7 @@ func runPicker(cmd *cobra.Command, start agent.Start) error {
 	if res.Session {
 		return open.Run(c, open.Options{Path: dir, Name: res.Project.Name, Start: start}, cmd.OutOrStdout())
 	}
+	autoServe(cmd.ErrOrStderr(), false)
 	if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 		return err
 	}

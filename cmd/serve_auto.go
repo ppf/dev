@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,8 +20,21 @@ import (
 	"github.com/ppf/dev/internal/serve"
 )
 
-// autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE, TMUX, TMUX_PANE).
-var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
+// autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE or TMUX_PANE); TMUX
+// keeps the boss's tmux server.
+var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TMUX", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
+
+// autoServeDefault is the address dev boss starts dev serve on without DEV_SERVE_ADDR; "": dev serve's own default
+// (tailnet, else private LAN, port 8417).
+const autoServeDefault = ""
+
+// autoServeAddr is where dev boss starts dev serve: DEV_SERVE_ADDR, else autoServeDefault.
+func autoServeAddr(getenv func(string) string) string {
+	if a := getenv("DEV_SERVE_ADDR"); a != "" {
+		return a
+	}
+	return autoServeDefault
+}
 
 // starter starts dev serve detached for dev boss; its fields are test seams.
 type starter struct {
@@ -32,6 +44,7 @@ type starter struct {
 	home   string
 	exe    string
 	served func(dir string, timeout time.Duration) (netip.AddrPort, string, error) // serve.Served
+	alive  func(dir string) (bool, error)                                          // serve.AnyAlive
 	bind   func(addr string) error
 	spawn  func(exe string, args, env []string, log *os.File) (exited <-chan struct{}, err error)
 	own    string
@@ -73,15 +86,13 @@ func newStarter() (*starter, error) {
 		home:   home,
 		exe:    exe,
 		served: serve.Served,
+		alive:  serve.AnyAlive,
 		bind:   func(addr string) error { _, _, err := bind(addr); return err },
 		spawn:  spawnServe,
 		own:    selfreload.Version(),
 		wait:   3 * time.Second,
 	}, nil
 }
-
-// releaseTag is a release build's version: a running release reloads itself into the next one, no restart line.
-var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 // ensure starts dev serve unless one answers, a launchd agent owns it, or this boss runs on a private tmux server
 // with no DEV_SERVE_ADDR; it takes at most s.wait (and a health check's last second) in all.
@@ -90,17 +101,24 @@ func (s *starter) ensure(stderr io.Writer) error {
 	served := func(most time.Duration) (netip.AddrPort, string, error) {
 		return s.served(s.dir, min(most, max(time.Until(deadline), 50*time.Millisecond)))
 	}
-	addr := s.getenv("DEV_SERVE_ADDR")
-	if addr == "" && !s.defaultServer() {
+	addr := autoServeAddr(s.getenv)
+	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
 		return nil
 	}
 	if _, v, err := served(time.Second); err == nil {
-		if v != "" && v != s.own && !releaseTag.MatchString(v) {
-			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update\n", v, s.own)
+		if v != "" && v != s.own {
+			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", v, s.own)
 		}
 		return nil
 	} else if !errors.Is(err, serve.ErrNotRunning) {
 		return err
+	}
+	// One that runs but doesn't answer (its recorded tailnet address gone, hung) would be a second
+	if alive, err := s.alive(s.dir); err != nil {
+		return err
+	} else if alive {
+		fmt.Fprintf(stderr, "⚠ dev serve runs but doesn't answer on its address (see %s): not starting another\n", filepath.Join(s.dir, "serve.log"))
+		return nil
 	}
 	if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
 		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%d/%s\n", s.uid, serve.Label)
@@ -110,9 +128,12 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	if err := s.bind(addr); err != nil {
 		if addr != "" {
-			return fmt.Errorf("DEV_SERVE_ADDR: %w", err)
+			return errors.New(strings.Replace(err.Error(), "--addr", "DEV_SERVE_ADDR", 1))
 		}
 		return fmt.Errorf("%w (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)", err)
+	}
+	if ap, err := netip.ParseAddrPort(addr); err == nil && ap.Port() == 0 {
+		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return err
@@ -141,20 +162,26 @@ func (s *starter) ensure(stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	ended := false
 	for time.Now().Before(deadline) {
+		// After an exit too: a second dev boss's dev serve may have taken the port first
 		if ap, _, err := served(300 * time.Millisecond); err == nil {
-			fmt.Fprintf(stderr, "dev serve started: http://%s/ (pair a phone: dev serve pair)\n", ap)
+			if !ended {
+				fmt.Fprintf(stderr, "dev serve started: http://%s/ (pair this browser: dev serve pair)\n", ap)
+				if _, kind, err := serve.Check(ap.String()); err == nil && kind == serve.LAN {
+					fmt.Fprintln(stderr, "⚠ "+serve.LANNotice)
+				}
+			}
 			return nil
 		}
 		select {
 		case <-exited:
-			// A second dev boss's dev serve may have taken the port first
-			if _, _, err := served(300 * time.Millisecond); err == nil {
-				return nil
-			}
-			return fmt.Errorf("%s (log: %s)", lastLine(logPath, start), logPath)
+			ended, exited = true, nil
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+	if ended {
+		return fmt.Errorf("%s (log: %s)", lastLine(logPath, start), logPath)
 	}
 	fmt.Fprintf(stderr, "⚠ dev serve: started, not answering after %s: %s (log: %s)\n", s.wait, lastLine(logPath, start), logPath)
 	return nil
@@ -193,6 +220,7 @@ func lastLine(path string, from int64) string {
 func spawnServe(exe string, args, env []string, log *os.File) (<-chan struct{}, error) {
 	c := exec.Command(exe, args...)
 	c.Env, c.Stdout, c.Stderr = env, log, log
+	c.Dir = "/" // not the boss's folder: a worktree it opened in may be removed while it runs
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", exe, err)

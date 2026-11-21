@@ -126,8 +126,9 @@ func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 	if err != nil {
 		return ap, "", fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
 	}
+	// A Transport without Proxy: HTTP_PROXY must not take a check of this Mac's own address
 	notRunning := fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, s)
-	resp, err := (&http.Client{Timeout: timeout}).Get("http://" + s + "/v1/health")
+	resp, err := (&http.Client{Timeout: timeout, Transport: &http.Transport{}}).Get("http://" + s + "/v1/health")
 	if err != nil {
 		return ap, "", notRunning
 	}
@@ -386,6 +387,38 @@ func lock(dir string) (func(), error) {
 		return nil, fmt.Errorf("lock %s: %w", dir, err)
 	}
 	return func() { _ = f.Close() }, nil
+}
+
+// Alive marks a running dev serve on dir until the func (or its exit or exec): a shared lock on dir/alive.
+func Alive(dir string) (func(), error) {
+	f, err := os.OpenFile(filepath.Join(dir, "alive"), os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
+	}
+	return func() { _ = f.Close() }, nil
+}
+
+// AnyAlive is whether a dev serve holds dir's Alive lock, answering or not.
+func AnyAlive(dir string) (bool, error) {
+	f, err := os.Open(filepath.Join(dir, "alive"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	switch err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); {
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("lock %s: %w", f.Name(), err)
+	}
+	return false, nil
 }
 
 func readSessions(dir string) ([]session, error) {

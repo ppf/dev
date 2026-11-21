@@ -290,3 +290,26 @@ func TestServed(t *testing.T) {
 		t.Errorf("no record: %v", err)
 	}
 }
+
+func TestAlive(t *testing.T) {
+	dir := t.TempDir()
+	if alive, err := AnyAlive(dir); err != nil || alive {
+		t.Fatalf("none: %v %v", alive, err)
+	}
+	release, err := Alive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Alive(dir) // a second dev serve on the same folder
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alive, err := AnyAlive(dir); err != nil || !alive {
+		t.Fatalf("held: %v %v", alive, err)
+	}
+	release()
+	second()
+	if alive, err := AnyAlive(dir); err != nil || alive {
+		t.Fatalf("released: %v %v", alive, err)
+	}
+}

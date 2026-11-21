@@ -65,6 +65,11 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			defer forget()
+			release, err := serve.Alive(dir)
+			if err != nil {
+				return err
+			}
+			defer release()
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
 			// After a reload the caffeinate started before it still waits on this pid

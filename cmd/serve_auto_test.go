@@ -22,6 +22,7 @@ type fakeStart struct {
 	exit     bool   // the spawned serve exits at once
 	logLine  string // what it writes to its log
 	bindErr  error
+	alive    bool // a dev serve holds the alive lock
 	envValue map[string]string
 }
 
@@ -37,7 +38,8 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 			}
 			return netip.MustParseAddrPort("127.0.0.1:18417"), f.version, nil
 		},
-		bind: func(string) error { return f.bindErr },
+		alive: func(string) (bool, error) { return f.alive, nil },
+		bind:  func(string) error { return f.bindErr },
 		spawn: func(exe string, args, env []string, log *os.File) (<-chan struct{}, error) {
 			f.spawned = append(f.spawned, append([]string{exe}, args...))
 			f.env = env
@@ -66,10 +68,10 @@ func TestAutoServeStarts(t *testing.T) {
 	if want := [][]string{{"/bin/dev", "serve", "--awake=false", "--addr", "127.0.0.1:18417"}}; !slices.EqualFunc(f.spawned, want, slices.Equal) {
 		t.Fatalf("spawned %q, want %q", f.spawned, want)
 	}
-	if !slices.Equal(f.env, []string{"PATH=/bin"}) {
-		t.Fatalf("env %q: want PATH only", f.env)
+	if !slices.Equal(f.env, []string{"TMUX=/private/tmp/tmux-501/default,1,0", "PATH=/bin"}) {
+		t.Fatalf("env %q: want TMUX and PATH only", f.env)
 	}
-	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (pair a phone: dev serve pair)\n" {
+	if got := out.String(); got != "dev serve started: http://127.0.0.1:18417/ (pair this browser: dev serve pair)\n" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -87,8 +89,7 @@ func TestAutoServeDefaultAddr(t *testing.T) {
 func TestAutoServeRunning(t *testing.T) {
 	for _, tt := range []struct{ version, want string }{
 		{"(devel) abc", ""},
-		{"v0.71.0", ""}, // reloads itself
-		{"(devel) old", "⚠ dev serve (devel) old runs (this dev is (devel) abc): restart it to update\n"},
+		{"v0.71.0", "⚠ dev serve v0.71.0 runs (this dev is (devel) abc): restart it to update, unless it reloads itself\n"},
 		{"", ""}, // an older dev serve's health named none
 	} {
 		f := &fakeStart{version: tt.version, envValue: map[string]string{}}
@@ -110,6 +111,54 @@ func TestAutoServeSkips(t *testing.T) {
 		if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
 			t.Errorf("%s: err %v, out %q, spawned %q", name, err, out.String(), f.spawned)
 		}
+	}
+}
+
+// Switching autostart to loopback is autoServeDefault = "127.0.0.1:8417" and this test
+func TestAutoServeAddr(t *testing.T) {
+	if got := autoServeAddr(func(string) string { return "" }); got != "" {
+		t.Errorf("default %q, want dev serve's own default", got)
+	}
+	if got := autoServeAddr(func(k string) string { return map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:9"}[k] }); got != "127.0.0.1:9" {
+		t.Errorf("override %q", got)
+	}
+}
+
+func TestAutoServeLAN(t *testing.T) {
+	f := &fakeStart{runs: 1, envValue: map[string]string{}}
+	s := f.starter(t)
+	s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
+		if f.runs > 0 {
+			f.runs--
+			return netip.AddrPort{}, "", serve.ErrNotRunning
+		}
+		return netip.MustParseAddrPort("192.168.1.89:8417"), "", nil
+	}
+	var out bytes.Buffer
+	if err := s.ensure(&out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "dev serve started: http://192.168.1.89:8417/ (pair this browser: dev serve pair)\n⚠ " + serve.LANNotice + "\n"; out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+}
+
+func TestAutoServePortZero(t *testing.T) {
+	f := &fakeStart{runs: -1, envValue: map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:0"}}
+	if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || !strings.HasPrefix(err.Error(), "DEV_SERVE_ADDR: port 0") || len(f.spawned) > 0 {
+		t.Fatalf("err %v, spawned %q", err, f.spawned)
+	}
+}
+
+func TestAutoServeAliveNotAnswering(t *testing.T) {
+	f := &fakeStart{runs: -1, alive: true, envValue: map[string]string{}}
+	s := f.starter(t)
+	var out bytes.Buffer
+	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
+		t.Fatalf("err %v, spawned %q", err, f.spawned)
+	}
+	if want := "⚠ dev serve runs but doesn't answer on its address (see " + filepath.Join(s.dir, "serve.log") + "): not starting another\n"; out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 }
 

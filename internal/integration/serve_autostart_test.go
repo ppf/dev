@@ -79,7 +79,7 @@ func TestBossStartsServe(t *testing.T) {
 		"0 boss-hq\n⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/"+strconv.Itoa(os.Getuid())+"/dev.serve\n0")
 
 	out, errOut = run(env, "boss", "hq", "--background")
-	check(t, "started", out+errOut, "0 boss-hq\ndev serve started: http://"+addr+"/ (pair a phone: dev serve pair)\n")
+	check(t, "started", out+errOut, "0 boss-hq\ndev serve started: http://"+addr+"/ (pair this browser: dev serve pair)\n")
 	first := pids()
 	if len(first) != 1 || !health() {
 		t.Fatalf("serve %v, health %v", first, health())
@@ -91,6 +91,16 @@ func TestBossStartsServe(t *testing.T) {
 	check(t, "already running", out+errOut, "0 boss-app\n")
 	if got := pids(); len(got) != 1 || got[0] != first[0] {
 		t.Fatalf("serve %v, want %v", got, first)
+	}
+
+	// Alive but not answering (hung, its address gone): no second one
+	if err := syscall.Kill(first[0], syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut = run(env, "boss", "hq", "--background")
+	_ = syscall.Kill(first[0], syscall.SIGCONT)
+	if out != "0 boss-hq\n" || !strings.HasPrefix(errOut, "⚠ dev serve runs but doesn't answer on its address") || len(pids()) != 1 {
+		t.Errorf("stopped: %q %q %v", out, errOut, pids())
 	}
 
 	stop()
