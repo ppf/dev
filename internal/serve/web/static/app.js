@@ -719,11 +719,30 @@ function listErrors() {
   return (state.board.lists || []).filter(l => l.error).map(l => el('p', { class: 'err' }, l.boss + ': its list could not be read: ' + l.error.replace(/^list not read: /, '')));
 }
 
+// statusRow is the item's column, with its status after it when that adds to it ("start not picked up" overrides it):
+// "yours", a person's "waiting" and "boss closed" say what the column and the rows below say.
+function statusRow(x) {
+  const { it } = x, col = titleOf(columnOf(x)), st = it.start_late ? 'start not picked up' : it.status;
+  if (x.done || !st) return col;
+  const word = ['yours', 'boss closed'].includes(st) || st === 'waiting' && it.waiting_for ? '' : st;
+  // The session it names when the card is not on it (a worker gone, a closed boss's: the card is on its boss); a person is in the rows below
+  const on = !it.waiting_for && it.status_on !== whoOf(x) ? it.status_on : '';
+  return [col, word, on].filter(Boolean).join(' · ');
+}
+
+// whoRows say who an item is on: for one waiting on a person, that person and who follows up (the boss it is on, no one
+// when that boss is closed); else the assignee.
+function whoRows(x) {
+  const { list, it } = x, who = whoOf(x);
+  if (!it.waiting_for || kindOf(x) !== 'boss') return [['On', who === ME ? 'you' : who]];
+  return [['Waiting for', it.waiting_for], ['Follows up', list.closed ? 'no one (' + who + ' is closed)' : who]];
+}
+
 function facts(x) {
   const { list, it } = x;
-  const rows = [['Status', [statusWord(it), it.status_on ? ' · ' + it.status_on : '']], ['On', whoOf(x) === ME ? 'you' : whoOf(x)], ['List', list.boss + (list.closed ? ' (closed)' : '')]];
+  const rows = [['Status', statusRow(x)], ...whoRows(x), ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
-  if (it.check) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.check && it.check.kind !== 'boss closed') rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);

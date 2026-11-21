@@ -592,3 +592,58 @@ func TestDoingKey(t *testing.T) {
 		}
 	}
 }
+
+// An item waiting on a person says who it waits on and who follows up, not "@boss"; a closed boss follows up no one,
+// and its status and check say "boss closed" once, in the list.
+func TestFactsWaitingFor(t *testing.T) {
+	waiting := func(closed bool) Item {
+		it := Item{Boss: "boss-vitay", Closed: closed, Shown: todo.Shown{ID: 19, Text: "Ask", On: "Alicja Serafin",
+			Status: sidebar.StatusWaiting, StatusOn: "Alicja Serafin",
+			Placement: todo.Placement{Column: sidebar.ColumnWaiting, WaitingFor: "Alicja Serafin", Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-vitay"}}}}
+		if closed {
+			it.Status, it.Check = sidebar.StatusBossClosed, &sidebar.Check{Kind: sidebar.CheckBossClosed}
+		}
+		return it
+	}
+	for _, c := range []struct {
+		name string
+		it   Item
+		want []string
+		not  []string
+	}{
+		{"live boss", waiting(false), []string{"column  Waiting", "waiting Alicja Serafin", "follows @boss-vitay"}, []string{"@boss-vitay ·", "status ", "check "}},
+		{"closed boss", waiting(true), []string{"column  Waiting", "waiting Alicja Serafin", "follows no one (boss-vitay is closed)", "list    boss-vitay (closed)"}, []string{"status ", "check ", "boss closed ·"}},
+		{"on a worker", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix", On: "dev-x", Status: sidebar.StatusWorking, StatusOn: "dev-x", Session: &todo.Session{ID: "$4", Name: "dev-x"},
+			Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}, []string{"column  In progress · @dev-x", "status  working · dev-x"}, []string{"waiting ", "follows "}},
+		{"the user's own", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 8, Text: "Mine", Status: sidebar.StatusYours,
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}, []string{"column  To do · @you", "status  yours"}, []string{"waiting ", "follows "}},
+		{"a closed boss's plain item", Item{Boss: "boss-dev", Closed: true, Shown: todo.Shown{ID: 7, Text: "Plain", Status: sidebar.StatusBossClosed, Check: &sidebar.Check{Kind: sidebar.CheckBossClosed},
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}, []string{"column  To do · @boss-dev", "list    boss-dev (closed)"}, []string{"status ", "check ", "waiting ", "follows "}},
+		{"a closed boss's item linked to a worker", Item{Boss: "boss-dev", Closed: true, Shown: todo.Shown{ID: 7, Text: "Linked", On: "dev-x", Status: sidebar.StatusBossClosed, StatusOn: "dev-x",
+			Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}, []string{"status  dev-x"}, []string{"boss closed ·", "status  boss"}},
+		{"waiting, its status not waiting", func() Item {
+			it := waiting(false)
+			it.Status, it.StatusOn = sidebar.StatusBlocked, "boss-vitay"
+			return it
+		}(), []string{"waiting Alicja Serafin", "follows @boss-vitay", "status  blocked"}, nil},
+		{"a ticked one keeps its assignee", func() Item {
+			it := waiting(false)
+			it.Done = true
+			return it
+		}(), []string{"column  Waiting · @boss-vitay"}, []string{"waiting ", "follows ", "status "}},
+		{"waiting for, on a worker", Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix", On: "dev-x", Status: sidebar.StatusWaiting, StatusOn: "dev-x", Session: &todo.Session{ID: "$4", Name: "dev-x"},
+			Placement: todo.Placement{Column: sidebar.ColumnProgress, WaitingFor: "Carl", Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}, []string{"column  In progress · @dev-x", "status  waiting · dev-x"}, []string{"waiting Carl", "follows "}},
+	} {
+		v := ansi.Strip(New(c.it, Actions{}, false).View(Width, 40, now))
+		for _, w := range c.want {
+			if !strings.Contains(v, w) {
+				t.Errorf("%s: %q missing:\n%s", c.name, w, v)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(v, w) {
+				t.Errorf("%s: %q shown:\n%s", c.name, w, v)
+			}
+		}
+	}
+}

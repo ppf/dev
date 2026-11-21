@@ -785,8 +785,15 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	}
 	foot := append([]string{who}, chips...)
 	if it.WaitingFor != "" {
-		// The person first: a narrow card cuts the tail
-		foot = append(chips, who)
+		// The person first: a narrow card cuts the tail. An open item on a boss: who follows up, no one when it is closed
+		switch {
+		case c.done || it.Assignee.Kind != sidebar.AssigneeBoss:
+			foot = append(chips, who)
+		case c.closed:
+			foot = chips
+		default:
+			foot = append(chips, who+" follows up")
+		}
 	}
 	if it.Quiet {
 		foot = append([]string{sidebar.Muted + "TEST" + reset}, foot...)
