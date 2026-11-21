@@ -174,9 +174,10 @@ a { color: var(--act); }
 .tab .hotn { background: var(--hot); color: var(--hot-ink); border-radius: 5px; padding: 0 5px; font-size: 11px; font-weight: 700; }
 .lanes { display: flex; align-items: flex-start; gap: 18px; overflow: auto hidden; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 12px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); scroll-padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
 .lanes::-webkit-scrollbar { display: none; }
-.lane { flex: none; width: calc(100vw - 58px); scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--sp-card-gap); }
-/* the lanes not shown cut to the shown one's height: a long one makes no blank page under a short one */
-.lane:not(.on) { max-height: var(--shown, 100dvh); overflow: hidden; }
+.lane { flex: none; width: calc(100vw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)) - 26px); scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--sp-card-gap); }
+/* the lanes not shown cut to the shown one's height, a screen at least (what a swipe brings in): a long one makes no long
+   blank page under a short one */
+.lane:not(.on) { max-height: 100vh; max-height: max(var(--shown, 0px), 100dvh); overflow: hidden; }
 .lane .stack { overflow: visible; }
 
 @media not all and (min-width: 900px) {

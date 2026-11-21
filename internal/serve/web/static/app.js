@@ -483,7 +483,7 @@ function card(x) {
 // doneRow is a finished card on one line, read-only: no sheet, no buttons.
 function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
-  const named = project(list) + ' #' + it.id + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
+  const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
     el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'),
@@ -546,7 +546,9 @@ function columns(ls) {
 // swipe is the phone's board: a tab per column, with its count and what needs the user, over the columns side by side,
 // one a screen, the next peeking in.
 function swipe(ls) {
-  const lanes = el('div', { class: 'lanes', onscroll: () => laneInView(lanes) },
+  // The lane is taken once the scroll stops: a tab's smooth scroll lands on no lane it passes
+  let settle = 0;
+  const lanes = el('div', { class: 'lanes', onscroll: () => { clearTimeout(settle); settle = setTimeout(() => laneInView(lanes), 150); } },
     ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
@@ -567,6 +569,7 @@ function showLane(k, smooth) {
 
 // laneInView takes the lane most in view (the last one can't scroll to its start).
 function laneInView(lanes) {
+  if (!lanes.isConnected) return; // redrawn since
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
   const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1, i = end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w);
   if (COLUMNS[i].key !== state.lane) land(lanes, COLUMNS[i].key);
@@ -583,7 +586,7 @@ function land(lanes, k) {
     l.classList.toggle('on', l.dataset.k === k);
     l.inert = l.dataset.k !== k;
   }
-  if (was?.inert) document.querySelector('#view [data-f="tab:' + k + '"]').focus({ preventScroll: true });
+  if (was?.inert) document.querySelector('#view [data-f="tab:' + k + '"]')?.focus({ preventScroll: true });
   lanes.style.setProperty('--shown', lanes.querySelector('[data-k="' + k + '"]').offsetHeight + 'px');
   if (moved && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView();
   for (const t of document.querySelectorAll('#view .tab')) {
@@ -780,16 +783,11 @@ function render() {
       const f = document.activeElement?.dataset?.f;
       // and each column keeps its scroll, the phone's filter strip its own
       for (const st of view.querySelectorAll('.stack[data-k]')) state.scroll[st.dataset.k] = st.scrollTop;
-      const strip = view.querySelector('.filters')?.scrollLeft || 0, swiped = view.querySelector('.lanes')?.scrollLeft;
+      const strip = view.querySelector('.filters')?.scrollLeft || 0;
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
-      // The lanes back where they were, even mid-swipe; else at the lane last shown
-      const lanes = view.querySelector('.lanes');
-      if (lanes && swiped !== undefined) {
-        lanes.scrollTo({ left: swiped, behavior: 'instant' });
-        land(lanes, state.lane);
-      } else if (lanes) showLane(state.lane, false);
+      if (!wide.matches) showLane(state.lane, false);
       if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
       state.noteShown = state.note;
