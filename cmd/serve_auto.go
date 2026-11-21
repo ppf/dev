@@ -46,7 +46,7 @@ type starter struct {
 	alive  func(dir string) (bool, error)                                          // serve.AnyAlive
 	local  func(netip.Addr) bool                                                   // ownIP
 	bind   func(addr string) error
-	spawn  func(exe string, args, env []string, log *os.File) (exited <-chan struct{}, err error)
+	spawn  func(exe string, args, env []string, log, hold *os.File) (exited <-chan struct{}, err error)
 	own    string
 	wait   time.Duration
 }
@@ -109,15 +109,15 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")
 	}
-	unlock, ok, err := startLock(s.dir, deadline)
+	hold, err := startLock(s.dir, deadline)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if hold == nil {
 		fmt.Fprintln(stderr, "⚠ dev serve: another dev boss is still starting it")
 		return nil
 	}
-	defer unlock()
+	defer func() { _ = hold.Close() }()
 	ap, v, err := served(time.Second)
 	if err == nil && !s.local(ap.Addr()) { // a stale record whose address another machine has now
 		err = serve.ErrNotRunning
@@ -197,7 +197,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		env = append(env, "TMUX="+socket+",0,-1")
 	}
-	exited, err := s.spawn(s.exe, args, env, log)
+	exited, err := s.spawn(s.exe, args, env, log, hold)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 	ended := false
 	for time.Now().Before(deadline) {
 		// After an exit too: a second dev boss's dev serve may have taken the port first
-		if ap, _, err := served(300 * time.Millisecond); err == nil {
+		if ap, _, err := served(300 * time.Millisecond); err == nil && s.local(ap.Addr()) {
 			if !ended {
 				fmt.Fprintf(stderr, "dev serve started: http://%s/ (pair this browser: dev serve pair)\n", ap)
 				if _, kind, err := serve.Check(ap.String()); err == nil && kind == serve.LAN {
@@ -232,30 +232,34 @@ func (s *starter) ensure(stderr io.Writer) error {
 	return nil
 }
 
-// startLock takes dir/start, so two dev bosses don't both start one; false once deadline passes first.
-func startLock(dir string, deadline time.Time) (func(), bool, error) {
+// startLock takes dir/start, so two dev bosses don't both start one; nil once deadline passes first. The dev serve
+// it starts inherits it (envStartFd) and holds it until it holds its alive lock.
+func startLock(dir string, deadline time.Time) (*os.File, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "start"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		switch {
 		case err == nil:
-			return func() { _ = f.Close() }, true, nil
+			return f, nil
 		case !errors.Is(err, syscall.EWOULDBLOCK):
 			_ = f.Close()
-			return nil, false, fmt.Errorf("lock %s: %w", f.Name(), err)
+			return nil, fmt.Errorf("lock %s: %w", f.Name(), err)
 		case time.Now().After(deadline):
 			_ = f.Close()
-			return nil, false, nil
+			return nil, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// envStartFd names the start lock's descriptor in a dev serve a dev boss started.
+const envStartFd = "DEV_SERVE_START_FD"
 
 // defaultServer: dev boss talks to tmux's default server (TMUX_TMPDIR unset or /tmp; $TMUX, when set, its default socket).
 func (s *starter) defaultServer() bool {
@@ -289,12 +293,13 @@ func lastLine(path string, from int64, none string) string {
 	return none
 }
 
-// spawnServe starts exe args in its own session (no SIGHUP from the terminal or tmux), output to log; exited
-// closes when it ends while this process still runs.
-func spawnServe(exe string, args, env []string, log *os.File) (<-chan struct{}, error) {
+// spawnServe starts exe args in its own session (no SIGHUP from the terminal or tmux), output to log, holding hold
+// as fd 3; exited closes when it ends while this process still runs.
+func spawnServe(exe string, args, env []string, log, hold *os.File) (<-chan struct{}, error) {
 	c := exec.Command(exe, args...)
-	c.Env, c.Stdout, c.Stderr = env, log, log
-	c.Dir = "/" // not the boss's folder: a worktree it opened in may be removed while it runs
+	c.Env, c.Stdout, c.Stderr = append(env, envStartFd+"=3"), log, log
+	c.ExtraFiles = []*os.File{hold} // fd 3
+	c.Dir = "/"                     // not the boss's folder: a worktree it opened in may be removed while it runs
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", exe, err)

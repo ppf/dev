@@ -41,7 +41,7 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 		alive: func(string) (bool, error) { return f.alive, nil },
 		local: func(netip.Addr) bool { return true },
 		bind:  func(string) error { return f.bindErr },
-		spawn: func(exe string, args, env []string, log *os.File) (<-chan struct{}, error) {
+		spawn: func(exe string, args, env []string, log, _ *os.File) (<-chan struct{}, error) {
 			f.spawned = append(f.spawned, append([]string{exe}, args...))
 			f.env = env
 			if f.logLine != "" {
@@ -191,19 +191,19 @@ func TestAutoServeAliveNotAnswering(t *testing.T) {
 
 func TestStartLock(t *testing.T) {
 	dir := t.TempDir()
-	unlock, ok, err := startLock(dir, time.Now().Add(time.Second))
-	if err != nil || !ok {
-		t.Fatal(ok, err)
+	first, err := startLock(dir, time.Now().Add(time.Second))
+	if err != nil || first == nil {
+		t.Fatal(first, err)
 	}
-	if _, ok, err := startLock(dir, time.Now().Add(100*time.Millisecond)); err != nil || ok {
-		t.Fatalf("taken twice: %v %v", ok, err)
+	if second, err := startLock(dir, time.Now().Add(100*time.Millisecond)); err != nil || second != nil {
+		t.Fatalf("taken twice: %v %v", second, err)
 	}
-	unlock()
-	if again, ok, err := startLock(dir, time.Now()); err != nil || !ok {
-		t.Fatalf("after unlock: %v %v", ok, err)
-	} else {
-		again()
+	_ = first.Close()
+	again, err := startLock(dir, time.Now())
+	if err != nil || again == nil {
+		t.Fatalf("after close: %v %v", again, err)
 	}
+	_ = again.Close()
 }
 
 func TestAutoServePrivateSocket(t *testing.T) {

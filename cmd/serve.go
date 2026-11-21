@@ -72,6 +72,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			defer func() { _ = alive.Close() }()
+			if os.Getenv(envStartFd) == "3" { // the dev boss's start lock: one holds now
+				_ = os.NewFile(3, "start").Close()
+			}
+			if err := os.Unsetenv(envStartFd); err != nil {
+				return err
+			}
 			if reloaded && kept > 2 {
 				// Held across the exec only: this process's own one holds now (closed only if it is that file)
 				old := os.NewFile(uintptr(kept), "alive")

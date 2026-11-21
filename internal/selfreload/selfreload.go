@@ -368,21 +368,28 @@ func Exec(r Ready, args []string) error {
 	}
 	env := setEnv(os.Environ(), envReloadedTo, r.Version)
 	env = setEnv(env, envCanary, canary)
-	if f := w.o.Keep; f != nil {
-		// Only now, past every check that runs a child (tmux), and with forks held off: no child must hold it
-		syscall.ForkLock.Lock()
-		defer syscall.ForkLock.Unlock()
-		if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
-			return w.dropClaim(claimed, r.Version, fmt.Errorf("selfreload: keep %s open: %w", f.Name(), err))
-		}
-		defer func() { _, _ = unix.FcntlInt(f.Fd(), unix.F_SETFD, unix.FD_CLOEXEC) }()
-		env = setEnv(env, EnvKept, fmt.Sprint(f.Fd()))
-	}
-	err := w.execve(w.o.Exe, args, env)
+	err := w.exec(args, env)
 	if err == nil { // only a test double returns from a successful exec
 		return nil
 	}
 	return w.dropClaim(claimed, r.Version, fmt.Errorf("selfreload: exec %s: %w", w.o.Exe, err))
+}
+
+// exec is execve of o.Exe, with o.Keep open to it: only now, past every check that runs a child (tmux), and with
+// forks held off, so no child holds it; closed to children again before anything else runs on a failure.
+func (w *watcher) exec(args, env []string) error {
+	f := w.o.Keep
+	if f == nil {
+		return w.execve(w.o.Exe, args, env)
+	}
+	syscall.ForkLock.Lock()
+	defer syscall.ForkLock.Unlock()
+	if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
+		return fmt.Errorf("keep %s open: %w", f.Name(), err)
+	}
+	err := w.execve(w.o.Exe, args, setEnv(env, EnvKept, fmt.Sprint(f.Fd())))
+	_, _ = unix.FcntlInt(f.Fd(), unix.F_SETFD, unix.FD_CLOEXEC)
+	return err
 }
 
 // dropClaim returns err, after unsetting version's canary claim when this process made it.
