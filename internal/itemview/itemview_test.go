@@ -3,6 +3,7 @@ package itemview
 import (
 	"errors"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -30,6 +31,12 @@ func (r *recorder) actions() Actions {
 		Tick:   func(boss string, id int, text string) (string, error) { return note("tick " + boss + " " + text) },
 		Start:  func(boss string, id int, text string) (string, error) { return note("start " + boss + " " + text) },
 		Reopen: func(boss string, id int, text string) (string, error) { return note("reopen " + boss + " " + text) },
+		Doing: func(boss string, id int, text, doing string, stop bool) (string, error) {
+			if stop {
+				return note("stop " + boss + " " + text)
+			}
+			return note("doing " + boss + " " + text + ": " + doing)
+		},
 		Open:   func(url string) error { _, err := note("open " + url); return err },
 		Switch: func(s string) error { _, err := note("switch " + s); return err },
 	}
@@ -88,7 +95,7 @@ func TestAsk(t *testing.T) {
 	if m := press(typed, "enter"); !m.Done || m.Result != "ok answer boss-dev Merge #221 now? soo 1" {
 		t.Errorf("own words: %q", m.Result)
 	}
-	if m := press(typed, "esc"); m.Done || m.typing {
+	if m := press(typed, "esc"); m.Done || m.typing != "" {
 		t.Error("esc left more than the field")
 	}
 	if m := press(New(ask, r.actions(), false), "3"); m.Done || !strings.Contains(m.msg, "2 options") {
@@ -325,10 +332,10 @@ func TestClick(t *testing.T) {
 		}
 	}
 	typed := press(click(m, row(t, m, Width, 40, "In your own words"), Width, 40), "h", "i")
-	if !typed.typing || string(typed.field) != "hi" {
+	if typed.typing != "m" || string(typed.field) != "hi" {
 		t.Fatalf("click on own words: typing %v field %q", typed.typing, string(typed.field))
 	}
-	if again := click(typed, row(t, typed, Width, 40, "m    hi"), Width, 40); !again.typing || again.Done {
+	if again := click(typed, row(t, typed, Width, 40, "m    hi"), Width, 40); again.typing != "m" || again.Done {
 		t.Error("click on the field's line left it")
 	}
 	r.calls = nil
@@ -390,7 +397,7 @@ func TestFastKeys(t *testing.T) {
 	if m, _ := New(ask, Actions{}, false).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj"), Alt: true}); m.sel != 0 {
 		t.Errorf("alt+jj: sel %d, want 0", m.sel)
 	}
-	if m := press(New(ask, Actions{}, false), "mok"); !m.typing || string(m.field) != "ok" {
+	if m := press(New(ask, Actions{}, false), "mok"); m.typing != "m" || string(m.field) != "ok" {
 		t.Errorf("mok: typing %v, field %q", m.typing, string(m.field))
 	}
 	if m, _ := New(ask, Actions{}, false).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj"), Paste: true}); m.sel != 0 {
@@ -517,6 +524,56 @@ func TestFactsAssignee(t *testing.T) {
 	for _, want := range []string{"dev #9 · In progress", "column  In progress · @dev-x", "doing   reading the log"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
+		}
+	}
+}
+
+// i on the user's own To do card opens a field: ⏎ marks it doing with the text (none is fine), esc leaves it unchanged;
+// i on their card with a doing line stops it. Not on a card that isn't theirs (by the model's assignee), an ask, one
+// started, nor a desktop app boss's.
+func TestDoingKey(t *testing.T) {
+	mine := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Send the cert", Status: sidebar.StatusYours,
+		Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+	var r recorder
+	m := press(New(mine, r.actions(), false), "i")
+	if m.typing != "i" || m.entries[m.sel].key != "i" || len(r.calls) != 0 {
+		t.Fatalf("i: typing %q sel %d calls %v", m.typing, m.sel, r.calls)
+	}
+	v := ansi.Strip(press(m, "mailing ops").View(Width, 40, now))
+	if !regexp.MustCompile(`i  I'm on it +mailing ops`).MatchString(v) || !strings.Contains(v, "⏎ on it · esc back") {
+		t.Errorf("field view:\n%s", v)
+	}
+	if m := press(m, "mailing", "esc"); m.typing != "" || m.Done || len(m.field) != 0 || len(r.calls) != 0 {
+		t.Errorf("esc: typing %q done %v field %q calls %v", m.typing, m.Done, string(m.field), r.calls)
+	}
+	if m := press(m, "mailing ops", "enter"); !m.Done || !slices.Equal(r.calls, []string{"doing boss-shop Send the cert: mailing ops"}) {
+		t.Errorf("enter: done %v calls %v", m.Done, r.calls)
+	}
+	r.calls = nil
+	if m := press(New(mine, r.actions(), false), "i", "enter"); !m.Done || !slices.Equal(r.calls, []string{"doing boss-shop Send the cert: "}) {
+		t.Errorf("enter, no text: done %v calls %v", m.Done, r.calls)
+	}
+	on := mine
+	on.Column, on.Doing = sidebar.ColumnProgress, &todo.Doing{Text: "mailing ops", At: 1}
+	r.calls = nil
+	if m := press(New(on, r.actions(), false), "i"); !m.Done || !slices.Equal(r.calls, []string{"stop boss-shop Send the cert"}) {
+		t.Errorf("i on a doing card: done %v calls %v", m.Done, r.calls)
+	}
+	if v := ansi.Strip(New(on, r.actions(), false).View(Width, 40, now)); !strings.Contains(v, "i  Stop") {
+		t.Errorf("doing card's view:\n%s", v)
+	}
+	ask := mine
+	ask.Options = []string{"a", "b"}
+	started := mine
+	started.Started = &todo.Started{At: 1, To: "boss-shop"}
+	desk := mine
+	desk.Boss = "local_1"
+	parked := mine
+	parked.On, parked.Assignee = "boss", todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-shop"}
+	for name, it := range map[string]Item{"ask": ask, "started": started, "desktop": desk, "the boss's": parked} {
+		r.calls = nil
+		if m := press(New(it, r.actions(), false), "i"); m.typing != "" || m.Done || len(r.calls) != 0 {
+			t.Errorf("%s: i typing %q done %v calls %v", name, m.typing, m.Done, r.calls)
 		}
 	}
 }

@@ -361,6 +361,21 @@ func ReopenNeed(boss string, id int, text string) (string, error) {
 	return strings.TrimSpace(out + " " + warning), err
 }
 
+// DoingNeed marks the user's own item id of boss's list in progress with doing, or ends it (stop), as dev todo doing
+// does, only while it still reads text.
+func DoingNeed(boss string, id int, text, doing string, stop bool) (string, error) {
+	args := []string{"doing", "--from-board", "--question=" + text}
+	if stop {
+		args = append(args, "--stop")
+	}
+	args = append(args, "--", boss, strconv.Itoa(id))
+	if !stop && doing != "" {
+		args = append(args, doing)
+	}
+	out, warning, err := runTodo(answerTimeout, args...)
+	return strings.TrimSpace(out + " " + warning), err
+}
+
 // TickNeed ticks item id of boss's list, as dev todo done does, only while it still reads text.
 func TickNeed(boss string, id int, text string) (string, error) {
 	out, warning, err := runTodo(answerTimeout, "done", "--text="+text, "--boss", boss, strconv.Itoa(id))
