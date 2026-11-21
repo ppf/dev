@@ -3,6 +3,7 @@ package todo
 import (
 	"cmp"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,7 +63,11 @@ func (s Store) keepDone(items []Item, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	kept := finished(append(old, items...), now)
+	return s.saveDone(finished(append(old, items...), now))
+}
+
+// saveDone writes kept as the list's finished items; its caller holds the list's lock. None left removes the file.
+func (s Store) saveDone(kept []Item) error {
 	path := s.donePath()
 	if len(kept) == 0 {
 		return ignoreMissing(os.Remove(path))
@@ -117,4 +122,67 @@ func shownFinished(items []Item, boss string) []Finished {
 		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet})
 	}
 	return out
+}
+
+// Reopen puts the user's ticked item id back on the list as an open item, only while it reads text: one still shown
+// (ticked under doneShown ago), else the newest finished one. It keeps its number when no item has it (numbers restart),
+// else gets the next one, and its fields but those that would tick it again or no longer hold: a passed Until, DoneOn,
+// the answer, its doer, start and other half. It returns the item as reopened. The list is written before the
+// finished items, so a failure between keeps it twice, never none.
+func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
+	var it Item
+	err := s.locked(func() error {
+		f, err := s.read()
+		if err != nil {
+			return err
+		}
+		f.prune(now)
+		was := func(x Item) bool { return x.ID == id && x.Done != 0 && x.Text == text }
+		kept, err := s.readDone(true)
+		if err != nil {
+			return err
+		}
+		done := finished(append(slices.Clone(kept), f.dropped...), now)
+		i, j := slices.IndexFunc(f.Items, was), slices.IndexFunc(done, was)
+		switch {
+		case i >= 0:
+			it = f.Items[i]
+			f.Items = slices.Delete(f.Items, i, i+1)
+		case j >= 0:
+			it = done[j]
+		default:
+			return Refused{fmt.Errorf("no ticked item %d reading %q in the last day: look at the list again", id, text)}
+		}
+		if !Own(it.On, it.Session, s.boss) {
+			return Refused{fmt.Errorf("item %d was on %s, not the user's to reopen", id, it.On)}
+		}
+		orig := it
+		f.dropped = slices.DeleteFunc(f.dropped, func(x Item) bool { return sameItem(x, orig) })
+		f.Ticked = slices.DeleteFunc(f.Ticked, func(t Ticked) bool { return t.ID == orig.ID && t.Text == orig.Text })
+		if slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == it.ID }) {
+			it.ID = max(f.Next, 1)
+		}
+		it.Done, it.DoneOn, it.Answer, it.Doing, it.Started, it.PartOf = 0, "", "", nil, nil, 0
+		if it.Until != 0 && now.Unix() >= it.Until {
+			it.Until = 0
+		}
+		f.Items = append(f.Items, it)
+		f.Next = max(f.Next, it.ID+1)
+		if s.trial {
+			return nil
+		}
+		f.Updated = now.Unix()
+		if err := s.write(f); err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(kept, func(x Item) bool { return sameItem(x, orig) }) {
+			return nil
+		}
+		// write kept what prune dropped meanwhile: read them again
+		if kept, err = s.readDone(true); err != nil {
+			return err
+		}
+		return s.saveDone(slices.DeleteFunc(kept, func(x Item) bool { return sameItem(x, orig) }))
+	})
+	return it, err
 }

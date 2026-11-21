@@ -82,6 +82,18 @@ func pageDoing(stderr io.Writer) func(boss string, id int, text string, seen tod
 	}
 }
 
+// pageReopen is dev todo reopen --question from the phone page.
+func pageReopen(stderr io.Writer) func(boss string, id int, text string) error {
+	return func(boss string, id int, text string) error {
+		_, err := reopenItem(boss, id, text, stderr)
+		if errors.As(err, new(noReopenList)) && !errors.As(err, new(unreadList)) {
+			log.Printf("dev serve: %v", err)
+			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with a ticked item", boss)}
+		}
+		return refused(err)
+	}
+}
+
 // running is whether boss's session is on c's server.
 func running(c *tmux.Client, boss string) bool {
 	_, err := c.Run("has-session", "-t", tmux.SessionTarget(boss))

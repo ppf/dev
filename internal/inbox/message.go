@@ -506,7 +506,7 @@ func listItem(c *tmux.Client, now time.Time) func(string, int) (bool, bool, erro
 			// Live but not read: not a closed boss's list
 			return false, false, err
 		} else {
-			closed, ok, err := todo.ClosedStore(c, boss, now)
+			closed, ok, err := todo.ClosedStore(c, boss, now, false)
 			if err != nil || !ok {
 				return false, false, err
 			}

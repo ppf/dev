@@ -355,6 +355,16 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await show([mine('review', { status: 'check', done: true }), worker], 'E14');
   check('need you: gone once settled', doneRows() === 0);
   run('state.filter.needs = false');
+
+  // A finished card of yours dropped on To do sends a reopen; one on In progress is refused
+  const shipped = "({ list: find('boss-a', 2).list, it: { id: 7, text: 'Ship it', column: 'done', assignee: { kind: 'you' }, done_at: 1 }, done: true })";
+  await show([worker], 'F1');
+  posts.length = 0;
+  await run('move(' + shipped + ", 'progress')");
+  check('Done → In progress: refused, nothing sent', last('refuse') === 'reopen it to To do' && !posts.length);
+  await run('move(' + shipped + ", 'todo')");
+  await settle();
+  check('Done → To do sends a reopen: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/reopen' && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 7, text: 'Ship it' }));
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });

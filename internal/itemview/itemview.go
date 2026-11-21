@@ -36,12 +36,13 @@ type Item struct {
 	todo.Shown
 }
 
-// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done and start (their
+// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done, start and reopen (their
 // output, or why not), the browser, a switch of the client to a session.
 type Actions struct {
 	Answer func(boss string, id int, question, answer string) (string, error)
 	Tick   func(boss string, id int, text string) (string, error)
 	Start  func(boss string, id int, text string) (string, error)
+	Reopen func(boss string, id int, text string) (string, error)
 	Open   func(url string) error
 	Switch func(session string) error
 }
@@ -97,6 +98,9 @@ func (m Model) canStart() bool {
 }
 func (m Model) canTick() bool { return m.plain() }
 
+// canReopen is what todo.Reopen takes: the user's own ticked item.
+func (m Model) canReopen() bool { return m.it.Done && m.own() }
+
 // list is what the view lists: an ask's options then own words; else its actions.
 func (m Model) list() []entry {
 	var out []entry
@@ -115,6 +119,9 @@ func (m Model) list() []entry {
 	}
 	if m.canTick() {
 		out = append(out, entry{key: "d", word: "Tick", detail: "done: it leaves every board"})
+	}
+	if m.canReopen() {
+		out = append(out, entry{key: "r", word: "Reopen", detail: "back to To do"})
 	}
 	if m.worker() {
 		out = append(out, entry{key: "w", word: "Go to worker", detail: "switch to " + m.it.Session.Name})
@@ -179,8 +186,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// key runs k: j/k/↓/↑ move (wrapping), ⏎ the selected line's key, 1-9 answer, m own words, s start, d tick, w go to the
-// worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c wait while an action is under way, so its
+// key runs k: j/k/↓/↑ move (wrapping), ⏎ the selected line's key, 1-9 answer, m own words, s start, d tick, r reopen,
+// w go to the worker, o open the link, g go to the boss, esc/q close. Keys but ctrl+c wait while an action is under way, so its
 // outcome shows.
 func (m Model) key(k string) (Model, tea.Cmd) {
 	switch {
@@ -227,6 +234,8 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		return m.run("starting", func() (string, error) { return m.acts.Start(it.Boss, it.ID, it.Text) })
 	case k == "d" && m.canTick():
 		return m.run("ticking", func() (string, error) { return m.acts.Tick(it.Boss, it.ID, it.Text) })
+	case k == "r" && m.canReopen():
+		return m.run("reopening", func() (string, error) { return m.acts.Reopen(it.Boss, it.ID, it.Text) })
 	case k == "w" && m.worker():
 		return m.run("switching", func() (string, error) { return "", m.acts.Switch(it.Session.Name) })
 	case k == "o" && it.Link != "":
@@ -237,7 +246,7 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		m.msg = sidebar.NeedRow{Boss: it.Boss, Project: project(it.Boss)}.ClosedHint()
 	case k == "o":
 		m.msg = "#" + strconv.Itoa(it.ID) + " has no link"
-	case len(k) == 1 && strings.Contains("sdw", k):
+	case len(k) == 1 && strings.Contains("sdrw", k):
 		m.msg = k + " doesn't act on this item: its keys are below"
 	}
 	return m, nil

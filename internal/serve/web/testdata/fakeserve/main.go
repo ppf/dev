@@ -58,6 +58,7 @@ func main() {
 	mux.HandleFunc("POST /v1/done", s.act(s.done))
 	mux.HandleFunc("POST /v1/start", s.act(s.start))
 	mux.HandleFunc("POST /v1/doing", s.act(s.doing))
+	mux.HandleFunc("POST /v1/reopen", s.reopen)
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("POST /fake/mac", s.mac)
 	mux.HandleFunc("POST /fake/version", s.version)
@@ -299,6 +300,45 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 	delete(it, "started")
 	delete(it, "needs_you")
 	return 200, ""
+}
+
+// reopen puts the user's finished item back in To do, as todo.Reopen does, with its number.
+func (s *server) reopen(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Dev-Page") != "1" {
+		refuse(w, 403, "missing X-Dev-Page header")
+		return
+	}
+	var req request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		refuse(w, 400, "bad JSON: "+err.Error())
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, l := range s.board["lists"].([]any) {
+		l := l.(map[string]any)
+		done, _ := l["finished"].([]any)
+		i := slices.IndexFunc(done, func(x any) bool {
+			f := x.(map[string]any)
+			return l["boss"] == req.Boss && int(f["id"].(float64)) == req.ID && f["text"] == req.Text
+		})
+		if i < 0 {
+			continue
+		}
+		f := done[i].(map[string]any)
+		if who, _ := f["assignee"].(map[string]any); who["kind"] != "you" {
+			refuse(w, 409, fmt.Sprintf("item %d was on %v, not the user's to reopen", req.ID, f["on"]))
+			return
+		}
+		l["finished"] = slices.Delete(done, i, i+1)
+		l["items"] = append(l["items"].([]any), map[string]any{"id": f["id"], "text": f["text"], "link": f["link"], "status": todo.StatusYours,
+			"column": "todo", "assignee": map[string]any{"kind": "you"}, "added": time.Now().Unix()})
+		s.recount()
+		log.Printf("%s %s #%d", r.URL.Path, req.Boss, req.ID)
+		reply(w, 200, map[string]any{"ok": true})
+		return
+	}
+	refuse(w, 409, fmt.Sprintf("no ticked item %d reading %q in the last day: look at the list again", req.ID, req.Text))
 }
 
 // same reports whether seen (JSON, null for none) equals the item's stored value v.

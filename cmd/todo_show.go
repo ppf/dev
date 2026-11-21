@@ -30,7 +30,8 @@ func newTodoShowCmd(boss *string) *cobra.Command {
 		Short: "Show item n of a dev boss's list in a popup, as the user: answer it, tick, start, open its link, go to its boss or worker",
 		Long: `Show item n on the list of dev boss session <boss> in a tmux popup sized to it, centred on the client: its text,
 context, options or actions, status, link and list. An ask is answered with 1-9, j/k and ⏎, or m in your own words
-(as dev todo answer); your own item is started (s, as dev todo start) or ticked (d, as dev todo done); o opens its
+(as dev todo answer); your own item is started (s, as dev todo start) or ticked (d, as dev todo done), your own ticked
+one on the board's Done reopened (r, as dev todo reopen); o opens its
 link, w goes to the worker it's on, g to its boss; esc closes. The boards' and the sidebar's TO DO open it with space.
 --question refuses it unless item n still reads that text (item numbers restart once a list empties).`,
 		Args: cobra.ExactArgs(2),
@@ -107,6 +108,7 @@ func showActions(c *tmux.Client, client string) itemview.Actions {
 		Answer: sidebar.AnswerNeed,
 		Tick:   sidebar.TickNeed,
 		Start:  sidebar.StartNeed,
+		Reopen: sidebar.ReopenNeed,
 		Open: func(url string) error {
 			// A link is the boss's text: never an option to open
 			if strings.HasPrefix(url, "-") {

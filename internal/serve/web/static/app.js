@@ -351,8 +351,9 @@ const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
 const seen = it => ({ doing: it.doing || null, started: it.started || null });
 const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '', seen: seen(it) }, 'On it, in progress: ');
 const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true, seen: seen(it) }, 'Off it: ');
-// What each verdict act calls: the sheet's buttons' own; stop doing has no button yet
-const ACTS = { tick, start, doing: onIt, stop: offIt };
+const reopen = (list, it) => itemCall('/v1/reopen', list, it, {}, 'Reopened: ');
+// What each verdict act calls: the sheet's buttons' own; stop doing and reopen have no button yet
+const ACTS = { tick, start, doing: onIt, stop: offIt, reopen };
 
 // leave closes item k's sheet with note, when it is still the one shown, and reads the board again; a drop's note
 // move shows at the foot of the screen.

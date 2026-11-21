@@ -256,3 +256,89 @@ func TestTodoBoardFollowsServe(t *testing.T) {
 		t.Logf("%s showed after %v", c.what, time.Since(began).Round(100*time.Millisecond))
 	}
 }
+
+// r on the user's Done card in the popup's item view reopens it: back in To do with its number within 5 s, as dev todo
+// --all --json has it, not among the finished items any more.
+func TestTodoBoardReopen(t *testing.T) {
+	tmp := t.TempDir()
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
+	script := filepath.Join(tmp, "boss.sh")
+	writeFile(t, script, stubBoss)
+	s.T("new-session", "-d", "-s", "boss-a", "-x", "200", "-y", "60", "bash", script, "", filepath.Join(tmp, "boss-a.log"))
+	s.T("set-option", "-t", "=boss-a:", "@dev_herd", "1")
+	pane := s.T("display", "-t", "=boss-a:", "-p", "#{pane_id}")
+	dev := func(env []string, argv ...string) string {
+		t.Helper()
+		cmd := exec.Command(devBin, argv...)
+		cmd.Env = s.scriptEnv(env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("❌ dev %v: %v %s", argv, err, out)
+		}
+		return string(out)
+	}
+	reg := exec.Command(devBin, "state", "idle")
+	reg.Env = s.scriptEnv("TMUX_PANE=" + pane)
+	reg.Stdin = strings.NewReader(`{"hook_event_name":"SessionStart"}`)
+	if out, err := reg.CombinedOutput(); err != nil {
+		t.Fatalf("❌ register: %v %s", err, out)
+	}
+	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
+	user := []string{"TMUX_PANE=", "CLAUDECODE="}
+	dev(boss, "todo", "add", "Ship it", "--link", "https://example.com/pull/7")
+	dev(boss, "todo", "add", "Other")
+	dev(user, "todo", "done", "--boss", "boss-a", "--text", "Ship it", "1")
+	// Past the 5 s a ticked item stays, a write moves it to the finished items
+	time.Sleep(5200 * time.Millisecond)
+	dev(boss, "todo", "add", "Later")
+	type item struct {
+		ID     int    `json:"id"`
+		Text   string `json:"text"`
+		Link   string `json:"link"`
+		Done   bool   `json:"done"`
+		Column string `json:"column"`
+	}
+	read := func() (items, finished []item) {
+		t.Helper()
+		var lists []struct {
+			Boss     string `json:"boss"`
+			Items    []item `json:"items"`
+			Finished []item `json:"finished"`
+		}
+		if err := json.Unmarshal([]byte(dev(user, "todo", "--all", "--json")), &lists); err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lists {
+			if l.Boss == "boss-a" {
+				return l.Items, l.Finished
+			}
+		}
+		t.Fatalf("❌ no boss-a list")
+		return nil, nil
+	}
+	if items, finished := read(); len(finished) != 1 || finished[0].ID != 1 || slices.ContainsFunc(items, func(it item) bool { return it.ID == 1 }) {
+		t.Fatalf("❌ before: items %+v finished %+v: want #1 finished only", items, finished)
+	}
+
+	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_BOARD_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "board", "--client", "none")
+	view := s.T("display", "-t", "=boss-a:2", "-p", "#{pane_id}")
+	capture := func() string { return s.T("capture-pane", "-p", "-t", view) }
+	waitFor(t, "the board drawn", func() bool { return slices.Contains(popupColumns(capture())["done"], "a#1") })
+	s.T("send-keys", "-t", view, "l", "l", "l", "l", "Space")
+	waitFor(t, "the Done card's item view", func() bool { return strings.Contains(capture(), "r  Reopen") })
+	t.Logf("item view:\n%s", capture())
+	s.T("send-keys", "-t", view, "r")
+	began := time.Now()
+	for !slices.Contains(popupColumns(capture())["todo"], "a#1") {
+		if time.Since(began) > 5*time.Second {
+			t.Fatalf("❌ a#1 not back in To do after 5 s:\n%s", capture())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Logf("reopened after %v:\n%s", time.Since(began).Round(100*time.Millisecond), capture())
+	items, finished := read()
+	i := slices.IndexFunc(items, func(it item) bool { return it.ID == 1 })
+	if i < 0 || items[i].Done || items[i].Column != "todo" || items[i].Text != "Ship it" || items[i].Link != "https://example.com/pull/7" || len(finished) != 0 {
+		t.Errorf("❌ after: items %+v finished %+v: want #1 open in To do with its text and link, none finished", items, finished)
+	}
+}

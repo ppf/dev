@@ -85,6 +85,14 @@ func (cfg Config) start(w http.ResponseWriter, r *http.Request) {
 	act(w, cfg.Start(req.Boss, req.ID, req.Text))
 }
 
+func (cfg Config) reopen(w http.ResponseWriter, r *http.Request) {
+	var req doneReq
+	if !decode(w, r, &req, req.check) {
+		return
+	}
+	act(w, cfg.Reopen(req.Boss, req.ID, req.Text))
+}
+
 func (cfg Config) doing(w http.ResponseWriter, r *http.Request) {
 	var req doingReq
 	if !decode(w, r, &req, req.check) {

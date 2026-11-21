@@ -355,6 +355,12 @@ func StartNeed(boss string, id int, text string) (string, error) {
 	return strings.TrimSpace(out + " " + warning), err
 }
 
+// ReopenNeed puts the user's ticked item id back on boss's list, as dev todo reopen does, only while it still reads text.
+func ReopenNeed(boss string, id int, text string) (string, error) {
+	out, warning, err := runTodo(answerTimeout, "reopen", "--from-board", "--question="+text, "--", boss, strconv.Itoa(id))
+	return strings.TrimSpace(out + " " + warning), err
+}
+
 // TickNeed ticks item id of boss's list, as dev todo done does, only while it still reads text.
 func TickNeed(boss string, id int, text string) (string, error) {
 	out, warning, err := runTodo(answerTimeout, "done", "--text="+text, "--boss", boss, strconv.Itoa(id))

@@ -29,6 +29,7 @@ func (r *recorder) actions() Actions {
 		},
 		Tick:   func(boss string, id int, text string) (string, error) { return note("tick " + boss + " " + text) },
 		Start:  func(boss string, id int, text string) (string, error) { return note("start " + boss + " " + text) },
+		Reopen: func(boss string, id int, text string) (string, error) { return note("reopen " + boss + " " + text) },
 		Open:   func(url string) error { _, err := note("open " + url); return err },
 		Switch: func(s string) error { _, err := note("switch " + s); return err },
 	}
@@ -108,6 +109,12 @@ func TestActions(t *testing.T) {
 	closed.Closed = true
 	note := plain
 	note.Boss = sidebar.Manager
+	ticked := plain
+	ticked.Done, ticked.Column = true, sidebar.ColumnDone
+	tickedClosed := ticked
+	tickedClosed.Closed = true
+	workerDone := worker
+	workerDone.Done, workerDone.Column = true, sidebar.ColumnDone
 	for _, c := range []struct {
 		name string
 		it   Item
@@ -119,6 +126,9 @@ func TestActions(t *testing.T) {
 		{"check", check, []string{"d", "o", "g"}},
 		{"closed", closed, []string{"d", "o"}},
 		{"manager's own item", note, []string{"s", "d", "o", "g"}},
+		{"ticked", ticked, []string{"r", "o", "g"}},
+		{"ticked, closed boss", tickedClosed, []string{"r", "o"}},
+		{"worker's ticked", workerDone, []string{"g"}},
 	} {
 		var keys []string
 		for _, e := range New(c.it, Actions{}, false).entries {
@@ -143,6 +153,8 @@ func TestActions(t *testing.T) {
 		{plain, []string{"o"}, "open https://x/pull/88"},
 		{worker, []string{"w"}, "switch dev-flaky"},
 		{worker, []string{"g"}, "switch boss-dev"},
+		{ticked, []string{"r"}, "reopen boss-shop Reply to the review"},
+		{tickedClosed, []string{"enter"}, "reopen boss-shop Reply to the review"},
 	} {
 		r.calls = nil
 		if m := press(New(c.it, r.actions(), false), c.keys...); !m.Done || !slices.Equal(r.calls, []string{c.want}) {
@@ -155,8 +167,14 @@ func TestActions(t *testing.T) {
 			t.Errorf("%s on a worker's item: done %v msg %q", k, m.Done, m.msg)
 		}
 	}
+	if m := press(New(workerDone, r.actions(), false), "r"); m.Done || m.msg == "" {
+		t.Errorf("r on a worker's ticked item: done %v msg %q", m.Done, m.msg)
+	}
 	if len(r.calls) != 0 {
 		t.Errorf("worker's item ran %v", r.calls)
+	}
+	if v := ansi.Strip(New(ticked, r.actions(), false).View(Width, 40, now)); !strings.Contains(v, "r  Reopen") || !strings.Contains(v, "r reopen") {
+		t.Errorf("ticked item's view:\n%s", v)
 	}
 	v := ansi.Strip(New(worker, r.actions(), false).View(Width, 40, now))
 	if !strings.Contains(v, "status  blocked · dev-flaky") || !strings.Contains(v, "j/k ⏎ run · w go to worker · g go to boss · esc close") {
@@ -474,7 +492,7 @@ func TestCanStart(t *testing.T) {
 	}
 }
 
-// A ticked item lists only its link and boss, shows its column Done and no status.
+// The user's ticked item lists Reopen, its link and boss, shows its column Done and no status.
 func TestDone(t *testing.T) {
 	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 8, Text: "Shipped", Link: "https://x/pull/9", Done: true, Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
 	m := New(it, Actions{}, true)
@@ -482,7 +500,7 @@ func TestDone(t *testing.T) {
 	for _, e := range m.entries {
 		keys = append(keys, e.key)
 	}
-	if !slices.Equal(keys, []string{"o", "g"}) {
+	if !slices.Equal(keys, []string{"r", "o", "g"}) {
 		t.Errorf("keys %v", keys)
 	}
 	v := ansi.Strip(m.View(Width, 40, now))
