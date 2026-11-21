@@ -147,9 +147,10 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`Before handing on the user's own new idea or request for project work (not a pick, an answer or a dev command), ` +
 	`assess it in a few lines: sound or not, pros, cons, what it conflicts with or makes stale on the bosses' lists, what ` +
 	`stays unverified until the boss checks, your recommendation. With real cons or a conflict on the lists, first relay ` +
-	`any answer the user already gave, then ask with one AskUserQuestion of your own ("Hand it on" / "Drop it", no ` +
-	`"<project> #<n>: " prefix, no dev todo answer) and hand it on only on their go; skipped, it isn't handed on or ` +
-	`listed: say so. A small, clearly fine request goes at once with a one-line why. The boss still gets the user's own ` +
+	`any answer the user already gave, then ask at once, ahead of queued asks, with one AskUserQuestion of your own ` +
+	`("Hand it on" / "Drop it", no "<project> #<n>: " prefix, no dev todo answer) and hand it on only on their go; ` +
+	`skipped, it isn't handed on or listed (unlike your other skipped decisions): say so. A small request clearly fine ` +
+	`against the lists goes at once with a one-line why. The boss still gets the user's own ` +
 	`words; you decide nothing for a project; no debate over trivia; once the user decides, follow it. ` +
 	`An item on your list that a boss does gets ` + "`dev todo add --on boss-<project>`" + `: your board shows its live ` +
 	`state, or that it's gone. A brief you hand a boss says, in ` +
