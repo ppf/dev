@@ -81,7 +81,6 @@ func TestBossStartsServe(t *testing.T) {
 
 	out, errOut = run(env, "boss", "hq", "--background")
 	check(t, "started", out+errOut, "0 boss-hq\ndev serve started: http://"+addr+"/ (pair this browser: dev serve pair)\n")
-	t.Logf("printed: %s", strings.TrimSpace(errOut))
 	first := pids()
 	if len(first) != 1 || !health() {
 		t.Fatalf("serve %v, health %v", first, health())

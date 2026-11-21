@@ -259,9 +259,10 @@ func TestAutoServeLaunchAgent(t *testing.T) {
 }
 
 func TestAutoServeFails(t *testing.T) {
-	t.Run("no address", func(t *testing.T) {
-		f := &fakeStart{runs: -1, envValue: map[string]string{}, bindErr: errors.New("no tailnet or private LAN address")}
-		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "no tailnet or private LAN address" || len(f.spawned) > 0 {
+	t.Run("DEV_SERVE_ADDR refused", func(t *testing.T) {
+		f := &fakeStart{runs: -1, envValue: map[string]string{"DEV_SERVE_ADDR": "0.0.0.0:1"},
+			bindErr: errors.New("--addr 0.0.0.0:1 listens on every interface: refused")}
+		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "DEV_SERVE_ADDR 0.0.0.0:1 listens on every interface: refused" || len(f.spawned) > 0 {
 			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})

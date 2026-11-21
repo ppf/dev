@@ -130,7 +130,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 	} else if !errors.Is(err, serve.ErrNotRunning) {
 		return err
 	}
-	// One that runs but doesn't answer (its recorded tailnet address gone, hung) would be a second
+	// One that runs but doesn't answer (its recorded address gone, hung) would be a second
 	if alive, err := s.alive(s.dir); err != nil {
 		return err
 	} else if alive {
@@ -148,7 +148,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 		switch {
 		case s.getenv("DEV_SERVE_ADDR") != "":
 			return errors.New(strings.Replace(err.Error(), "--addr", "DEV_SERVE_ADDR", 1))
-		case addr == "":
+		case addr == "": // only with autoServeDefault "" (dev serve's own default)
 			return fmt.Errorf("%w (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)", err)
 		}
 		return err
