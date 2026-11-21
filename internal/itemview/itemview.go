@@ -4,6 +4,7 @@ package itemview
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -43,7 +44,7 @@ type Actions struct {
 	Tick   func(boss string, id int, text string) (string, error)
 	Start  func(boss string, id int, text string) (string, error)
 	Reopen func(boss string, id int, text string) (string, error)
-	Doing  func(boss string, id int, text, doing string, stop bool) (string, error)
+	Doing  func(boss string, id int, text, seen, doing string, stop bool) (string, error)
 	Open   func(url string) error
 	Switch func(session string) error
 }
@@ -113,6 +114,12 @@ func (m Model) yourCard() bool {
 	return !m.it.Done && !strings.HasPrefix(m.it.Boss, "local_") && m.it.Assignee.Kind == sidebar.AssigneeYou
 }
 
+// seen is the item's doing line and start as the view read them, for dev todo doing --seen.
+func (m Model) seen() string {
+	b, _ := json.Marshal(todo.Seen{Doing: m.it.Doing, Started: m.it.Started})
+	return string(b)
+}
+
 // canReopen is what todo.Reopen takes, as the web page offers it: the user's own ticked item, never a desktop app boss's.
 func (m Model) canReopen() bool {
 	return m.it.Done && m.own() && !strings.HasPrefix(m.it.Boss, "local_")
@@ -136,9 +143,9 @@ func (m Model) list() []entry {
 	}
 	switch {
 	case m.canDoing():
-		out = append(out, entry{key: "i", word: "I'm on it", detail: "In progress, " + m.startTo() + " told: say what you do now…"})
+		out = append(out, entry{key: "i", word: "I'm on it", detail: "In progress, no worker started: say what you do now…"})
 	case m.canStop():
-		out = append(out, entry{key: "i", word: "Stop", detail: "off it: back to To do"})
+		out = append(out, entry{key: "i", word: "Stop", detail: "off it: To do, or Review if its PR moved"})
 	}
 	if m.canTick() {
 		out = append(out, entry{key: "d", word: "Tick", detail: "done: it leaves every board"})
@@ -250,11 +257,15 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		}
 		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, it.Options[n]) })
 	case k == "m" && m.ask() && !it.Closed, k == "i" && m.canDoing():
+		if k == "i" {
+			// A fresh line each time; own words wait for the next m
+			m.field = nil
+		}
 		m.typing = k
 		m.sel = slices.IndexFunc(m.entries, func(e entry) bool { return e.key == k })
 		return m, nil
 	case k == "i" && m.canStop():
-		return m.run("stopping", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, "", true) })
+		return m.run("stopping", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, m.seen(), "", true) })
 	case k == "s" && m.canStart():
 		return m.run("starting", func() (string, error) { return m.acts.Start(it.Boss, it.ID, it.Text) })
 	case k == "d" && m.canTick():
@@ -278,7 +289,7 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 }
 
 // typeKey edits the open field: ⏎ answers with own words, or marks I'm on it with what is done now (none is fine), esc
-// leaves it (I'm on it's text dropped), backspace deletes; a pasted line break is a space.
+// leaves it, backspace deletes; a pasted line break is a space.
 func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case k.Type == tea.KeyCtrlC:
@@ -289,10 +300,6 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 	}
 	switch k.Type {
 	case tea.KeyEsc:
-		// I'm on it is cancelled; own words wait for the next m
-		if m.typing == "i" {
-			m.field = nil
-		}
 		m.typing, m.msg = "", ""
 	case tea.KeyBackspace:
 		if len(m.field) > 0 {
@@ -302,7 +309,7 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 		text := strings.TrimSpace(string(m.field))
 		it := m.it
 		if m.typing == "i" {
-			return m.run("marking", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, text, false) })
+			return m.run("marking", func() (string, error) { return m.acts.Doing(it.Boss, it.ID, it.Text, m.seen(), text, false) })
 		}
 		if text == "" {
 			m.msg = "Type an answer, or esc"

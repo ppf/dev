@@ -31,11 +31,11 @@ func (r *recorder) actions() Actions {
 		Tick:   func(boss string, id int, text string) (string, error) { return note("tick " + boss + " " + text) },
 		Start:  func(boss string, id int, text string) (string, error) { return note("start " + boss + " " + text) },
 		Reopen: func(boss string, id int, text string) (string, error) { return note("reopen " + boss + " " + text) },
-		Doing: func(boss string, id int, text, doing string, stop bool) (string, error) {
+		Doing: func(boss string, id int, text, seen, doing string, stop bool) (string, error) {
 			if stop {
-				return note("stop " + boss + " " + text)
+				return note("stop " + boss + " " + text + " " + seen)
 			}
-			return note("doing " + boss + " " + text + ": " + doing)
+			return note("doing " + boss + " " + text + " " + seen + ": " + doing)
 		},
 		Open:   func(url string) error { _, err := note("open " + url); return err },
 		Switch: func(s string) error { _, err := note("switch " + s); return err },
@@ -543,20 +543,22 @@ func TestDoingKey(t *testing.T) {
 	if !regexp.MustCompile(`i  I'm on it +mailing ops`).MatchString(v) || !strings.Contains(v, "⏎ on it · esc back") {
 		t.Errorf("field view:\n%s", v)
 	}
-	if m := press(m, "mailing", "esc"); m.typing != "" || m.Done || len(m.field) != 0 || len(r.calls) != 0 {
-		t.Errorf("esc: typing %q done %v field %q calls %v", m.typing, m.Done, string(m.field), r.calls)
+	if m := press(m, "mailing", "esc"); m.typing != "" || m.Done || len(r.calls) != 0 {
+		t.Errorf("esc: typing %q done %v calls %v", m.typing, m.Done, r.calls)
+	} else if m = press(m, "i"); len(m.field) != 0 {
+		t.Errorf("i after esc: field %q, want empty", string(m.field))
 	}
-	if m := press(m, "mailing ops", "enter"); !m.Done || !slices.Equal(r.calls, []string{"doing boss-shop Send the cert: mailing ops"}) {
+	if m := press(m, "mailing ops", "enter"); !m.Done || !slices.Equal(r.calls, []string{`doing boss-shop Send the cert {"doing":null,"started":null}: mailing ops`}) {
 		t.Errorf("enter: done %v calls %v", m.Done, r.calls)
 	}
 	r.calls = nil
-	if m := press(New(mine, r.actions(), false), "i", "enter"); !m.Done || !slices.Equal(r.calls, []string{"doing boss-shop Send the cert: "}) {
+	if m := press(New(mine, r.actions(), false), "i", "enter"); !m.Done || !slices.Equal(r.calls, []string{`doing boss-shop Send the cert {"doing":null,"started":null}: `}) {
 		t.Errorf("enter, no text: done %v calls %v", m.Done, r.calls)
 	}
 	on := mine
 	on.Column, on.Doing = sidebar.ColumnProgress, &todo.Doing{Text: "mailing ops", At: 1}
 	r.calls = nil
-	if m := press(New(on, r.actions(), false), "i"); !m.Done || !slices.Equal(r.calls, []string{"stop boss-shop Send the cert"}) {
+	if m := press(New(on, r.actions(), false), "i"); !m.Done || !slices.Equal(r.calls, []string{`stop boss-shop Send the cert {"doing":{"text":"mailing ops","at":1},"started":null}`}) {
 		t.Errorf("i on a doing card: done %v calls %v", m.Done, r.calls)
 	}
 	if v := ansi.Strip(New(on, r.actions(), false).View(Width, 40, now)); !strings.Contains(v, "i  Stop") {
@@ -570,7 +572,14 @@ func TestDoingKey(t *testing.T) {
 	desk.Boss = "local_1"
 	parked := mine
 	parked.On, parked.Assignee = "boss", todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-shop"}
-	for name, it := range map[string]Item{"ask": ask, "started": started, "desktop": desk, "the boss's": parked} {
+	review := mine
+	review.Column = sidebar.ColumnReview
+	bossOn := parked
+	bossOn.Column, bossOn.Doing = sidebar.ColumnProgress, &todo.Doing{Text: "drafting", At: 1}
+	ticked := on
+	ticked.Done, ticked.Column = true, sidebar.ColumnDone
+	for name, it := range map[string]Item{"ask": ask, "started": started, "desktop": desk, "the boss's": parked, "Review": review,
+		"the boss's, doing": bossOn, "ticked": ticked} {
 		r.calls = nil
 		if m := press(New(it, r.actions(), false), "i"); m.typing != "" || m.Done || len(r.calls) != 0 {
 			t.Errorf("%s: i typing %q done %v calls %v", name, m.typing, m.Done, r.calls)

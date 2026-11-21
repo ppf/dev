@@ -362,9 +362,9 @@ func ReopenNeed(boss string, id int, text string) (string, error) {
 }
 
 // DoingNeed marks the user's own item id of boss's list in progress with doing, or ends it (stop), as dev todo doing
-// does, only while it still reads text.
-func DoingNeed(boss string, id int, text, doing string, stop bool) (string, error) {
-	args := []string{"doing", "--from-board", "--question=" + text}
+// does, only while it still reads text and its doing line and start are as seen (JSON, todo.Seen).
+func DoingNeed(boss string, id int, text, seen, doing string, stop bool) (string, error) {
+	args := []string{"doing", "--from-board", "--question=" + text, "--seen=" + seen}
 	if stop {
 		args = append(args, "--stop")
 	}

@@ -67,6 +67,15 @@ func TestTodoDoingDesktop(t *testing.T) {
 	if out, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--stop", "--question", "mine"); err != nil || out != "#1 stopped, no one told\n" {
 		t.Errorf("user stop = %q, %v", out, err)
 	}
+	// A board's --seen: refused once the doing line changed since the board read it
+	stale := `{"doing":null,"started":null}`
+	run(t, "", "todo", "doing", "local_boss", "1", "phoning", "--question", "mine")
+	if _, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "again", "--question", "mine", "--seen", stale); err == nil || !strings.Contains(err.Error(), "changed since it was read") {
+		t.Errorf("stale --seen: %v", err)
+	}
+	if _, _, err := execute(t, "", "todo", "doing", "local_boss", "1", "--question", "mine", "--seen", "{"); err == nil || !strings.Contains(err.Error(), "--seen") {
+		t.Errorf("bad --seen: %v", err)
+	}
 }
 
 // add --part-of links the new item to an open one, both shown in --json; one linked already is refused.
