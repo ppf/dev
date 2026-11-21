@@ -301,9 +301,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Only after a refresh is applied: one in flight may carry (and has cleared) the sidebar's ask to focus TO DO
-		if quit := m.reload.Reload(m.idle()); quit != nil {
-			return m, quit
+		// Only after a good refresh is applied: one in flight may carry (and has cleared) the sidebar's ask to focus
+		// TO DO, and a failed one leaves the sessions unread, so carry would drop every kept reply
+		if msg.err == nil && m.reload.Held() != "" {
+			if quit := m.reload.Reload(m.idle()); quit != nil {
+				return m, quit
+			}
 		}
 		return m, tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tea.WindowSizeMsg:

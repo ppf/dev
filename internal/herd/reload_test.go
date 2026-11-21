@@ -352,3 +352,15 @@ func TestReloadHeldByStateOverBound(t *testing.T) {
 		t.Fatal("no reload once the long reply was gone")
 	}
 }
+
+// A failed refresh decides nothing: just after a reload its sessions are unread, and carry would drop every kept reply.
+func TestNoReloadOnFailedRefresh(t *testing.T) {
+	m := ready(t, board4())
+	next, cmd := m.Update(refreshMsg{err: errors.New("tmux hiccup")})
+	if quits(cmd) {
+		t.Fatal("reloaded on a failed refresh")
+	}
+	if _, quit := refreshed(next.(Model)); !quit {
+		t.Fatal("no reload on the good refresh after it")
+	}
+}

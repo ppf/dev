@@ -46,8 +46,11 @@ type draft struct {
 func Run(c *tmux.Client, pane, exe string, args []string) error {
 	own := selfreload.Version()
 	m := newModel(c, pane)
-	if selfreload.ReloadedTo(own) != "" {
-		m = m.restore(os.Getenv(envState))
+	switch s := os.Getenv(envState); {
+	case selfreload.ReloadedTo(own) != "":
+		m = m.restore(s)
+	case s != "":
+		m.reload.Err = fmt.Errorf("reload: UI state not carried: made for another version than %s", own)
 	}
 	if err := os.Unsetenv(envState); err != nil {
 		return fmt.Errorf("boss: %w", err)
