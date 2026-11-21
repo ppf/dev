@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"strings"
 )
 
 //go:embed static
@@ -25,6 +26,11 @@ func Handler() http.Handler {
 	}
 	files := http.FileServerFS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No directory listing (fonts/)
+		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
 		if t, ok := types[path.Ext(r.URL.Path)]; ok {
 			w.Header().Set("Content-Type", t)
 		}

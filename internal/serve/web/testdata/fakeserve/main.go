@@ -280,6 +280,7 @@ func (s *server) doing(req request, it map[string]any) (int, string) {
 	it["doing"] = map[string]any{"text": req.Doing, "at": time.Now().Unix()}
 	it["column"], it["assignee"] = "progress", map[string]any{"kind": "you"}
 	delete(it, "started")
+	delete(it, "needs_you")
 	return 200, ""
 }
 

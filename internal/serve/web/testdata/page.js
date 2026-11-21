@@ -166,7 +166,28 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('a card that needs you is flagged, no red chip saying it again', needCards.length === run('tally(cards(state.board)).need') + run("cards(state.board).filter(x => needsYou(x) && x.it.quiet).length")
     && needCards.every(c => c.children[0].className === 'flag' && !walk(c, x => /\btag hot\b/.test(x.className || '') && /needs you|decide/.test(x.children.join(''))).length));
   const doable = run("cards(state.board).filter(x => !x.done && doable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
-  check("I'm on it: own items, no ask, not desktop, not doing or starting: " + doable, JSON.stringify(doable) === JSON.stringify(['boss-garden#6', 'boss-garden#7', 'boss-kitchen#5', 'boss-kitchen#6', 'boss-kitchen#7', 'boss-shed#2']));
+  check("I'm on it: own To do cards, no ask, not desktop, not doing or starting: " + doable, JSON.stringify(doable) === JSON.stringify(['boss-garden#6', 'boss-garden#7', 'boss-kitchen#7', 'boss-shed#2']));
+  const startable = run("cards(state.board).filter(x => !x.done && startable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
+  check('Start: own To do cards only (not the one marked doing in In progress): ' + startable, !startable.includes('boss-garden#12') && startable.includes('boss-garden#6'));
+  const byHref = h => drawnCards().find(c => walk(c, x => x.attrs?.href === h).length);
+  const textOf = n => (n.children || []).map(c => typeof c === 'string' ? c : textOf(c)).join('');
+  check('the flag says why: blocked', textOf(byHref('#/item/boss-kitchen/2').children[0]) === 'Needs you · blocked');
+  check('the flag says why: decide', textOf(byHref('#/item/boss-garden/4').children[0]) === 'Needs you · decide');
+  check('a flagged card keeps its other tags (merged PR)', walk(byHref('#/item/boss-kitchen/5'), x => /\btag ok\b/.test(x.className || '')).length === 1);
+  run("state.more = false");
+  // To do of only asks past TODO_SHOWN: every one shown, no toggle
+  const asks = n => ({ lists: [{ boss: 'boss-a', items: Array.from({ length: n }, (_, i) => ({ id: i + 1, text: 'ask ' + i, status: 'decide', needs_you: true, column: 'todo', options: ['a', 'b'], assignee: { kind: 'you' } }))
+    .concat([{ id: 50, text: 'plain', status: 'yours', column: 'todo', assignee: { kind: 'you' } }]) }] });
+  ctx.asks = asks(7);
+  run('state.board = asks');
+  const toggle = () => drawnCards().length + ' ' + run('board()').flatMap(n => walk(n, c => c.className === 'more')).map(textOf).join();
+  check('7 asks and a plain card: the asks shown, 1 more: ' + toggle(), toggle() === '7 Show 1 more');
+  ctx.asks = asks(7).lists[0].items.slice(0, 7);
+  run('state.board = { lists: [{ boss: "boss-a", items: asks }] }');
+  check('only asks past TODO_SHOWN: all shown, no toggle: ' + toggle(), toggle() === '7 ');
+  ctx.late = { lists: [{ boss: 'boss-a', items: [{ id: 1, text: 'late', status: 'starting', start_late: true, needs_you: true, column: 'progress', started: { at: 1, to: 'boss-a' }, assignee: { kind: 'boss', name: 'boss-a' } }] }] };
+  run('state.board = late');
+  check('the flag says why: a start not picked up', textOf(drawnCards()[0].children[0]) === 'Needs you · start not picked up');
   media.matches = false;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });

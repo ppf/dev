@@ -13,7 +13,7 @@
   --shadow: 0 1px 0 rgba(18, 25, 34, .05), 0 1px 3px rgba(18, 25, 34, .07);
   --lift: 0 14px 30px rgba(18, 25, 34, .20), 0 3px 8px rgba(18, 25, 34, .12);
   --scrim: rgba(12, 17, 23, .40);
-  /* controls never pill; avatars are the only circles */
+  /* controls never pill */
   --r-card: 10px; --r-col: 14px; --r-ctl: 8px; --r-chip: 6px; --r-sheet: 16px;
   --f-head: "Bricolage Grotesque", "Avenir Next Condensed", sans-serif;
   --f-ui: "Instrument Sans", "Avenir Next", "Segoe UI", sans-serif;
@@ -138,10 +138,10 @@ a { color: var(--act); }
 .quick .k { color: var(--meta); font-weight: 600; font-size: var(--fs-meta); }
 .quick small { flex-basis: 100%; padding-left: 15px; font-weight: 450; color: var(--meta); font-size: var(--fs-meta); }
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; }
-.tag { display: inline-flex; align-items: center; gap: 5px; border-radius: var(--r-chip); padding: 2px 7px; font-size: var(--fs-tag); font-weight: 600; background: var(--well); color: var(--ink2); white-space: nowrap; }
+.tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border-radius: var(--r-chip); padding: 2px 7px; font-size: var(--fs-tag); font-weight: 600; background: var(--well); color: var(--ink2); }
 .tag.test { background: none; box-shadow: inset 0 0 0 1px var(--edge-strong); letter-spacing: .06em; font-size: 10.5px; font-weight: 700; }
 .tag.hot { background: var(--hot-wash); color: var(--hot-text); }
-.tag.wait { background: var(--wait-wash); color: var(--s-wait); white-space: normal; } /* waiting for a person: may run longer than a narrow card */
+.tag.wait { background: var(--wait-wash); color: var(--s-wait); }
 .tag.ok { background: var(--done-wash); color: var(--s-done); }
 .tag.act { background: var(--act-wash); color: var(--s-prog); }
 .tag.link::before { content: "↗"; }
@@ -172,7 +172,7 @@ a { color: var(--act); }
 .tab .n { font-size: var(--fs-meta); }
 .tab[aria-selected="true"] { color: var(--ink); box-shadow: inset 0 -3px 0 var(--sq); }
 .tab .hotn { background: var(--hot); color: var(--hot-ink); border-radius: 5px; padding: 0 5px; font-size: 11px; font-weight: 700; }
-.lanes { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 12px 16px 0; scroll-padding: 0 16px; }
+.lanes { display: flex; align-items: flex-start; gap: 16px; overflow: auto hidden; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 12px 16px 4px; scroll-padding: 0 16px; }
 .lanes::-webkit-scrollbar { display: none; }
 .lane { flex: none; width: calc(100vw - 56px); scroll-snap-align: start; display: flex; flex-direction: column; gap: var(--sp-card-gap); }
 .lane .stack { overflow: visible; }
@@ -193,7 +193,7 @@ a { color: var(--act); }
   .btn-s { height: 44px; padding: 0 14px; font-size: 13.5px; }
   .card .title { font-size: 15px; }
   .quick button { min-height: 44px; padding: 8px 10px; font-size: 14px; align-items: center; }
-  .asg { min-height: 44px; }
+  .card.done .t { white-space: normal; } /* no hover to read the rest */
 }
 
 /* the item sheet: a bottom sheet on the phone, a full-height panel at the right on the desktop */
