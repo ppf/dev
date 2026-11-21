@@ -255,3 +255,10 @@ func TestBottomRowAfterReload(t *testing.T) {
 		t.Error("a key leaves the reload error")
 	}
 }
+
+func TestNoPlaceholderBeforeReloadsFirstRefresh(t *testing.T) {
+	m := Model{width: 60, height: 10}.restore(`{"selected":"a"}`)
+	if got := strings.Join(ansiStrip(m.render()), "\n"); strings.Contains(got, "No worker sessions yet") {
+		t.Errorf("a reload's first frame says the workers are gone:\n%s", got)
+	}
+}

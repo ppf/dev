@@ -44,7 +44,8 @@ func (m Model) render() []string {
 	copy(lines[gh-len(msgs):], msgs)
 	board, bh := lines[len(top):gh-len(msgs)], gh-len(top)-len(msgs)
 	if len(m.snap.tiles) == 0 {
-		if bh > 0 {
+		// Before a reload's first refresh the workers aren't read yet, not gone
+		if bh > 0 && !m.restored {
 			board[0] = sidebar.HintRow("No worker sessions yet: ask the coordinator to start some", w)
 		}
 		return lines
