@@ -69,6 +69,7 @@ func TestTodoDoing(t *testing.T) {
 	must(boss, "todo", "add", "Send the cert")
 	must(boss, "todo", "add", "Install the cert", "--on", "boss", "--part-of", "1")
 	must(boss, "todo", "add", "Write the notes")
+	must(boss, "todo", "add", "Book the room")
 
 	if _, stderr, err := dev(boss, "todo", "doing", "boss-a", "1", "--question", "Send the cert"); err == nil || !strings.Contains(stderr, "refused in a Claude Code session") {
 		t.Errorf("❌ doing in a Claude session: %v %s", err, stderr)
@@ -83,6 +84,15 @@ func TestTodoDoing(t *testing.T) {
 	check(t, "boss's own doing", out, "#2 in progress\n")
 	if j := json(); !strings.Contains(j, `"status":"working","status_on":"boss-a","doing":{"text":"drafting","at":`) || !strings.Contains(j, `"part_of":1,"column":"progress"`) {
 		t.Errorf("❌ --all --json after the boss's doing:\n%s", j)
+	}
+
+	// Queued behind the first paste: a doing note whose item is ticked before the boss rests goes unsaid, another stays
+	must(user, "todo", "doing", "boss-a", "4", "booking", "--question", "Book the room")
+	must(user, "todo", "doing", "boss-a", "1", "phoning ops", "--question", "Send the cert")
+	must(user, "todo", "done", "4", "--boss", "boss-a", "--text", "Book the room")
+	reason := inboxAtStop(t, s, pane)
+	if !strings.Contains(reason, `the user is on #1 "Send the cert": phoning ops`) || strings.Contains(reason, "#4") {
+		t.Errorf("❌ boss Stop reason = %q, want #1's doing, none for ticked #4", reason)
 	}
 
 	// Closed: no manager, marked and no one told; with one, the manager is told, naming the boss

@@ -130,6 +130,13 @@ func TestTodoStart(t *testing.T) {
 		}
 	}
 	refused(user, "item 5 is in In progress (w-busy), not To do: only a To do card starts", "todo", "start", "boss-a", "5", "--question", "Ship it")
+	// The boss's own item it is on: In progress while the boss runs, To do once it closed (below)
+	if _, err := dev(boss, "todo", "add", "--on", "boss", "Tidy the docs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dev(boss, "todo", "doing", "6", "drafting"); err != nil {
+		t.Fatal(err)
+	}
 	out, _ = dev(user, "todo", "--all", "--json")
 	for id, want := range map[int]string{3: "idle boss-a progress", 4: "gone w-old progress", 5: "idle w-busy progress"} {
 		if got := placedAs(t, out, "boss-a", id); got != want {
@@ -171,6 +178,23 @@ func TestTodoStart(t *testing.T) {
 	}
 	if want := `- you were asked to start boss-a #5 "Ship it": boss-a is closed: reopen it (dev boss a --background), its start list asks it to start #5`; !strings.Contains(inboxAtStop(t, s, mpane), want) {
 		t.Errorf("❌ manager Stop reason lacks\n%s", want)
+	}
+	// A start ends doing: the closed boss's own item it was on sits in To do, goes to the manager, no one on it any more
+	out, _ = dev(user, "todo", "--all", "--json")
+	if got := placedAs(t, out, "boss-a", 6); got != "boss closed boss todo" || !strings.Contains(out, "drafting") {
+		t.Errorf("❌ #6 before start = %q, want boss closed, To do, still doing:\n%s", got, out)
+	}
+	out, err = dev(user, "todo", "start", "boss-a", "6", "--question", "Tidy the docs")
+	check(t, "start a closed boss's own item marked doing", out, "#6 sent to manager\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ = dev(user, "todo", "--all", "--json")
+	if got := placedAs(t, out, "boss-a", 6); got != "boss closed boss progress" {
+		t.Errorf("❌ #6 after start = %q, want boss closed, In progress", got)
+	}
+	if j := listed(); strings.Contains(j, `"doing"`) {
+		t.Errorf("❌ start kept doing:\n%s", j)
 	}
 }
 

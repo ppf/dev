@@ -128,6 +128,8 @@ type Worker struct {
 	StatusText string `json:"statusText"`
 	// between is what a busy worker last said this turn (its text's first line), else what its last call did
 	between string
+	// running: its Claude process is live (Running)
+	running bool
 	// Since is how long it has been in its live state (busy, idle) or, not running, since the app's last
 	// activity, e.g. 12m; "" when unknown.
 	Since string `json:"since"`
@@ -184,6 +186,9 @@ type live struct {
 	// WaitingFor is what a waiting session waits for, e.g. input needed.
 	WaitingFor string `json:"waitingFor"`
 }
+
+// Running reports its Claude process live, whatever its State (a blocked turn reads blocked either way).
+func (w Worker) Running() bool { return w.running }
 
 // Board lists boss's unarchived workers, oldest first, with their notes at now; warnings name files it could
 // not read, err that boss has no readable app record.
@@ -462,6 +467,7 @@ func worker(p Paths, r record, lives []live, windows map[string]int, canPrune bo
 	}
 	cli := r.CLISessionID
 	l, running := findLive(lives, r)
+	w.running = running
 	if running {
 		// The record's id lags behind a /clear or /resume; the live file's is current
 		cli = l.SessionID
