@@ -104,7 +104,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
-		if _, _, err := served(time.Second); err == nil {
+		if ap, _, err := served(time.Second); err == nil && s.local(ap.Addr()) {
 			return nil
 		}
 		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")

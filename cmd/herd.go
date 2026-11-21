@@ -61,9 +61,17 @@ agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is o
 			if background && len(args) == 0 {
 				return errors.New("--background needs a project: dev boss <project> --background")
 			}
+			// A detached boss starts dev serve once it exists (a refused one starts none); an attached one before the attach
 			if len(args) == 0 {
+				if hasTerminal() {
+					autoServe(cmd.ErrOrStderr(), noServe)
+					return openManager(cmd, c, start, timeout)
+				}
+				if err := openManager(cmd, c, start, timeout); err != nil {
+					return err
+				}
 				autoServe(cmd.ErrOrStderr(), noServe)
-				return openManager(cmd, c, start, timeout)
+				return nil
 			}
 			projects, _, err := loadProjects(cmd)
 			if err != nil {
@@ -77,17 +85,21 @@ agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is o
 			if err != nil {
 				return err
 			}
-			if !adopt {
-				autoServe(cmd.ErrOrStderr(), noServe)
-			}
 			// A detached boss skips the first-run restore, which switches clients (as dev agent start does)
 			if background {
-				return openBackground(cmd, c, p.Name, dir, start, timeout, adopt)
+				if err := openBackground(cmd, c, p.Name, dir, start, timeout, adopt); err != nil {
+					return err
+				}
+				if !adopt {
+					autoServe(cmd.ErrOrStderr(), noServe)
+				}
+				return nil
 			}
 			// After the first-run restore, so a saved boss is attached rather than replaced
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
 				return err
 			}
+			autoServe(cmd.ErrOrStderr(), noServe)
 			return herd.Open(c, p.Name, dir, start)
 		},
 	}

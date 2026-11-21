@@ -72,7 +72,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			defer func() { _ = alive.Close() }()
-			if os.Getenv(envStartFd) == "3" { // the dev boss's start lock: one holds now
+			if os.Getenv(envStartFd) == "3" && alive.Fd() != 3 { // the dev boss's start lock: one holds now
 				_ = os.NewFile(3, "start").Close()
 			}
 			if err := os.Unsetenv(envStartFd); err != nil {
@@ -84,6 +84,8 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				if a, aerr := old.Stat(); aerr == nil {
 					if b, berr := alive.Stat(); berr == nil && os.SameFile(a, b) {
 						_ = old.Close()
+					} else {
+						syscall.CloseOnExec(kept) // not ours to close: at least no child keeps it
 					}
 				}
 			}
