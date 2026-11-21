@@ -150,7 +150,7 @@ func TestServePair(t *testing.T) {
 	if _, _, err := execute(t, "", "serve", "pair"); err == nil || !strings.Contains(err.Error(), "dev serve is not running") {
 		t.Errorf("no server: %v, want not running", err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) }))
 	defer srv.Close()
 	ln := srv.Listener
 	dir, err := authDir()

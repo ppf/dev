@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -258,16 +259,34 @@ func TestUnpair(t *testing.T) {
 }
 
 func TestServed(t *testing.T) {
-	dir := t.TempDir()
-	srv := httptest.NewServer(Handler(Config{Version: "v0.72.0", Guard: func(h http.Handler) http.Handler { return h }, Pair: http.NotFoundHandler()}))
-	defer srv.Close()
-	ap := netip.MustParseAddrPort(srv.Listener.Addr().String())
-	forget, err := RecordAddr(dir, ap)
-	if err != nil {
-		t.Fatal(err)
+	health := func(w http.ResponseWriter, body string, code int) { w.WriteHeader(code); _, _ = w.Write([]byte(body)) }
+	for _, tt := range []struct {
+		name, body string
+		code       int
+		version    string
+		running    bool
+	}{
+		{"dev serve", `{"ok":true,"version":"v0.72.0"}`, 200, "v0.72.0", true},
+		{"no version", `{"ok":true}`, 200, "", true},
+		{"another program", `hello`, 200, "", false},
+		{"500", `{"ok":true}`, 500, "", false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { health(w, tt.body, tt.code) }))
+		dir := t.TempDir()
+		ap := netip.MustParseAddrPort(srv.Listener.Addr().String())
+		if _, err := RecordAddr(dir, ap); err != nil {
+			t.Fatal(err)
+		}
+		got, v, err := Served(dir, time.Second)
+		if tt.running && (err != nil || got != ap || v != tt.version) || !tt.running && !errors.Is(err, ErrNotRunning) {
+			t.Errorf("%s: %v %q %v", tt.name, got, v, err)
+		}
+		srv.Close()
+		if _, _, err := Served(dir, time.Second); !errors.Is(err, ErrNotRunning) {
+			t.Errorf("%s closed: %v", tt.name, err)
+		}
 	}
-	defer forget()
-	if got, v, err := Served(dir); err != nil || got != ap || v != "v0.72.0" {
-		t.Fatalf("got %v %q %v", got, v, err)
+	if _, _, err := Served(t.TempDir(), time.Second); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("no record: %v", err)
 	}
 }

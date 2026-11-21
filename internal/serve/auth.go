@@ -104,18 +104,21 @@ func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
 	}, nil
 }
 
-// ServedAddr is the address the running dev serve recorded in dir; an error when none runs (no record, or nothing answers /v1/health there).
+// ErrNotRunning is Served's error when no dev serve answers: no record, or nothing answers /v1/health there.
+var ErrNotRunning = errors.New("dev serve is not running")
+
+// ServedAddr is the address the running dev serve recorded in dir; ErrNotRunning when none runs.
 func ServedAddr(dir string) (netip.AddrPort, error) {
-	ap, _, err := Served(dir)
+	ap, _, err := Served(dir, time.Second)
 	return ap, err
 }
 
-// Served is ServedAddr with the version its /v1/health names.
-func Served(dir string) (netip.AddrPort, string, error) {
+// Served is ServedAddr with the version its /v1/health names, waiting at most timeout for it.
+func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 	var s string
 	if err := readFile(dir, addrFile, &s); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return netip.AddrPort{}, "", errors.New("dev serve is not running: start it first (a dev serve started before this version must be restarted)")
+			return netip.AddrPort{}, "", fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
 		}
 		return netip.AddrPort{}, "", err
 	}
@@ -123,15 +126,20 @@ func Served(dir string) (netip.AddrPort, string, error) {
 	if err != nil {
 		return ap, "", fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
 	}
-	resp, err := (&http.Client{Timeout: time.Second}).Get("http://" + s + "/v1/health")
-	if err == nil {
-		defer func() { _ = resp.Body.Close() }()
+	notRunning := fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, s)
+	resp, err := (&http.Client{Timeout: timeout}).Get("http://" + s + "/v1/health")
+	if err != nil {
+		return ap, "", notRunning
 	}
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return ap, "", fmt.Errorf("dev serve is not running: it does not answer on %s", s)
+	defer func() { _ = resp.Body.Close() }()
+	var health struct {
+		OK      bool
+		Version string
 	}
-	var health struct{ Version string }
-	_ = json.NewDecoder(resp.Body).Decode(&health)
+	// Another program on a stale record's port answers no {"ok":true}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&health) != nil || !health.OK {
+		return ap, "", notRunning
+	}
 	return ap, health.Version, nil
 }
 

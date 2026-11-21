@@ -30,10 +30,10 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 	return &starter{
 		getenv: func(k string) string { return f.envValue[k] },
 		uid:    501, dir: filepath.Join(t.TempDir(), "serve"), home: t.TempDir(), exe: "/bin/dev", own: "(devel) abc",
-		served: func(string) (netip.AddrPort, string, error) {
+		served: func(string, time.Duration) (netip.AddrPort, string, error) {
 			if f.runs != 0 {
 				f.runs--
-				return netip.AddrPort{}, "", errors.New("not running")
+				return netip.AddrPort{}, "", serve.ErrNotRunning
 			}
 			return netip.MustParseAddrPort("127.0.0.1:18417"), f.version, nil
 		},
@@ -89,6 +89,7 @@ func TestAutoServeRunning(t *testing.T) {
 		{"(devel) abc", ""},
 		{"v0.71.0", ""}, // reloads itself
 		{"(devel) old", "⚠ dev serve (devel) old runs (this dev is (devel) abc): restart it to update\n"},
+		{"", ""}, // an older dev serve's health named none
 	} {
 		f := &fakeStart{version: tt.version, envValue: map[string]string{}}
 		var out bytes.Buffer
@@ -112,6 +113,30 @@ func TestAutoServeSkips(t *testing.T) {
 	}
 }
 
+func TestAutoServeDefaultSocket(t *testing.T) {
+	for _, socket := range []string{"/tmp/tmux-501/default", "/private/tmp/tmux-501/default"} {
+		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0"}}
+		if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
+			t.Errorf("%s: err %v, spawned %q", socket, err, f.spawned)
+		}
+	}
+}
+
+func TestLastLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "serve.log")
+	if err := os.WriteFile(path, []byte("old line\n❌ listen: in use\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		from int64
+		want string
+	}{{0, "listen: in use"}, {9, "listen: in use"}, {100, "exited"}} {
+		if got := lastLine(path, tt.from); got != tt.want {
+			t.Errorf("from %d: %q, want %q", tt.from, got, tt.want)
+		}
+	}
+}
+
 func TestAutoServeLaunchAgent(t *testing.T) {
 	f := &fakeStart{runs: -1, envValue: map[string]string{}}
 	s := f.starter(t)
@@ -130,7 +155,7 @@ func TestAutoServeLaunchAgent(t *testing.T) {
 func TestAutoServeFails(t *testing.T) {
 	t.Run("no address", func(t *testing.T) {
 		f := &fakeStart{runs: -1, envValue: map[string]string{}, bindErr: errors.New("no tailnet or private LAN address")}
-		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "no tailnet or private LAN address" || len(f.spawned) > 0 {
+		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || err.Error() != "no tailnet or private LAN address (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)" || len(f.spawned) > 0 {
 			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})
@@ -158,8 +183,23 @@ func TestAutoServeFails(t *testing.T) {
 	})
 	t.Run("never answers", func(t *testing.T) {
 		f := &fakeStart{runs: -1, envValue: map[string]string{}}
-		if err := f.starter(t).ensure(&bytes.Buffer{}); err == nil || !strings.HasPrefix(err.Error(), "not answering after 300ms") {
-			t.Fatalf("got %v", err)
+		var out bytes.Buffer
+		began := time.Now()
+		if err := f.starter(t).ensure(&out); err != nil || !strings.HasPrefix(out.String(), "⚠ dev serve: started, not answering after 300ms: exited (log: ") {
+			t.Fatalf("got %v %q", err, out.String())
+		}
+		if took := time.Since(began); took > time.Second {
+			t.Fatalf("took %s", took)
+		}
+	})
+	t.Run("record unreadable", func(t *testing.T) {
+		f := &fakeStart{envValue: map[string]string{}}
+		s := f.starter(t)
+		s.served = func(string, time.Duration) (netip.AddrPort, string, error) {
+			return netip.AddrPort{}, "", errors.New("addr.json: permission denied")
+		}
+		if err := s.ensure(&bytes.Buffer{}); err == nil || err.Error() != "addr.json: permission denied" || len(f.spawned) > 0 {
+			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})
 }

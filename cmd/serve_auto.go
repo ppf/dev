@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -20,8 +21,8 @@ import (
 	"github.com/ppf/dev/internal/serve"
 )
 
-// autoServeEnv is what the detached dev serve keeps of dev boss's environment: no CLAUDECODE, TMUX or TMUX_PANE.
-var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "DEV_NO_RELOAD"}, serve.LaunchEnv...)
+// autoServeEnv is all the detached dev serve keeps of dev boss's environment (not CLAUDECODE, TMUX, TMUX_PANE).
+var autoServeEnv = append([]string{"HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "DEV_NO_RELOAD", "DEV_RELOAD_DEVEL"}, serve.LaunchEnv...)
 
 // starter starts dev serve detached for dev boss; its fields are test seams.
 type starter struct {
@@ -30,7 +31,7 @@ type starter struct {
 	dir    string // dev serve's state folder: addr.json, serve.log
 	home   string
 	exe    string
-	served func(dir string) (netip.AddrPort, string, error) // serve.Served
+	served func(dir string, timeout time.Duration) (netip.AddrPort, string, error) // serve.Served
 	bind   func(addr string) error
 	spawn  func(exe string, args, env []string, log *os.File) (exited <-chan struct{}, err error)
 	own    string
@@ -48,7 +49,7 @@ func autoServe(stderr io.Writer, off bool) {
 		err = s.ensure(stderr)
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "⚠ dev serve not started: "+err.Error())
+		fmt.Fprintln(stderr, "⚠ dev serve not started: "+strings.ReplaceAll(err.Error(), "\n", ": "))
 	}
 }
 
@@ -79,28 +80,39 @@ func newStarter() (*starter, error) {
 	}, nil
 }
 
-// releaseTag is a release build's version: a newer release reloads a running dev serve by itself.
+// releaseTag is a release build's version: a running release reloads itself into the next one, no restart line.
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 // ensure starts dev serve unless one answers, a launchd agent owns it, or this boss runs on a private tmux server
-// with no DEV_SERVE_ADDR; it waits at most s.wait for the new one to answer.
+// with no DEV_SERVE_ADDR; it takes at most s.wait (and a health check's last second) in all.
 func (s *starter) ensure(stderr io.Writer) error {
+	deadline := time.Now().Add(s.wait)
+	served := func(most time.Duration) (netip.AddrPort, string, error) {
+		return s.served(s.dir, min(most, max(time.Until(deadline), 50*time.Millisecond)))
+	}
 	addr := s.getenv("DEV_SERVE_ADDR")
 	if addr == "" && !s.defaultServer() {
 		return nil
 	}
-	if _, v, err := s.served(s.dir); err == nil {
-		if v != s.own && !releaseTag.MatchString(v) {
+	if _, v, err := served(time.Second); err == nil {
+		if v != "" && v != s.own && !releaseTag.MatchString(v) {
 			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update\n", v, s.own)
 		}
 		return nil
+	} else if !errors.Is(err, serve.ErrNotRunning) {
+		return err
 	}
 	if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
 		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%d/%s\n", s.uid, serve.Label)
 		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	if err := s.bind(addr); err != nil {
-		return err
+		if addr != "" {
+			return fmt.Errorf("DEV_SERVE_ADDR: %w", err)
+		}
+		return fmt.Errorf("%w (dev boss: set DEV_SERVE_ADDR=ip:port, or DEV_NO_SERVE=1)", err)
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return err
@@ -129,25 +141,23 @@ func (s *starter) ensure(stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(s.wait)
-	for {
-		if ap, _, err := s.served(s.dir); err == nil {
+	for time.Now().Before(deadline) {
+		if ap, _, err := served(300 * time.Millisecond); err == nil {
 			fmt.Fprintf(stderr, "dev serve started: http://%s/ (pair a phone: dev serve pair)\n", ap)
 			return nil
 		}
 		select {
 		case <-exited:
 			// A second dev boss's dev serve may have taken the port first
-			if _, _, err := s.served(s.dir); err == nil {
+			if _, _, err := served(300 * time.Millisecond); err == nil {
 				return nil
 			}
 			return fmt.Errorf("%s (log: %s)", lastLine(logPath, start), logPath)
 		case <-time.After(100 * time.Millisecond):
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("not answering after %s (log: %s)", s.wait, logPath)
-		}
 	}
+	fmt.Fprintf(stderr, "⚠ dev serve: started, not answering after %s: %s (log: %s)\n", s.wait, lastLine(logPath, start), logPath)
+	return nil
 }
 
 // defaultServer: dev boss talks to tmux's default server (no TMUX_TMPDIR; $TMUX, when set, its default socket).
@@ -164,15 +174,13 @@ func (s *starter) defaultServer() bool {
 	return socket == want || socket == "/private"+want
 }
 
-// lastLine is the last non-blank line path got past offset from; "exited" when none.
+// lastLine is the last line written to path after offset from, without its "❌ "; "exited" when none.
 func lastLine(path string, from int64) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err.Error()
 	}
-	if from <= int64(len(b)) {
-		b = b[from:]
-	}
+	b = b[min(from, int64(len(b))):]
 	lines := strings.Split(strings.TrimSpace(string(bytes.ToValidUTF8(b, nil))), "\n")
 	if l := strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "❌ "); l != "" {
 		return l
@@ -187,7 +195,7 @@ func spawnServe(exe string, args, env []string, log *os.File) (<-chan struct{}, 
 	c.Env, c.Stdout, c.Stderr = env, log, log
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {
-		return nil, errors.Join(errors.New("dev serve"), err)
+		return nil, fmt.Errorf("start %s: %w", exe, err)
 	}
 	exited := make(chan struct{})
 	go func() { _ = c.Wait(); close(exited) }()
