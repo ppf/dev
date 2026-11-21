@@ -61,7 +61,12 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			}
 			// After a reload the caffeinate started before it still waits on this pid, and the alive lock it kept is open
 			reloaded, pid := reexecMarker(os.Getenv(envServeReexec), os.Getpid())
-			kept, _ := strconv.Atoi(os.Getenv(selfreload.EnvKept))
+			kept := 0
+			if v := os.Getenv(selfreload.EnvKept); v != "" {
+				if kept, err = strconv.Atoi(v); err != nil {
+					return fmt.Errorf("%s=%q: %w", selfreload.EnvKept, v, err)
+				}
+			}
 			for _, k := range []string{envServeReexec, selfreload.EnvKept} {
 				if err := os.Unsetenv(k); err != nil {
 					return err
@@ -320,7 +325,7 @@ func closeKept(fd int, alive *os.File, stderr io.Writer) {
 		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
 		return
 	}
-	if err := unix.Fstat(int(alive.Fd()), &b); err != nil || a.Dev != b.Dev || a.Ino != b.Ino || fd == int(alive.Fd()) {
+	if err := unix.Fstat(int(alive.Fd()), &b); err != nil || a.Dev != b.Dev || a.Ino != b.Ino {
 		syscall.CloseOnExec(fd)
 		return
 	}
