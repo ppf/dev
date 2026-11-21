@@ -229,3 +229,63 @@ func TestReopenRefused(t *testing.T) {
 		}
 	}
 }
+
+// A quick reopen keeps no link to its other half, from either side; an item that ticked by itself is no longer told
+// as ticked.
+func TestReopenUnlinksAndUntells(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "send"}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "install", On: Boss, PartOf: 1}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "until", Until: t0.Unix() + 1}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{1}, t0); err != nil {
+		t.Fatal(err)
+	}
+	at := t0.Add(2 * time.Second)
+	if _, err := s.Reopen(1, "send", at); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range read(t, s, at).Items {
+		if it.PartOf != 0 {
+			t.Errorf("#%d still part of #%d", it.ID, it.PartOf)
+		}
+	}
+	if _, err := s.Reopen(3, "until", at); err != nil {
+		t.Fatal(err)
+	}
+	if told, err := s.TakeTicked(at, nil, nil); err != nil || len(told) != 0 {
+		t.Errorf("ticked told after reopen: %+v %v", told, err)
+	}
+}
+
+// Two finished items by one number and text (numbers restart): the newest comes back, the older stays finished.
+func TestReopenNewest(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	for i, link := range []string{"https://x/old", "https://x/new"} {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		if _, err := s.Add(Item{Text: "same", Link: link}, at); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Done([]int{1}, at); err != nil {
+			t.Fatal(err)
+		}
+		// A write past doneShown moves it out; the list empties, so the next add is #1 again
+		if err := s.Clear(at.Add(doneShown)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	it, err := s.Reopen(1, "same", t0.Add(time.Hour))
+	if err != nil || it.Link != "https://x/new" {
+		t.Fatalf("reopened %+v %v: want the newer", it, err)
+	}
+	if l := read(t, s, t0.Add(time.Hour)); len(l.Finished) != 1 || l.Finished[0].Link != "https://x/old" {
+		t.Errorf("finished %+v: want the older left", l.Finished)
+	}
+}

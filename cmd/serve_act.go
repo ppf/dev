@@ -86,7 +86,7 @@ func pageDoing(stderr io.Writer) func(boss string, id int, text string, seen tod
 func pageReopen(stderr io.Writer) func(boss string, id int, text string) error {
 	return func(boss string, id int, text string) error {
 		_, err := reopenItem(boss, id, text, stderr)
-		if errors.As(err, new(noReopenList)) && !errors.As(err, new(unreadList)) {
+		if errors.As(err, new(noReopenList)) && !errors.As(err, new(unreadList)) && !running(tmux.New(), boss) {
 			log.Printf("dev serve: %v", err)
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with a ticked item", boss)}
 		}

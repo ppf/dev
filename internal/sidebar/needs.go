@@ -323,7 +323,7 @@ func runTodo(timeout time.Duration, args ...string) (stdout, warning string, err
 	warning = strings.Join(strings.Fields(stderr.String()), " ")
 	switch {
 	case ctx.Err() != nil:
-		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, it may be ticked", args[0], timeout)
+		return "", "", fmt.Errorf("dev todo %s timed out after %s: check the list, it may have gone through", args[0], timeout)
 	case err != nil:
 		return "", "", errors.New(cmp.Or(warning, err.Error()))
 	}

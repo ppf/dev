@@ -57,7 +57,7 @@ todo start is.`,
 	return cmd
 }
 
-// noReopenList is a reopen refused before a list was found.
+// noReopenList is a reopen that failed before a list was found.
 type noReopenList struct{ error }
 
 func (e noReopenList) Unwrap() error { return e.error }

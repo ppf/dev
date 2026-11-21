@@ -44,10 +44,11 @@ func TestTodoReopen(t *testing.T) {
 	run(t, "", "todo", "add", "mine")
 	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
 	run(t, "", "todo", "done", "1", "2")
-	t.Setenv("CLAUDECODE", "")
-	if out := run(t, "", "todo", "reopen", "local_boss", "1", "--question", "mine"); out != "#1 reopened\n" {
+	// A board's button runs it inside a Claude Code session
+	if out := run(t, "", "todo", "reopen", "local_boss", "1", "--question", "mine", "--from-board"); out != "#1 reopened\n" {
 		t.Errorf("reopen = %q", out)
 	}
+	t.Setenv("CLAUDECODE", "")
 	if out := run(t, "", "todo", "--json"); !strings.Contains(out, `"text": "mine"`) || !strings.Contains(out, `"column": "todo"`) {
 		t.Errorf("--json after reopen:\n%s", out)
 	}

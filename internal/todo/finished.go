@@ -157,6 +157,8 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 			return Refused{fmt.Errorf("item %d was on %s, not the user's to reopen", id, it.On)}
 		}
 		orig := it
+		// A link its other half stores to it goes too, as its own does
+		f.unlink(orig.ID)
 		f.dropped = slices.DeleteFunc(f.dropped, func(x Item) bool { return sameItem(x, orig) })
 		f.Ticked = slices.DeleteFunc(f.Ticked, func(t Ticked) bool { return t.ID == orig.ID && t.Text == orig.Text })
 		if slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == it.ID }) {
@@ -178,11 +180,14 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		if !slices.ContainsFunc(kept, func(x Item) bool { return sameItem(x, orig) }) {
 			return nil
 		}
-		// write kept what prune dropped meanwhile: read them again
-		if kept, err = s.readDone(true); err != nil {
-			return err
+		// write added prune's dropped items to the file: read it again
+		if kept, err = s.readDone(true); err == nil {
+			err = s.saveDone(slices.DeleteFunc(kept, func(x Item) bool { return sameItem(x, orig) }))
 		}
-		return s.saveDone(slices.DeleteFunc(kept, func(x Item) bool { return sameItem(x, orig) }))
+		if err != nil {
+			return fmt.Errorf("#%d reopened as #%d, but it still shows in Done: %w", orig.ID, it.ID, err)
+		}
+		return nil
 	})
 	return it, err
 }

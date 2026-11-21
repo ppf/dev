@@ -11,8 +11,8 @@ func Closed(c *tmux.Client, now time.Time) ([]BossList, error) {
 	return All(c, now, func(string) bool { return false }, true, false)
 }
 
-// ClosedStore is the list of boss when it is a boss closed on c's server with open items, or with finished, ticked or
-// finished ones (List.Finished); ok false when it isn't.
+// ClosedStore is the list of boss when it is a boss closed on c's server with open items, or, with finished, ticked or
+// finished items only; ok false when it isn't.
 func ClosedStore(c *tmux.Client, boss string, now time.Time, finished bool) (s Store, ok bool, err error) {
 	lists, err := All(c, now, func(string) bool { return false }, true, finished)
 	if err != nil {
