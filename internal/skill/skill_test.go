@@ -174,8 +174,8 @@ func TestAskRules(t *testing.T) {
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
-		"**Assess the user's ideas before handing them on.**", "one you doubt but can check counts",
-		"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user gave, typed or picked, is relayed", "the pick decides the hand-on", "a typed change goes on only if it says to", "the usual brief carries the user's own words (\"contract first\" for a feature)", "work in the same message still counts", "needs no written assessment", "options \"Hand it on\" and \"Drop it\"", "goes in the unverified part and asks nothing",
+		"**Assess the user's ideas before handing them on.**", "a conflict on the lists always counts",
+		"a one-line why", "it decides nothing for a project", "skipped, it isn't handed on", "goes before them all, once every answer the user gave, typed or picked, is relayed", "the pick decides the hand-on", "a typed change goes on only if it says to", "the usual brief adds to the user's own words (\"contract first\" for a feature)", "work in the same message still counts", "needs no written assessment", "options \"Hand it on\" and \"Drop it\"", "goes in the unverified part and asks nothing",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)
