@@ -158,10 +158,15 @@ func (m Model) bottom() []string {
 	return m.hintRow(pages + hint)
 }
 
-// hintRow is the bottom row of keys, then what holds a ready reload: after the keys, which a narrow pane keeps.
+// hintRow is the bottom row of keys with what holds a ready reload: before them, so a narrow pane shows it, but
+// after TO DO's keys, which the user is using.
 func (m Model) hintRow(keys string) []string {
-	if h := m.held(); h != "" {
+	switch h := m.held(); {
+	case h == "":
+	case m.needMode:
 		keys += "  " + h
+	default:
+		keys = h + "  " + keys
 	}
 	return []string{sidebar.HintRow(keys, m.width)}
 }

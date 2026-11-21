@@ -82,13 +82,12 @@ func TestReloadHeldByTypedReply(t *testing.T) {
 	}
 	// Focus moved away: the reply is kept for its card, and still holds the reload
 	m.blur()
-	m.width = 120
 	m, quit := refreshed(m)
 	if quit {
 		t.Fatal("reloaded with a reply kept for a card")
 	}
-	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "j/k select") || !strings.Contains(row, "↻ v2 reloads once the unsent message goes") {
-		t.Errorf("bottom row %q: want the keys, then what holds the reload", row)
+	if row := ansiStrip(m.bottom())[0]; !strings.HasPrefix(row, " ↻ v2 reloads once the unsent message goes  j/k") {
+		t.Errorf("bottom row %q: want what holds the reload, then the keys", row)
 	}
 	m.open(m.snap.tiles[index(m.snap.tiles, m.selected)])
 	if string(m.box.ed.text) != "hi" {
