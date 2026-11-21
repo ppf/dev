@@ -52,6 +52,13 @@ func reopenItem() Item {
 	return Item{Text: "Review the plan", Link: prURL, Context: []string{"why: it ships today"}}
 }
 
+// sameBut reports got as want but its Added, which a reopen sets to after: its checks and age start afresh.
+func sameBut(got, want Item, after time.Time) bool {
+	ok := got.Added > want.Added && got.Added >= after.Unix()
+	got.Added = want.Added
+	return ok && reflect.DeepEqual(got, want)
+}
+
 // openItem is s's open item id as written, and whether there is one.
 func openItem(t *testing.T, s Store, id int) (Item, bool) {
 	t.Helper()
@@ -101,7 +108,7 @@ func TestReopenThroughWriters(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(got, before) {
+			if !sameBut(got, before, later.Add(time.Minute)) {
 				t.Errorf("reopened %+v, want %+v", got, before)
 			}
 			// And the writer after it keeps it open
@@ -109,7 +116,7 @@ func TestReopenThroughWriters(t *testing.T) {
 			if s, err = w.write(s, at); err != nil {
 				t.Fatal(err)
 			}
-			if it, ok := openItem(t, s, id); !ok || !reflect.DeepEqual(it, before) {
+			if it, ok := openItem(t, s, id); !ok || !sameBut(it, before, later.Add(time.Minute)) {
 				t.Errorf("after %s: open #%d %+v (%v), want %+v", w.name, id, it, ok, before)
 			}
 			l, err := s.Read(at)
@@ -141,7 +148,7 @@ func TestReopenNotMoved(t *testing.T) {
 		if _, err := s.Reopen(1, before.Text, at); err != nil {
 			t.Fatal(err)
 		}
-		if it, ok := openItem(t, s, 1); !ok || !reflect.DeepEqual(it, before) {
+		if it, ok := openItem(t, s, 1); !ok || !sameBut(it, before, at) {
 			t.Errorf("at +%v: open #1 %+v (%v), want %+v", at.Sub(t0), it, ok, before)
 		}
 		if items, done := stored(t, s); !slices.Equal(items, []int{1}) || len(done) != 0 {

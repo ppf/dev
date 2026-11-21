@@ -148,6 +148,8 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		case i >= 0:
 			it = f.Items[i]
 			f.Items = slices.Delete(f.Items, i, i+1)
+			// A link its other half stores to it goes too; one to a finished item went as it left (unlinkGone)
+			f.unlink(it.ID)
 		case j >= 0:
 			it = done[j]
 		default:
@@ -157,14 +159,13 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 			return Refused{fmt.Errorf("item %d was on %s, not the user's to reopen", id, it.On)}
 		}
 		orig := it
-		// A link its other half stores to it goes too, as its own does
-		f.unlink(orig.ID)
 		f.dropped = slices.DeleteFunc(f.dropped, func(x Item) bool { return sameItem(x, orig) })
 		f.Ticked = slices.DeleteFunc(f.Ticked, func(t Ticked) bool { return t.ID == orig.ID && t.Text == orig.Text })
 		if slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == it.ID }) {
 			it.ID = max(f.Next, 1)
 		}
-		it.Done, it.DoneOn, it.Answer, it.Doing, it.Started, it.PartOf = 0, "", "", nil, nil, 0
+		// A new Added, as a --replaces gives: its checks and age start afresh
+		it.Done, it.DoneOn, it.Answer, it.Doing, it.Started, it.PartOf, it.Added = 0, "", "", nil, nil, 0, max(now.Unix(), it.Added+1)
 		if it.Until != 0 && now.Unix() >= it.Until {
 			it.Until = 0
 		}

@@ -98,8 +98,10 @@ func (m Model) canStart() bool {
 }
 func (m Model) canTick() bool { return m.plain() }
 
-// canReopen is what todo.Reopen takes: the user's own ticked item.
-func (m Model) canReopen() bool { return m.it.Done && m.own() }
+// canReopen is what todo.Reopen takes, as the web page offers it: the user's own ticked item, never a desktop app boss's.
+func (m Model) canReopen() bool {
+	return m.it.Done && m.own() && !strings.HasPrefix(m.it.Boss, "local_")
+}
 
 // list is what the view lists: an ask's options then own words; else its actions.
 func (m Model) list() []entry {

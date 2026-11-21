@@ -21,7 +21,8 @@ func newTodoReopenCmd(boss *string) *cobra.Command {
 		Short: "Put the user's ticked item n of a dev boss's list back on it, as the user: Done back to To do",
 		Long: `Put item n of the list of dev boss session <boss>, ticked in the last day, back on the list as an open item, as
 the user: only their own (no --on), the newest ticked one by that number that reads --question's text. It keeps its
-number, unless an item has it now (numbers restart once a list empties): then it gets the next one, printed. Its text,
+number, unless an item has it now (numbers restart once a list empties): then it gets the next one, printed; its added
+time is now, so its checks and age start afresh. Its text,
 link, context and options come back; a passed --until, --done-on, an ask's answer, a doing line, a start and a
 --part-of link do not. Works for a closed boss's list. Refused in a Claude Code session ($CLAUDECODE set), as dev
 todo start is.`,

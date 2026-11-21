@@ -336,10 +336,9 @@ async function send(list, it) {
   }
 }
 
-// itemCall posts path for item it of list with extra in its body; when the Mac took it, leaves with note and returns
-// it ('' when not taken).
-async function itemCall(path, list, it, extra, note) {
-  const k = key(list.boss, it.id);
+// itemCall posts path for item it of list with extra in its body, under k; when the Mac took it, leaves with note and
+// returns it ('' when not taken).
+async function itemCall(path, list, it, extra, note, k = key(list.boss, it.id)) {
   if (!await post(path, { boss: list.boss, id: it.id, text: it.text, ...extra }, k)) return '';
   leave(k, note + it.text);
   return note + it.text;
@@ -351,7 +350,9 @@ const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
 const seen = it => ({ doing: it.doing || null, started: it.started || null });
 const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '', seen: seen(it) }, 'On it, in progress: ');
 const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true, seen: seen(it) }, 'Off it: ');
-const reopen = (list, it) => itemCall('/v1/reopen', list, it, {}, 'Reopened: ');
+// A finished card's key: its number may be an open card's again
+const doneKey = (boss, id) => 'done:' + key(boss, id);
+const reopen = (list, it) => itemCall('/v1/reopen', list, it, {}, 'Reopened: ', doneKey(list.boss, it.id));
 // What each verdict act calls: the sheet's buttons' own; stop doing and reopen have no button yet
 const ACTS = { tick, start, doing: onIt, stop: offIt, reopen };
 
@@ -908,9 +909,8 @@ const acted = ({ list, it }) => JSON.stringify([it.text, it.added, it.on, it.ses
 // only), the card shown there meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y};
 // else by the card). shown: the verdict the drag showed for to, when it was lifted.
 async function move(x, to, at, shown) {
-  const k = key(x.list.boss, x.it.id);
-  // A finished card's id may be an open one's again: only an open card (or one shown dropped on Done) is on its way
-  if ((!x.done || x.moving) && (state.moves[k] || state.pending[k])) return refuse(x, 'already on its way to your Mac', at);
+  const k = x.done && !x.moving ? doneKey(x.list.boss, x.it.id) : key(x.list.boss, x.it.id);
+  if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
   if (!x.done) {
     const now = find(x.list.boss, x.it.id), was = shown || verdict(x, columnOf(x), to, managerRuns()), is = verdict(now || x, columnOf(now || x), to, managerRuns());
     if (!now) return refuse(x, 'no longer open', at);
