@@ -790,7 +790,7 @@ func TestPromptAskRules(t *testing.T) {
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
 			"dev todo note decided|said|risk",
-			"write a five-line contract file", `ending "leave it to the manager" is the manager's`, `in a "via manager (...)" note only the answer after the colon is`, "stop it after the first step and ask before the rest",
+			"write a five-line contract file", "An item you do yourself or park is --on boss", "--waiting-for <who>, never a free-text owner", "state: your standing state off the board", `ending "leave it to the manager" is the manager's`, `in a "via manager (...)" note only the answer after the colon is`, "stop it after the first step and ask before the rest",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
@@ -801,7 +801,7 @@ func TestPromptAskRules(t *testing.T) {
 			"for you the source is the boss", "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
 			"Before handing on the user's own new idea or request", "With real cons or a conflict on the lists",
 			"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
-			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly"}},
+			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly", "your own task --on boss, one a person owes --waiting-for <who>"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {

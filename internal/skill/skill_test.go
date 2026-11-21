@@ -197,12 +197,18 @@ func TestTodoOwnerRule(t *testing.T) {
 		if strings.Contains(text, "dev todo") && !strings.Contains(text, "add --on <worker name>") {
 			t.Errorf("%s/SKILL.md: dev todo rule without --on for a worker's item", name)
 		}
+		// A boss's own or parked item and a person's must not read as free-text owners
+		for _, want := range []string{"An item you do yourself or park gets `--on boss`", "`dev todo doing <n> '<what now>'`", "`--waiting-for <who>`", "never a free-text owner"} {
+			if strings.Contains(text, "dev todo") && !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: owner rule missing %q", name, want)
+			}
+		}
 	}
 }
 
 func TestTodoNoteRule(t *testing.T) {
 	for name, text := range byName {
-		if strings.Contains(text, "dev todo") && !strings.Contains(text, "dev todo note decided|said|risk") {
+		if strings.Contains(text, "dev todo") && (!strings.Contains(text, "dev todo note decided|said|risk") || !strings.Contains(text, "`state` holds your standing state off the board")) {
 			t.Errorf("%s/SKILL.md: dev todo rule without dev todo note", name)
 		}
 	}
