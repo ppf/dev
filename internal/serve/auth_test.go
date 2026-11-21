@@ -324,11 +324,15 @@ func TestAlive(t *testing.T) {
 }
 
 func TestRecordAddrPutsBack(t *testing.T) {
-	health := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`)) })
-	first, second := httptest.NewServer(health), httptest.NewServer(health)
-	defer second.Close()
 	dir := t.TempDir()
-	a, b := netip.MustParseAddrPort(first.Listener.Addr().String()), netip.MustParseAddrPort(second.Listener.Addr().String())
+	a, b := netip.MustParseAddrPort("127.0.0.1:8417"), netip.MustParseAddrPort("192.168.1.89:8417")
+	recorded := func() string {
+		var cur string
+		if err := readFile(dir, addrFile, &cur); err != nil {
+			return err.Error()
+		}
+		return cur
+	}
 	if _, err := RecordAddr(dir, a); err != nil {
 		t.Fatal(err)
 	}
@@ -336,17 +340,34 @@ func TestRecordAddrPutsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := RecordAddr(dir, b); err != nil { // b reloads: same address, a still kept
+		t.Fatal(err)
+	}
 	forgetB()
-	if got, _, err := Served(dir, time.Second); err != nil || got != a {
-		t.Fatalf("after the second one left: %v %v, want %v back", got, err, a)
+	if got := recorded(); got != a.String() {
+		t.Fatalf("after b left: %q, want %s back", got, a)
 	}
 	forgetB, err = RecordAddr(dir, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.Close()
+	c := netip.MustParseAddrPort("127.0.0.1:9000")
+	if _, err := RecordAddr(dir, c); err != nil { // c records over b: b's leaving leaves c's record
+		t.Fatal(err)
+	}
 	forgetB()
+	if got := recorded(); got != c.String() {
+		t.Fatalf("b's leaving touched c's record: %q", got)
+	}
+	forgetA, err := RecordAddr(dir, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, prevAddrFile)); err != nil {
+		t.Fatal(err)
+	}
+	forgetA()
 	if _, err := os.Stat(filepath.Join(dir, addrFile)); !os.IsNotExist(err) {
-		t.Fatalf("a gone one put back: %v", err)
+		t.Fatalf("nothing to put back, record kept: %v", err)
 	}
 }
