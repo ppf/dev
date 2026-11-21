@@ -485,7 +485,7 @@ function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
-    el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, '#' + it.id),
+    el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, project(list) + ' #' + it.id),
     el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
@@ -546,15 +546,21 @@ function columns(ls) {
 // swipe is the phone's board: a tab per column, with its count and what needs the user, over the columns side by side,
 // one a screen, the next peeking in.
 function swipe(ls) {
-  // The lane is taken once the scroll stops (a tab's smooth scroll lands on no lane it passes), and a redraw held meanwhile
-  const lanes = el('div', { class: 'lanes', onscroll: () => {
+  // The lane is taken once the scroll stops and no finger is down (a tab's smooth scroll lands on no lane it passes); a
+  // redraw is held meanwhile
+  const settle = () => {
     clearTimeout(settling);
     settling = setTimeout(() => {
+      if (touching) return; // the finger's lift settles again
       settling = 0;
+      if (!lanes.isConnected) return; // the board left for Pair or Loading
       laneInView(lanes);
       render();
     }, 150);
-  } },
+  };
+  const lift = () => { touching = false; settle(); };
+  const lanes = el('div', { class: 'lanes', onscroll: () => { if (placed) placed = false; else settle(); },
+    ontouchstart: () => { touching = true; settle(); }, ontouchend: lift, ontouchcancel: lift },
     ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
@@ -565,14 +571,17 @@ function swipe(ls) {
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
-let settling = 0;
+// settling is the phone lanes' scroll or touch under way (its timer): a redraw would cut it off. placed: the next scroll
+// event is a redraw's own instant scroll, no one's swipe.
+let settling = 0, touching = false, placed = false;
 
 // showLane scrolls the phone's lanes to column k's.
 function showLane(k, smooth) {
   const lanes = document.querySelector('#view .lanes'), lane = lanes?.querySelector('[data-k="' + k + '"]');
   if (!lane) return;
-  lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: smooth ? 'smooth' : 'instant' });
+  const left = Math.min(lane.offsetLeft - lanes.firstElementChild.offsetLeft, lanes.scrollWidth - lanes.clientWidth);
+  placed = !smooth && Math.abs(left - lanes.scrollLeft) >= 1; // a scroll that moves fires an event
+  lanes.scrollTo({ left, behavior: smooth ? 'smooth' : 'instant' });
   land(lanes, k);
 }
 

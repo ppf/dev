@@ -163,8 +163,8 @@ a { color: var(--act); }
 .card.done { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 10px; font-size: 13px; color: var(--ink2); }
 .card.done .ok { color: var(--s-done); font-weight: 700; flex: none; }
 .card.done .num, .card.done .age { font-size: var(--fs-meta); color: var(--meta); white-space: nowrap; }
-.card.done .t { order: 1; flex-basis: 100%; overflow-wrap: break-word; } /* whole, under its meta: no hover needed to read it */
-.card.done .age { margin-left: auto; }
+.card.done .t { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; } /* whole, under its meta: no hover needed to read it */
+.card.done .num { flex: 1; } /* what follows it at the row's end */
 
 /* phone: one column per screen, a tab per column; the next peeks at the right edge */
 .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 6px calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--edge); }
