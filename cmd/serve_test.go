@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -18,10 +19,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -154,6 +155,7 @@ func TestServePair(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path != "/v1/done":
+			_, _ = w.Write([]byte(`{"ok":true,"version":"v1"}`))
 		case older.Load():
 			w.WriteHeader(http.StatusUnauthorized)
 		default:
@@ -343,11 +345,11 @@ func startReloadRunWith(t *testing.T, fire <-chan struct{}, execErr error, tweak
 		}()
 		return ch
 	}
-	execReload = func(rd selfreload.Ready, args []string) error {
+	execReload = func(rd selfreload.Ready, args []string, _ ...string) error {
 		if rd.Version != "v2.0.0" {
 			t.Errorf("exec into %q", rd.Version)
 		}
-		if got := os.Getenv(envServeReexec); got != strconv.Itoa(os.Getpid())+" 0" {
+		if got := os.Getenv(envServeReexec); got != fmt.Sprintf("%d 0", os.Getpid()) {
 			t.Errorf("%s=%q at exec, want this pid", envServeReexec, got)
 		}
 		// The socket stays bound, so a connection waits unanswered
@@ -720,5 +722,36 @@ func TestUnrepeated(t *testing.T) {
 	}
 	if out.String() != "a\nb\na\n" {
 		t.Errorf("written %q, want a, b, then a again a minute on", out.String())
+	}
+}
+
+func TestCloseKept(t *testing.T) {
+	dir := t.TempDir()
+	alive, err := serve.Alive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = alive.Close() }()
+	kept, err := syscall.Open(filepath.Join(dir, "alive"), syscall.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := syscall.Open(filepath.Join(dir, "lock"), syscall.O_CREAT|syscall.O_RDONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Close(other) }()
+	var out bytes.Buffer
+	closeKept(kept, alive, &out)
+	if err := syscall.Close(kept); !errors.Is(err, syscall.EBADF) {
+		t.Errorf("the alive file kept open: %v", err)
+	}
+	closeKept(other, alive, &out)
+	var st syscall.Stat_t
+	if err := syscall.Fstat(other, &st); err != nil {
+		t.Errorf("another file closed: %v", err)
+	}
+	if out.Len() > 0 {
+		t.Errorf("out %q", out.String())
 	}
 }

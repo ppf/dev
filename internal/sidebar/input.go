@@ -14,7 +14,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if target == "" {
 		target = current
 	}
-	m.answerErr, m.reloadErr = nil, nil
+	m.answerErr, m.reload.Err = nil, nil
 	if m.needMode {
 		return m.handleNeedsKey(k)
 	}
@@ -42,7 +42,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		return m, m.openPR(client, target)
 	case "ctrl+c":
-		return m, tea.Quit
+		// Before m is read: the quit marks its reload
+		quit := m.reload.Quit()
+		return m, quit
 	}
 	return m, nil
 }

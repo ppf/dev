@@ -225,7 +225,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		m.todoFolded = !m.todoFolded
 	case "ctrl+c":
-		return m, tea.Quit
+		// Before m is read: the quit marks its reload
+		quit := m.reload.Quit()
+		return m, quit
 	}
 	return m, nil
 }
@@ -386,12 +388,12 @@ func (m Model) openPR(i int) (tea.Model, tea.Cmd) {
 
 // action runs fn off the update loop and reports its error on the bottom row.
 func (m Model) action(fn func() error) tea.Cmd {
-	return func() tea.Msg {
+	return m.reload.Busy.Run(func() tea.Msg {
 		if err := fn(); err != nil {
 			return actionMsg{alert("❌ " + err.Error())}
 		}
 		return actionMsg{}
-	}
+	})
 }
 
 // typeBox edits the reply in the box: ⏎ sends it to the worker as a prompt (as dev agent prompt does, so one
@@ -399,7 +401,9 @@ func (m Model) action(fn func() error) tea.Cmd {
 // replies, esc closes, ctrl+c quits. A dialog the worker waits on shows as a picker instead.
 func (m Model) typeBox(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
-		return m, tea.Quit
+		// Before m is read: the quit marks its reload
+		quit := m.reload.Quit()
+		return m, quit
 	}
 	m.msg = message{}
 	b := &m.box
@@ -490,7 +494,7 @@ func (m Model) sendReply() (tea.Model, tea.Cmd) {
 	if n := len(m.history); n == 0 || m.history[n-1] != text {
 		m.history = append(m.history, text)[max(0, n+1-maxHistory):]
 	}
-	return m, func() tea.Msg {
+	return m, m.reload.Busy.Run(func() tea.Msg {
 		// The worker may have exited while the reply was typed: its pane's shell would run the text
 		if a, err := control.Resolve(m.c, target); err != nil || a.Pane != pane {
 			return actionMsg{alert("❌ " + target + ": its agent is gone, reply not sent")}
@@ -503,7 +507,7 @@ func (m Model) sendReply() (tea.Model, tea.Cmd) {
 			return actionMsg{info("Queued for " + target + ": it reads it at its turn's next step")}
 		}
 		return actionMsg{info("Sent to " + target)}
-	}
+	})
 }
 
 // typePick answers the bound worker's dialog: ←→ (↑↓) move, ⏎ picks (a multi-select's ⏎ goes on to the next
