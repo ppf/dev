@@ -11,7 +11,7 @@ function node() {
   return n;
 }
 const els = {};
-let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200;
+let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200, held = null;
 const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
   lists: lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
 const calls = [], posts = [], media = { matches: false, addEventListener() {} };
@@ -30,12 +30,14 @@ const ctx = {
     if (p === '/v1/health') return res(200, { ok: true, version: 'v1' });
     if (opts.method === 'POST') {
       posts.push([p, opts.body]);
+      if (postStatus === 0) throw new Error('no reply');
       return postStatus === 200 ? res(200, { ok: true }) : res(postStatus, { error: 'refused by the Mac' });
     }
     if (status !== 200) return res(status, { error: 'no' });
     const etag = 'W/"' + tag + version + '"';
-    if (opts.headers['If-None-Match'] === etag) return res(304, null, etag);
-    return res(200, board(), etag);
+    const r = opts.headers['If-None-Match'] === etag ? res(304, null, etag) : res(200, board(), etag);
+    // held: board reads answer, as read when asked, only once let go one by one
+    return held ? new Promise(ok => held.push(() => ok(r))) : r;
   },
   EventSource: class {
     constructor(url) { this.url = url; this.on = {}; this.closed = false; ctx.streams.push(this); }
@@ -238,13 +240,79 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   const last = cls => ctx.document.body.children.filter(c => c.className === cls).at(-1)?.children.join('');
   check('a drop on To do of a card you are on sends stop: ' + JSON.stringify(posts), posts.length === 1 && JSON.parse(posts[0][1]).stop === true);
   check('a 409 puts it back, with the reason: ' + laneOf(1) + ' ' + last('refuse'), laneOf(1) === 'progress' && !Object.keys(run('state.moves')).length
-    && last('refuse') === 'refused by the Mac' && last('toast') === 'Not moved · #1 stays in In progress');
+    && last('refuse') === 'refused by the Mac' && last('toast') === 'Not moved · #1 is in In progress');
   postStatus = 200;
   posts.length = 0;
   await run("move(find('boss-a', 2), 'done')");
   check('a refused drop sends nothing, says why, leaves the card', !posts.length && last('refuse') === 'boss-a ticks it' && laneOf(2) === 'progress');
   await run("move(find('boss-a', 2), 'waiting')");
   check('Waiting refuses: set by the session', last('refuse') === 'set by the session' && !posts.length);
+
+  // A board read asked before the call's reply doesn't settle the card: the one asked after it does
+  const parked = { id: 3, text: 'Plan the beds', status: 'idle', on: 'boss', column: 'todo', assignee: { kind: 'boss', name: 'boss-a', running: true } };
+  const show = async (items, t) => {
+    lists = [{ boss: 'boss-a', items }];
+    tag = t;
+    es().on.board({ data: 'W/"' + t + 'v2"' });
+    await settle();
+  };
+  await show([mine('todo'), worker, parked], 'E1');
+  held = [];
+  tag = 'E2';
+  es().on.board({ data: 'W/"E2v2"' }); // read asked now, answering the board as it is
+  await settle();
+  lists = [{ boss: 'boss-a', items: [mine('todo', { done: true }), worker, parked] }];
+  tag = 'E3';
+  posts.length = 0;
+  const ticking = run("move(find('boss-a', 1), 'done')");
+  const doneCard = () => walk(lanes().find(l => l.attrs['data-k'] === 'done'), c => /\bmoving\b/.test(c.className || ''))[0];
+  check('a drop on Done: pending as a done row, Ticking…', /^card done moving/.test(doneCard()?.className) && textOf(doneCard()).startsWith('Ticking…'));
+  await ticking;
+  await settle();
+  check('a drop on Done sends the Tick button\'s request', posts.length === 1 && posts[0][0] === '/v1/done' && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 1, text: 'Order the hoses' }));
+  held.shift()();
+  await settle();
+  check('a read asked before the reply leaves it pending', !!run("state.moves['boss-a/1']"));
+  while (held.length) held.shift()();
+  held = null;
+  await settle();
+  check('the read asked after it settles it', !run("state.moves['boss-a/1']") && !doneCard());
+  const ticked = posts[0];
+  await show([mine('todo'), worker, parked], 'E4');
+  posts.length = 0;
+  await run("tick(find('boss-a', 1).list, find('boss-a', 1).it)");
+  check('the Tick button sends the same', JSON.stringify(posts[0]) === JSON.stringify(ticked));
+
+  await show([mine('todo'), worker, parked], 'E5');
+  posts.length = 0;
+  await run("move(find('boss-a', 3), 'progress')");
+  const started = posts[0];
+  await show([mine('todo'), worker, parked], 'E6');
+  posts.length = 0;
+  await run("start(find('boss-a', 3).list, find('boss-a', 3).it)");
+  check('a boss\'s card on In progress sends what Start sends: ' + JSON.stringify(started), started?.[0] === '/v1/start' && JSON.stringify(posts[0]) === JSON.stringify(started));
+
+  await show([mine('todo'), worker, parked], 'E7');
+  posts.length = 0;
+  const first = run("move(find('boss-a', 1), 'progress')");
+  await run("move(find('boss-a', 1), 'done')");
+  check('a second drop while the first is on its way: refused, nothing sent', last('refuse') === 'already on its way to your Mac');
+  await first;
+  await settle();
+  check('only the first call went', posts.length === 1);
+
+  await show([mine('todo'), worker, parked], 'E8');
+  posts.length = 0;
+  postStatus = 0;
+  await run("move(find('boss-a', 1), 'progress')");
+  await settle();
+  check('no reply: back in To do, says so', /^No reply from your Mac/.test(last('refuse')) && laneOf(1) === 'todo' && !Object.keys(run('state.moves')).length);
+  postStatus = 200;
+  posts.length = 0;
+  run('state.reachable = false');
+  await run("move(find('boss-a', 1), 'progress')");
+  check('unreachable: refused, nothing sent', last('refuse') === 'your Mac is not reachable' && !posts.length);
+  run('state.reachable = true');
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });

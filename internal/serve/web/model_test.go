@@ -202,6 +202,9 @@ const got = [
   ['5 out of Done', v(done, 'todo'), 'reopen is not built yet'],
   ['6 the same column: nothing', v(yours, 'todo'), 'null'],
   ['a desktop app list', v(desk, 'progress'), "a desktop app boss's card: change it in its chat"],
+  ['a desktop app list → Done', v(desk, 'done'), "a desktop app boss's card: change it in its chat"],
+  ['2 own, in progress, not doing → To do', v(c(live, { status: 'yours', column: 'progress', assignee: you }), 'todo'), 'you are working on it'],
+  ['3 own, on its boss by name → Done', v(c(live, { status: 'yours', on: 'boss-dev', column: 'todo', assignee: you }), 'done'), 'not tickable from the page'],
 ];
 for (const [name, out, want] of got) {
   const o = JSON.parse(out), is = o === null ? 'null' : o.act || o.why;

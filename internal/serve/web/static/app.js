@@ -154,7 +154,7 @@ async function load() {
   } catch {}
   if (seq !== state.seq) return;
   // A dropped card goes where the first board read after its call puts it
-  if (res?.ok || res?.status === 304) {
+  if ((res?.ok && res.data) || res?.status === 304) {
     for (const [k, m] of Object.entries(state.moves)) if (m.after < seq) delete state.moves[k];
   }
   state.reachable = !!res && (res.status === 401 || res.status === 304 || (res.ok && !!res.data));
@@ -345,7 +345,7 @@ const tick = (list, it) => itemCall('/v1/done', list, it, {}, 'Ticked: ');
 const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
 const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '' }, 'On it, in progress: ');
 const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true }, 'Off it, back to To do: ');
-// What each verdict act calls: the sheet's buttons' own
+// What each verdict act calls: the sheet's buttons' own; stop doing has no button yet
 const ACTS = { tick, start, doing: onIt, stop: offIt };
 
 // leave closes item k's sheet with note, when it is still the one shown, and reads the board again.
@@ -853,12 +853,13 @@ const FLASH_MS = 4500;
 const DRAG_PX = 5; // a press moved this far lifts its card: less is a click
 const titleOf = k => COLUMNS.find(c => c.key === k).title;
 
-// move runs what dropping card x on column to means (verdict), as the matching sheet button does, the card shown there
-// meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y}; else by the card).
+// move runs what dropping card x on column to means (verdict): the call the sheet's button makes (stop doing: a drop's
+// only), the card shown there meanwhile; a refusal, the page's or the Mac's, puts it back and says why near at ({x, y};
+// else by the card).
 async function move(x, to, at) {
   const k = key(x.list.boss, x.it.id);
   if (!x.done) {
-    if (state.moves[k] || state.pending[k]) return;
+    if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
     const now = find(x.list.boss, x.it.id);
     if (!now) return refuse(x, 'no longer open', at);
     x = now;
@@ -866,9 +867,18 @@ async function move(x, to, at) {
   const v = verdict(x, columnOf(x), to, managerRuns());
   if (!v) return;
   if (v.why) return refuse(x, v.why, at);
+  // as the buttons, disabled then
+  if (!state.reachable) return refuse(x, 'your Mac is not reachable', at);
   state.moves[k] = { to, act: v.act };
-  render();
-  if (!await ACTS[v.act](x.list, x.it)) refuse(x, state.errors[k] || state.note || 'not moved', at);
+  delete state.errors[k];
+  let ok = false;
+  try {
+    render();
+    ok = await ACTS[v.act](x.list, x.it);
+  } finally {
+    if (state.moves[k]?.after === undefined) delete state.moves[k]; // never left for good
+  }
+  if (!ok) refuse(x, state.errors[k] || state.note || 'not moved', at);
 }
 
 let flashTimer = 0;
@@ -877,8 +887,10 @@ let flashTimer = 0;
 function refuse(x, why, at) {
   for (const n of document.querySelectorAll('body > .refuse, body > .toast')) n.remove();
   at ||= anchor(x);
+  // Where it is now: an unanswered call may have moved it after all
+  const now = x.done ? x : find(x.list.boss, x.it.id);
   const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': at.y + 'px' } }, why);
-  const toast = el('div', { class: 'toast' }, 'Not moved · #' + x.it.id + ' stays in ' + titleOf(columnOf(x)));
+  const toast = el('div', { class: 'toast' }, 'Not moved · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
   document.body.append(call, toast);
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { call.remove(); toast.remove(); }, FLASH_MS);
@@ -898,6 +910,7 @@ function press(e) {
   if (e.pointerType === 'touch' || e.button !== 0 || !wide.matches || route().name !== 'board') return;
   const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
   if (!x || x.moving || e.target.closest('button, select, input, textarea, .quick')) return;
+  if (drag?.lifted) drop(e, true); // its pointerup never came
   drag = { x, el: c, id: e.pointerId, sx: e.clientX, sy: e.clientY };
 }
 
@@ -923,6 +936,7 @@ function lift() {
     return { el: c, k: c.dataset.k, v };
   });
   drag.lifted = true;
+  drag.el.setPointerCapture?.(drag.id); // its pointerup comes back from outside the window too
 }
 
 // follow moves the ghost to the pointer and marks the column under it: a target with what a drop does, or refusing.
@@ -951,8 +965,8 @@ function drop(e, end = false) {
   const d = drag;
   drag = null;
   if (!d?.lifted) return;
-  // The click this pointerup fires comes before any timer
-  swallow = !end;
+  // The click this pointerup fires, a cancelled drag's too, comes before any timer
+  swallow = true;
   setTimeout(() => { swallow = false; });
   d.ghost.remove();
   d.el.classList.remove('slot');
@@ -1000,12 +1014,12 @@ window.addEventListener('hashchange', () => {
 document.getElementById('shade').addEventListener('click', closeSheet);
 document.addEventListener('keydown', e => {
   if (drag?.lifted && e.key === 'Escape') return drop(e, true);
-  if (route().name === 'board' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
+  if (route().name === 'board' && wide.matches && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft', 'ArrowRight'].includes(e.key)) {
     const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
     if (!x || drag?.lifted) return;
     e.preventDefault();
     const next = COLUMNS[COLUMNS.findIndex(col => col.key === columnOf(x)) + (e.key === 'ArrowRight' ? 1 : -1)];
-    if (next && !x.moving) move(x, next.key);
+    if (next) move(x, next.key);
     return;
   }
   if (route().name !== 'item') return;

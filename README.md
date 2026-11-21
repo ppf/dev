@@ -289,7 +289,7 @@ Open the printed URL on the phone and enter the code (8 digits shown as `1234 56
 - A card: its project's colour bar, number and status; a strip for what to read first (blocked · needs you, worker gone, start not picked up, a PR merged, approved or failing); under the title what its worker is doing now (`now`); its due time, PR, age (amber after a day for your own) and whom it is on (initials); Start on your own plain items; an ask's options numbered, ★ the recommended one.
 - Tap a card for its sheet (from the bottom on the phone, centred on a wide screen): the full text, context lines and facts (what its worker does now among them), an ask's options (★ the recommended one), your own words, Send, Start and Tick as done. An ask's card has its options as buttons: a tap opens the sheet with that pick ready to Send.
 - Can: read the board, answer an ask (pick, then Send, or your own words), tick your own items, or Start your own plain ones (not the manager's own notes; yours, boss closed, or start not picked up; Start is `dev todo start`: the boss, or the manager for a closed boss, gets the note; again only once it reads `start not picked up`).
-- Drag and drop (wide screen, mouse or trackpad; not on the phone): a drop runs the sheet button's own call, the card waiting in the target (Starting…, Ticking…) until the board read after it places it; a refusal, the page's or the Mac's, puts it back with the reason for a few seconds. While a card is lifted, columns that refuse it dim with the reason, and a board change waits for the drop. Shift+←/→ on a focused card moves it one column, same rules.
+- Drag and drop (wide screen, mouse or trackpad; not on the phone): a drop runs the sheet button's own call (stop doing has no button yet), the card waiting in the target (Starting…, Ticking…) until the board read after it places it; a refusal, the page's or the Mac's, puts it back with the reason for a few seconds. While a card is lifted, columns that refuse it dim with the reason, and a board change waits for the drop. Shift+←/→ on a focused card moves it one column, same rules.
 
 | From → to | Whose card | What happens |
 |---|---|---|
@@ -301,13 +301,15 @@ Open the printed URL on the phone and enter the code (8 digits shown as `1234 56
 | In progress → To do | yours, marked doing | stop doing: back to To do |
 | In progress → To do | started, not picked up yet | refused: "boss-x was asked to start it" |
 | In progress → To do | a session's or boss's | refused: "dev-x is working on it" |
+| In progress → To do | yours, not marked doing | refused: "you are working on it" |
 | any → Done | yours, no ask (where Tick shows) | Tick |
 | any → Done | an ask | refused: "answer it instead" |
 | any → Done | a session's or boss's | refused: "boss-x ticks it" (the list's boss) |
+| any → Done | yours, where Tick doesn't show | refused: "not tickable from the page" |
 | any → Waiting / Review | any | refused: "set by the session" / "set by the PR" |
 | Waiting / Review → To do / In progress | any | refused: "the session moves it out of Waiting" / "the PR moves it out of Review" |
 | Done → any | any | refused: "reopen is not built yet" |
-| any → any | a desktop app boss's | refused: "a desktop app boss's card: change it in its chat" |
+| To do / In progress → another (not Waiting, Review) | a desktop app boss's | refused: "a desktop app boss's card: change it in its chat" |
 | same column | any | nothing (no reordering) |
 
 - Live: while the page is shown, `GET /v1/events` (a server-sent event stream, same session as `/v1/board`) tells it the board changed, so a change on the Mac shows within about a second; `dev serve` reads the board every second only while a page has the stream open, and the stream pings every 15 s (the page then checks the board, a 304 when unchanged) and ends at the next ping after its session is dropped. Without the stream (dropped, refused) the page reads `/v1/board` every 5 s and retries the stream (1 s, doubling, at most 15 s); back from the background, it reads the board and reopens the stream at once. The header says `live · updated HH:MM` while either works, `unreachable · as of HH:MM` when neither does; it comes back by itself, and a dropped session (`dev serve unpair`) moves the page to Pair. After `dev serve` restarts on a new version the page reloads itself once; with words typed or a pick made in an open sheet, a note shown (`Sent to …`), or a reload of its own in the last minute, the header offers `New version: reload` instead.
