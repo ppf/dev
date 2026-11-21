@@ -31,7 +31,7 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 		getenv: func(k string) string { return f.envValue[k] },
 		uid:    501, dir: filepath.Join(t.TempDir(), "serve"), home: t.TempDir(), exe: "/bin/dev", own: "(devel) abc",
 		served: func(string) (netip.AddrPort, string, error) {
-			if f.runs < 0 || f.runs > 0 {
+			if f.runs != 0 {
 				f.runs--
 				return netip.AddrPort{}, "", errors.New("not running")
 			}

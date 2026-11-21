@@ -65,10 +65,18 @@ func newStarter() (*starter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &starter{getenv: os.Getenv, uid: os.Getuid(), dir: dir, home: home, exe: exe,
+	return &starter{
+		getenv: os.Getenv,
+		uid:    os.Getuid(),
+		dir:    dir,
+		home:   home,
+		exe:    exe,
 		served: serve.Served,
 		bind:   func(addr string) error { _, _, err := bind(addr); return err },
-		spawn:  spawnServe, own: selfreload.Version(), wait: 3 * time.Second}, nil
+		spawn:  spawnServe,
+		own:    selfreload.Version(),
+		wait:   3 * time.Second,
+	}, nil
 }
 
 // releaseTag is a release build's version: a newer release reloads a running dev serve by itself.

@@ -123,17 +123,15 @@ func Served(dir string) (netip.AddrPort, string, error) {
 	if err != nil {
 		return ap, "", fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
 	}
-	var health struct{ Version string }
 	resp, err := (&http.Client{Timeout: time.Second}).Get("http://" + s + "/v1/health")
 	if err == nil {
 		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == http.StatusOK {
-			_ = json.NewDecoder(resp.Body).Decode(&health)
-		}
 	}
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ap, "", fmt.Errorf("dev serve is not running: it does not answer on %s", s)
 	}
+	var health struct{ Version string }
+	_ = json.NewDecoder(resp.Body).Decode(&health)
 	return ap, health.Version, nil
 }
 
