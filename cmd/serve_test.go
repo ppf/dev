@@ -152,8 +152,12 @@ func TestServePair(t *testing.T) {
 	}
 	var older atomic.Bool // a dev serve from before loopback needed no pairing
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if older.Load() && r.URL.Path == "/v1/done" {
+		switch {
+		case r.URL.Path != "/v1/done":
+		case older.Load():
 			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusBadRequest) // past the Guard: the body names no item
 		}
 	}))
 	defer srv.Close()

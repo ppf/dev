@@ -181,10 +181,13 @@ func unpairedBoard(ap netip.AddrPort) error {
 		return fmt.Errorf("dev serve on %s: %w", ap, err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized {
+	switch resp.StatusCode {
+	case http.StatusBadRequest:
+		return nil
+	case http.StatusUnauthorized:
 		return fmt.Errorf("the dev serve on %s is from an older dev and still wants pairing on loopback: restart it", ap)
 	}
-	return nil
+	return fmt.Errorf("dev serve on %s answered %s to an empty tick, not 400: restart it", ap, resp.Status)
 }
 
 // loopbackMessage is pair's answer for a dev serve on loopback only: no pairing there, and a phone can't reach it.
