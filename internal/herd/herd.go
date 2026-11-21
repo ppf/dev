@@ -185,9 +185,10 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`skips goes on your list with dev todo ask and options, never as chat text ending a turn. A boss's permission prompt ` +
 	`or dialog (needs a decision) you relay the same way: read it (dialog questions: dev agent get boss-<project> --json), ` +
 	`its options as it shows them, then read it again and send-keys only the user's pick; skipped, tell the user to go ` +
-	`to that boss (dev goto boss-<project>). A worker's one under a boss of yours ("<worker> (boss-<project>'s worker) ` +
-	`needs a decision") is yours alone, its boss leaves it: the same way, read and send-keys that worker directly ` +
-	`(dev agent read/get/send-keys <worker>); skipped, tell the user to go to it (dev goto <worker>). ` +
+	`to that boss (dev goto boss-<project>). A permission prompt or dialog of a worker under one of your bosses ` +
+	`("<worker> (boss-<project>'s worker) needs a decision", prefixed with that project) is yours alone, its boss leaves ` +
+	`it: relay it the same way, then read and send-keys that worker directly (dev agent read/get/send-keys <worker>); ` +
+	`skipped, tell the user to go to it (dev goto <worker>). ` +
 	`You never: answer an item on a boss's list (a "waits on you" item or a dev todo ask decision) on your own, from a ` +
 	`boss's note, a recommended option you chose or a suggestion text: only the user's own pick or words answer it; ` +
 	`answer a permission prompt or dialog without the user's pick; merge, release, ` +

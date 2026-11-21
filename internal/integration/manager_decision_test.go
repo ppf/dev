@@ -68,20 +68,25 @@ func TestWorkerDecisionToManager(t *testing.T) {
 	const plain = "[dev boss inbox] 1 worker update(s):\n- app-w needs a decision: Claude needs your permission to use Bash"
 
 	decide()
-	check(t, "the manager asks", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) needs a decision: "+
-		"Claude needs your permission to use Bash; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
-	check(t, "the boss leaves it", take(app), plain+"; the manager asks the user: leave it to the manager")
-	// Still unanswered: the boss's stuck note leaves it too, the manager gets a reminder, once
+	// Still unanswered: the boss's stuck note leaves it too; the manager gets a reminder once its first note is out
 	later := control.Clock{Now: func() time.Time { return time.Now().Add(inbox.StuckDecision + time.Minute) }, Sleep: time.Sleep}
-	for range 2 {
+	watch := func() {
+		t.Helper()
 		if err := inbox.Watch(s.tmux, later, app); err != nil {
 			t.Fatal(err)
 		}
 	}
-	check(t, "the boss's stuck note", take(app), "[dev boss inbox] 1 worker update(s):\n- app-w stuck: waiting on a decision for 4m, unanswered; "+
-		"the manager asks the user: leave it to the manager")
-	check(t, "the manager's reminder", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) stuck: waiting on a decision for 4m, "+
+	watch()
+	check(t, "the manager asks, no reminder beside it", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) needs a decision: "+
+		"Claude needs your permission to use Bash; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
+	check(t, "the boss leaves it, stuck too", take(app), "[dev boss inbox] 2 worker update(s):\n- app-w needs a decision: Claude needs your permission to use Bash; "+
+		"the manager asks the user: leave it to the manager\n- app-w stuck: waiting on a decision for 4m, unanswered; the manager asks the user: leave it to the manager")
+	for range 2 {
+		watch()
+	}
+	check(t, "the manager's reminder, once", take(manager), "[dev boss inbox] 1 worker update(s):\n- app-w (boss-app's worker) stuck: waiting on a decision for 4m, "+
 		"unanswered; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
+	check(t, "nothing new for the boss", take(app), "")
 
 	// A worker started outside tmux, or one that is itself a boss: not handed over
 	s.T("set-option", "-t", "=app-w:", "@dev_started_outside", "1")

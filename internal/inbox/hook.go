@@ -290,15 +290,16 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 	return errors.Join(askErr, resumeErr, handErr, err, setNote(c, pane, n.Summary()))
 }
 
-// handOver queues worker w's decision n in the Manager's inbox, and delivers it, when w's boss b runs under the live
-// Manager: the Manager asks the user and sends their pick to w itself, so the user is asked once. handed reports it
-// queued there, kept in b's box for Watch's stuck note; else b relays it as before.
+// handOver queues worker w's decision n in the Manager's inbox, once per wait, and delivers it, when w's boss b runs
+// under the live Manager: the Manager asks the user and sends their pick to w itself, so the user is asked once.
+// handed reports it there (queued now or before), kept in b's box for Watch's stuck note; else b relays it as before.
 func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (handed bool, err error) {
 	m, ok, err := managerOver(c, b)
 	if !ok || err != nil {
 		return false, err
 	}
-	n.Of, n.Key = b.Name, n.Key+"\x00"+w.Since
+	// One per wait: a dialog read or not, its Notification and PermissionRequest are one question
+	n.Of, n.Key = b.Name, Decision+"\x00"+w.Since
 	if _, err := m.Box.Add(n, clk.Now()); err != nil {
 		return false, err
 	}
@@ -308,10 +309,22 @@ func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (
 	}), Deliver(c, clk, m))
 }
 
-// managerOver is the Manager when it started or adopted boss b and is alive with its inbox on.
+// managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.
 func managerOver(c *tmux.Client, b Boss) (Boss, bool, error) {
 	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))
 	if !ok || err != nil || m.Name != Manager {
+		return Boss{}, false, err
+	}
+	a, err := control.Resolve(c, Manager)
+	if control.NoAgent(err) {
+		return Boss{}, false, nil
+	}
+	if err != nil {
+		return Boss{}, false, err
+	}
+	// remain-on-exit keeps a crashed coordinator's pane
+	dead, err := c.Run("display-message", "-p", "-t", a.Pane, "#{pane_dead}")
+	if err != nil || strings.TrimSpace(dead) == "1" {
 		return Boss{}, false, err
 	}
 	return m, true, nil

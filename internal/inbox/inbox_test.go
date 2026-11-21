@@ -357,6 +357,10 @@ func TestObserveDecisionHanded(t *testing.T) {
 	if got, _ := o.round(time.Minute, w); got != "[dev boss inbox] 1 worker update(s):\n- w stuck: waiting on a decision for 4m, unanswered" {
 		t.Errorf("Manager gone = %q, want the plain note", got)
 	}
+	w.managed = true
+	if got, holding := o.round(time.Minute, w); got != "" || len(holding) != 1 || strings.HasSuffix(holding[0], leaveToManager) {
+		t.Errorf("Manager back = %q, holding %q; want it kept by the boss", got, holding)
+	}
 }
 
 // A question a turn ended on is repeated while the worker rests: after AskAgain, then twice as long each time.

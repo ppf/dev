@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -213,7 +214,10 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			// No stretch to time
 		case agent.Deciding(w.trusted, w.WaitingFor):
 			if held := now.Sub(since); held >= StuckDecision {
-				// Handed to the Manager, still there: it asks; else the boss relays it
+				// Handed to the Manager, still there: it asks; else the boss relays it, and keeps it
+				if !w.managed && h.Handed == w.Since {
+					h.Handed = ""
+				}
 				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since, w.managed && h.Handed == w.Since)
 			}
 		case resting(w.trusted, w.WaitingFor) && !w.waiting:
@@ -607,7 +611,8 @@ func checkPRs(c *tmux.Client, clk control.Clock, b Boss, due []paneRow) error {
 }
 
 // remindManager queues in the Manager's inbox, once each, the stuck notes of decisions handed to it (handOver) that
-// still wait, and delivers them: it may have lost the first note to a /clear.
+// still wait, and delivers them: it may have lost the first note to a /clear. Not while that first note still waits
+// there: the Manager would get the one dialog twice.
 func remindManager(c *tmux.Client, clk control.Clock, b, m Boss, holding []Note) error {
 	queued := false
 	for _, n := range holding {
@@ -615,8 +620,13 @@ func remindManager(c *tmux.Client, clk control.Clock, b, m Boss, holding []Note)
 			continue
 		}
 		n.Handed, n.Of = false, b.Name
-		added, err := m.Box.Add(n, clk.Now())
-		if err != nil {
+		var added bool
+		if err := m.Box.update(func(s *state) error {
+			if !slices.ContainsFunc(s.Notes, func(q Note) bool { return q.Worker == n.Worker && q.Of != "" }) {
+				added = s.add(n)
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		queued = queued || added
