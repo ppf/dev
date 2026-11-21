@@ -802,3 +802,36 @@ func TestItemViewFastKeys(t *testing.T) {
 		t.Errorf("❌ jj didn't move to own words:\n%s", plain(m))
 	}
 }
+
+// Five columns need an inner width of 132: a popup of 136.
+func TestFitColsEdge(t *testing.T) {
+	for w, want := range map[int]int{131: 4, 132: 5, 105: 4, 104: 3, 78: 3, 77: 2, 51: 2, 50: 1} {
+		if got := fitCols(w); got != want {
+			t.Errorf("❌ inner %d: %d columns, want %d", w, got, want)
+		}
+	}
+}
+
+// A check's state: a boss closed's is the chip's, an unchanged one's only on a check item, failing ones red.
+func TestCheckState(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	at := func(kind, status string) (string, string) {
+		it := todo.Shown{Status: status, Check: &sidebar.Check{Kind: kind, PR: 4, Since: now.Unix()}}
+		return checkState(card{it: it}, now)
+	}
+	if s, _ := at(sidebar.CheckBossClosed, sidebar.StatusCheck); s != "" {
+		t.Errorf("❌ boss closed shows %q", s)
+	}
+	if s, _ := at(sidebar.CheckUnchanged, sidebar.StatusYours); s != "" {
+		t.Errorf("❌ unchanged on a plain item shows %q", s)
+	}
+	if _, c := at(sidebar.CheckUnchanged, sidebar.StatusCheck); c != sidebar.Gold {
+		t.Errorf("❌ unchanged check colour %q", c)
+	}
+	if _, c := at(sidebar.CheckFailing, sidebar.StatusCheck); c != sidebar.Red {
+		t.Errorf("❌ failing colour %q", c)
+	}
+	if _, c := at(sidebar.CheckApproved, sidebar.StatusCheck); c != sidebar.Green {
+		t.Errorf("❌ approved colour %q", c)
+	}
+}

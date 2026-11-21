@@ -30,7 +30,7 @@ the web page's five columns, in its order: To do, In progress, Waiting, Review, 
 item in the column dev todo --all --json gives it. A card shows its project and number, its state at the right (starting,
 a PR's, its worker's), the title, @assignee (you for yours) with its marks (decide, needs you, waiting for, boss closed,
 ⇄ with another item) and, under it, what is done on it now. A column with a card that waits on you has a red head; the top
-line counts what needs you and what is yours. All five show side by side from 132 columns wide, else as many as fit, h/l
+line counts what needs you and what is yours. All five show side by side from 136 columns wide, else as many as fit, h/l
 moving on to the rest. j/k move within a column, ⏎ or space opens the item over the board (as dev todo show), p shows
 the next project, esc closes. The lists are read again every 2 seconds and after an action, so a card moved on the web
 page moves here. The previews' and the sidebar's TO DO open it with b.`,
