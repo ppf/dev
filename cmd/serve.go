@@ -93,7 +93,7 @@ another origin's (Sec-Fetch-Site, Origin) is refused instead.`, serve.DefaultPor
 			if err != nil {
 				return err
 			}
-			forget, err := serve.RecordAddr(dir, netip.AddrPortFrom(ap.Addr(), uint16(ln.Addr().(*net.TCPAddr).Port)))
+			forget, err := serve.RecordAddr(dir, netip.AddrPortFrom(ap.Addr(), uint16(ln.Addr().(*net.TCPAddr).Port)), reloaded)
 			if err != nil {
 				_ = ln.Close()
 				return err
@@ -176,18 +176,22 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 			if err != nil {
 				return err
 			}
-			live, err := served(dir, ownIP, time.Second)
+			live, err := pairServed(dir, ownIP, time.Second)
 			if err != nil {
 				return err
 			}
 			urls := phoneURLs(live)
 			if len(urls) == 0 {
-				ap := live[0].Addr
-				if err := unpairedBoard(ap); err != nil {
+				var errs []error
+				for _, r := range live { // one an older dev runs may come first
+					if err := unpairedBoard(r.Addr); err != nil {
+						errs = append(errs, err)
+						continue
+					}
+					_, err = fmt.Fprint(cmd.OutOrStdout(), loopbackMessage(r.Addr, restartHint()))
 					return err
 				}
-				_, err = fmt.Fprint(cmd.OutOrStdout(), loopbackMessage(ap, restartHint()))
-				return err
+				return errors.Join(errs...)
 			}
 			code, err := serve.NewCode(dir, time.Now())
 			if err != nil {
@@ -200,7 +204,7 @@ running. Refused in a Claude Code session ($CLAUDECODE set) and outside a termin
 	return cmd
 }
 
-var served = serve.Served // test seam: a phone-reachable dev serve would need a LAN bind
+var pairServed = serve.Served // test seam: a phone-reachable dev serve would need a LAN bind
 
 // phoneURLs is the page's URL on each dev serve a phone can reach (not loopback): any of them takes the code, the
 // state folder's.

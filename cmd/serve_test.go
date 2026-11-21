@@ -166,7 +166,7 @@ func TestServePair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forget, err := serve.RecordAddr(dir, ln.Addr().(*net.TCPAddr).AddrPort())
+	forget, err := serve.RecordAddr(dir, ln.Addr().(*net.TCPAddr).AddrPort(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestServePairTwo(t *testing.T) {
 	start := func() (*httptest.Server, func() error) {
 		srv := httptest.NewServer(h)
 		t.Cleanup(srv.Close)
-		forget, err := serve.RecordAddr(dir, srv.Listener.Addr().(*net.TCPAddr).AddrPort())
+		forget, err := serve.RecordAddr(dir, srv.Listener.Addr().(*net.TCPAddr).AddrPort(), false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,11 +253,11 @@ func TestServePairTwo(t *testing.T) {
 // #146's case: dev boss's loopback dev serve and a hand-run one for the phone: pair writes a code and names the phone's.
 func TestServePairPhone(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	origTerm, origServed := hasTerminal, served
-	t.Cleanup(func() { hasTerminal, served = origTerm, origServed })
+	origTerm, origServed := hasTerminal, pairServed
+	t.Cleanup(func() { hasTerminal, pairServed = origTerm, origServed })
 	t.Setenv("CLAUDECODE", "")
 	hasTerminal = func() bool { return true }
-	served = func(string, func(netip.Addr) bool, time.Duration) ([]serve.Running, error) {
+	pairServed = func(string, func(netip.Addr) bool, time.Duration) ([]serve.Running, error) {
 		return []serve.Running{{Addr: netip.MustParseAddrPort("192.168.1.9:8417"), Version: "v1"},
 			{Addr: netip.MustParseAddrPort("127.0.0.1:8417"), Version: "v1"}}, nil
 	}
@@ -271,6 +271,38 @@ func TestServePairPhone(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pair.json")); err != nil {
 		t.Errorf("no code written: %v", err)
+	}
+}
+
+// Loopback only: a dev serve from an older dev that still wants pairing doesn't hide a current one
+func TestServePairOlderLoopback(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	origTerm, origServed := hasTerminal, pairServed
+	t.Cleanup(func() { hasTerminal, pairServed = origTerm, origServed })
+	t.Setenv("CLAUDECODE", "")
+	hasTerminal = func() bool { return true }
+	answer := func(code int) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(code) }))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	older, current := answer(http.StatusUnauthorized), answer(http.StatusBadRequest)
+	run := func(srvs ...*httptest.Server) (string, error) {
+		pairServed = func(string, func(netip.Addr) bool, time.Duration) ([]serve.Running, error) {
+			var live []serve.Running
+			for _, srv := range srvs {
+				live = append(live, serve.Running{Addr: netip.MustParseAddrPort(srv.Listener.Addr().String()), Version: "v1"})
+			}
+			return live, nil
+		}
+		out, _, err := execute(t, "", "serve", "pair")
+		return out, err
+	}
+	if out, err := run(older, current); err != nil || !strings.Contains(out, " "+current.URL+"/ in a browser") {
+		t.Errorf("older first: %q %v, want the current one", out, err)
+	}
+	if _, err := run(older); err == nil || !strings.Contains(err.Error(), "older dev") {
+		t.Errorf("older alone: %v, want restart it", err)
 	}
 }
 

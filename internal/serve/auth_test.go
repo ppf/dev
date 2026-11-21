@@ -278,7 +278,7 @@ func TestServed(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { health(w, tt.body, tt.code) }))
 		dir := t.TempDir()
 		ap := netip.MustParseAddrPort(srv.Listener.Addr().String())
-		if _, err := RecordAddr(dir, ap); err != nil {
+		if _, err := RecordAddr(dir, ap, false); err != nil {
 			t.Fatal(err)
 		}
 		got, err := Served(dir, local, time.Second)
@@ -325,7 +325,7 @@ func startFake(t *testing.T, dir string) *fakeServe {
 	t.Cleanup(srv.Close)
 	f := &fakeServe{srv: srv, ap: netip.MustParseAddrPort(srv.Listener.Addr().String())}
 	var err error
-	if f.forget, err = RecordAddr(dir, f.ap); err != nil {
+	if f.forget, err = RecordAddr(dir, f.ap, false); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -426,6 +426,17 @@ func TestServedMany(t *testing.T) {
 			t.Errorf("got %v", err)
 		}
 	})
+	t.Run("reload re-bound elsewhere", func(t *testing.T) {
+		dir := t.TempDir()
+		a, b := startFake(t, dir), startFake(t, dir) // b: the same pid before its reload's exec
+		if _, err := RecordAddr(dir, netip.AddrPortFrom(b.ap.Addr(), b.ap.Port()+1), true); err != nil {
+			t.Fatal(err)
+		}
+		names, err := recordNames(filepath.Join(dir, addrDir))
+		if err != nil || len(names) != 1 || names[0] != netip.AddrPortFrom(b.ap.Addr(), b.ap.Port()+1).String()+".json" {
+			t.Errorf("records %q %v, want the new address only (a %s is this pid's too)", names, err, a.ap)
+		}
+	})
 	t.Run("live address, process gone", func(t *testing.T) {
 		dir := t.TempDir()
 		a := startFake(t, dir)
@@ -439,11 +450,19 @@ func TestServedMany(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, addrDir), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, addrDir, "127.0.0.1:1.json"), []byte(`{}`), 0o000); err != nil {
+		bad := filepath.Join(dir, addrDir, "127.0.0.1:1.json")
+		if err := os.WriteFile(bad, []byte(`{}`), 0o000); err != nil {
 			t.Fatal(err)
+		}
+		if _, err := os.ReadFile(bad); err == nil {
+			t.Skip("mode 000 doesn't stop this user reading it (root)")
 		}
 		if _, err := Served(dir, local, time.Second); err == nil || errors.Is(err, ErrNotRunning) {
 			t.Errorf("alone: %v, want its read error", err)
+		}
+		startFake(t, t.TempDir()) // nor does it stop a start beside it
+		if _, err := RecordAddr(dir, netip.MustParseAddrPort("127.0.0.1:2"), false); err != nil {
+			t.Errorf("a start beside it: %v", err)
 		}
 		a := startFake(t, t.TempDir())
 		if err := writeFile(filepath.Join(dir, addrDir), a.ap.String()+".json", addrRecord{Addr: a.ap.String(), Pid: os.Getpid()}); err != nil {
@@ -464,7 +483,7 @@ func TestServedMany(t *testing.T) {
 		defer srv.Close()
 		dir := t.TempDir()
 		ap := netip.MustParseAddrPort(ln.Addr().String())
-		forget, err := RecordAddr(dir, ap)
+		forget, err := RecordAddr(dir, ap, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -501,7 +520,7 @@ func TestServedMany(t *testing.T) {
 			t.Fatal(err)
 		}
 		old.srv.Close()
-		if _, err := RecordAddr(dir, old.ap); err != nil { // a dev serve on its address now
+		if _, err := RecordAddr(dir, old.ap, false); err != nil { // a dev serve on its address now
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, legacyAddrFile)); !errors.Is(err, fs.ErrNotExist) {

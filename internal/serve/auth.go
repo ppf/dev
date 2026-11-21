@@ -93,9 +93,10 @@ func NewCode(dir string, now time.Time) (string, error) {
 }
 
 // RecordAddr records the address the running dev serve listens on in dir, one record per serve (addrDir/<address>.json,
-// with its pid), for dev serve pair and dev boss, and drops records whose process is gone; the func removes its record
-// unless another dev serve has since recorded that address.
-func RecordAddr(dir string, ap netip.AddrPort) (func() error, error) {
+// with its pid), for dev serve pair and dev boss, and drops records whose process is gone, and after a reload (same pid)
+// its own from before it; the func removes its record unless another dev serve has since recorded that address.
+// Another record it can't read or drop is logged, not fatal: it is another serve's.
+func RecordAddr(dir string, ap netip.AddrPort, reloaded bool) (func() error, error) {
 	unlock, err := lock(dir)
 	if err != nil {
 		return nil, err
@@ -113,14 +114,14 @@ func RecordAddr(dir string, ap netip.AddrPort) (func() error, error) {
 	for _, name := range names {
 		var r addrRecord
 		if err := readFile(recs, name, &r); err != nil {
-			if unreadable(err) {
-				continue // readers skip it; the next serve on its address replaces it
+			if !unreadable(err) { // a damaged one readers skip, and the next serve on its address replaces
+				log.Printf("dev serve: address record not read: %v", err)
 			}
-			return nil, err
+			continue
 		}
-		if gone(r.Pid) {
+		if gone(r.Pid) || reloaded && r.Pid == pid && r.Addr != ap.String() {
 			if err := os.Remove(filepath.Join(recs, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return nil, err
+				log.Printf("dev serve: address record not dropped: %v", err)
 			}
 		}
 	}
@@ -221,7 +222,9 @@ func Served(dir string, local func(netip.Addr) bool, timeout time.Duration) ([]R
 			switch {
 			case err != nil: // a record no dev serve wrote
 			case !local(ap.Addr()):
-				moved = append(moved, ap.String())
+				if pid > 0 { // a legacy record may be a crashed serve's
+					moved = append(moved, ap.String())
+				}
 			case !slices.Contains(addrs, ap):
 				addrs = append(addrs, ap)
 			}

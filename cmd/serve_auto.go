@@ -119,8 +119,12 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return nil
 	}
 	defer func() { _ = hold.Close() }()
+	want, wantErr := netip.ParseAddrPort(addr)                  // "": dev serve's own default, any address
+	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
+	at := func(r serve.Running) bool { return addr == "" || r.Addr == want }
 	live, err := served(time.Second)
-	if err == nil {
+	switch {
+	case err == nil:
 		warned := map[string]bool{}
 		for _, r := range live {
 			if r.Version != s.own && !warned[r.Version] {
@@ -128,23 +132,27 @@ func (s *starter) ensure(stderr io.Writer) error {
 				fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", r.Version, s.own)
 			}
 		}
-		return nil
-	} else if !errors.Is(err, serve.ErrNotRunning) {
+		// Any one will do, unless DEV_SERVE_ADDR asks for its own (a phone's beside this Mac's)
+		if s.getenv("DEV_SERVE_ADDR") == "" || slices.ContainsFunc(live, at) {
+			return nil
+		}
+	case !errors.Is(err, serve.ErrNotRunning):
 		return err
-	}
-	// One that runs but doesn't answer (its recorded address gone, hung) would be a second
-	if alive, err := s.alive(s.dir); err != nil {
-		return err
-	} else if alive {
-		fmt.Fprintf(stderr, "⚠ dev serve runs but doesn't answer on its address (see %s): not starting another\n", filepath.Join(s.dir, "serve.log"))
-		return nil
-	}
-	if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
-		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%[1]d/%[2]s (not loaded: launchctl bootstrap gui/%[1]d %[3]q)\n",
-			s.uid, serve.Label, serve.PlistPath(s.home))
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return err
+	default:
+		// One that runs but doesn't answer (its recorded address gone, hung) would be a second
+		if alive, err := s.alive(s.dir); err != nil {
+			return err
+		} else if alive {
+			fmt.Fprintf(stderr, "⚠ dev serve runs but doesn't answer on its address (see %s): not starting another\n", filepath.Join(s.dir, "serve.log"))
+			return nil
+		}
+		if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
+			fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%[1]d/%[2]s (not loaded: launchctl bootstrap gui/%[1]d %[3]q)\n",
+				s.uid, serve.Label, serve.PlistPath(s.home))
+			return nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
 	}
 	if err := s.bind(addr); err != nil {
 		switch {
@@ -155,9 +163,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		return err
 	}
-	want, err := netip.ParseAddrPort(addr)                      // "": dev serve's own default, any address
-	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
-	if err == nil && want.Port() == 0 {
+	if wantErr == nil && want.Port() == 0 {
 		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
@@ -215,7 +221,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 	for time.Now().Before(deadline) {
 		// After an exit too: a second dev boss's dev serve may have taken the port first
 		live, err := served(300 * time.Millisecond)
-		i := slices.IndexFunc(live, func(r serve.Running) bool { return addr == "" || r.Addr == want })
+		i := slices.IndexFunc(live, at)
 		if err == nil && i >= 0 {
 			if !ended {
 				ap := live[i].Addr
