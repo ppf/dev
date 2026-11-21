@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/selfreload"
@@ -79,15 +80,7 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			if reloaded && kept > 2 {
-				// Held across the exec only: this process's own one holds now (closed only if it is that file)
-				old := os.NewFile(uintptr(kept), "alive")
-				if a, aerr := old.Stat(); aerr == nil {
-					if b, berr := alive.Stat(); berr == nil && os.SameFile(a, b) {
-						_ = old.Close()
-					} else {
-						syscall.CloseOnExec(kept) // not ours to close: at least no child keeps it
-					}
-				}
+				closeKept(kept, alive, cmd.ErrOrStderr())
 			}
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
@@ -316,6 +309,24 @@ func (u *unrepeated) Write(p []byte) (int, error) {
 	}
 	u.seen[string(p)] = now
 	return u.w.Write(p)
+}
+
+// closeKept closes fd, the alive lock a reload kept open across its exec, once this process holds alive: only when
+// it is that file (raw fd, no *os.File whose finalizer would close a reused number later); else it only gets
+// close-on-exec, so no child keeps it.
+func closeKept(fd int, alive *os.File, stderr io.Writer) {
+	var a, b unix.Stat_t
+	if err := unix.Fstat(fd, &a); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+		return
+	}
+	if err := unix.Fstat(int(alive.Fd()), &b); err != nil || a.Dev != b.Dev || a.Ino != b.Ino || fd == int(alive.Fd()) {
+		syscall.CloseOnExec(fd)
+		return
+	}
+	if err := syscall.Close(fd); err != nil {
+		fmt.Fprintf(stderr, "⚠ dev serve: kept alive lock fd %d: %v\n", fd, err)
+	}
 }
 
 // envServeReexec is "<pid> <caffeinate pid>" across a reload: that process doesn't start a second caffeinate.

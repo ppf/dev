@@ -61,9 +61,12 @@ agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is o
 			if background && len(args) == 0 {
 				return errors.New("--background needs a project: dev boss <project> --background")
 			}
-			// A detached boss starts dev serve once it exists (a refused one starts none); an attached one before the attach
+			// A refused boss starts no dev serve: a detached one starts it once it exists, an attached one before the attach
 			if len(args) == 0 {
 				if hasTerminal() {
+					if err := herd.Check(c, herd.Manager, start); err != nil {
+						return err
+					}
 					autoServe(cmd.ErrOrStderr(), noServe)
 					return openManager(cmd, c, start, timeout)
 				}
@@ -97,6 +100,9 @@ agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is o
 			}
 			// After the first-run restore, so a saved boss is attached rather than replaced
 			if err := open.RestoreOnce(c, os.Getenv("HOME"), cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			if err := herd.Check(c, herd.SessionName(p.Name), start); err != nil {
 				return err
 			}
 			autoServe(cmd.ErrOrStderr(), noServe)
