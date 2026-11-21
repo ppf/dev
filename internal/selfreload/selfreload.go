@@ -9,11 +9,11 @@
 //     the version this process was exec'd into (DEV_RELOADED_TO, the loop guard); `<exe> --version`
 //     exits 0 within 5 s and prints it; the kill switch is off. Then it waits a random 0 to
 //     Options.Stagger. A failed check is retried next poll; a repeated warning is passed on once.
-//   - Exec(Ready, args, set...) error: re-checks the kill switch, that Exe is still the file checked, and the
-//     canary, then syscall.Exec(exe, args) with DEV_RELOADED_TO=<version> and set's KEY=VALUE (set, not appended). It
-//     returns only on failure: the caller keeps running the old version and says so; it must never exit
-//     to reload. Watch's channel is closed by then: after any Exec error, call Watch again to keep
-//     watching (ErrNotNow: refused without trying).
+//   - Exec(Ready, args, set...) error: re-checks the kill switch, that Exe is still the file checked,
+//     and the canary, then syscall.Exec(exe, args) with DEV_RELOADED_TO=<version> and set's KEY=VALUE
+//     entries (set, not appended). It returns only on failure: the caller keeps running the old version
+//     and says so; it must never exit to reload. Watch's channel is closed by then: after any Exec
+//     error, call Watch again to keep watching (ErrNotNow: refused without trying).
 //   - Kill switch: tmux global option @dev_reload off (read on every check and in Exec), or the
 //     env DEV_NO_RELOAD=1. A missing tmux server isn't "off"; any other tmux error is.
 //   - Canary (Options.Canary with Options.Tmux, panes only; ignored without Tmux): any pane may get
