@@ -105,6 +105,11 @@ func (s *starter) ensure(stderr io.Writer) error {
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
 		return nil
 	}
+	unlock, ok, err := startLock(s.dir, deadline)
+	if err != nil || !ok {
+		return err // !ok: another dev boss is starting one still
+	}
+	defer unlock()
 	if _, v, err := served(time.Second); err == nil {
 		if v != "" && v != s.own {
 			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", v, s.own)
@@ -121,7 +126,8 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return nil
 	}
 	if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
-		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%d/%s\n", s.uid, serve.Label)
+		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%[1]d/%[2]s (not loaded: launchctl bootstrap gui/%[1]d %[3]q)\n",
+			s.uid, serve.Label, serve.PlistPath(s.home))
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -177,6 +183,9 @@ func (s *starter) ensure(stderr io.Writer) error {
 		select {
 		case <-exited:
 			ended, exited = true, nil
+			if grace := time.Now().Add(time.Second); grace.Before(deadline) {
+				deadline = grace
+			}
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
@@ -187,9 +196,34 @@ func (s *starter) ensure(stderr io.Writer) error {
 	return nil
 }
 
-// defaultServer: dev boss talks to tmux's default server (no TMUX_TMPDIR; $TMUX, when set, its default socket).
+// startLock takes dir/start, so two dev bosses don't both start one; false once deadline passes first.
+func startLock(dir string, deadline time.Time) (func(), bool, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, false, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "start"), os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() { _ = f.Close() }, true, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK):
+			_ = f.Close()
+			return nil, false, fmt.Errorf("lock %s: %w", f.Name(), err)
+		case time.Now().After(deadline):
+			_ = f.Close()
+			return nil, false, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// defaultServer: dev boss talks to tmux's default server (TMUX_TMPDIR unset or /tmp; $TMUX, when set, its default socket).
 func (s *starter) defaultServer() bool {
-	if s.getenv("TMUX_TMPDIR") != "" {
+	if d := strings.TrimSuffix(s.getenv("TMUX_TMPDIR"), "/"); d != "" && d != "/tmp" && d != "/private/tmp" {
 		return false
 	}
 	t := s.getenv("TMUX")

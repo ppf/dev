@@ -38,7 +38,7 @@ dev runs in, prints its name and waits until its Claude registered (as dev agent
 boss is only printed. With --adopt, run in the manager's pane, an existing boss no live session started becomes
 the manager's as if it had started it: its news goes up to the manager, it shows in the manager's --mine list and
 previews, and it keeps its workers and list.
-Every dev boss (the manager, a project's boss, --background, a boss from dev's picker; not --adopt) starts
+Every dev boss (the manager, a project's boss, --background; not --adopt) starts
 dev serve, the web board, detached with --awake=false when none answers: on its default address, or DEV_SERVE_ADDR; only on tmux's default server unless DEV_SERVE_ADDR is set, not when its launchd
 agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is one ⚠ line; the boss opens anyway.`,
 		Args:              cobra.MaximumNArgs(1),

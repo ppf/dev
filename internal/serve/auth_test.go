@@ -289,6 +289,13 @@ func TestServed(t *testing.T) {
 	if _, _, err := Served(t.TempDir(), time.Second); !errors.Is(err, ErrNotRunning) {
 		t.Errorf("no record: %v", err)
 	}
+	bad := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bad, addrFile), []byte(`"127.0.`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Served(bad, time.Second); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("corrupt record: %v", err)
+	}
 }
 
 func TestAlive(t *testing.T) {

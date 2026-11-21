@@ -120,15 +120,20 @@ func Served(dir string, timeout time.Duration) (netip.AddrPort, string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return netip.AddrPort{}, "", fmt.Errorf("%w: start it first (a dev serve started before this version must be restarted)", ErrNotRunning)
 		}
+		if _, ok := errors.AsType[*json.SyntaxError](err); ok { // a record cut short: no dev serve wrote it whole
+			return netip.AddrPort{}, "", fmt.Errorf("%w: %v", ErrNotRunning, err)
+		}
 		return netip.AddrPort{}, "", err
 	}
 	ap, err := netip.ParseAddrPort(s)
 	if err != nil {
-		return ap, "", fmt.Errorf("%s: %w", filepath.Join(dir, addrFile), err)
+		return ap, "", fmt.Errorf("%w: %s: %v", ErrNotRunning, filepath.Join(dir, addrFile), err)
 	}
 	// A Transport without Proxy: HTTP_PROXY must not take a check of this Mac's own address
 	notRunning := fmt.Errorf("%w: it does not answer on %s", ErrNotRunning, s)
-	resp, err := (&http.Client{Timeout: timeout, Transport: &http.Transport{}}).Get("http://" + s + "/v1/health")
+	resp, err := (&http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true},
+		// Only a direct answer counts: another program on a stale record's port could redirect to one
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Get("http://" + s + "/v1/health")
 	if err != nil {
 		return ap, "", notRunning
 	}

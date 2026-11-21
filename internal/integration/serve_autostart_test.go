@@ -32,7 +32,7 @@ func TestBossStartsServe(t *testing.T) {
 	_ = ln.Close()
 	// Never the user's tmux server, launchd agent or default address
 	base := d.scriptEnv(writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}),
-		"DEV_NO_SERVE=", "TMUX_TMPDIR="+tempDir(t), "HOME="+tempDir(t))
+		"DEV_NO_SERVE=", "DEV_SERVE_ADDR=", "TMUX_TMPDIR="+tempDir(t), "HOME="+tempDir(t))
 	env := append(base, "DEV_SERVE_ADDR="+addr)
 	run := func(env []string, args ...string) (string, string) {
 		cmd := exec.Command(devBin, args...)
@@ -76,7 +76,7 @@ func TestBossStartsServe(t *testing.T) {
 	writeFile(t, filepath.Join(home, "Library/LaunchAgents/dev.serve.plist"), "<plist/>")
 	out, errOut = run(append(env, "HOME="+home), "boss", "hq", "--background")
 	check(t, "launchd agent", out+errOut+strconv.Itoa(len(pids())),
-		"0 boss-hq\n⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/"+strconv.Itoa(os.Getuid())+"/dev.serve\n0")
+		"0 boss-hq\n⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/"+strconv.Itoa(os.Getuid())+"/dev.serve (not loaded: launchctl bootstrap gui/"+strconv.Itoa(os.Getuid())+" \""+filepath.Join(home, "Library/LaunchAgents/dev.serve.plist")+"\")\n0")
 
 	out, errOut = run(env, "boss", "hq", "--background")
 	check(t, "started", out+errOut, "0 boss-hq\ndev serve started: http://"+addr+"/ (pair this browser: dev serve pair)\n")

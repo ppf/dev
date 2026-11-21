@@ -162,9 +162,26 @@ func TestAutoServeAliveNotAnswering(t *testing.T) {
 	}
 }
 
+func TestStartLock(t *testing.T) {
+	dir := t.TempDir()
+	unlock, ok, err := startLock(dir, time.Now().Add(time.Second))
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, ok, err := startLock(dir, time.Now().Add(100*time.Millisecond)); err != nil || ok {
+		t.Fatalf("taken twice: %v %v", ok, err)
+	}
+	unlock()
+	if again, ok, err := startLock(dir, time.Now()); err != nil || !ok {
+		t.Fatalf("after unlock: %v %v", ok, err)
+	} else {
+		again()
+	}
+}
+
 func TestAutoServeDefaultSocket(t *testing.T) {
 	for _, socket := range []string{"/tmp/tmux-501/default", "/private/tmp/tmux-501/default"} {
-		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0"}}
+		f := &fakeStart{runs: 1, envValue: map[string]string{"TMUX": socket + ",1,0", "TMUX_TMPDIR": "/tmp/"}}
 		if err := f.starter(t).ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
 			t.Errorf("%s: err %v, spawned %q", socket, err, f.spawned)
 		}
@@ -196,7 +213,7 @@ func TestAutoServeLaunchAgent(t *testing.T) {
 	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
 		t.Fatalf("err %v, spawned %q", err, f.spawned)
 	}
-	if want := "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/501/dev.serve\n"; out.String() != want {
+	if want := "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/501/dev.serve (not loaded: launchctl bootstrap gui/501 \"" + serve.PlistPath(s.home) + "\")\n"; out.String() != want {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 }

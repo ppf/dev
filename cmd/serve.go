@@ -55,6 +55,15 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			if err != nil {
 				return err
 			}
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return err
+			}
+			// Before the listen: a reload's exec drops it, and a dev boss in that gap would start a second one
+			release, err := serve.Alive(dir)
+			if err != nil {
+				return err
+			}
+			defer release()
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
 				return err
@@ -65,11 +74,6 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 				return err
 			}
 			defer forget()
-			release, err := serve.Alive(dir)
-			if err != nil {
-				return err
-			}
-			defer release()
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "dev serve: open http://"+ln.Addr().String()+"/ on the phone")
 			// After a reload the caffeinate started before it still waits on this pid
