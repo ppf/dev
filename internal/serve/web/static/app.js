@@ -546,7 +546,7 @@ function columns(ls) {
 // swipe is the phone's board: a tab per column, with its count and what needs the user, over the columns side by side,
 // one a screen, the next peeking in.
 function swipe(ls) {
-  // The lane is taken once the scroll stops (a tab's smooth scroll lands on no lane it passes), and a redraw held meanwhile
+  // The lane is taken once a swipe stops, and a redraw held meanwhile
   const lanes = el('div', { class: 'lanes', onscroll: () => {
     clearTimeout(settling);
     settling = setTimeout(() => {
@@ -559,39 +559,50 @@ function swipe(ls) {
   const tab = l => {
     const hot = hotCount(l);
     return el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
-      'aria-selected': String(state.lane === l.key), onclick: () => showLane(l.key, true) },
+      'aria-selected': String(state.lane === l.key), onclick: () => showLane(l.key) },
     l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
   };
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
 }
 
-// refilter draws the board for a filter just changed; on the phone a lane the filter emptied gives way to the first drawn
-// with cards. A redraw held by a scroll under way moves no lane.
+// refilter draws the board for a filter just changed, at once: a swipe under way gives its lane first. On the phone a lane
+// the filter emptied gives way to the first drawn with cards.
 function refilter() {
-  const sig = state.sig;
+  const before = document.querySelector('#view .lanes'), had = !!before?.querySelector('.lane.on .card');
+  if (settling && before) {
+    clearTimeout(settling);
+    settling = 0;
+    state.lane = laneAt(before);
+  }
   render();
   const lanes = document.querySelector('#view .lanes');
-  if (state.sig === sig || !lanes || lanes.querySelector('.lane.on .card')) return;
+  if (!had || !lanes || lanes.querySelector('.lane.on .card')) return;
   const next = [...lanes.children].find(l => l.querySelector('.card'));
-  if (next) showLane(next.dataset.k, false);
+  if (next) showLane(next.dataset.k);
 }
 
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
 let settling = 0;
 
 // showLane scrolls the phone's lanes to column k's.
-function showLane(k, smooth) {
+function showLane(k) {
   const lanes = document.querySelector('#view .lanes'), lane = lanes?.querySelector('[data-k="' + k + '"]');
   if (!lane) return;
-  lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: smooth ? 'smooth' : 'instant' });
+  lanes.scrollTo({ left: lane.offsetLeft - lanes.firstElementChild.offsetLeft, behavior: 'instant' });
   land(lanes, k);
 }
 
 // laneInView takes the lane most in view (the last one can't scroll to its start).
 function laneInView(lanes) {
+  const k = laneAt(lanes);
+  if (k !== state.lane) land(lanes, k);
+}
+
+// laneAt is the key of the lane most in view.
+function laneAt(lanes) {
   const w = lanes.firstElementChild.offsetWidth + parseFloat(getComputedStyle(lanes).columnGap);
-  const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1, i = end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w);
-  if (COLUMNS[i].key !== state.lane) land(lanes, COLUMNS[i].key);
+  const end = lanes.scrollLeft >= lanes.scrollWidth - lanes.clientWidth - 1;
+  return COLUMNS[end ? COLUMNS.length - 1 : Math.round(lanes.scrollLeft / w)].key;
 }
 
 // land makes column k's lane the one shown (the others cut to its height), its tab marked and in view, the page back up
@@ -806,7 +817,7 @@ function render() {
       view.replaceChildren(...(state.note ? [el('p', { class: 'note' }, state.note)] : []), ...board());
       for (const st of view.querySelectorAll('.stack[data-k]')) st.scrollTop = state.scroll[st.dataset.k] || 0;
       view.querySelector('.filters')?.scrollTo({ left: strip, behavior: 'instant' });
-      if (!wide.matches) showLane(state.lane, false);
+      if (!wide.matches) showLane(state.lane);
       if (f) view.querySelector('[data-f="' + CSS.escape(f) + '"]')?.focus({ preventScroll: true });
       if (state.note && state.note !== state.noteShown) window.scrollTo(0, 0);
       state.noteShown = state.note;
