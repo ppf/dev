@@ -405,6 +405,8 @@ type Prompt struct {
 	Question string `json:"question,omitempty"`
 	Answer   string `json:"answer,omitempty"`
 	Spent    bool   `json:"spent,omitempty"`
+	// Paired: a pairing code was shown on it (ClaimPair)
+	Paired bool `json:"paired,omitempty"`
 }
 
 // flight is a batch sent over Claude's messaging socket at At (unix seconds).
@@ -692,35 +694,54 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 
 // Claim spends p, the pick an answer is relayed from: refused once spent or when the user said something since.
 func (b Box) Claim(p Prompt) error {
+	return b.spend(p, spentOf, "the user's latest pick answered an item already: ask them this one")
+}
+
+// Unclaim gives back p, claimed for an answer that was refused, unless the user said something since.
+func (b Box) Unclaim(p Prompt) error { return b.unspend(p, spentOf) }
+
+// ClaimPair spends p, the prompt a pairing code is shown on: refused once one was or when the user said something since.
+func (b Box) ClaimPair(p Prompt) error {
+	return b.spend(p, pairedOf, "the user's latest prompt paired a phone already: ask them to say so again")
+}
+
+// UnclaimPair gives back p, claimed for a code that wasn't shown, unless the user said something since.
+func (b Box) UnclaimPair(p Prompt) error { return b.unspend(p, pairedOf) }
+
+func spentOf(p *Prompt) *bool  { return &p.Spent }
+func pairedOf(p *Prompt) *bool { return &p.Paired }
+
+// spend sets mark on p, the user's latest prompt: refused (used) once set or when the user said something since.
+func (b Box) spend(p Prompt, mark func(*Prompt) *bool, used string) error {
 	return b.update(func(s *state) error {
 		switch {
 		case !s.Prompt.is(p):
 			return errors.New("the user said something since: look again")
-		case s.Prompt.Spent:
-			return errors.New("the user's latest pick answered an item already: ask them this one")
+		case *mark(s.Prompt):
+			return errors.New(used)
 		}
-		s.Prompt.Spent = true
+		*mark(s.Prompt) = true
 		return nil
 	})
 }
 
-// Unclaim gives back p, claimed for an answer that was refused, unless the user said something since.
-func (b Box) Unclaim(p Prompt) error {
+// unspend clears mark on p unless the user said something since.
+func (b Box) unspend(p Prompt, mark func(*Prompt) *bool) error {
 	return b.update(func(s *state) error {
 		if s.Prompt.is(p) {
-			s.Prompt.Spent = false
+			*mark(s.Prompt) = false
 		}
 		return nil
 	})
 }
 
-// is reports p the same prompt as q, spent or not.
+// is reports p the same prompt as q, spent or paired or not.
 func (p *Prompt) is(q Prompt) bool {
 	if p == nil {
 		return false
 	}
 	now := *p
-	now.Spent = q.Spent
+	now.Spent, now.Paired = q.Spent, q.Paired
 	return now == q
 }
 

@@ -186,6 +186,47 @@ func TestPickedClaim(t *testing.T) {
 	}
 }
 
+// A pairing code is shown once per prompt of the user's: given back when not shown, refused after a prompt since;
+// a new prompt may pair again. Pairing leaves the prompt's pick unspent.
+func TestClaimPair(t *testing.T) {
+	b := testBox(t)
+	at := time.Unix(1700000000, 0)
+	if err := b.Arrived("pair my phone", at); err != nil {
+		t.Fatal(err)
+	}
+	p, err := b.UserPrompt()
+	if err != nil || p == nil {
+		t.Fatalf("UserPrompt = %+v, %v", p, err)
+	}
+	if err := b.ClaimPair(*p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPair(*p); err == nil || !strings.Contains(err.Error(), "paired a phone already") {
+		t.Errorf("second ClaimPair: %v, want refused", err)
+	}
+	if err := b.Claim(*p); err != nil {
+		t.Errorf("Claim after ClaimPair: %v", err)
+	}
+	if err := b.UnclaimPair(*p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPair(*p); err != nil {
+		t.Errorf("ClaimPair after UnclaimPair: %v", err)
+	}
+	if err := b.Arrived("pair it again", at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPair(*p); err == nil || !strings.Contains(err.Error(), "said something since") {
+		t.Errorf("ClaimPair of the old prompt: %v, want refused", err)
+	}
+	if p, err = b.UserPrompt(); err != nil || p.Paired {
+		t.Fatalf("new prompt: %+v, %v", p, err)
+	}
+	if err := b.ClaimPair(*p); err != nil {
+		t.Errorf("ClaimPair of the new prompt: %v", err)
+	}
+}
+
 // The user's latest prompt is kept for an answer the manager relays; a batch or ResumePrompt dev sent isn't one.
 func TestArrivedUserPrompt(t *testing.T) {
 	b := testBox(t)
