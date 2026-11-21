@@ -55,7 +55,7 @@ func press(m Model, ks ...string) Model {
 	return m
 }
 
-var ask = Item{Boss: "boss-dev", Shown: todo.Shown{ID: 4, Text: "Merge #221 now?", Status: sidebar.StatusDecide, Added: now.Add(-2 * time.Hour).Unix(),
+var ask = Item{Boss: "boss-dev", Shown: todo.Shown{ID: 4, Text: "Merge #221 now?", Status: sidebar.StatusDecide, Placement: todo.Placement{Column: sidebar.ColumnTodo, NeedsYou: true}, Added: now.Add(-2 * time.Hour).Unix(),
 	Link: "https://x/pull/221", Context: []string{"CI green"}, Options: []string{"Merge now | ships today (Recommended)", "Wait | after the test"}}}
 
 // An ask lists its options with ★ and detail, then own words; 1-9 answer at once, j/k ⏎ the picked one, m in own words.
@@ -63,8 +63,8 @@ func TestAsk(t *testing.T) {
 	var r recorder
 	m := New(ask, r.actions(), false)
 	v := ansi.Strip(m.View(Width, 40, now))
-	for _, want := range []string{"╭─ dev #4 · To decide ", " 2h ─╮", "Merge #221 now?", "CI green", "▸ 1  ★ Merge now   ships today", "  2    Wait        after the test",
-		"m    In your own words…", "status  decide", "link    https://x/pull/221", "list    boss-dev · added 2h ago", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
+	for _, want := range []string{"╭─ dev #4 · To do ", " 2h ─╮", "Merge #221 now?", "CI green", "▸ 1  ★ Merge now   ships today", "  2    Wait        after the test",
+		"m    In your own words…", "column  To do · @you", "status  decide", "link    https://x/pull/221", "list    boss-dev · added 2h ago", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}
@@ -98,12 +98,12 @@ func TestAsk(t *testing.T) {
 // The user's own item lists Start, Tick, Open link, Go to boss; one on a worker Go to worker, Open link, Go to boss;
 // one on a person only the link and its boss.
 func TestActions(t *testing.T) {
-	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply to the review", Status: sidebar.StatusYours, Link: "https://x/pull/88"}}
+	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply to the review", Status: sidebar.StatusYours, Placement: todo.Placement{Column: sidebar.ColumnTodo}, Link: "https://x/pull/88"}}
 	worker := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix the test", On: "dev-flaky", Session: &todo.Session{ID: "$4", Name: "dev-flaky"},
-		Status: sidebar.StatusBlocked, StatusOn: "dev-flaky"}}
-	person := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 7, Text: "Review", On: "Carl", Status: sidebar.StatusWaiting, StatusOn: "Carl"}}
+		Status: sidebar.StatusBlocked, StatusOn: "dev-flaky", Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-flaky"}}}}
+	person := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 7, Text: "Review", On: "Carl", Status: sidebar.StatusWaiting, StatusOn: "Carl", Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}
 	check := plain
-	check.Status = sidebar.StatusCheck
+	check.Status, check.Column = sidebar.StatusCheck, sidebar.ColumnReview
 	closed := plain
 	closed.Closed = true
 	note := plain
@@ -118,7 +118,7 @@ func TestActions(t *testing.T) {
 		{"person", person, []string{"g"}},
 		{"check", check, []string{"d", "o", "g"}},
 		{"closed", closed, []string{"d", "o"}},
-		{"manager's own note", note, []string{"d", "o", "g"}},
+		{"manager's own item", note, []string{"s", "d", "o", "g"}},
 	} {
 		var keys []string
 		for _, e := range New(c.it, Actions{}, false).entries {
@@ -221,7 +221,7 @@ func TestOwn(t *testing.T) {
 	if m := New(handed, Actions{}, false); m.ask() || m.entries[0].key != "w" {
 		t.Errorf("handed-over ask: entries %+v", m.entries)
 	}
-	mine := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 2, Text: "x", On: "boss-dev"}}
+	mine := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 2, Text: "x", On: "boss-dev", Placement: todo.Placement{Column: sidebar.ColumnTodo}}}
 	if m := New(mine, Actions{}, false); !m.plain() || m.entries[0].key != "s" {
 		t.Errorf("item on its own boss: entries %+v", m.entries)
 	}
@@ -327,7 +327,7 @@ func TestClick(t *testing.T) {
 	}
 
 	// Actions: Tick, then a click while it's under way does nothing
-	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply", Status: sidebar.StatusYours}}
+	plain := Item{Boss: "boss-shop", Shown: todo.Shown{ID: 3, Text: "Reply", Status: sidebar.StatusYours, Placement: todo.Placement{Column: sidebar.ColumnTodo}}}
 	p := New(plain, r.actions(), false)
 	busy, cmd := p.Click(2, row(t, p, 60, 40, "Tick"), 60, 40, now)
 	if cmd == nil || busy.busy != "ticking" {
@@ -435,5 +435,70 @@ func TestFastKeysPty(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		p.Kill()
 		t.Fatal("no key read")
+	}
+}
+
+// Start is offered by the card's column, whoever's it is: To do and no ask, or a late start; not on the manager's list
+// for another's item, a closed boss's without the manager, a desktop app boss's, a ticked item.
+func TestCanStart(t *testing.T) {
+	todoCard := func(mod func(*Item)) Item {
+		it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 5, Text: "Parked", On: todo.Boss, Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}
+		if mod != nil {
+			mod(&it)
+		}
+		return it
+	}
+	for _, c := range []struct {
+		name    string
+		it      Item
+		manager bool
+		want    bool
+	}{
+		{"the boss's parked item", todoCard(nil), false, true},
+		{"a gone worker's item", todoCard(func(it *Item) {
+			it.On, it.Session = "dev-x", &todo.Session{ID: "$4", Name: "dev-x"}
+			it.Status = sidebar.StatusGone
+		}), false, true},
+		{"in progress", todoCard(func(it *Item) { it.Column = sidebar.ColumnProgress }), false, false},
+		{"in progress, start late", todoCard(func(it *Item) { it.Column, it.StartLate = sidebar.ColumnProgress, true }), false, true},
+		{"an ask", todoCard(func(it *Item) { it.Options = []string{"a", "b"} }), false, false},
+		{"done", todoCard(func(it *Item) { it.Done, it.Column = true, sidebar.ColumnDone }), false, false},
+		{"a closed boss's, no manager", todoCard(func(it *Item) { it.Closed = true }), false, false},
+		{"a closed boss's, manager runs", todoCard(func(it *Item) { it.Closed = true }), true, true},
+		{"on the manager's list, not the user's", todoCard(func(it *Item) { it.Boss = sidebar.Manager }), false, false},
+		{"a desktop app boss's", todoCard(func(it *Item) { it.Boss = "local_ab12" }), false, false},
+	} {
+		if got := New(c.it, Actions{}, c.manager).canStart(); got != c.want {
+			t.Errorf("%s: canStart %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A ticked item lists only its link and boss, shows its column Done and no status.
+func TestDone(t *testing.T) {
+	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 8, Text: "Shipped", Link: "https://x/pull/9", Done: true, Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+	m := New(it, Actions{}, true)
+	var keys []string
+	for _, e := range m.entries {
+		keys = append(keys, e.key)
+	}
+	if !slices.Equal(keys, []string{"o", "g"}) {
+		t.Errorf("keys %v", keys)
+	}
+	v := ansi.Strip(m.View(Width, 40, now))
+	if !strings.Contains(v, "dev #8 · Done") || !strings.Contains(v, "column  Done · @you") || strings.Contains(v, "status") {
+		t.Errorf("view:\n%s", v)
+	}
+}
+
+// The facts name the column and whose the item is: a session's name, or "boss" for a desktop app boss's.
+func TestFactsAssignee(t *testing.T) {
+	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 9, Text: "Fix", On: "dev-x", Session: &todo.Session{ID: "$4", Name: "dev-x"}, Doing: &todo.Doing{Text: "reading the log"},
+		Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "dev-x"}}}}
+	v := ansi.Strip(New(it, Actions{}, false).View(Width, 40, now))
+	for _, want := range []string{"dev #9 · In progress", "column  In progress · @dev-x", "doing   reading the log"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
+		}
 	}
 }

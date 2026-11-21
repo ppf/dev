@@ -31,7 +31,7 @@ func TestTodoShow(t *testing.T) {
 		return strings.Contains(s.T("capture-pane", "-p", "-t", view), "1-2 answer")
 	})
 	shown := s.T("capture-pane", "-p", "-t", view)
-	for _, want := range []string{"a #1 · To decide", "Merge #148?", "CI green", "▸ 1  ★ Merge", "ships today", "2    Wait", "m    In your own words…", "status  decide"} {
+	for _, want := range []string{"a #1 · To do", "Merge #148?", "CI green", "▸ 1  ★ Merge", "ships today", "2    Wait", "m    In your own words…", "status  decide"} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("❌ %q missing:\n%s", want, shown)
 		}
@@ -108,7 +108,7 @@ func TestTodoPopupColours(t *testing.T) {
 		argv []string
 		mark string
 	}{
-		{[]string{"todo", "show", "--client", client, "boss-a", "1"}, "a #1 · To decide"},
+		{[]string{"todo", "show", "--client", client, "boss-a", "1"}, "a #1 · To do"},
 		{[]string{"todo", "board", "--client", client}, "TO DO board"},
 	} {
 		done := make(chan error, 1)

@@ -80,17 +80,20 @@ func New(it Item, acts Actions, managerRuns bool) Model {
 	return m
 }
 
-// ask, worker and plain are how the view treats the item: the user's own ask, on a worker, or the user's own; whose
-// it is as the list decides (todo.Own), so an ask handed to a worker is the worker's.
-func (m Model) ask() bool    { return m.own() && len(m.it.Options) > 0 }
-func (m Model) worker() bool { return !m.own() && m.it.Session != nil }
-func (m Model) plain() bool  { return m.own() && len(m.it.Options) == 0 }
+// ask, worker and plain are how the view treats an open item: the user's own ask, on a worker, or the user's own; whose
+// it is as the list decides (todo.Own), so an ask handed to a worker is the worker's. A ticked item is none of them.
+func (m Model) ask() bool    { return !m.it.Done && m.own() && len(m.it.Options) > 0 }
+func (m Model) worker() bool { return !m.it.Done && !m.own() && m.it.Session != nil }
+func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options) == 0 }
 func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
 
-// canStart and canTick mirror the board's expanded row (herd's actions): a check item isn't started; a closed boss's
-// item starts only while the manager runs.
+// canStart is what todo.Start takes, as the web page offers it: a late start, else a To do card, no ask, whoever's it
+// is; on the manager's own list only the user's; a closed boss's only while the manager runs; never a desktop app
+// boss's.
 func (m Model) canStart() bool {
-	return m.plain() && m.it.Boss != sidebar.Manager && m.it.Status != sidebar.StatusCheck && (!m.it.Closed || m.managerRuns)
+	it := m.it
+	return !it.Done && len(it.Options) == 0 && !strings.HasPrefix(it.Boss, "local_") && (it.Boss != sidebar.Manager || m.own()) &&
+		(!it.Closed || m.managerRuns) && (it.StartLate || it.Column == sidebar.ColumnTodo)
 }
 func (m Model) canTick() bool { return m.plain() }
 
@@ -123,6 +126,18 @@ func (m Model) list() []entry {
 		out = append(out, entry{key: "g", word: "Go to boss", detail: "switch to " + m.it.Boss})
 	}
 	return out
+}
+
+// assignee is whose the item is: "you", else the session's name ("boss" for a desktop app boss).
+func (m Model) assignee() string {
+	a := m.it.Assignee
+	switch {
+	case a.Kind == sidebar.AssigneeYou, a.Kind == "" && m.own():
+		return "you"
+	case a.Name != "":
+		return a.Name
+	}
+	return cmp.Or(m.it.On, "boss")
 }
 
 func (m Model) startTo() string {
@@ -378,10 +393,10 @@ func (m Model) Height(w int, now time.Time) int {
 	return strings.Count(m.View(w, 1<<16, now), "\n") + 1
 }
 
-// top is the box's top border: "project #id · status" at the left, the item's age at the right.
+// top is the box's top border: "project #id · column" at the left, the item's age at the right.
 func (m Model) top(w int, now time.Time) string {
 	it := m.it
-	title := " " + project(it.Boss) + " #" + strconv.Itoa(it.ID) + " · " + statusTitle(it.Status) + " "
+	title := " " + project(it.Boss) + " #" + strconv.Itoa(it.ID) + " · " + columnTitle(it.Column) + " "
 	age := ""
 	if it.Added != 0 {
 		age = " " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " "
@@ -392,16 +407,8 @@ func (m Model) top(w int, now time.Time) string {
 		sidebar.Muted + age + reset + sidebar.Faint + "─╮" + reset
 }
 
-// statusTitle is a status as the title says it: its group's title for the user's own, else the word.
-func statusTitle(status string) string {
-	switch status {
-	case sidebar.StatusDecide:
-		return "To decide"
-	case sidebar.StatusYours:
-		return "Yours"
-	}
-	return cmp.Or(status, "open")
-}
+// columnTitle is a column's title, as the boards show it; "open" for one the model didn't name.
+func columnTitle(column string) string { return cmp.Or(sidebar.ColumnTitles[column], "open") }
 
 // listLines are the entries, one per line, the selected one marked ▸ on the selection band; the own-words line shows
 // the field while it's typed in.
@@ -444,7 +451,7 @@ func (m Model) listLines(in int) []string {
 	return out
 }
 
-// facts are the item's status and whom it's on, link, list and age, and its tick time and check when it has them.
+// facts are the item's column and assignee, status, link, list and age, and its tick time and check when it has them.
 func (m Model) facts(in int, now time.Time) []string {
 	it := m.it
 	status := cmp.Or(it.Status, "—")
@@ -461,7 +468,18 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Added != 0 {
 		list += " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago"
 	}
-	facts := [][2]string{{"status", sidebar.StatusColours[it.Status] + status + reset}, {"link", cmp.Or(it.Link, "—")}, {"list", list}}
+	facts := [][2]string{{"column", columnTitle(it.Column) + " · @" + m.assignee()}}
+	if !it.Done {
+		facts = append(facts, [2]string{"status", sidebar.StatusColours[it.Status] + status + reset})
+	}
+	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
+	doing := it.Now
+	if it.Doing != nil {
+		doing = it.Doing.Text
+	}
+	if doing != "" {
+		facts = append(facts, [2]string{"doing", doing})
+	}
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})
 	}
