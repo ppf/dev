@@ -486,7 +486,7 @@ function doneRow(x) {
   const named = project(list) + ' #' + it.id + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
     el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, '#' + it.id),
-    el('span', { class: 't' }, it.text),
+    el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
 
@@ -547,7 +547,7 @@ function columns(ls) {
 // one a screen, the next peeking in.
 function swipe(ls) {
   const lanes = el('div', { class: 'lanes', onscroll: () => laneInView(lanes) },
-    ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title }, body(l))));
+    ls.map(l => el('section', { class: 'lane' + (state.lane === l.key ? ' on' : ''), 'data-k': l.key, 'aria-label': l.title, inert: state.lane !== l.key }, body(l))));
   const tab = l => {
     const hot = hotCount(l);
     return el('button', { type: 'button', role: 'tab', class: 'tab sq-' + l.key, 'data-f': 'tab:' + l.key,
@@ -577,7 +577,13 @@ function laneInView(lanes) {
 function land(lanes, k) {
   const moved = k !== state.lane, tabs = lanes.previousElementSibling;
   state.lane = k;
-  for (const l of lanes.children) l.classList.toggle('on', l.dataset.k === k);
+  // The lanes not shown out of the Tab order; focus in one that leaves goes to its tab
+  const was = document.activeElement?.closest?.('.lane');
+  for (const l of lanes.children) {
+    l.classList.toggle('on', l.dataset.k === k);
+    l.inert = l.dataset.k !== k;
+  }
+  if (was?.inert) document.querySelector('#view [data-f="tab:' + k + '"]').focus({ preventScroll: true });
   lanes.style.setProperty('--shown', lanes.querySelector('[data-k="' + k + '"]').offsetHeight + 'px');
   if (moved && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView();
   for (const t of document.querySelectorAll('#view .tab')) {
