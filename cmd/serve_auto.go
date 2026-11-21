@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,12 +40,11 @@ func autoServeAddr(getenv func(string) string) string {
 type starter struct {
 	getenv func(string) string
 	uid    int
-	dir    string // dev serve's state folder: addr.json, serve.log
+	dir    string // dev serve's state folder: address records, serve.log
 	home   string
 	exe    string
-	served func(dir string, timeout time.Duration) (netip.AddrPort, string, error) // serve.Served
-	alive  func(dir string) (bool, error)                                          // serve.AnyAlive
-	local  func(netip.Addr) bool                                                   // ownIP
+	served func(dir string, timeout time.Duration) ([]serve.Running, error) // serve.Served on this Mac's addresses
+	alive  func(dir string) (bool, error)                                   // serve.AnyAlive
 	bind   func(addr string) error
 	spawn  func(exe string, args, env []string, log, hold *os.File) (exited <-chan struct{}, err error)
 	own    string
@@ -85,13 +85,14 @@ func newStarter() (*starter, error) {
 		dir:    dir,
 		home:   home,
 		exe:    exe,
-		served: serve.Served,
-		alive:  serve.AnyAlive,
-		local:  ownIP,
-		bind:   func(addr string) error { _, _, err := bind(addr); return err },
-		spawn:  spawnServe,
-		own:    selfreload.Version(),
-		wait:   3 * time.Second,
+		served: func(dir string, timeout time.Duration) ([]serve.Running, error) {
+			return serve.Served(dir, ownIP, timeout)
+		},
+		alive: serve.AnyAlive,
+		bind:  func(addr string) error { _, _, err := bind(addr); return err },
+		spawn: spawnServe,
+		own:   selfreload.Version(),
+		wait:  3 * time.Second,
 	}, nil
 }
 
@@ -99,13 +100,13 @@ func newStarter() (*starter, error) {
 // with no DEV_SERVE_ADDR; it takes at most s.wait (and a health check's last second) in all.
 func (s *starter) ensure(stderr io.Writer) error {
 	deadline := time.Now().Add(s.wait)
-	served := func(most time.Duration) (netip.AddrPort, string, error) {
+	served := func(most time.Duration) ([]serve.Running, error) {
 		return s.served(s.dir, min(most, max(time.Until(deadline), 300*time.Millisecond)))
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
-		if ap, _, err := served(time.Second); err == nil && s.local(ap.Addr()) {
-			return nil
+		if _, err := served(time.Second); err == nil || !errors.Is(err, serve.ErrNotRunning) {
+			return err
 		}
 		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")
 	}
@@ -118,13 +119,14 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return nil
 	}
 	defer func() { _ = hold.Close() }()
-	ap, v, err := served(time.Second)
-	if err == nil && !s.local(ap.Addr()) { // a stale record whose address another machine has now
-		err = serve.ErrNotRunning
-	}
+	live, err := served(time.Second)
 	if err == nil {
-		if v != "" && v != s.own {
-			fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", v, s.own)
+		warned := map[string]bool{}
+		for _, r := range live {
+			if r.Version != s.own && !warned[r.Version] {
+				warned[r.Version] = true
+				fmt.Fprintf(stderr, "⚠ dev serve %s runs (this dev is %s): restart it to update, unless it reloads itself\n", r.Version, s.own)
+			}
 		}
 		return nil
 	} else if !errors.Is(err, serve.ErrNotRunning) {
@@ -153,7 +155,9 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		return err
 	}
-	if ap, err := netip.ParseAddrPort(addr); err == nil && ap.Port() == 0 {
+	want, err := netip.ParseAddrPort(addr)                      // "": dev serve's own default, any address
+	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
+	if err == nil && want.Port() == 0 {
 		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
@@ -210,8 +214,11 @@ func (s *starter) ensure(stderr io.Writer) error {
 	ended := false
 	for time.Now().Before(deadline) {
 		// After an exit too: a second dev boss's dev serve may have taken the port first
-		if ap, _, err := served(300 * time.Millisecond); err == nil && s.local(ap.Addr()) {
+		live, err := served(300 * time.Millisecond)
+		i := slices.IndexFunc(live, func(r serve.Running) bool { return addr == "" || r.Addr == want })
+		if err == nil && i >= 0 {
 			if !ended {
+				ap := live[i].Addr
 				hint := "pair a phone: dev serve pair"
 				if ap.Addr().IsLoopback() {
 					hint = "this Mac only, no pairing needed"
