@@ -485,7 +485,7 @@ function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   return el('article', { class: 'card done', title: named, 'aria-label': named },
-    el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, project(list) + ' #' + it.id),
+    el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'num' }, '#' + it.id), el('span', { class: 'pn' }, project(list)),
     el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
@@ -493,7 +493,7 @@ function doneRow(x) {
 // filters are the Project chips (a menu on the phone) and the Assignee avatars; those toggle, several at once, ME first.
 function filters(projects, ws, kinds) {
   const f = state.filter, all = [['', 'All'], ...projects.map(p => [p, p])];
-  const setProject = v => { f.project = v; render(); };
+  const setProject = v => { f.project = v; refilter(); };
   const projectFilter = wide.matches
     ? el('div', { class: 'filter' }, el('span', { class: 'flabel' }, 'Project'), el('div', { class: 'seg', role: 'group', 'aria-label': 'Project' },
       all.map(([v, text]) => el('button', { type: 'button', 'data-f': 'project:' + v, 'aria-pressed': String(f.project === v), onclick: () => setProject(v) },
@@ -507,7 +507,7 @@ function filters(projects, ws, kinds) {
         const name = who === ME ? 'Me' : who;
         return el('button', { type: 'button', class: 'avbtn' + (kinds.get(who) === 'boss' ? ' boss' : ''), 'data-f': 'who:' + who, 'aria-pressed': String(f.who.includes(who)),
           title: name + ' · ' + n, 'aria-label': name + ', ' + n + ' cards',
-          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; render(); } }, avatar(who, kinds.get(who)));
+          onclick: () => { f.who = f.who.includes(who) ? f.who.filter(w => w !== who) : [...f.who, who]; refilter(); } }, avatar(who, kinds.get(who)));
       }),
       ws.length > shown.length && el('button', { type: 'button', class: 'avmore', 'data-f': 'who:more', onclick: () => { state.allWho = true; render(); } }, '+' + (ws.length - shown.length)))));
 }
@@ -551,8 +551,7 @@ function swipe(ls) {
     clearTimeout(settling);
     settling = setTimeout(() => {
       settling = 0;
-      if (!lanes.isConnected) return; // the board left for Pair or Loading
-      laneInView(lanes);
+      if (lanes.isConnected) laneInView(lanes); // else the board left for Pair or Loading
       render();
     }, 150);
   } },
@@ -564,6 +563,14 @@ function swipe(ls) {
     l.title, el('span', { class: 'n' }, String(l.xs.length)), hot > 0 && el('span', { class: 'hotn', title: 'need you' }, String(hot)));
   };
   return [el('div', { class: 'tabs', role: 'tablist' }, ls.map(tab)), lanes];
+}
+
+// refilter draws the board for a filter just changed; on the phone, a lane the filter emptied gives way to the first that
+// has cards.
+function refilter() {
+  const ls = lanes(cards(state.board).filter(x => matches(x, state.filter)));
+  if (!ls.find(l => l.key === state.lane).xs.length) state.lane = ls.find(l => l.xs.length)?.key || state.lane;
+  render();
 }
 
 // settling is the phone lanes' scroll under way (its timer): a redraw would cut it off.
@@ -771,7 +778,7 @@ function render() {
     const n = (count, what) => el('span', null, el('b', null, String(count)), what);
     // What needs the user: a shortcut to those cards, again to all
     const need = el('button', { type: 'button', class: 'need' + (t.need ? ' on' : ''), 'aria-pressed': String(f.needs), 'data-f': 'needs',
-      onclick: () => { f.needs = !f.needs; render(); } }, el('b', null, String(t.need)), 'need you');
+      onclick: () => { f.needs = !f.needs; refilter(); } }, el('b', null, String(t.need)), 'need you');
     top.append(need, n(t.mine, 'mine'), n(t.open, 'open'));
     if (focused) need.focus({ preventScroll: true });
     line.append('live · updated ' + hhmm(state.asOf));
