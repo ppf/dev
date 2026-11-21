@@ -217,7 +217,7 @@ func TestStartShapes(t *testing.T) {
 	if _, _, err := s.Start(placed(t, s, live, id, now), "e", "boss-x", now); err != nil {
 		t.Fatal(err)
 	}
-	if it, err := s.SetDoing(id, "", false, &Doing{Text: "writing it"}, now); err != nil || it.Started != nil {
+	if it, err := s.SetDoing(id, "", false, nil, &Doing{Text: "writing it"}, now); err != nil || it.Started != nil {
 		t.Errorf("the boss on its started parked item = %+v, %v; want the start ended", it.Started, err)
 	}
 }

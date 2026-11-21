@@ -44,7 +44,7 @@ func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 	return func(boss string, id int, text string) error {
 		s, _, err := listStore(boss, true, stderr)
 		switch {
-		case err != nil && !running(tmux.New(), boss):
+		case err != nil && !errors.As(err, new(unreadList)) && !running(tmux.New(), boss):
 			// A closed boss's list leaves once its last item is ticked: that and an unknown boss look the same
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		case err != nil:
@@ -64,13 +64,13 @@ func pageStart(stderr io.Writer) func(boss string, id int, text string) error {
 	}
 }
 
-// pageDoing is dev todo doing --question from the phone page.
-func pageDoing(stderr io.Writer) func(boss string, id int, text, doing string, stop bool) error {
-	return func(boss string, id int, text, doing string, stop bool) error {
+// pageDoing is dev todo doing --question from the phone page, refused once the item's doing or start changed since the page read it.
+func pageDoing(stderr io.Writer) func(boss string, id int, text string, seen todo.Seen, doing string, stop bool) error {
+	return func(boss string, id int, text string, seen todo.Seen, doing string, stop bool) error {
 		c := tmux.New()
-		_, err := userDoing(c, boss, id, text, doing, stop, stderr)
+		_, err := userDoing(c, boss, id, text, &seen, doing, stop, stderr)
 		switch {
-		case errors.As(err, new(noList)) && !running(c, boss):
+		case errors.As(err, new(noList)) && !errors.As(err, new(unreadList)) && !running(c, boss):
 			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("no list for %s: not running, and no closed list with an open item", boss)}
 		case errors.As(err, new(notTold)):
 			log.Printf("dev serve: %v", err)

@@ -782,6 +782,8 @@ func listStore(boss string, adopt bool, stderr io.Writer) (s todo.Store, closed 
 	}
 	gone, ok, cerr := todo.ClosedStore(tmux.New(), boss, time.Now())
 	switch {
+	case cerr != nil && ok:
+		return s, false, errors.Join(err, unreadList{cerr})
 	case cerr != nil:
 		return s, false, errors.Join(err, cerr)
 	case !ok:
@@ -789,6 +791,11 @@ func listStore(boss string, adopt bool, stderr io.Writer) (s todo.Store, closed 
 	}
 	return gone, true, nil
 }
+
+// unreadList is listStore's error for a closed boss's list found but not read: not a missing list.
+type unreadList struct{ error }
+
+func (e unreadList) Unwrap() error { return e.error }
 
 // todoBoss is the boss session whose list it is: --boss's, else the one it runs in; a pane in a tmux one, else
 // a desktop app session's id.

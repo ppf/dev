@@ -11,7 +11,7 @@ function node() {
   return n;
 }
 const els = {};
-let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200, held = null;
+let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200, held = null, postHeld = null;
 const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
   lists: lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
 const calls = [], posts = [], media = { matches: false, addEventListener() {} };
@@ -30,6 +30,7 @@ const ctx = {
     if (p === '/v1/health') return res(200, { ok: true, version: 'v1' });
     if (opts.method === 'POST') {
       posts.push([p, opts.body]);
+      if (postHeld) await new Promise(ok => postHeld.push(ok));
       if (postStatus === 0) throw new Error('no reply');
       return postStatus === 200 ? res(200, { ok: true }) : res(postStatus, { error: 'refused by the Mac' });
     }
@@ -174,7 +175,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   const doable = run("cards(state.board).filter(x => !x.done && doable(x.list, x.it)).map(x => x.list.boss + '#' + x.it.id)");
   check("I'm on it: own To do cards, no ask, not desktop, not doing or starting: " + doable, JSON.stringify(doable) === JSON.stringify(['boss-garden#6', 'boss-garden#7', 'boss-kitchen#7', 'boss-shed#2']));
   const startable = run("cards(state.board).filter(x => !x.done && startable(x.list, x.it, state.board.manager_runs)).map(x => x.list.boss + '#' + x.it.id)");
-  check('Start: own To do cards only (not the one marked doing in In progress): ' + startable, !startable.includes('boss-garden#12') && startable.includes('boss-garden#6'));
+  check('Start: To do cards (not the one marked doing in In progress): ' + startable, !startable.includes('boss-garden#12') && startable.includes('boss-garden#6'));
   const byHref = h => drawnCards().find(c => walk(c, x => x.attrs?.href === h).length);
   const textOf = n => (n.children || []).map(c => typeof c === 'string' ? c : textOf(c)).join('');
   check('the flag says why: blocked', textOf(byHref('#/item/boss-kitchen/2').children[0]) === 'Needs you · blocked');
@@ -217,7 +218,9 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await moving;
   await settle();
   check('a drop on In progress sends what I\'m on it sends: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/doing'
-    && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 1, text: 'Order the hoses', doing: '' }));
+    && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 1, text: 'Order the hoses', doing: '', seen: { doing: null, started: null } }));
+  const last = cls => ctx.document.body.children.filter(c => c.className === cls).at(-1)?.children.join('');
+  check('a drop says how it went at the foot, not in the note at the top: ' + last('toast') + ' / ' + run('state.note'), last('toast') === 'On it, in progress: Order the hoses' && run('state.note') === '');
   check('the board read after it settles the card', !Object.keys(run('state.moves')).length && laneOf(1) === 'progress' && !/\bmoving\b/.test(cardFor(1).className));
   const dropped = posts[0];
   lists = [{ boss: 'boss-a', items: [mine('todo'), worker] }];
@@ -237,10 +240,10 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   postStatus = 409;
   await run("move(find('boss-a', 1), 'todo')");
   await settle();
-  const last = cls => ctx.document.body.children.filter(c => c.className === cls).at(-1)?.children.join('');
-  check('a drop on To do of a card you are on sends stop: ' + JSON.stringify(posts), posts.length === 1 && JSON.parse(posts[0][1]).stop === true);
-  check('a 409 puts it back, with the reason: ' + laneOf(1) + ' ' + last('refuse'), laneOf(1) === 'progress' && !Object.keys(run('state.moves')).length
-    && last('refuse') === 'refused by the Mac' && last('toast') === 'Not moved · #1 is in In progress');
+  check('a drop on To do of a card you are on sends stop, with the doing line seen: ' + JSON.stringify(posts), posts.length === 1 && JSON.parse(posts[0][1]).stop === true
+    && JSON.stringify(JSON.parse(posts[0][1]).seen) === JSON.stringify({ doing: { text: '', at: 1 }, started: null }));
+  check('a 409 puts it back, with the reason once (the callout, not the top note): ' + laneOf(1) + ' ' + last('refuse') + ' / ' + run('state.note'), laneOf(1) === 'progress' && !Object.keys(run('state.moves')).length
+    && last('refuse') === 'Already answered or changed on your Mac: refused by the Mac' && last('toast') === 'Not moved · #1 is in In progress' && !run('state.note').includes('refused'));
   postStatus = 200;
   posts.length = 0;
   await run("move(find('boss-a', 2), 'done')");
@@ -339,6 +342,18 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   while (held.length) held.shift()();
   held = null;
   await settle();
+  // A read before the reply has it ticked on the Mac: still shown under the filter until the reply's read settles it
+  await show([mine('review', { status: 'check', needs_you: true }), worker], 'E12');
+  postHeld = [];
+  const tickLate = run("move(find('boss-a', 1), 'done')");
+  await show([mine('review', { status: 'check', done: true }), worker], 'E13');
+  const doneRows = () => walk(lanes().find(l => l.attrs['data-k'] === 'done'), c => /^card done/.test(c.className || '')).length;
+  check('need you: ticked on the Mac before the reply, still shown: ' + doneRows(), doneRows() === 1);
+  postHeld.shift()();
+  postHeld = null;
+  await tickLate;
+  await show([mine('review', { status: 'check', done: true }), worker], 'E14');
+  check('need you: gone once settled', doneRows() === 0);
   run('state.filter.needs = false');
   lists = null;
   process.exit(0);

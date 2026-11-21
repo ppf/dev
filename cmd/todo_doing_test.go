@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ppf/dev/internal/serve"
+	"github.com/ppf/dev/internal/todo"
 )
 
 // The user's doing refuses a Claude Code session (not a board's button), no --question, --boss, a bad number, a
@@ -84,18 +85,27 @@ func TestTodoAddPartOf(t *testing.T) {
 	}
 }
 
-// The page's doing: no list and no session is 404, an item not the user's 409; no tmux server reached.
+// The page's doing: no list and no session is 404, an item not the user's or changed since the page read it 409; no
+// tmux server reached.
 func TestPageDoing(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	t.Setenv("TMUX", "")
 	t.Setenv("CLAUDECODE", "1")
 	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
+	run(t, "", "todo", "add", "mine")
 	var ref serve.Refused
-	if err := pageDoing(io.Discard)("boss-nope", 1, "x", "y", false); !errors.As(err, &ref) || ref.Code != http.StatusNotFound {
+	if err := pageDoing(io.Discard)("boss-nope", 1, "x", todo.Seen{}, "y", false); !errors.As(err, &ref) || ref.Code != http.StatusNotFound {
 		t.Errorf("no list: %v, want 404", err)
 	}
-	if err := pageDoing(io.Discard)("local_boss", 1, "theirs", "y", false); !errors.As(err, &ref) || ref.Code != http.StatusConflict || !strings.Contains(err.Error(), "not the user's") {
+	if err := pageDoing(io.Discard)("local_boss", 1, "theirs", todo.Seen{}, "y", false); !errors.As(err, &ref) || ref.Code != http.StatusConflict || !strings.Contains(err.Error(), "not the user's") {
 		t.Errorf("not the user's: %v, want 409", err)
+	}
+	// Doing set on the Mac after the page read it
+	if err := pageDoing(io.Discard)("local_boss", 2, "mine", todo.Seen{Doing: &todo.Doing{Text: "x", At: 1}}, "y", false); !errors.As(err, &ref) || ref.Code != http.StatusConflict || !strings.Contains(err.Error(), "changed since it was read") {
+		t.Errorf("doing changed: %v, want 409", err)
+	}
+	if err := pageDoing(io.Discard)("local_boss", 2, "mine", todo.Seen{}, "y", false); err != nil {
+		t.Errorf("as seen: %v", err)
 	}
 }

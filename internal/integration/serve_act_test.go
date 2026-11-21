@@ -291,4 +291,16 @@ func TestServeAnswerDone(t *testing.T) {
 	if !strings.Contains(bt.String(), `you were asked to start #5 "Keep me"`) {
 		t.Errorf("❌ boss-a's notes after the start: %s", bt)
 	}
+
+	// A closed boss's list that can't be read is no missing list: not done (500), not 404
+	files, err := filepath.Glob(filepath.Join(tmp, "state", "dev", "todo", "*boss-b.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("❌ boss-b's list file: %v %v", files, err)
+	}
+	writeFile(t, files[0], "{")
+	for _, call := range [][2]string{{"v1/done", `{"boss":"boss-b","id":2,"text":"Ship it?"}`}, {"v1/doing", `{"boss":"boss-b","id":2,"text":"Ship it?","seen":{}}`}} {
+		if code, body := post(call[0], call[1], true); code != http.StatusInternalServerError {
+			t.Errorf("❌ %s on an unreadable closed list: %d %s, want 500", call[0], code, body)
+		}
+	}
 }
