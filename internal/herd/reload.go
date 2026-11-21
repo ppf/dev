@@ -4,16 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/ppf/dev/internal/selfreload"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 const (
 	// envState carries the previews' UI state across a reload's exec
 	envState = "DEV_PREVIEWS_STATE"
-	// maxState bounds envState, dropping the oldest replies, then the bottom row's message, so the exec doesn't fail
-	// on the environment's size
+	// maxState is envState's bound, kept by dropping the oldest replies, then the bottom row's alert; folds, expands
+	// and kept replies always go
 	maxState = 32 << 10
 )
 
@@ -82,8 +84,15 @@ func (m Model) held() string {
 // carry is the reload's environment: the UI state as envState.
 func (m Model) carry() []string {
 	c := carried{Selected: m.selected, Folds: m.folds, Expands: m.expands, TodoFolded: m.todoFolded, WaitOpen: m.waitOpen,
-		History: m.history, Size: m.size, Msg: m.msg.text, Alert: m.msg.alert}
+		History: m.history, Size: m.size}
+	if m.msg.alert {
+		// An info line would hide the flash of the version just reloaded into
+		c.Msg, c.Alert = m.msg.text, true
+	}
 	for name, b := range m.drafts {
+		if !slices.ContainsFunc(m.snap.all, func(s sidebar.Session) bool { return s.Name == name }) {
+			continue // its session is closed: it can't be sent
+		}
 		if c.Drafts == nil {
 			c.Drafts = map[string]draft{}
 		}

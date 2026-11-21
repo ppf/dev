@@ -287,16 +287,50 @@ func TestReloadHeldByTodoFocusAsk(t *testing.T) {
 	}
 }
 
-// An empty, collapsed pane opens to show a reload error, as it does for any alert.
-func TestReloadErrorOpensCollapsedPane(t *testing.T) {
+// A watcher's warning doesn't open an empty, collapsed pane: it takes the coordinator's room until a key.
+func TestReloadWarningKeepsPaneCollapsed(t *testing.T) {
 	var ran []string
 	m := Model{width: collapsedW, height: 10, size: collapsed, c: tmux.NewFake(func(args []string) (string, error) {
 		ran = append(ran, strings.Join(args, " "))
 		return "", nil
 	})}
-	m.reload.Err = errors.New("reload: boom")
+	m.reload.Err = errors.New("reload: tmux down")
 	m.fit()
-	if m.size == collapsed || len(ran) == 0 {
-		t.Fatalf("size %v, tmux calls %q: want the pane opened for the error", m.size, ran)
+	if m.size != collapsed || len(ran) != 0 {
+		t.Fatalf("size %v, tmux calls %q: want it left collapsed", m.size, ran)
+	}
+}
+
+func TestCarryLeavesOut(t *testing.T) {
+	m := board4()
+	m.msg = info("Sent to docs-api")
+	m.drafts = map[string]replyBox{"gone": {pane: "%9", ed: editor{text: []rune("x")}}}
+	r := Model{}.restore(strings.TrimPrefix(m.carry()[0], envState+"="))
+	if r.msg.text != "" {
+		t.Errorf("info %q carried: it would hide the flash of the new version", r.msg.text)
+	}
+	if len(r.drafts) != 0 {
+		t.Errorf("a reply kept for a closed session carried: %v", r.drafts)
+	}
+}
+
+func TestClickClearsReloadError(t *testing.T) {
+	m := board4()
+	m.reload.Err = errors.New("reload: boom")
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 300, Y: 300})
+	if next.(Model).reload.Err != nil {
+		t.Error("a click leaves the reload error, hiding what the click did")
+	}
+}
+
+// A window resize before a reload's first refresh undoes the carried collapse, as it would a live one.
+func TestResizeBeforeFirstRefreshUndoesCarriedCollapse(t *testing.T) {
+	m := Model{}.restore(`{"size":2}`)
+	if m.restoredSize != collapsed {
+		t.Fatalf("restoredSize %v, want collapsed", m.restoredSize)
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	if got := next.(Model).restoredSize; got != unsized {
+		t.Errorf("restoredSize %v after a wide resize, want unsized", got)
 	}
 }

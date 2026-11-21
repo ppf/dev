@@ -212,7 +212,7 @@ func (m Model) Init() tea.Cmd {
 // It runs in Update, so fits apply in order.
 func (m *Model) fit() {
 	want := shared
-	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.reload.Err == nil && m.box.session == "" && m.confirm == "" {
+	if len(m.snap.tiles) == 0 && len(m.snap.todo.Items) == 0 && m.snap.todoErr == nil && len(m.snap.asks) == 0 && m.snap.asksErr == nil && len(m.snap.threads) == 0 && m.snap.msgsErr == nil && m.err == nil && !m.msg.alert && m.box.session == "" && m.confirm == "" {
 		want = collapsed
 	}
 	if m.size == unlisted || m.snap.zoomed || m.size == want && (want == shared || !m.focused) {
@@ -312,6 +312,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.size == collapsed && msg.Width > collapsedW {
 			m.size = unsized
 		}
+		if m.size == unlisted && msg.Width > collapsedW && m.restoredSize == collapsed {
+			// Before a reload's first refresh: the carried collapse is undone too
+			m.restoredSize = unsized
+		}
 		m.fixNeeds()
 		return m, nil
 	case tea.KeyMsg:
@@ -320,7 +324,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			// tmux focuses a clicked pane before passing the click on
-			m.focused, m.inputs = true, m.inputs+1
+			m.focused, m.inputs, m.reload.Err = true, m.inputs+1, nil
 		}
 		return m.handleMouse(msg)
 	case actionMsg:
