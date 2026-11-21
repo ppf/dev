@@ -197,8 +197,8 @@ func resolveOther(c *tmux.Client, target string) (control.Agent, error) {
 	return a, err
 }
 
-// typeInto is resolveOther for a command that types into the pane, refusing a Claude Code session the manager: its
-// prompts count as the user's words (dev todo answer --via manager).
+// typeInto is resolveOther for a command that types into the pane, refusing a Claude Code session the manager: a key
+// there could make the user's pick in its AskUserQuestion (dev todo answer --via manager).
 func typeInto(c *tmux.Client, target string) (control.Agent, error) {
 	a, err := resolveOther(c, target)
 	if err == nil && a.Session == herd.Manager && os.Getenv("CLAUDECODE") != "" {

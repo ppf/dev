@@ -369,7 +369,7 @@ manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask 
 				before = said.At
 			}
 			var claim func() (string, func() error, error)
-			if said != nil && said.Pick {
+			if said != nil {
 				// A pick answers one item, also with two answers relayed at once
 				claim = func() (string, func() error, error) {
 					if err := manager.Box.Claim(*said); err != nil {
@@ -401,11 +401,12 @@ manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask 
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button (needs --question): allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
-	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's answer from their latest prompt to it (only in its coordinator pane)")
+	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's pick in its AskUserQuestion (only in its coordinator pane)")
 	return cmd
 }
 
-// managerPrompt is the manager and the user's latest prompt to it, for an answer relayed from its coordinator pane.
+// managerPrompt is the manager and the user's latest prompt to it (a pick or a typed message), for an answer relayed
+// from its coordinator pane.
 func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	notHere := errors.New("--via manager runs only in the manager's coordinator pane")
 	pane := os.Getenv("TMUX_PANE")
