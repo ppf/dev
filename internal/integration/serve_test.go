@@ -65,6 +65,15 @@ func TestServeBoard(t *testing.T) {
 			t.Fatalf("❌ /v1/board with %v: %d %s, want 403", h, resp.StatusCode, body)
 		}
 	}
+	events, err := http.Get(url + "v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := bufio.NewReader(events.Body).ReadString('\n')
+	_ = events.Body.Close()
+	if events.StatusCode != http.StatusOK || first != "event: board\n" {
+		t.Fatalf("❌ /v1/events with no session: %d %q", events.StatusCode, first)
+	}
 	resp, body := do(boardReq("Sec-Fetch-Site", "same-origin"))
 	var board struct {
 		Lists any `json:"lists"`
