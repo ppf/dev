@@ -344,7 +344,7 @@ async function itemCall(path, list, it, extra, note) {
 const tick = (list, it) => itemCall('/v1/done', list, it, {}, 'Ticked: ');
 const start = (list, it) => itemCall('/v1/start', list, it, {}, 'Start sent: ');
 const onIt = (list, it) => itemCall('/v1/doing', list, it, { doing: '' }, 'On it, in progress: ');
-const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true }, 'Off it, back to To do: ');
+const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true }, 'Off it: ');
 // What each verdict act calls: the sheet's buttons' own; stop doing has no button yet
 const ACTS = { tick, start, doing: onIt, stop: offIt };
 
@@ -539,7 +539,7 @@ function body(l) {
     clearTimeout(settling);
     settling = 0;
     render();
-    if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[xs.length]?.focus();
+    if (state.more) document.querySelectorAll('#view .stack[data-k="todo"] a.title')[n]?.focus();
   } },
     state.more ? 'Show fewer' : 'Show ' + (l.xs.length - xs.length) + ' more');
   return [el('div', { class: 'stack', 'data-k': l.key }, xs.map(card), more),
@@ -652,7 +652,7 @@ function shownAt(x) {
 }
 
 function board() {
-  const all = cards(state.board).map(shownAt);
+  const raw = cards(state.board), all = raw.map(shownAt);
   const projects = [...new Set(all.map(x => project(x.list)))].sort();
   if (!projects.includes(state.filter.project)) state.filter.project = '';
   // A pressed assignee whose cards are gone has no chip left to unpress
@@ -664,7 +664,8 @@ function board() {
   const kinds = new Map();
   for (const x of all) if (kindOf(x) === 'boss' || !kinds.get(whoOf(x))) kinds.set(whoOf(x), kindOf(x));
   const total = new Map(lanes(all).map(l => [l.key, l.xs.length]));
-  const ls = lanes(all.filter(x => matches(x, state.filter))).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
+  // A dropped card is filtered as it was: a tick under "need you" stays shown, Ticking…
+  const ls = lanes(raw.filter(x => matches(x, state.filter)).map(shownAt)).map(l => ({ ...l, hidden: total.get(l.key) - l.xs.length }));
   const out = [...listErrors(), filters(projects, ws, kinds), ...(wide.matches ? [columns(ls)] : swipe(ls))];
   if (!all.some(x => !x.done)) out.push(el('p', { class: 'quiet' }, 'No open items.'));
   return out;
@@ -862,6 +863,10 @@ async function move(x, to, at) {
     if (state.moves[k] || state.pending[k]) return refuse(x, 'already on its way to your Mac', at);
     const now = find(x.list.boss, x.it.id);
     if (!now) return refuse(x, 'no longer open', at);
+    // A drop does what was shown when the card was picked up, not what a change on the Mac since would make of it
+    if (columnOf(now) !== columnOf(x) || verdict(now, columnOf(now), to, managerRuns())?.act !== verdict(x, columnOf(x), to, managerRuns())?.act) {
+      return refuse(now, 'it changed on your Mac meanwhile: look again', at);
+    }
     x = now;
   }
   const v = verdict(x, columnOf(x), to, managerRuns());
@@ -878,7 +883,7 @@ async function move(x, to, at) {
   } finally {
     if (state.moves[k]?.after === undefined) delete state.moves[k]; // never left for good
   }
-  if (!ok) refuse(x, state.errors[k] || state.note || 'not moved', at);
+  if (!ok && !state.unpaired) refuse(x, state.errors[k] || state.note || 'not moved', at); // unpaired: Pair says why
 }
 
 let flashTimer = 0;
@@ -889,7 +894,7 @@ function refuse(x, why, at) {
   at ||= anchor(x);
   // Where it is now: an unanswered call may have moved it after all
   const now = x.done ? x : find(x.list.boss, x.it.id);
-  const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': at.y + 'px' } }, why);
+  const call = el('div', { class: 'refuse', role: 'alert', vars: { '--rx': Math.max(8, Math.min(at.x, innerWidth - 336)) + 'px', '--ry': Math.min(at.y, innerHeight - 140) + 'px' } }, why);
   const toast = el('div', { class: 'toast' }, 'Not moved · #' + x.it.id + (now ? ' is in ' + titleOf(columnOf(now)) : ' is no longer open'));
   document.body.append(call, toast);
   clearTimeout(flashTimer);
@@ -907,10 +912,11 @@ function anchor(x) {
 let drag = null, swallow = false;
 
 function press(e) {
+  if (drag?.lifted) drop(e, true); // its pointerup never came
+  swallow = false; // a new press: its click is its own
   if (e.pointerType === 'touch' || e.button !== 0 || !wide.matches || route().name !== 'board') return;
   const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
   if (!x || x.moving || e.target.closest('button, select, input, textarea, .quick')) return;
-  if (drag?.lifted) drop(e, true); // its pointerup never came
   drag = { x, el: c, id: e.pointerId, sx: e.clientX, sy: e.clientY };
 }
 
@@ -922,6 +928,7 @@ function lift() {
   drag.ghost.classList.add('ghost');
   drag.ghost.removeAttribute('aria-label');
   drag.ghost.setAttribute('aria-hidden', 'true');
+  drag.ghost.inert = true;
   drag.ghost.style.setProperty('--gw', r.width + 'px');
   document.body.append(drag.ghost);
   drag.el.classList.add('slot');
@@ -943,10 +950,7 @@ function lift() {
 function follow(e) {
   drag.ghost.style.setProperty('--gx', e.clientX - drag.dx + 'px');
   drag.ghost.style.setProperty('--gy', e.clientY - drag.dy + 'px');
-  const over = drag.cols.find(c => {
-    const r = c.el.getBoundingClientRect();
-    return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 40;
-  }) || null;
+  const over = colAt(drag.cols, e);
   if (over === drag.over) return;
   if (drag.over) unmark(drag.over);
   drag.over = over;
@@ -954,6 +958,12 @@ function follow(e) {
   over.el.classList.add(over.v.why ? 'is-refuse' : 'is-target');
   if (over.v.act) over.el.querySelector('.ch').after(el('div', { class: 'drop-hint' }, 'Drop: ' + over.v.hint));
 }
+
+// colAt is the column of cols under the pointer of e, null for none.
+const colAt = (cols, e) => cols.find(c => {
+  const r = c.el.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}) || null;
 
 function unmark(c) {
   c.el.classList.remove('is-target', 'is-refuse');
@@ -965,9 +975,9 @@ function drop(e, end = false) {
   const d = drag;
   drag = null;
   if (!d?.lifted) return;
-  // The click this pointerup fires, a cancelled drag's too, comes before any timer
+  const over = !end && colAt(d.cols, e); // where it is released, not where it last moved
+  // The click its pointerup fires opens no sheet, a cancelled drag's (button still down) too
   swallow = true;
-  setTimeout(() => { swallow = false; });
   d.ghost.remove();
   d.el.classList.remove('slot');
   document.documentElement.classList.remove('dragging');
@@ -977,7 +987,7 @@ function drop(e, end = false) {
     c.el.querySelector('.dim-hint')?.remove();
   }
   render(); // what was held meanwhile
-  if (!end && d.over) move(d.x, d.over.k, { x: e.clientX, y: e.clientY + 12 });
+  if (over) move(d.x, over.k, { x: e.clientX, y: e.clientY + 12 });
 }
 
 document.addEventListener('pointerdown', press);
@@ -990,8 +1000,12 @@ document.addEventListener('pointermove', e => {
   }
   follow(e);
 });
-document.addEventListener('pointerup', e => { if (drag && e.pointerId === drag.id) drop(e); });
-document.addEventListener('pointercancel', e => drop(e, true));
+document.addEventListener('pointerup', e => {
+  if (drag && e.pointerId === drag.id) drop(e);
+  // its click comes before any timer; with none (released off the card), Enter's own click goes through
+  if (swallow) setTimeout(() => { swallow = false; });
+});
+document.addEventListener('pointercancel', e => { if (drag && e.pointerId === drag.id) drop(e, true); });
 window.addEventListener('blur', e => drop(e, true));
 // The click that ends a drag opens no sheet
 document.addEventListener('click', e => {

@@ -313,6 +313,26 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await run("move(find('boss-a', 1), 'progress')");
   check('unreachable: refused, nothing sent', last('refuse') === 'your Mac is not reachable' && !posts.length);
   run('state.reachable = true');
+
+  // Given to its boss on the Mac while lifted: the drop shown (I'm on it) isn't turned into a Start
+  await show([mine('todo'), worker, parked], 'E9');
+  run("globalThis.lifted = find('boss-a', 1)");
+  await show([{ ...mine('todo'), on: 'boss', status: 'idle', assignee: { kind: 'boss', name: 'boss-a', running: true } }, worker, parked], 'E10');
+  posts.length = 0;
+  await run("move(lifted, 'progress')");
+  check('changed on the Mac while lifted: refused, nothing sent', last('refuse') === 'it changed on your Mac meanwhile: look again' && !posts.length);
+
+  // Under "need you", a ticked Review card stays shown, Ticking…, until settled
+  await show([mine('review', { status: 'check', needs_you: true }), worker], 'E11');
+  run('state.filter.needs = true');
+  held = [];
+  const tickReview = run("move(find('boss-a', 1), 'done')");
+  check('need you: a ticked card stays shown, Ticking…', !!doneCard());
+  await tickReview;
+  while (held.length) held.shift()();
+  held = null;
+  await settle();
+  run('state.filter.needs = false');
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
