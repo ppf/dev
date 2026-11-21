@@ -34,7 +34,6 @@ const (
 	maxDevice    = 40
 	codeFile     = "pair.json"
 	addrFile     = "addr.json"
-	prevAddrFile = "addr.prev.json"
 	sessionFile  = "sessions.json"
 )
 
@@ -89,44 +88,28 @@ func NewCode(dir string, now time.Time) (string, error) {
 	return code[:4] + " " + code[4:], nil
 }
 
-// RecordAddr writes the address the running dev serve listens on to dir, for dev serve pair, keeping the one it
-// replaced (a hand-run dev serve for the phone beside dev boss's own on loopback); the func puts that one back, or
-// removes the record, unless another dev serve has recorded its own since. A reload records the same address and
-// keeps what was replaced. No health check: a record left for one that has stopped reads as not running.
+// RecordAddr writes the address the running dev serve listens on to dir, for dev serve pair; the func removes it
+// unless another dev serve has recorded its own since, and puts back the one it replaced while that one still
+// answers (a hand-run dev serve for the phone beside dev boss's own on loopback).
 func RecordAddr(dir string, ap netip.AddrPort) (func(), error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	unlock, err := lock(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	var cur string
-	if err := readFile(dir, addrFile, &cur); err == nil && cur != "" && cur != ap.String() {
-		if err := writeFile(dir, prevAddrFile, cur); err != nil {
-			return nil, err
-		}
-	}
+	prev, _, perr := Served(dir, time.Second)
 	if err := writeFile(dir, addrFile, ap.String()); err != nil {
 		return nil, err
 	}
 	return func() {
-		unlock, err := lock(dir)
-		if err != nil {
-			return
-		}
-		defer unlock()
-		var cur, prev string
+		var cur string
 		if readFile(dir, addrFile, &cur) != nil || cur != ap.String() {
 			return
 		}
-		if readFile(dir, prevAddrFile, &prev) == nil && prev != "" && prev != ap.String() && writeFile(dir, addrFile, prev) == nil {
-			_ = os.Remove(filepath.Join(dir, prevAddrFile))
-			return
+		if perr == nil && prev != ap && writeFile(dir, addrFile, prev.String()) == nil {
+			if _, _, err := Served(dir, time.Second); err == nil {
+				return
+			}
 		}
 		_ = os.Remove(filepath.Join(dir, addrFile))
-		_ = os.Remove(filepath.Join(dir, prevAddrFile))
 	}, nil
 }
 
