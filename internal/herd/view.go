@@ -97,13 +97,13 @@ func (m Model) bottom() []string {
 		return []string{sidebar.AlertRow("Kill "+m.confirm+"? y/n", w)}
 	case m.msg.alert:
 		return []string{sidebar.AlertRow(m.msg.text, w)}
-	case m.err != nil:
-		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	case m.reload.Err != nil:
 		// Before info: the key that clears one clears it too, unseen
 		return []string{sidebar.AlertRow("❌ "+m.reload.Err.Error(), w)}
 	case m.msg.text != "":
 		return []string{sidebar.HintRow(m.msg.text, w)}
+	case m.err != nil:
+		return []string{sidebar.AlertRow(m.err.Error(), w)}
 	}
 	if m.needMode {
 		rows := m.needRows()

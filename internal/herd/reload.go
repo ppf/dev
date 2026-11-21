@@ -62,7 +62,12 @@ func Run(c *tmux.Client, pane, exe string, args []string) error {
 // idle: nothing typed, asked, open or in flight would be lost by a reload (Busy counts the commands running);
 // replies kept for cards are carried.
 func (m Model) idle() bool {
-	return m.box.session == "" && m.confirm == "" && m.answering == "" && !m.needMode
+	return m.box.session == "" && m.confirm == "" && m.answering == "" && !m.needMode && m.fits()
+}
+
+// fits reports the carried state within maxState: a longer one (a long kept reply) could fail the exec on the environment's size.
+func (m Model) fits() bool {
+	return len(m.carry()[0]) <= len(envState)+1+maxState
 }
 
 // held says what holds a ready reload, for the bottom row; "" when none is held.
@@ -77,6 +82,8 @@ func (m Model) held() string {
 		why = "after TO DO (esc)"
 	case m.answering != "":
 		why = "after answering " + m.answering
+	case !m.fits():
+		why = "once the long kept message goes"
 	}
 	return "↻ " + v + " reloads " + why
 }

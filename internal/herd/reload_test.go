@@ -334,3 +334,21 @@ func TestResizeBeforeFirstRefreshUndoesCarriedCollapse(t *testing.T) {
 		t.Errorf("restoredSize %v after a wide resize, want unsized", got)
 	}
 }
+
+// A kept reply too long to carry holds the reload, rather than failing the exec on the environment's size.
+func TestReloadHeldByStateOverBound(t *testing.T) {
+	m := ready(t, board4())
+	m.drafts = map[string]replyBox{"docs-api": {pane: "%1", ed: editor{text: []rune(strings.Repeat("x", maxState+1))}}}
+	m, quit := refreshed(m)
+	if quit {
+		t.Fatal("reloaded with state over the bound")
+	}
+	m.width = 200
+	if row := ansiStrip(m.bottom())[0]; !strings.Contains(row, "↻ v2 reloads once the long kept message goes") {
+		t.Errorf("bottom row %q: want what holds it", row)
+	}
+	m.drafts = nil
+	if _, quit = refreshed(m); !quit {
+		t.Fatal("no reload once the long reply was gone")
+	}
+}

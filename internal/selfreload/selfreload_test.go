@@ -624,7 +624,7 @@ func TestExecEnvAndError(t *testing.T) {
 	t.Setenv(envReloadedTo, "v0.9.0")
 	t.Setenv(envCanary, oldV)
 	t.Setenv("DEV_STATE", "old")
-	if err := Exec(ready, []string{"dev"}, "DEV_STATE={\"a\":\"b=c\"}"); err != nil {
+	if err := Exec(ready, []string{"dev"}, "DEV_STATE={\"a\":\"b=c\"}", envReloadedTo+"="); err != nil {
 		t.Fatal(err)
 	}
 	if v, n := envValue(r.execs[0], "DEV_STATE"); v != `{"a":"b=c"}` || n != 1 {

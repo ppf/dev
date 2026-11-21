@@ -361,12 +361,14 @@ func Exec(r Ready, args []string, set ...string) error {
 	if claimed {
 		canary = r.Version
 	}
-	env := setEnv(os.Environ(), envReloadedTo, r.Version)
-	env = setEnv(env, envCanary, canary)
+	env := os.Environ()
 	for _, kv := range set {
 		k, v, _ := strings.Cut(kv, "=")
 		env = setEnv(env, k, v)
 	}
+	// After set's: the loop guard and the canary mark aren't the caller's
+	env = setEnv(env, envReloadedTo, r.Version)
+	env = setEnv(env, envCanary, canary)
 	err := w.execve(w.o.Exe, args, env)
 	if err == nil { // only a test double returns from a successful exec
 		return nil
