@@ -369,7 +369,9 @@ func Exec(r Ready, args []string) error {
 	env := setEnv(os.Environ(), envReloadedTo, r.Version)
 	env = setEnv(env, envCanary, canary)
 	if f := w.o.Keep; f != nil {
-		// Only now, past every check that runs a child (tmux): none of them must hold it
+		// Only now, past every check that runs a child (tmux), and with forks held off: no child must hold it
+		syscall.ForkLock.Lock()
+		defer syscall.ForkLock.Unlock()
 		if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
 			return w.dropClaim(claimed, r.Version, fmt.Errorf("selfreload: keep %s open: %w", f.Name(), err))
 		}

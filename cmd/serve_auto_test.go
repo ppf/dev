@@ -116,6 +116,14 @@ func TestAutoServeSkips(t *testing.T) {
 	}
 }
 
+func TestAutoServePrivateRunning(t *testing.T) {
+	f := &fakeStart{envValue: map[string]string{"TMUX_TMPDIR": "/tmp/x"}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
+		t.Fatalf("err %v, out %q, spawned %q", err, out.String(), f.spawned)
+	}
+}
+
 func TestAutoServeOtherMachine(t *testing.T) {
 	f := &fakeStart{version: "(devel) abc", envValue: map[string]string{}}
 	s := f.starter(t)

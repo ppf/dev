@@ -104,11 +104,18 @@ func (s *starter) ensure(stderr io.Writer) error {
 	}
 	addr := autoServeAddr(s.getenv)
 	if s.getenv("DEV_SERVE_ADDR") == "" && !s.defaultServer() {
+		if _, _, err := served(time.Second); err == nil {
+			return nil
+		}
 		return errors.New("this boss's tmux server isn't the default one: set DEV_SERVE_ADDR to start it for this one")
 	}
 	unlock, ok, err := startLock(s.dir, deadline)
-	if err != nil || !ok {
-		return err // !ok: another dev boss is starting one still
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(stderr, "⚠ dev serve: another dev boss is still starting it")
+		return nil
 	}
 	defer unlock()
 	ap, v, err := served(time.Second)
@@ -185,6 +192,9 @@ func (s *starter) ensure(stderr io.Writer) error {
 	// It reads the boss's tmux server (TMUX before TMUX_TMPDIR, as tmux does): its socket, no session of its own
 	if t := s.getenv("TMUX"); t != "" {
 		socket, _, _ := strings.Cut(t, ",")
+		if socket, err = filepath.Abs(socket); err != nil {
+			return err
+		}
 		env = append(env, "TMUX="+socket+",0,-1")
 	}
 	exited, err := s.spawn(s.exe, args, env, log)

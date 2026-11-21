@@ -73,7 +73,13 @@ address. Plain HTTP. /v1/board and /v1/events need a paired phone on every bind,
 			}
 			defer func() { _ = alive.Close() }()
 			if reloaded && kept > 2 {
-				_ = os.NewFile(uintptr(kept), "alive").Close() // held across the exec only: this process's own one holds now
+				// Held across the exec only: this process's own one holds now (closed only if it is that file)
+				old := os.NewFile(uintptr(kept), "alive")
+				if a, aerr := old.Stat(); aerr == nil {
+					if b, berr := alive.Stat(); berr == nil && os.SameFile(a, b) {
+						_ = old.Close()
+					}
+				}
 			}
 			ln, err := net.Listen("tcp", ap.String())
 			if err != nil {
