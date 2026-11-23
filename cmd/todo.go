@@ -335,7 +335,9 @@ still reads that text (item numbers restart once a list empties). --via manager 
 told it, only from their pick in the manager's AskUserQuestion: only in the manager's coordinator pane, for an item
 older than that pick, once; its one question must start "<project> #<n>: " and contain --question, the answer must be
 the option picked (or what they typed under Other), and the note quotes it: "you answered #<n> \"<question>\" via
-manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask the item as a question instead.`,
+manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask the item as a question instead. An
+item the user answered meanwhile elsewhere sends nothing, saying who answered what where: an error only for another
+answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").`,
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -378,7 +380,17 @@ manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask 
 					return said.Answer, func() error { return manager.Box.Unclaim(*said) }, nil
 				}
 			}
-			it, b, err := answerTick(c, name, id, question, args[2], before, claim)
+			where := ""
+			if said != nil {
+				where = todo.ViaManager
+			}
+			it, b, pane, err := answerTick(c, name, id, question, args[2], where, before, claim)
+			var already todo.Answered
+			if said != nil && errors.As(err, &already) && already.Same {
+				// The user answered it elsewhere while the manager's question was up, the same way
+				fmt.Fprintf(cmd.OutOrStdout(), "#%d not sent to %s: %v\n", id, name, already)
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -393,6 +405,9 @@ manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask 
 			case err != nil:
 				// Answered all the same: a board shows a failed exit as an answer to give again
 				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, name, err)
+			}
+			if said == nil {
+				tellAbove(c, pane, it, note, func(s string) { fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: "+s) })
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "#%d answered, sent to %s\n", id, name)
 			return nil

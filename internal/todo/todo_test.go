@@ -606,13 +606,79 @@ func TestAnswer(t *testing.T) {
 	if l := read(t, s, now); !l.Items[0].Done || l.Items[0].Answer != "Wait" {
 		t.Errorf("after answer: %+v", l.Items[0])
 	}
-	if _, err := s.Answer(id, "", "1", 0, now); err == nil || err.Error() != "item 1 is answered already: Wait" {
+	if _, err := s.Answer(id, "", "1", 0, now); err == nil || err.Error() != `item 1 is answered already: the user answered "Wait" in the sidebar, a board or a shell, not "Merge"` {
 		t.Errorf("second answer: %v, want answered already", err)
 	}
 	plain, _ := s.Add(Item{Text: "Answer Vince"}, now)
 	if _, err := s.Answer(plain, "", "ok", 0, now); err == nil || !strings.Contains(err.Error(), "is no question") {
 		t.Errorf("answer a plain item: %v, want refused", err)
 	}
+}
+
+// An answer to an ask answered already elsewhere, once it left the list too, says who answered it, what and where, and
+// whether it is the same answer: the manager's question for it may have been up all along. Numbers restart: only by
+// the question's text.
+func TestAnswerAnsweredElsewhere(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Filter row?", Options: []string{"A: chips", "B: label + filter row (Recommended)"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(id, "Filter row?", "B: label + filter row", "", ViaPage, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute)
+	if l := read(t, s, later); len(l.Items) != 0 {
+		t.Fatalf("answered item still listed: %+v", l.Items)
+	}
+	for _, tt := range []struct {
+		arg  string
+		same bool
+		want string
+	}{
+		{"2", true, `item 1 is answered already: the user answered "B: label + filter row" on the phone page`},
+		{"A: chips", false, `item 1 is answered already: the user answered "B: label + filter row" on the phone page, not "A: chips"`},
+	} {
+		_, err := s.AnswerPick(id, "Filter row?", tt.arg, tt.arg, ViaManager, 0, later)
+		var a Answered
+		if !errors.As(err, &a) || a.Same != tt.same || a.Item.Via != ViaPage || err.Error() != tt.want {
+			t.Errorf("late answer %q: %v (%+v), want %q", tt.arg, err, a, tt.want)
+		}
+	}
+	if _, err := s.Answer(id, "", "2", 0, later); err == nil || err.Error() != "no open item 1" {
+		t.Errorf("late answer without the question: %v, want no open item", err)
+	}
+	if _, err := s.Answer(id, "Other?", "2", 0, later); err == nil || err.Error() != "no open item 1" {
+		t.Errorf("late answer to another question: %v, want no open item", err)
+	}
+	same := func(what string, err error, want bool) {
+		t.Helper()
+		var a Answered
+		if !errors.As(err, &a) || a.Same != want {
+			t.Errorf("%s: %v (same %v), want same %v", what, err, a.Same, want)
+		}
+	}
+	// The user's pick decides, not what the manager relays; an item added after the pick is another
+	_, err = s.AnswerPick(id, "Filter row?", "2", "A: chips", ViaManager, 0, later)
+	same("a relay other than the pick", err, false)
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, now.Unix(), later)
+	same("a pick older than the item", err, false)
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, now.Unix()+1, later)
+	same("a pick newer than the item", err, true)
+	// Its number given to a new item since
+	if _, err := s.Add(Item{Text: "Ship it?", Options: []string{"Ship"}}, later); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, 0, later)
+	same("its number reused", err, true)
+	// Typed answers match exactly
+	free, _ := s.Add(Item{Text: "Branch?", Options: []string{"main"}}, later)
+	if _, err := s.Answer(free, "Branch?", "Release/ABC", 0, later); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Answer(free, "Branch?", "release/abc", 0, later)
+	same("a typed answer in another case", err, false)
 }
 
 // The open list a boss gets names an ask's options, so a cleared boss knows it still waits on the user.
@@ -657,17 +723,17 @@ func TestAnswerPick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AnswerPick(id, "", "Wait", "Merge (Recommended)", 0, now); err == nil || !strings.Contains(err.Error(), `the user picked "Merge (Recommended)", not "Wait"`) {
+	if _, err := s.AnswerPick(id, "", "Wait", "Merge (Recommended)", "", 0, now); err == nil || !strings.Contains(err.Error(), `the user picked "Merge (Recommended)", not "Wait"`) {
 		t.Errorf("another option: %v, want refused", err)
 	}
-	if it, err := s.AnswerPick(id, "", "1", "merge (recommended)", 0, now); err != nil || it.Answer != "Merge" {
+	if it, err := s.AnswerPick(id, "", "1", "merge (recommended)", "", 0, now); err != nil || it.Answer != "Merge" {
 		t.Errorf("AnswerPick = %+v, %v", it, err)
 	}
 	id, err = s.Add(Item{Text: "Branch?", Options: []string{"main"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AnswerPick(id, "", "release/abc", "Release/ABC", 0, now); err == nil {
+	if _, err := s.AnswerPick(id, "", "release/abc", "Release/ABC", "", 0, now); err == nil {
 		t.Error("free text with another case: answered, want refused")
 	}
 }

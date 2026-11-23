@@ -67,6 +67,7 @@ type Item struct {
 	Options []string `json:"options,omitempty"`
 	Context []string `json:"context,omitempty"` // an ask's lines under its question
 	Answer  string   `json:"answer,omitempty"`
+	Via     string   `json:"via,omitempty"`     // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
 	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
 	Started *Started `json:"started,omitempty"` // the user asked to start it (dev todo start), until a --replaces or set
@@ -868,27 +869,74 @@ func answerOf(options []string, o string) string {
 	return label
 }
 
+// Where the user answered an ask (Item.Via), when not in a shell, the sidebar or a board.
+const (
+	ViaPage    = "page"
+	ViaManager = "manager"
+)
+
+// Answered is the refusal of an answer to an ask the user answered already, Same when the refused answer is that one.
+type Answered struct {
+	Item Item
+	Same bool
+	arg  string
+}
+
+func (a Answered) Error() string {
+	where := "in the sidebar, a board or a shell"
+	switch a.Item.Via {
+	case ViaPage:
+		where = "on the phone page"
+	case ViaManager:
+		where = "via manager"
+	}
+	msg := fmt.Sprintf("item %d is answered already: the user answered %q %s", a.Item.ID, a.Item.Answer, where)
+	if !a.Same {
+		msg += fmt.Sprintf(", not %q", a.arg)
+	}
+	return msg
+}
+
 // Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
 // that isn't an ask, is on someone else or isn't open is an error; so is one whose text isn't question ("" skips the check),
 // as item numbers restart once a list empties. A before other than 0 also refuses an item not added before it (unix seconds).
+// One answered already is an Answered error: still on the list, or with question, among its finished items.
 func (s Store) Answer(id int, question, arg string, before int64, now time.Time) (Item, error) {
-	return s.AnswerPick(id, question, arg, "", before, now)
+	return s.AnswerPick(id, question, arg, "", "", before, now)
 }
 
-// AnswerPick is Answer refusing an answer other than picked, the user's pick for it, when given.
-func (s Store) AnswerPick(id int, question, arg, picked string, before int64, now time.Time) (Item, error) {
+// AnswerPick is Answer refusing an answer other than picked, the user's pick for it, when given; via is where (Item.Via).
+func (s Store) AnswerPick(id int, question, arg, picked, via string, before int64, now time.Time) (Item, error) {
 	var it Item
+	var unread error
 	err := s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
 		if i < 0 {
-			return fmt.Errorf("no open item %d", id)
+			was, err := s.answeredItem(f, id, question, now)
+			switch {
+			case err != nil:
+				unread = err
+				return err
+			case was == nil:
+				return fmt.Errorf("no open item %d", id)
+			}
+			return answeredAlready(*was, cmp.Or(picked, arg), before)
 		}
 		p := &f.Items[i]
 		switch {
 		case question != "" && p.Text != question:
+			// Its number may have been given to a new item since
+			was, err := s.answeredItem(f, id, question, now)
+			switch {
+			case err != nil:
+				unread = err
+				return err
+			case was != nil:
+				return answeredAlready(*was, cmp.Or(picked, arg), before)
+			}
 			return fmt.Errorf("item %d is %q now, not %q: look at the list again", id, p.Text, question)
 		case p.Done != 0:
-			return fmt.Errorf("item %d is answered already: %s", id, p.Answer)
+			return answeredAlready(*p, cmp.Or(picked, arg), before)
 		case !Own(p.On, p.Session, s.boss):
 			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
 		case len(p.Options) == 0:
@@ -912,11 +960,42 @@ func (s Store) AnswerPick(id int, question, arg, picked string, before int64, no
 			}
 		}
 		p.tick(now.Unix())
-		p.Answer = answer
+		p.Answer, p.Via = answer, via
 		it = *p
 		return nil
 	}))
+	if unread != nil {
+		// A failed read of the finished items is no refusal
+		return it, unread
+	}
 	return it, err
+}
+
+// answeredItem is the newest finished item id reading question when it is an answered ask, nil for none, another or
+// with no question (numbers restart); its caller holds the list's lock.
+func (s Store) answeredItem(f *file, id int, question string, now time.Time) (*Item, error) {
+	if question == "" {
+		return nil, nil
+	}
+	kept, err := s.readDone(false)
+	if err != nil {
+		return nil, err
+	}
+	done := finished(append(kept, f.dropped...), now)
+	if j := slices.IndexFunc(done, func(x Item) bool { return x.ID == id && x.Text == question }); j >= 0 && done[j].Answer != "" {
+		return &done[j], nil
+	}
+	return nil, nil
+}
+
+// answeredAlready is the Answered refusal of arg for it, answered already: never the same answer for an item not added
+// before before, when not 0, as for an open one.
+func answeredAlready(it Item, arg string, before int64) error {
+	a := Answered{Item: it, arg: arg}
+	if answer, err := Pick(it.Options, arg); err == nil {
+		a.Same, a.arg = answer == it.Answer && (before == 0 || it.Added != 0 && it.Added < before), answer
+	}
+	return a
 }
 
 // Clear empties the list.
