@@ -439,7 +439,7 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	shown := src
 	shown.Items, shown.Notes = slices.Clone(src.Items), slices.Clone(src.Notes)
 	shown.prune(now)
-	if !slices.ContainsFunc(shown.Items, func(it Item) bool { return it.Done == 0 }) && len(shown.Notes) == 0 {
+	if shown.empty() {
 		return t, Refused{fmt.Errorf("%s is empty (no open items, no notes): nothing to take", from.Name())}
 	}
 	dst.prune(now)
@@ -450,20 +450,19 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	}
 	t.OwnNotes = len(dst.Notes)
 	if t.OwnItems == 0 && t.OwnNotes == 0 {
-		err = s.move(from, src, dst, now)
-	} else {
-		t.Merged = true
-		err = s.merge(from, shown, dst, &t, now)
-	}
-	if err != nil {
-		return Taken{}, err
-	}
-	if !t.Merged {
+		if err := s.move(from, src, dst, now); err != nil {
+			return Taken{}, err
+		}
 		for _, it := range shown.Items {
 			t.Items = append(t.Items, TakenItem{it.ID, it})
 		}
 		for _, n := range shown.Notes {
 			t.Notes = append(t.Notes, TakenNote{n.ID, n})
+		}
+	} else {
+		t.Merged = true
+		if err := s.merge(from, shown, dst, &t, now); err != nil {
+			return Taken{}, err
 		}
 	}
 	t.Items = slices.DeleteFunc(t.Items, func(it TakenItem) bool { return it.Done != 0 })
@@ -633,5 +632,10 @@ func (s Store) Empty(now time.Time) (bool, error) {
 		return false, err
 	}
 	f.prune(now)
-	return !slices.ContainsFunc(f.Items, func(it Item) bool { return it.Done == 0 }) && len(f.Notes) == 0, nil
+	return f.empty(), nil
+}
+
+// empty reports f with no open items and no notes.
+func (f file) empty() bool {
+	return !slices.ContainsFunc(f.Items, func(it Item) bool { return it.Done == 0 }) && len(f.Notes) == 0
 }

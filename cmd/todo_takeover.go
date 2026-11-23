@@ -466,7 +466,7 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 func takeOverHint(cmd *cobra.Command, own todo.Store, pane, id string, now time.Time) string {
 	line, err := hintLine(cmd, own, pane, id, now)
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: no take-over hint: "+err.Error())
+		noHint(cmd, err)
 	}
 	return line
 }
@@ -501,7 +501,7 @@ func hintT3(cmd *cobra.Command, boss string, s todo.Store, now time.Time) {
 	}
 	_, id, err := todoBoss("")
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: no take-over hint: "+err.Error())
+		noHint(cmd, err)
 		return
 	}
 	if line := takeOverHint(cmd, s, "", id, now); line != "" {
@@ -517,12 +517,17 @@ func desktopHint(cmd *cobra.Command, s todo.Store, id string) string {
 	if err == nil {
 		worker, err = desktop.Spawned(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")).Records, id)
 	}
-	switch {
-	case err != nil:
-		fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: no take-over hint: "+err.Error())
+	if err != nil {
+		noHint(cmd, err)
 		return ""
-	case worker:
+	}
+	if worker {
 		return ""
 	}
 	return takeOverHint(cmd, s, "", id, time.Now())
+}
+
+// noHint reports on stderr why there's no take-over hint.
+func noHint(cmd *cobra.Command, err error) {
+	fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: no take-over hint: "+err.Error())
 }
