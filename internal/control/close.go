@@ -179,27 +179,8 @@ func CloseBoss(c *tmux.Client, pane string, a Agent) error {
 
 // bossEmpty refuses boss a while a session it started is left or its list has an open ask.
 func bossEmpty(c *tmux.Client, a Agent) error {
-	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
-	if err != nil {
+	if err := noWorkers(c, a); err != nil {
 		return err
-	}
-	id = strings.TrimSpace(id)
-	type session struct {
-		Name      string `tmux:"session_name"`
-		StartedBy string `tmux:"@dev_started_by"`
-	}
-	sessions, err := tmux.Query[session](c, "list-sessions")
-	if err != nil {
-		return err
-	}
-	var left []string
-	for _, s := range sessions {
-		if sidebar.Names(s.StartedBy, id, a.Session, true) {
-			left = append(left, s.Name)
-		}
-	}
-	if len(left) > 0 {
-		return fmt.Errorf("%s still has workers (%s): it closes them first", a.Session, strings.Join(left, ", "))
 	}
 	s, err := todo.ForPane(c, a.Pane)
 	if err != nil {
@@ -217,6 +198,33 @@ func bossEmpty(c *tmux.Client, a Agent) error {
 	}
 	if len(asks) > 0 {
 		return fmt.Errorf("%s has open asks on its list (%s): the user answers them first", a.Session, strings.Join(asks, ", "))
+	}
+	return nil
+}
+
+// noWorkers refuses a while a session it started is left.
+func noWorkers(c *tmux.Client, a Agent) error {
+	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
+	if err != nil {
+		return err
+	}
+	id = strings.TrimSpace(id)
+	type session struct {
+		Name      string `tmux:"session_name"`
+		StartedBy string `tmux:"@dev_started_by"`
+	}
+	sessions, err := tmux.Query[session](c, "list-sessions")
+	if err != nil {
+		return err
+	}
+	var left []string
+	for _, s := range sessions {
+		if sidebar.Names(s.StartedBy, id, a.Session, a.Boss) {
+			left = append(left, s.Name)
+		}
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%s still has workers (%s): it closes them first", a.Session, strings.Join(left, ", "))
 	}
 	return nil
 }

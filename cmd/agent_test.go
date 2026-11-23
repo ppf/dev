@@ -104,3 +104,9 @@ func TestCheckStartAccepts(t *testing.T) {
 		}
 	}
 }
+
+func TestShellLine(t *testing.T) {
+	if got, want := shellLine([]string{"dev", "agent", "start", "My App", "fix", "--boss", "it's"}), `dev agent start 'My App' fix --boss 'it'\''s'`; got != want {
+		t.Errorf("shellLine = %s, want %s", got, want)
+	}
+}

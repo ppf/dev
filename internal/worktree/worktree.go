@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -168,9 +169,20 @@ func Dirty(wt string) (bool, error) {
 	return out != "", err
 }
 
-// Changed lists wt's tracked files with changes, staged or not, relative to wt.
+// Changed lists wt's tracked files with changes, staged, unstaged or both, relative to wt.
 func Changed(wt string) ([]string, error) {
-	return nulList(gitOutput(wt, "diff", "HEAD", "--name-only", "-z", "--ignore-submodules=none"))
+	// Two diffs: against HEAD alone, a staged edit the working copy undid would cancel out
+	staged, err := nulList(gitOutput(wt, "diff", "--cached", "--name-only", "-z", "--ignore-submodules=none"))
+	if err != nil {
+		return nil, err
+	}
+	unstaged, err := nulList(gitOutput(wt, "diff", "--name-only", "-z", "--ignore-submodules=none"))
+	if err != nil {
+		return nil, err
+	}
+	paths := append(staged, unstaged...)
+	slices.Sort(paths)
+	return slices.Compact(paths), nil
 }
 
 // Ahead counts the commits in wt's HEAD that aren't in ref.

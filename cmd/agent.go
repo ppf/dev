@@ -466,13 +466,36 @@ func startFrom(cmd *cobra.Command, from, boss string, start agent.Start, timeout
 		}
 		return p.Dir()
 	})
-	if err != nil {
-		return err
-	}
 	stderr := cmd.ErrOrStderr()
 	branch := "detached HEAD"
 	if took.Branch != "" {
 		branch = "branch " + took.Branch
+	}
+	// failed is err after the worker's session closed, naming the plain start that brings it back
+	failed := func(err error) error {
+		retry := []string{"dev", "agent", "start", a.Project, took.Name}
+		for _, f := range [][2]string{{"--model", start.Model}, {"--effort", start.Effort}, {"--boss", boss}} {
+			if f[1] != "" {
+				retry = append(retry, f[0], f[1])
+			}
+		}
+		msg := fmt.Sprintf("closed %s and kept its worktree and %s, but the new session failed: retry with\n   %s", a.Session, branch, shellLine(retry))
+		if _, gone := c.Run("has-session", "-t", tmux.SessionTarget(a.Session)); gone == nil {
+			// A retry would only wait on it again
+			msg = fmt.Sprintf("closed %s and kept its worktree and %s, but the new session's agent didn't register: answer its screen (dev agent read %s), "+
+				"or have the user close it (× → keep worktree) and retry with\n   %s", a.Session, branch, a.Session, shellLine(retry))
+		}
+		// open.Run printed err already, so Execute prints nothing
+		if errors.Is(err, open.ErrShown) {
+			fmt.Fprintln(stderr, "❌ "+msg)
+		}
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+	if errors.Is(err, control.ErrKilled) {
+		return failed(err)
+	}
+	if err != nil {
+		return err
 	}
 	fmt.Fprintf(stderr, "ℹ  Taking over %s (%s, %s): %s, %s ahead of %s, %s (kept)\n", a.Session, cmp.Or(a.Model, "default model"),
 		cmp.Or(a.Effort, "default effort"), branch, plural(took.Ahead, "commit"), took.Base, plural(len(took.Dirty), "uncommitted file"))
@@ -482,18 +505,7 @@ func startFrom(cmd *cobra.Command, from, boss string, start agent.Start, timeout
 	}
 	b, err := startTaken(cmd, c, pane, a.Project, took, boss, start, timeout)
 	if err != nil {
-		retry := []string{"dev agent start", a.Project, took.Name}
-		for _, f := range [][2]string{{"--model", start.Model}, {"--effort", start.Effort}, {"--boss", boss}} {
-			if f[1] != "" {
-				retry = append(retry, f[0], f[1])
-			}
-		}
-		err = fmt.Errorf("closed %s and kept its worktree and %s, but the new session failed: retry with\n   %s: %w", a.Session, branch, strings.Join(retry, " "), err)
-		// open.Run printed its error already, so Execute wouldn't print the retry
-		if errors.Is(err, open.ErrShown) {
-			fmt.Fprintln(stderr, "❌ "+err.Error())
-		}
-		return err
+		return failed(err)
 	}
 	if asJSON {
 		return printJSON(cmd.OutOrStdout(), struct {
@@ -507,13 +519,36 @@ func startFrom(cmd *cobra.Command, from, boss string, start agent.Start, timeout
 // startTaken starts the session took closed again in its worktree, as the worker of the coordinator in pane. Its
 // to do items stay linked: a tmux worker's link is its session name.
 func startTaken(cmd *cobra.Command, c *tmux.Client, pane, project string, took control.TookOver, boss string, start agent.Start, timeout time.Duration) (control.Agent, error) {
-	if err := openProject(cmd, project, took.Name, true, true, agent.Claude, boss, start); err != nil {
-		return control.Agent{}, err
+	target := tmux.SessionTarget(took.Session)
+	if _, err := c.Run("has-session", "-t", target); err == nil {
+		return control.Agent{}, fmt.Errorf("a session %s was opened again meanwhile, not by this takeover", took.Session)
 	}
-	if err := herd.MarkStartedBy(c, took.Session, pane, outsideBoss(boss)); err != nil {
-		return control.Agent{}, err
+	openErr := openProject(cmd, project, took.Name, true, true, agent.Claude, boss, start)
+	// Also one open.Run made before failing, which a retry reuses; never one another coordinator started meanwhile
+	if by, err := c.Run("show-option", "-qv", "-t", target, herd.OptStartedBy); err == nil && strings.TrimSpace(by) == "" {
+		if err := herd.MarkStartedBy(c, took.Session, pane, outsideBoss(boss)); err != nil {
+			return control.Agent{}, errors.Join(openErr, err)
+		}
+	}
+	if openErr != nil {
+		return control.Agent{}, openErr
 	}
 	return control.AwaitAgent(c, control.RealClock, took.Session, timeout)
+}
+
+// shellLine joins words into a command line to paste into a shell, quoting only the words that need it.
+func shellLine(words []string) string {
+	plain := func(r rune) bool {
+		return r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("-_./=:@%+,", r))
+	}
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = w
+		if w == "" || strings.ContainsFunc(w, func(r rune) bool { return !plain(r) }) {
+			quoted[i] = "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
+		}
+	}
+	return strings.Join(quoted, " ")
 }
 
 // plural is n with one, made plural with an s unless n is 1.

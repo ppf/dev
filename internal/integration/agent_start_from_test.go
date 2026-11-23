@@ -91,6 +91,9 @@ func TestAgentStartFrom(t *testing.T) {
 	d.T("set-option", "-t", "=sub:", "@dev_herd", "1")
 	worker("main", true, "idle", idle)
 	d.T("new-session", "-d", "-s", "shell", "-c", worker("shared", true, "idle", idle), "sleep 600")
+	worker("parent", true, "idle", idle)
+	d.T("new-session", "-d", "-s", "child", "sleep 600")
+	d.T("set-option", "-t", "=child:", "@dev_started_by", d.T("display", "-t", "=parent:", "-p", "#{session_id}"))
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -103,6 +106,7 @@ func TestAgentStartFrom(t *testing.T) {
 		{"sub", nil, "❌ sub is a boss: --from takes over workers only\n"},
 		{"main", nil, "❌ main isn't in a .claude/worktrees worktree (" + root + ")\n"},
 		{"shared", nil, "❌ another session has a pane in " + filepath.Join(root, ".claude", "worktrees", "shared") + "\n"},
+		{"parent", nil, "❌ parent still has workers (child): it closes them first\n"},
 		{"repo-fix", []string{"repo", "fix-2"}, "❌ --from takes no <project> or [worktree]: the new session takes repo-fix's\n"},
 		{"repo-fix", []string{"--agent", "codex"}, "❌ --from starts a fresh Claude, not --agent codex\n"},
 	} {
@@ -134,9 +138,9 @@ func TestAgentStartFrom(t *testing.T) {
 		strings.Join([]string{"repo-fix", wt, "coord", "opus", "high"}, " "))
 	check(t, "took_over", strings.Join([]string{got.TookOver.Session, got.TookOver.Worktree, got.TookOver.Branch, got.TookOver.Base, got.TookOver.Transcript,
 		strings.Join(got.TookOver.Dirty, ","), strconv.Itoa(got.TookOver.Ahead)}, " "),
-		strings.Join([]string{"repo-fix", wt, "fix", "origin/main", transcript, ".gitignore", "1"}, " "))
+		strings.Join([]string{"repo-fix", wt, "fix", "origin/main", transcript, ".gitignore,notes.txt", "1"}, " "))
 	for _, want := range []string{
-		"ℹ  Taking over repo-fix (sonnet, medium): branch fix, 1 commit ahead of origin/main, 1 uncommitted file (kept)\n",
+		"ℹ  Taking over repo-fix (sonnet, medium): branch fix, 1 commit ahead of origin/main, 2 uncommitted files (kept)\n",
 		"Closed repo-fix, kept worktree " + wt + "\n",
 		"Handover: its transcript " + transcript + "\n",
 	} {
@@ -159,7 +163,7 @@ func TestAgentStartFrom(t *testing.T) {
 		!strings.Contains(string(record), `"note": "taken over by a fresh worker"`) || !strings.Contains(string(record), `"transcript": "`+transcript+`"`) {
 		t.Errorf("❌ archive record: %v %s", err, record)
 	}
-	if list := todo(); !strings.Contains(list, "Fix login") || strings.Contains(list, "session gone") {
+	if list := todo(); !strings.Contains(list, "Fix login") || !strings.Contains(list, "on repo-fix") || strings.Contains(list, "session gone") {
 		t.Errorf("❌ to do list %q, want Fix login still on the live repo-fix", list)
 	}
 	out, _, _ = devAgent(env, "", "list", "--mine")
@@ -176,12 +180,26 @@ func TestAgentStartFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, errOut, status = devAgent(env, "", "start", "--from", "repo-late", "--model", "opus", "--timeout", "2s")
-	if want := "❌ closed repo-late and kept its worktree and branch late, but the new session failed: retry with\n   dev agent start repo late --model opus: timed out"; status != "2" || !strings.Contains(errOut, want) {
+	if want := "❌ closed repo-late and kept its worktree and branch late, but the new session's agent didn't register: answer its screen (dev agent read repo-late), " +
+		"or have the user close it (× → keep worktree) and retry with\n   dev agent start repo late --model opus: timed out"; status != "2" || !strings.Contains(errOut, want) {
 		t.Errorf("❌ takeover timing out = exit %s, %q; want 2 and %q", status, errOut, want)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".claude", "worktrees", "late")); err != nil {
-		t.Errorf("❌ worktree late: %v", err)
+	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/late"); err != nil {
+		t.Errorf("❌ branch late gone: %v", err)
 	}
+	// The retry: a plain start reusing the worktree, its session still this coordinator's worker
+	d.T("kill-session", "-t", "=repo-late:")
+	// Unlinked first: Linux refuses to write over a running executable
+	if err := os.Remove(filepath.Join(stubs, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	agentStub(t, stubs, "claude")
+	out, errOut, status = devAgent(env, "", "start", "repo", "late", "--model", "opus", "--json", "--timeout", "30s")
+	var late map[string]string
+	if err := json.Unmarshal([]byte(out), &late); err != nil || status != "0" {
+		t.Fatalf("❌ retry: exit %s, %v: %q %q", status, err, out, errOut)
+	}
+	check(t, "retry", late["path"]+" "+late["branch"]+" "+late["started_by"], filepath.Join(root, ".claude", "worktrees", "late")+" late coord")
 }
 
 // runDev runs dev args with env and stdin and returns stdout, stderr and the exit status.
