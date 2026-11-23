@@ -69,6 +69,17 @@ func TestWaitsOn(t *testing.T) {
 	if _, err := s.ReplaceAsk(ask, Item{For: item}, now); err != nil {
 		t.Fatal(err)
 	}
+	// Handed to a worker, an ask isn't the user's: the item waits on the older one
+	handed := add(Item{Text: "Theirs?", Options: []string{"Yes", "No"}, For: item})
+	if err := s.Replace(handed, Item{On: "w1"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if w := waits(item); w == nil || w.ID != ask {
+		t.Errorf("a handed ask: waits on %+v, want %d", w, ask)
+	}
+	if err := s.Done([]int{handed}, now); err != nil {
+		t.Fatal(err)
+	}
 	// Two open asks for it: the newest is the one it waits on, the older once the newest goes
 	newer := add(Item{Text: "Or now?", Options: []string{"Yes", "No"}, For: item})
 	if w := waits(item); w == nil || w.ID != newer {
@@ -121,5 +132,19 @@ func TestWaitsOn(t *testing.T) {
 	}
 	if a := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == ask3 })]; a.For != 0 {
 		t.Errorf("the ticked item's link kept: for %d", a.For)
+	}
+	// Once the item leaves the list (ticked, past its shown time), the open ask's link goes: its number may come back
+	gone := add(Item{Text: "Gone soon", On: Boss})
+	ask4 := add(Item{Text: "For the gone one?", Options: []string{"Yes", "No"}, For: gone})
+	if err := s.Done([]int{gone}, now); err != nil {
+		t.Fatal(err)
+	}
+	f, err = s.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.prune(now.Add(time.Hour))
+	if a := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == ask4 })]; a.For != 0 {
+		t.Errorf("an ask's link to an item gone from the list kept: for %d", a.For)
 	}
 }

@@ -311,6 +311,9 @@ keeping its number: a pick the user made before it still answers it while the qu
 			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && !cmd.Flags().Changed("for"):
 				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link, --for or --quiet")
 			}
+			if it.For < 0 {
+				return fmt.Errorf("--for %d: an item's number, or 0 to unlink", it.For)
+			}
 			if replace && cmd.Flags().Changed("for") && it.For == 0 {
 				it.For = todo.NoFor
 			}
@@ -341,8 +344,12 @@ keeping its number: a pick the user made before it still answers it while the qu
 			}
 			now := time.Now()
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
-			if replace {
+			if replace || it.For != 0 {
 				if err := tryAdoptable(*boss, func(t todo.Store) error {
+					if !replace {
+						_, err := t.Add(it, now)
+						return err
+					}
 					_, err := t.ReplaceAsk(replaces, it, now)
 					return err
 				}); err != nil {

@@ -102,22 +102,26 @@ func (f *file) checkFor(id int, it Item) error {
 	return nil
 }
 
-// askFor is the open ask item id waits on (its For), the newest when several; nil for none.
+// askFor is the open ask of the user's item id waits on (its For), the newest when several; nil for none. One handed to
+// someone (--on) isn't the user's to answer.
 func (f *file) askFor(id int) *Item {
 	var ask *Item
 	for i, it := range f.Items {
-		if it.For == id && it.Done == 0 && len(it.Options) > 0 && (ask == nil || it.ID > ask.ID) {
+		if it.For == id && it.Done == 0 && len(it.Options) > 0 && it.On == "" && (ask == nil || it.ID > ask.ID) {
 			ask = &f.Items[i]
 		}
 	}
 	return ask
 }
 
-// unlinkGone clears the links whose other half left the list.
+// unlinkGone clears the links whose other half, or an ask's item, left the list: its number may come back on another.
 func (f *file) unlinkGone() {
 	for i, it := range f.Items {
 		if it.PartOf != 0 && !slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == it.PartOf }) {
 			f.Items[i].PartOf = 0
+		}
+		if it.For != 0 && !slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == it.For }) {
+			f.Items[i].For = 0
 		}
 	}
 }

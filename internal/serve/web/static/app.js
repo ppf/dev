@@ -987,7 +987,10 @@ function sheet(r) {
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && (r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at));
   const k = on && (r.at === undefined ? key : doneKey)(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[k], !!state.moves[k], state.reachable, listError(r.boss)].join('\n') : '';
+  // An item waiting on an ask redraws with the ask: its form edits the ask's pick
+  const ask = x && !x.done && x.it.waits_on ? find(r.boss, x.it.waits_on.id) : null;
+  const askK = ask && key(r.boss, ask.it.id);
+  const sig = on ? [location.hash, JSON.stringify(x?.it), JSON.stringify(ask?.it), askK && state.errors[askK], x?.list.closed, state.board?.manager_runs, state.errors[k], !!state.moves[k], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;

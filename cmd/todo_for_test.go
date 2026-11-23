@@ -41,6 +41,9 @@ func TestTodoAskFor(t *testing.T) {
 	if got := read(); got[3].For != 0 || got[2].WaitsOn != nil {
 		t.Errorf("--for 0 unlinks: %+v", got)
 	}
+	if _, _, err := execute(t, "", "todo", "ask", "--replaces", "3", "--for", "-1"); err == nil {
+		t.Error("--for -1: no error")
+	}
 	if _, _, err := execute(t, "", "todo", "ask", "Q?", "--option", "a", "--option", "b", "--details", "x", "--for", "3"); err == nil {
 		t.Error("--for an ask: no error")
 	}
