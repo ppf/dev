@@ -72,6 +72,9 @@ func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 		if err != nil {
 			return err
 		}
+		if err := s.refuseMoved(f); err != nil {
+			return err
+		}
 		f.prune(now)
 		n.ID, n.Added = max(f.NextNote, 1), now.Unix()
 		// A file an earlier dev wrote has no NextNote: after its highest
@@ -100,6 +103,9 @@ func (s Store) DropNote(id int, now time.Time) error {
 	return s.locked(func() error {
 		f, err := s.read()
 		if err != nil {
+			return err
+		}
+		if err := s.refuseMoved(f); err != nil {
 			return err
 		}
 		f.prune(now)

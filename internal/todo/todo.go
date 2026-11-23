@@ -103,6 +103,9 @@ type file struct {
 	Notes   []Note   `json:"notes,omitempty"`
 	// NextNote is the id the next note gets: never reused while the file lives
 	NextNote int `json:"next_note,omitempty"`
+	// Dir is the main checkout its T3 Code boss runs in, which names its project (TakeOver)
+	Dir string `json:"dir,omitempty"`
+	movedMarker
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
 	dropped []Item
 	pruned  time.Time
@@ -117,6 +120,8 @@ type List struct {
 	Updated  int64      `json:"updated"`
 	Stale    bool       `json:"stale"`
 	Finished []Finished `json:"finished,omitempty"`
+	// Moved says where the list went, when another boss took it over (TakeOver)
+	Moved string `json:"-"`
 }
 
 // Shown is an item on a board; Until is when it ticks by itself, unix seconds (0: never); Added when it was added or
@@ -185,10 +190,14 @@ func (l List) Open() (n, on int) {
 // ErrNotBoss is ForPane's error for a session not marked a dev boss.
 var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is its boss's")
 
-// Store is one boss's list file; boss is its session's name when known; trial: its writes write nothing (Trial).
+// Store is one boss's list file; boss is its session's name when known; trial: its writes write nothing (Trial). name
+// is the list's name for take-over (Name); dir the main checkout its own T3 Code boss writes (WithDir); created when its
+// tmux session was created, unix seconds, which a moved marker (TakeOver) older than it doesn't hold.
 type Store struct {
 	path, boss string
 	trial      bool
+	name, dir  string
+	created    int64
 }
 
 // Trial is s with its changes tried, not written: their refusals, nothing else.
@@ -215,10 +224,18 @@ func open(key string) (Store, error) {
 const desktopPrefix = "desktop-"
 
 // Desktop is the list of the desktop app boss session id (local_…).
-func Desktop(id string) (Store, error) { return open(desktopPrefix + id) }
+func Desktop(id string) (Store, error) {
+	s, err := open(desktopPrefix + id)
+	s.name = id
+	return s, err
+}
 
 // T3 is the list of the T3 Code boss thread id.
-func T3(id string) (Store, error) { return open("t3-" + id) }
+func T3(id string) (Store, error) {
+	s, err := open(t3Prefix + id)
+	s.name = T3Name(id)
+	return s, err
+}
 
 // AdoptDesktop moves into s, when it has no file yet, the newest list with open items earlier accepts (Adoptable);
 // adopted reports it. Unreadable lists are skipped and returned in err.
@@ -268,28 +285,30 @@ func (s Store) Adoptable(earlier func() (func(id string) bool, error)) (from Sto
 
 // take moves from's file to s, when s has none and from still has one; taken reports it.
 func (s Store) take(from Store) (taken bool, err error) {
-	err = s.locked(func() error {
-		return from.locked(func() error {
-			// Under both locks: another boss may have taken it, or s got a list meanwhile
-			if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			if _, err := os.Stat(from.path); errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			taken = true
-			if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
-				return err
-			}
-			// Its checks and finished items go first, under its lock, which guards them too: a retry still finds the list
-			if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
-				return err
-			}
-			if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
-				return err
-			}
-			return os.Rename(from.path, s.path)
-		})
+	err = lockedPair(s, from, func() error {
+		// Under both locks: another boss may have taken it, or s got a list meanwhile
+		if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if _, err := os.Stat(from.path); errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		// Taken over meanwhile (TakeOver): its marker stays its boss's
+		if f, err := from.read(); err != nil || f.MovedTo != "" {
+			return err
+		}
+		taken = true
+		if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
+			return err
+		}
+		// Its checks and finished items go first, under its lock, which guards them too: a retry still finds the list
+		if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
+			return err
+		}
+		if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
+			return err
+		}
+		return os.Rename(from.path, s.path)
 	})
 	return taken, err
 }
@@ -350,7 +369,10 @@ func ForPane(c *tmux.Client, pane string) (Store, error) {
 	if err != nil {
 		return st, err
 	}
-	st.boss = s.Name
+	st.boss, st.name = s.Name, s.Name
+	if st.created, err = strconv.ParseInt(s.Created, 10, 64); err != nil {
+		return st, fmt.Errorf("todo: %s's creation time %q: %w", s.Name, s.Created, err)
+	}
 	old, err := open(s.Socket + "-" + s.ID + "-" + s.Created)
 	if err != nil {
 		return st, err
@@ -554,7 +576,7 @@ func (s Store) Read(now time.Time) (List, error) {
 	done = slices.DeleteFunc(done, func(d Item) bool {
 		return slices.ContainsFunc(f.Items, func(it Item) bool { return sameItem(it, d) })
 	})
-	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale}
+	l := List{Items: []Shown{}, Updated: f.Updated, Stale: f.Updated != 0 && now.Sub(time.Unix(f.Updated, 0)) >= stale, Moved: f.movedText(now)}
 	l.Finished = shownFinished(finished(append(done, f.dropped...), now), s.boss)
 	for _, it := range f.Items {
 		if it.PartOf == 0 {
@@ -1046,6 +1068,10 @@ func (s Store) read() (file, error) {
 	if err := json.Unmarshal(data, &f); err != nil {
 		return file{}, fmt.Errorf("todo %s: %w", s.path, err)
 	}
+	// A tmux boss opened under the name after the move starts afresh: the marker is its earlier session's
+	if f.MovedTo != "" && s.created != 0 && s.created >= f.MovedAt {
+		return file{}, nil
+	}
 	return f, nil
 }
 
@@ -1088,6 +1114,9 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 		if err != nil {
 			return err
 		}
+		if err := s.refuseMoved(f); err != nil {
+			return err
+		}
 		f.prune(now)
 		if err := fn(&f); err != nil || s.trial {
 			return err
@@ -1102,6 +1131,9 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 func (s Store) write(f file) error {
 	if s.boss != "" {
 		f.Boss = s.boss
+	}
+	if s.dir != "" {
+		f.Dir = s.dir
 	}
 	if len(f.dropped) > 0 {
 		if err := s.keepDone(f.dropped, f.pruned); err != nil {
