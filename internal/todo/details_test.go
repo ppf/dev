@@ -48,7 +48,7 @@ func TestDetails(t *testing.T) {
 		t.Errorf("after ask --replaces with details: %q", it.Details)
 	}
 	long := strings.Repeat("é", MaxDetails+1)
-	if _, err := s.Add(Item{Text: "x", Details: long}, now); err == nil || !strings.Contains(err.Error(), "at most 1500") {
+	if _, err := s.Add(Item{Text: "x", Details: long}, now); err == nil || !strings.Contains(err.Error(), "at most 4000") {
 		t.Errorf("Add over MaxDetails: %v", err)
 	}
 	if err := s.Replace(id, Item{Details: long}, now); err == nil {

@@ -214,7 +214,7 @@ dev todo ask "Merge #148?" --option "Merge (Recommended)" --option "Wait"  # a d
 dev todo ask "Test?" --option "A" --option "B" --quiet  # a test item (add or ask): a TEST tag on the boards, in no tally or roll-up, the boss above not told
 dev todo ask --replaces 5 --context "CI green" --option "Merge (Recommended)"  # correct open ask 5 in place, same number; the question, options, context, details, link not given are kept
 dev todo answer boss-dev 5 1                          # answer it: option 1, its label or your own words
-dev todo add "Send the reminder" --details -          # its longer text from stdin (up to 1500 characters, add or ask; --replaces keeps it)
+dev todo add "Send the reminder" --details -          # its longer text from stdin (up to 4000 characters, add or ask; --replaces keeps it)
 dev todo done 2 3                                     # tick by number
 dev todo done 4 --result "Mail sent 12:40 to accounts@…, id 19ab3f"  # tick one, saying what was done (one line, up to 300 characters)
 dev todo clear                                        # empty: no block

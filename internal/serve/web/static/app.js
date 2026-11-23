@@ -110,6 +110,18 @@ function find(boss, id) {
   return it ? { list: l, it } : null;
 }
 
+// findDone is boss's finished item id ticked at at (unix seconds), or for at 0 its newest: ids restart, and an item
+// ticked moments ago has no time yet.
+function findDone(boss, id, at) {
+  const l = (state.board?.lists || []).find(l => l.boss === boss);
+  const xs = [...(l?.items || []).filter(it => it.done), ...(l?.finished || [])].filter(it => it.id === id);
+  const it = at ? xs.find(it => it.done_at === at) : xs[0];
+  return it ? { list: l, it, done: true } : null;
+}
+
+// doneHash is a finished item's sheet
+const doneHash = (boss, it) => '#/done/' + encodeURIComponent(boss) + '/' + it.id + (it.done_at ? '/' + it.done_at : '');
+
 // call returns the answer's status, ETag and JSON body (null when it isn't JSON), the body read within the timeout;
 // it throws when the Mac doesn't answer in time.
 async function call(method, path, body) {
@@ -174,8 +186,8 @@ async function load() {
       dropStalePicks();
       const r = route();
       if (r.name === 'pair') return go('#/');
-      if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
-        return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
+      if (r.name === 'item' && state.shown && !(r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at)) && !unread(r.boss)) {
+        return go('#/', state.errors[state.shown.k] || (r.at === undefined ? 'No longer open, answered or ticked on your Mac: ' : 'No longer on the board (Done keeps an item 24 hours): ') + state.shown.text);
       }
     } else if (state.newVersion && !sameVersion(state.seen)) return; // a held reload, no longer busy
   }
@@ -491,14 +503,14 @@ function openCard(x) {
       startBtn, assignee(x)));
 }
 
-// doneRow is a finished card on one line, read-only: no sheet, no buttons.
+// doneRow is a finished card on one line: its text opens its sheet, read-only.
 function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   // Focusable, so a card ticked from the keyboard keeps focus
   return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
     movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
-    el('span', { class: 't' }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
+    el('a', { class: 't row', href: doneHash(list.boss, it), 'data-f': doneHash(list.boss, it) }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
 
@@ -736,12 +748,15 @@ function whoRows(x) {
   return [['Waiting for', it.waiting_for], ['Follows up', list.closed ? 'no one (' + who + ' is closed)' : who]];
 }
 
-function facts(x) {
+// linkRow is a facts row for an item's link: a web one opens in a new tab
+const linkRow = link => ['Link', /^https?:/i.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener noreferrer' }, link) : link];
+
+function facts(x, live = false, session = false) {
   const { list, it } = x;
   const rows = [['Status', statusRow(x)], ...whoRows(x), ['List', list.boss + (list.closed ? ' (closed)' : '')]];
-  if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
-  if (it.check && it.check.kind !== 'boss closed') rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
-  if (it.now) rows.push(['Now', it.now]);
+  if (it.link) rows.push(linkRow(it.link));
+  if (it.check && it.check.kind !== 'boss closed' && !session) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.now && !live) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);
@@ -777,7 +792,100 @@ function answerForm(list, it) {
 
 const closeSheet = () => { location.hash = '#/'; };
 
-function item(boss, id) {
+// details is an item's longer text: its first line a paragraph of its own (a draft's state), a blank line between
+// paragraphs, "- " lines a list (indented: a sub-item).
+function details(text) {
+  const out = [];
+  let p = null, ul = null, item = null;
+  for (const line of text.split('\n')) {
+    const li = line.match(/^(\s*)[-*•] (.*)$/);
+    if (li) {
+      p = null;
+      if (!ul) out.push(ul = el('ul'));
+      ul.append(item = el('li', li[1] ? { class: 'sub' } : null, li[2]));
+    } else if (ul && /^\s/.test(line) && line.trim()) {
+      item.append('\n' + line.trim()); // an item's next line, indented under it
+    } else if (!line.trim()) {
+      p = ul = null;
+    } else if (p && out.length > 1) {
+      p.append('\n' + line.trim());
+    } else {
+      ul = null;
+      out.push(p = el('p', null, line.trim()));
+    }
+  }
+  return el('div', { class: 'details' }, out);
+}
+
+// A worker's state as its live block says it, with its class; the others say their status
+const LIVE_WORDS = { blocked: ['needs you', 's-decide'], gone: ['session gone', 's-gone'] };
+// checkTone is a PR check's tag class: what failed or wants changes red, what passed green
+const checkTone = kind => /failing|changes|closed|lookup/.test(kind) ? 'hot' : /green|approved|merged/.test(kind) ? 'ok' : 'wait';
+
+// liveBlock is the session block of open item x; the boss's own item only its doing line, none for the user's or a person's.
+function liveBlock(x) {
+  const { list, it } = x, boss = it.on === 'boss' && !it.session;
+  if (own(list, it) || !(boss ? it.doing : it.session || onWorker(x))) return null;
+  const who = boss ? whoOf(x) : it.session?.name || it.status_on || it.on; // a gone worker's card is on its boss
+  const [word, cls] = boss ? ['doing', 's-working'] : LIVE_WORDS[it.status] || [statusOf(it), statusClass(statusOf(it))];
+  const since = boss ? 'since ' + when(it.doing.at).replace(/^today /, '') : it.added ? 'on it ' + age(it.added) : '';
+  const row = (k, ...v) => el('div', { class: 'lv-row' }, el('b', null, k), el('span', null, ...v));
+  const note = it.note?.match(/^([^:]+): (.*)$/s);
+  const check = it.check && it.check.kind !== 'boss closed' && el('span', { class: 'tag ' + checkTone(it.check.kind) }, it.check.kind);
+  // The state on data-st, not a class: an s-* class colours the block's text too
+  return el('section', { class: 'live', 'data-st': cls, 'aria-label': boss ? 'Boss' : 'Session' },
+    el('div', { class: 'lv-top' }, avatar(who, kindOf(x), true, 'sm'), el('span', { class: 'lv-who' }, who), el('span', { class: 'st ' + cls }, word),
+      since && el('span', { class: 'lv-since' }, since)),
+    boss ? row('Now', it.doing.text || 'on it') : it.now && row('Now', it.now),
+    !boss && it.note && row('Last', note ? [el('i', null, note[1]), ': ' + note[2]] : it.note),
+    !boss && (it.link || check) && el('div', { class: 'lv-foot' }, prChip(it), check));
+}
+
+// BY is who ticked an item (done_by) as the sheet says it; a boss by its name
+const BY = { you: 'you', until: 'itself, at its time', 'done-on': "itself, at its PR's move" };
+const byOf = it => BY[it.done_by] || it.done_by;
+
+// doneSheet is finished item id of boss's list ticked at at (0: its newest), read-only; Reopen only for the user's own.
+function doneSheet(boss, id, at) {
+  const x = findDone(boss, id, at);
+  const close = el('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×');
+  if (!x) {
+    state.shown = null;
+    return [el('div', { class: 'sh-head' }, el('span'), close), el('p', { class: 'quiet', id: 'sheet-text' }, 'This item is no longer on the board: Done keeps an item 24 hours.')];
+  }
+  const { list, it } = x, k = doneKey(boss, id);
+  state.shown = { k, text: it.text };
+  const [title, rest] = lead(it.text);
+  const out = [el('div', { class: 'sh-head' }, dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', null, '#' + it.id + ' ·'), el('span', { class: 'st s-done' }, 'Done'), close)];
+  if (title) out.push(el('p', { class: 'sh-text', id: 'sheet-text' }, title));
+  if (rest) out.push(el('p', { class: 'sh-body', id: !title && 'sheet-text' }, rest));
+  const ticked = [it.done_at && when(it.done_at), it.done_by && 'by ' + byOf(it)].filter(Boolean).join(' · ');
+  if (it.result) {
+    out.push(el('section', { class: 'live result', 'aria-label': 'What was done' },
+      el('div', { class: 'lv-top' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), el('span', { class: 'lv-who' }, 'What was done'), ticked && el('span', { class: 'lv-since' }, ticked)),
+      el('p', { class: 'res' }, it.result)));
+  }
+  if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, 'You answered'), el('span', null, it.answer)));
+  if (it.details) out.push(details(it.details));
+  if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
+  if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
+  const v = verdict(x, 'done', 'todo', managerRuns());
+  if (v?.act === 'reopen') {
+    out.push(el('div', { class: 'acts' }, el('button', { class: 'btn', type: 'button', disabled: !state.reachable || state.pending[k],
+      onclick: e => { e.currentTarget.disabled = true; reopen(list, it); } }, 'Reopen')), el('p', { class: 'hint' }, 'Reopen puts it back in To do, without its answer.'));
+  } else if (v?.why) out.push(el('p', { class: 'hint' }, 'Not reopened from the page: ' + v.why + '.'));
+  const rows = [];
+  if (ticked) rows.push(['Ticked', ticked]);
+  if (whoOf(x) !== ME) rows.push(['Was on', whoOf(x)]);
+  rows.push(['List', list.boss + (list.closed ? ' (closed)' : '')]);
+  if (it.link) rows.push(linkRow(it.link));
+  out.push(el('dl', { class: 'facts' }, rows.map(([k, v]) => el('div', null, el('dt', null, k), el('dd', null, v)))),
+    el('p', { class: 'hint' }, 'Done keeps an item 24 hours after its tick (at most 50 a list), then it leaves the board.'));
+  return out;
+}
+
+function item(boss, id, at) {
+  if (at !== undefined) return doneSheet(boss, id, at);
   const x = find(boss, id);
   const close = el('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×');
   if (!x) {
@@ -793,6 +901,9 @@ function item(boss, id) {
   // The title, or the body when there is none, names the sheet
   if (title) out.push(el('p', { class: 'sh-text', id: 'sheet-text' }, title));
   if (rest) out.push(el('p', { class: 'sh-body', id: !title && 'sheet-text' }, rest));
+  const lv = liveBlock(x);
+  if (lv) out.push(lv);
+  if (it.details) out.push(details(it.details));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   if (answerable(list, it)) out.push(...answerForm(list, it));
   else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
@@ -812,7 +923,7 @@ function item(boss, id) {
   } else if (!own(list, it)) {
     out.push(el('p', { class: 'hint' }, onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
   }
-  out.push(facts(x));
+  out.push(facts(x, !!lv, !!lv && !(it.on === 'boss' && !it.session)));
   return out;
 }
 
@@ -832,6 +943,13 @@ function route() {
       return { name: 'item', boss: decodeURIComponent(m[1]), id: Number(m[2]) };
     } catch {}
   }
+  // A finished item: at is when it was ticked, 0 for one ticked moments ago
+  const d = location.hash.match(/^#\/done\/([^/]+)\/(\d+)(?:\/(\d+))?$/);
+  if (d) {
+    try {
+      return { name: 'item', boss: decodeURIComponent(d[1]), id: Number(d[2]), at: Number(d[3] || 0) };
+    } catch {}
+  }
   if (location.hash === '#/pair') return { name: 'pair' };
   return { name: 'board' };
 }
@@ -840,12 +958,13 @@ function route() {
 function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
-  const x = on && find(r.boss, r.id);
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], !!state.moves[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
+  const x = on && (r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at));
+  const k = on && (r.at === undefined ? key : doneKey)(r.boss, r.id);
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[k], !!state.moves[k], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;
-    s.replaceChildren(...item(r.boss, r.id));
+    s.replaceChildren(...item(r.boss, r.id, r.at));
   }
   state.sheetSig = sig;
   const was = s.classList.contains('on');

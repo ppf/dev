@@ -365,7 +365,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 	return cmd
 }
 
-const detailsHelp = "its longer text: what it is, its steps, what's out of scope; at most 1500 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
+const detailsHelp = "its longer text: what it is, its steps, what's out of scope; for a message to send (mail, chat, comment), its state on the first line (\"Draft ready, not sent\" or \"Sent <when> to <whom>, <where>\"), then the draft; at most 4000 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
 
 const maxDetailsBytes = 64 << 10
 

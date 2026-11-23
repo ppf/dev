@@ -171,7 +171,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   media.matches = true;
   check('wide: five columns in order', JSON.stringify(lanes().map(c => c.attrs['data-k'])) === JSON.stringify(['todo', 'progress', 'waiting', 'review', 'done']));
   check('wide: every card drawn', drawnCards().length === cardCount);
-  check('wide: finished cards have no sheet link', drawnCards().filter(c => /\bdone\b/.test(c.className)).every(c => !walk(c, x => x.tag === 'a').length));
+  check('wide: a finished card links to its read-only sheet', drawnCards().filter(c => /\bdone\b/.test(c.className)).every(c => walk(c, x => x.tag === 'a' && /^#\/done\/[^/]+\/\d+(\/\d+)?$/.test(x.attrs.href)).length === 1));
   run("state.filter.needs = true");
   check('needs you: only those cards, as many as the tally', drawnCards().length === run('tally(cards(state.board)).need'));
   run("state.filter = { project: '', who: ['gone-worker'], needs: false }; board()");
@@ -474,6 +474,120 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   fire('click');
   pressed.on.click();
   check('a pick from a card whose question changed during the press is dropped', !run("state.picks['boss-a/3']"));
+  // The sheet in its three states: To do with details, In progress with its session's block, Done read-only
+  const sheetOf = async (ls, call) => {
+    lists = ls;
+    tag = 'S' + Math.random();
+    es().on.board({ data: 'W/"' + tag + 'v2"' });
+    await settle();
+    return run(call);
+  };
+  const cls = re => nodes => nodes.flatMap(n => walk(n, c => re.test(c.className || '')));
+  const reopenBtns = nodes => nodes.flatMap(n => walk(n, c => c.tag === 'button' && c.children[0] === 'Reopen'));
+  const draft = 'Draft ready, not sent\n\nHallo Frau Weber,\nanbei die Rechnung.\n\n- attach the PDF\n  - the March one\n- cc Jana';
+  let s = await sheetOf([{ boss: 'boss-a', items: [{ id: 1, text: 'Send the reminder', status: 'yours', column: 'todo', assignee: { kind: 'you' }, details: draft, context: ['template: Mahnung 2'] }] }], "item('boss-a', 1)");
+  const det = cls(/^details$/)(s)[0];
+  check('To do: details under the title, before the context', !!det && s.indexOf(det) < s.findIndex(n => n.className === 'context') && !cls(/^live\b/)(s).length);
+  check('details: the draft\'s state the first line, its own paragraph', textOf(det.children[0]) === 'Draft ready, not sent' && det.children[0].tag === 'p');
+  check('details: a paragraph keeps its lines, a list its items, an indented one a sub-item', textOf(det.children[1]) === 'Hallo Frau Weber,\nanbei die Rechnung.'
+    && det.children[2].tag === 'ul' && det.children[2].children.length === 3 && det.children[2].children[1].className === 'sub');
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 1, text: 'Send it', status: 'yours', column: 'todo', assignee: { kind: 'you' }, details: 'Draft ready, not sent\nHallo Frau Weber,\nanbei die Rechnung.' }] }], "item('boss-a', 1)");
+  const tight = cls(/^details$/)(s)[0];
+  check('details: the first line its own paragraph with no blank line after it', textOf(tight.children[0]) === 'Draft ready, not sent' && textOf(tight.children[1]) === 'Hallo Frau Weber,\nanbei die Rechnung.');
+  const long = 'Sent today 12:40 to accounts@hartmann.example, Gmail\n\n' + 'Sehr geehrte Damen und Herren, '.repeat(130).trim();
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 1, text: 'Send it', status: 'yours', column: 'todo', assignee: { kind: 'you' }, details: long.slice(0, 4000) }] }], "item('boss-a', 1)");
+  check('a 4000-character draft is drawn whole', textOf(cls(/^details$/)(s)[0]).replace(/\n/g, '').length === long.slice(0, 4000).replace(/\n/g, '').length);
+
+  const fixing = { id: 5, text: 'Fix the login', status: 'working', status_on: 'dev-x', on: 'dev-x', column: 'progress', session: { id: '$2', name: 'dev-x' },
+    assignee: { kind: 'worker', name: 'dev-x', running: true }, now: 'go test ./...', note: 'finished: PR #285 open, CI running', added: Math.floor(Date.now() / 1000) - 42 * 60,
+    link: 'https://github.com/o/r/pull/285', check: { kind: 'checks failing', pr: 285 }, details: 'Only the token expiry.' };
+  s = await sheetOf([{ boss: 'boss-a', items: [fixing] }], "item('boss-a', 5)");
+  const lv = cls(/^live\b/)(s)[0], lvText = textOf(lv || {});
+  check('In progress: the live block first, under the title, its state on data-st, not a text-colouring class: ' + lvText, !!lv && s.indexOf(lv) === 2 && s.indexOf(lv) < s.indexOf(cls(/^details$/)(s)[0]) && lv.className === 'live' && lv.attrs['data-st'] === 's-working');
+  check('live block: state, how long, now, last note with its kind, PR and check', /dev-xworkingon it 42m/.test(lvText) && /Nowgo test/.test(lvText) && /Lastfinished: PR #285 open/.test(lvText)
+    && /#285checks failing/.test(lvText) && walk(lv, c => c.tag === 'i')[0]?.children[0] === 'finished');
+  check('In progress: Now left out of the facts, the block says it', !Object.keys(Object.fromEntries(walk(s.at(-1), n => n.tag === 'div').map(d => [textOf(d.children[0]), 1]))).includes('Now'));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'gone', assignee: { kind: 'boss', name: 'boss-a' } }] }], "item('boss-a', 5)");
+  check('a gone worker: the block names it, not the boss it went back to', /^dev-xsession gone/.test(textOf(cls(/^live\b/)(s)[0] || {}).replace(/^[A-Z]+/, '')));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, details: '- step one\n  more on step one\n- step two' }] }], "item('boss-a', 5)");
+  const steps = cls(/^details$/)(s)[0];
+  check('details: an indented line under a list item stays in it', steps.children.length === 1 && steps.children[0].children.length === 2 && textOf(steps.children[0].children[0]) === 'step one\nmore on step one');
+  check('a check shown in the block is not a fact again', !/Check/.test(textOf(s.at(-1))));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
+  check('a worker asking you: needs you', cls(/^live\b/)(s)[0]?.attrs['data-st'] === 's-decide' && /needs you/.test(textOf(cls(/^live\b/)(s)[0])));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },
+    doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) } }] }], "item('boss-a', 6)");
+  const bossLv = textOf(cls(/^live\b/)(s)[0] || {});
+  check("a boss's own item: only its doing line: " + bossLv, /boss-adoingsince \d\d:\d\dNowwaiting on CI for #285$/.test(bossLv));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 7, text: 'Mine', status: 'yours', column: 'todo', assignee: { kind: 'you' } }] }], "item('boss-a', 7)");
+  check('your own item: no live block', !cls(/^live\b/)(s).length);
+
+  const at = Math.floor(Date.now() / 1000) - 3600;
+  const mailed = { id: 117, text: 'Send the March invoice reminder', on: 'vitay-mail', assignee: { kind: 'worker', name: 'vitay-mail' }, done_at: at, done_by: 'boss-vitay',
+    result: 'Mail sent 12:40 to accounts@hartmann.example, Gmail id 19ab3f0c2e', details: draft, context: ['template: Mahnung 2'], link: 'https://mail.example/1' };
+  const asked = { id: 21, text: 'Release now or after #285?', assignee: { kind: 'you' }, answer: 'After #285', done_at: at - 60, done_by: 'you' };
+  s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 117, " + at + ')');
+  const res = cls(/^live result$/)(s)[0], doneText = s.map(textOf).join('|');
+  check('Done: what was done under the title, when and by whom: ' + textOf(res || {}), s.indexOf(res) === 2 && /What was done.*by boss-vitay.*Mail sent 12:40/.test(textOf(res)));
+  check('Done: details and context too, Done in its head', /Draft ready, not sent/.test(doneText) && /template: Mahnung 2/.test(doneText) && /#117 ·\|?Done/.test(textOf(s[0])));
+  check('Done: a worker\'s item does not reopen, said why', !reopenBtns(s).length && /only your own card reopens/.test(doneText));
+  check('Done: the 24-hour limit said', /Done keeps an item 24 hours/.test(doneText) && /Ticked.*by boss-vitay/.test(doneText) && /Was onvitay-mail/.test(doneText));
+  s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 21, " + (at - 60) + ')');
+  check('Done: your ask shows your answer and offers Reopen', /You answeredAfter #285/.test(s.map(textOf).join('')) && reopenBtns(s).length === 1);
+  const t2 = at - 7200;
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 9, text: 'Just ticked', done: true, assignee: { kind: 'you' } }],
+    finished: [{ id: 5, text: 'Newer five', assignee: { kind: 'you' }, done_at: at }, { id: 5, text: 'Older five', assignee: { kind: 'you' }, done_at: t2 }] }], "item('boss-a', 5, " + t2 + ')');
+  check('Done: two with one number: its tick time picks the older', /Older five/.test(s.map(textOf).join('')) && !/Newer five/.test(s.map(textOf).join('')));
+  check('Done: and the newer', /Newer five/.test(run("item('boss-a', 5, " + at + ')').map(textOf).join('')));
+  check('Done: one ticked moments ago (no time yet) has a hash without one', run("doneHash('boss-a', { id: 9 })") === '#/done/boss-a/9');
+  ctx.location.hash = '#/done/boss-a/9';
+  check('its route has at 0', run('route()').at === 0);
+  check('and its sheet draws it, not gone', /Just ticked/.test(run("item('boss-a', 9, 0)").map(textOf).join('')) && !/no longer on the board/.test(run("item('boss-a', 9, 0)").map(textOf).join('')));
+  ctx.location.hash = '#/';
+  s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 117, " + at + ')');
+  check('Done: one gone from the board says so', /no longer on the board/.test(run("item('boss-vitay', 117, 5)").map(textOf).join('')));
+
+  // A Done card opens its sheet: its link's hash routes to it, the sheet draws it, Reopen calls reopen
+  media.matches = true;
+  await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], 'render()');
+  const doneLink = drawnCards().filter(c => /\bdone\b/.test(c.className)).flatMap(c => walk(c, x => x.tag === 'a')).find(a => /\/117\//.test(a.attrs.href));
+  check('a Done card links to its sheet: ' + doneLink?.attrs.href, doneLink?.attrs.href === '#/done/boss-vitay/117/' + at && doneLink.attrs['data-f'] === doneLink.attrs.href);
+  ctx.location.hash = doneLink.attrs.href;
+  check('its route is the item sheet, with when it was ticked', JSON.stringify(run('route()')) === JSON.stringify({ name: 'item', boss: 'boss-vitay', id: 117, at }));
+  run('render()');
+  check('the sheet opens on it', els.sheet.classList.contains('on') && /What was done/.test(textOf(els.sheet)));
+  lists = [{ boss: 'boss-vitay', items: [{ id: 3, text: 'Something new', status: 'yours', column: 'todo', assignee: { kind: 'you' } }], finished: [mailed, asked] }];
+  tag = 'D' + Math.random();
+  es().on.board({ data: 'W/"' + tag + 'v2"' });
+  await settle();
+  check('a board change keeps the Done sheet open', ctx.location.hash === doneLink.attrs.href && /What was done/.test(textOf(els.sheet)));
+  ctx.location.hash = '#/done/boss-vitay/21/' + (at - 60);
+  run('render()');
+  run("state.errors[doneKey('boss-vitay', 21)] = 'item 21 is open again'; sheet(route())");
+  check('a refused Reopen shows why on the Done sheet', /item 21 is open again/.test(textOf(els.sheet)));
+  ctx.location.hash = '#/';
+  run('state.errors = {}; render()');
+
+  // A Done row's link is held as an option is: a redraw between a press on it and its release keeps it drawn
+  ctx.location.hash = '#/';
+  lists = [{ boss: 'boss-a', items: [], finished: [{ id: 30, text: 'Sent it', assignee: { kind: 'you' }, done_at: 1000 }] }];
+  tag = 'DH';
+  es().on.board({ data: 'W/"DHv2"' });
+  await settle();
+  const doneA = () => walk(els.view, n => n.attrs?.href === '#/done/boss-a/30/1000')[0];
+  const link = doneA();
+  fire('pointerdown');
+  lists = [{ boss: 'boss-a', items: [{ id: 31, text: 'New', status: 'yours', column: 'todo', assignee: { kind: 'you' } }], finished: lists[0].finished }];
+  tag = 'DI';
+  es().on.board({ data: 'W/"DIv2"' });
+  await settle();
+  check('a redraw between a press on a Done row and its release keeps the row drawn', !!link && doneA() === link);
+  fire('pointerup');
+  fire('click');
+  await past('RELEASE_MS');
+  check('… and the board redraws after its click', doneA() !== link && walk(els.view, n => n.attrs?.href === '#/item/boss-a/31').length === 1);
+
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
