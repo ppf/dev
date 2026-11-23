@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 function node() {
   const n = { children: [], dataset: {}, style: { setProperty(k, v) { this[k] = v; } }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
     classList: { set: new Set(), toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); }, contains(c) { return this.set.has(c); } },
-    attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, addEventListener() {}, focus() {},
+    attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, on: {}, addEventListener(k, f) { n.on[k] = f; }, focus() {},
     contains() { return false; }, append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
     querySelectorAll() { return []; }, querySelector() { return null; } };
   return n;
@@ -25,7 +25,7 @@ const ctx = {
   pc, console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
-    createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [], querySelector: () => null, body: node() },
+    createElement: tag => Object.assign(node(), { tag }), addEventListener(k, f) { (ctx.docOn[k] ||= []).push(f); }, querySelectorAll: () => [], querySelector: () => null, body: node() },
   window: { addEventListener() {}, scrollTo() {} }, innerWidth: 1280, innerHeight: 800,
   location: { hash: '#/', reloads: 0, reload() { this.reloads++; } },
   matchMedia: () => media,
@@ -51,7 +51,7 @@ const ctx = {
     addEventListener(k, f) { this.on[k] = f; }
     close() { this.closed = true; }
   },
-  streams: [],
+  streams: [], docOn: {},
 };
 const res = (code, data, etag = '') => ({ status: code, ok: code >= 200 && code < 300, headers: { get: () => etag }, text: async () => data ? JSON.stringify(data) : '' });
 ctx.globalThis = ctx;
@@ -408,6 +408,72 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('waiting_for on a worker keeps On: ' + JSON.stringify(waitsOnWorker), waitsOnWorker.On === 'dev-x' && !('Waiting for' in waitsOnWorker));
   const mineRows = await rowsOf('boss-a', [{ id: 6, text: 'Mine', status: 'yours', column: 'todo', assignee: { kind: 'you' }, check: { kind: 'merged', pr: 12 } }], false);
   check('the user\'s own: ' + JSON.stringify(mineRows), mineRows.Status === 'To do' && mineRows.On === 'you' && mineRows.Check === 'merged · PR #12' && !('Waiting for' in mineRows));
+
+  // A redraw between a press on a card's option and its release replaced the button: the tap took no click
+  lists = [{ boss: 'boss-a', items: [{ id: 3, text: 'Pick', status: 'decide', needs_you: true, column: 'todo', options: ['a', 'b'], added: 5, assignee: { kind: 'you' } }] }];
+  ctx.location.hash = '#/';
+  tag = 'P';
+  es().on.board({ data: 'W/"Pv2"' });
+  await settle();
+  const optB = () => walk(els.view, n => n.attrs?.['data-f'] === '#/item/boss-a/3/b')[0];
+  const onBoard = { closest: s => s === '#view button, #view a' ? {} : null };
+  const fire = (k, target = onBoard) => ctx.docOn[k].forEach(f => f({ pointerId: 1, pointerType: 'touch', button: 0, detail: 1, target }));
+  const past = ms => new Promise(r => setTimeout(r, run(ms) + 100));
+  const other = (id, t) => {
+    lists[0].items = [lists[0].items[0], { id, text: 'other', status: 'yours', column: 'todo', assignee: { kind: 'you' } }]; // one more: To do shows a few
+    tag = t;
+    es().on.board({ data: 'W/"' + t + 'v2"' });
+    return settle();
+  };
+  let pressed = optB();
+  fire('pointerdown');
+  await other(4, 'Q');
+  check('a redraw between press and release keeps the pressed option drawn', !!pressed && optB() === pressed);
+  fire('pointerup');
+  await settle();
+  check('a touch\'s click after the release finds the pressed option still drawn', optB() === pressed);
+  fire('click');
+  pressed.on.click();
+  check('a redraw between press and release still picks', run("state.picks['boss-a/3']?.option") === 'b' && ctx.location.hash === '#/item/boss-a/3');
+  await settle();
+  check('the held redraw follows the click', optB() !== pressed && run('state.etag') === 'W/"Qv2"' && walk(els.view, n => n.attrs?.href === '#/item/boss-a/4').length === 1);
+  ctx.location.hash = '#/';
+  pressed = optB();
+  fire('pointerdown');
+  await other(8, 'U');
+  fire('pointerup');
+  fire('click');
+  run('render()'); // a filter's or Show more's own render, in its click
+  check('a click\'s own render redraws at once', optB() !== pressed && walk(els.view, n => n.attrs?.href === '#/item/boss-a/8').length === 1);
+  await settle();
+  pressed = optB();
+  fire('pointerdown'); // never released
+  await other(5, 'R');
+  check('a press with no release holds the board', optB() === pressed);
+  await past('HOLD_MS');
+  check('… for a moment only', optB() !== pressed && walk(els.view, n => n.attrs?.href === '#/item/boss-a/5').length === 1);
+  fire('pointerup');
+  await past('RELEASE_MS');
+  pressed = optB();
+  fire('pointerdown');
+  await other(6, 'S');
+  fire('pointercancel'); // a swipe took the touch
+  await past('RELEASE_MS');
+  check('a cancelled press redraws soon', optB() !== pressed && walk(els.view, n => n.attrs?.href === '#/item/boss-a/6').length === 1);
+  pressed = optB();
+  fire('pointerdown', { closest: () => null }); // off the board: the header, the sheet
+  await other(7, 'T');
+  check('a press off the board holds nothing', optB() !== pressed && walk(els.view, n => n.attrs?.href === '#/item/boss-a/7').length === 1);
+  pressed = optB();
+  fire('pointerdown');
+  lists[0].items[0].text = 'Pick again';
+  tag = 'V';
+  es().on.board({ data: 'W/"Vv2"' });
+  await settle();
+  fire('pointerup');
+  fire('click');
+  pressed.on.click();
+  check('a pick from a card whose question changed during the press is dropped', !run("state.picks['boss-a/3']"));
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
