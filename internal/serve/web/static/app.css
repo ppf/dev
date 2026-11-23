@@ -135,6 +135,7 @@ a { color: var(--act); }
 .now.parked { background: none; border: 1px dashed var(--edge-strong); color: var(--meta); }
 .now.waits { background: var(--hot-wash); color: var(--hot-text); }
 .now.waits b { color: var(--hot-text); }
+.now.waits span { white-space: normal; }
 .waits { border-left: 3px solid var(--hot); padding-left: 12px; }
 .waits-q { font-weight: 650; }
 .now.parked b { color: var(--ink2); }
