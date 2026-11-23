@@ -115,17 +115,25 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 // closable refuses a working, deciding or hookless worker, or a shared or dirty worktree, or one whose HEAD
 // moved from head, the one delivered checked.
 func closable(c *tmux.Client, a Agent, wt, head string) error {
-	if err := settled(c, a); err != nil {
+	if err := takeable(c, a, wt); err != nil {
 		return err
-	}
-	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
-		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
 	}
 	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
 		return cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt))
 	}
 	if now, err := worktree.Head(wt); err != nil || now != head {
 		return cmp.Or(err, fmt.Errorf("%s got new commits while closing", wt))
+	}
+	return nil
+}
+
+// takeable refuses a working, deciding or hookless worker, or one whose worktree wt another session has a pane in.
+func takeable(c *tmux.Client, a Agent, wt string) error {
+	if err := settled(c, a); err != nil {
+		return err
+	}
+	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
+		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
 	}
 	return nil
 }
@@ -171,27 +179,8 @@ func CloseBoss(c *tmux.Client, pane string, a Agent) error {
 
 // bossEmpty refuses boss a while a session it started is left or its list has an open ask.
 func bossEmpty(c *tmux.Client, a Agent) error {
-	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
-	if err != nil {
+	if err := noWorkers(c, a); err != nil {
 		return err
-	}
-	id = strings.TrimSpace(id)
-	type session struct {
-		Name      string `tmux:"session_name"`
-		StartedBy string `tmux:"@dev_started_by"`
-	}
-	sessions, err := tmux.Query[session](c, "list-sessions")
-	if err != nil {
-		return err
-	}
-	var left []string
-	for _, s := range sessions {
-		if sidebar.Names(s.StartedBy, id, a.Session, true) {
-			left = append(left, s.Name)
-		}
-	}
-	if len(left) > 0 {
-		return fmt.Errorf("%s still has workers (%s): it closes them first", a.Session, strings.Join(left, ", "))
 	}
 	s, err := todo.ForPane(c, a.Pane)
 	if err != nil {
@@ -209,6 +198,33 @@ func bossEmpty(c *tmux.Client, a Agent) error {
 	}
 	if len(asks) > 0 {
 		return fmt.Errorf("%s has open asks on its list (%s): the user answers them first", a.Session, strings.Join(asks, ", "))
+	}
+	return nil
+}
+
+// noWorkers refuses a while a session it started is left.
+func noWorkers(c *tmux.Client, a Agent) error {
+	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
+	if err != nil {
+		return err
+	}
+	id = strings.TrimSpace(id)
+	type session struct {
+		Name      string `tmux:"session_name"`
+		StartedBy string `tmux:"@dev_started_by"`
+	}
+	sessions, err := tmux.Query[session](c, "list-sessions")
+	if err != nil {
+		return err
+	}
+	var left []string
+	for _, s := range sessions {
+		if sidebar.Names(s.StartedBy, id, a.Session, a.Boss) {
+			left = append(left, s.Name)
+		}
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%s still has workers (%s): it closes them first", a.Session, strings.Join(left, ", "))
 	}
 	return nil
 }

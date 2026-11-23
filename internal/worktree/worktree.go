@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -167,6 +169,31 @@ func Dirty(wt string) (bool, error) {
 	return out != "", err
 }
 
+// Changed lists wt's tracked files with changes, staged, unstaged or both, relative to wt.
+func Changed(wt string) ([]string, error) {
+	// Two diffs: against HEAD alone, a staged edit the working copy undid would cancel out
+	staged, err := nulList(gitOutput(wt, "diff", "--cached", "--name-only", "-z", "--ignore-submodules=none"))
+	if err != nil {
+		return nil, err
+	}
+	unstaged, err := nulList(gitOutput(wt, "diff", "--name-only", "-z", "--ignore-submodules=none"))
+	if err != nil {
+		return nil, err
+	}
+	paths := append(staged, unstaged...)
+	slices.Sort(paths)
+	return slices.Compact(paths), nil
+}
+
+// Ahead counts the commits in wt's HEAD that aren't in ref.
+func Ahead(wt, ref string) (int, error) {
+	out, err := gitOutput(wt, "rev-list", "--count", ref+"..HEAD")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(out)
+}
+
 // FetchDefault fetches origin into the repo at root and returns origin's default branch (origin/HEAD), e.g. origin/main.
 // Without an origin remote it returns the branch checked out at root, which Ensure branches from then.
 func FetchDefault(root string) (string, error) {
@@ -239,7 +266,11 @@ func DeleteBranch(root, name string) error {
 // Untracked lists wt's untracked files relative to wt, ignored ones left out; a nested repo is one
 // entry ending in /.
 func Untracked(wt string) ([]string, error) {
-	out, err := gitOutput(wt, "ls-files", "-z", "--others", "--exclude-standard")
+	return nulList(gitOutput(wt, "ls-files", "-z", "--others", "--exclude-standard"))
+}
+
+// nulList splits git's NUL-separated output into its paths.
+func nulList(out string, err error) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
