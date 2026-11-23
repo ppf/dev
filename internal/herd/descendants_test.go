@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -260,19 +261,20 @@ func TestBossListsFinishedOnly(t *testing.T) {
 // "asks its boss", with no NEEDS YOU row; with no coordinator agent it asks the user.
 func TestSnapshotAsksBoss(t *testing.T) {
 	for _, c := range []struct {
-		name               string
-		command, off, from string
-		want               section
-		rows               int
+		name                     string
+		command, off, from, note string
+		want                     section
+		rows                     int
 	}{
-		{"coordinator runs", "claude", "", "", restingSection, 0},
-		{"no coordinator", "zsh", "", "", needsYouSection, 1},
-		{"its inbox off", "claude", "off", "", needsYouSection, 1},
-		{"started by a coordinator outside tmux", "claude", "", "1", needsYouSection, 1},
+		{"coordinator runs", "claude", "", "", "", restingSection, 0},
+		{"repeated unanswered", "claude", "", "", "asks: Merge? (unanswered for 30m)", needsYouSection, 1},
+		{"no coordinator", "zsh", "", "", "", needsYouSection, 1},
+		{"its inbox off", "claude", "off", "", "", needsYouSection, 1},
+		{"started by a coordinator outside tmux", "claude", "", "1", "", needsYouSection, 1},
 	} {
 		boss := row{Session: "boss-a", SessionID: "$1", ID: "%1", Window: 1, Command: c.command, State: agent.Idle, StateCmd: "claude", Herd: "1", InboxOff: c.off}
 		w := row{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1", Outside: c.from,
-			Note: inbox.Note{Kind: inbox.Asks, Text: "Merge?"}.Summary()}
+			Note: cmp.Or(c.note, inbox.Note{Kind: inbox.Asks, Text: "Merge?"}.Summary())}
 		s, err := buildSnapshot([]row{boss, w}, nil, "%1", "", &fakeLookups{})
 		if err != nil {
 			t.Fatal(err)

@@ -3,6 +3,7 @@ package sidebar
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -68,11 +69,20 @@ func (s Session) Asking() bool {
 // that is a boss hands its asks up, one with no running boss is the user's to answer, and so is one its boss left
 // unanswered past inbox.AskAgain (its note repeated, Unanswered).
 func (s Session) AsksBoss() bool {
-	return s.Asking() && s.BossRuns && !s.Boss && !strings.Contains(s.Note, Unanswered)
+	_, repeated := Unanswered(s.Note)
+	return s.Asking() && s.BossRuns && !s.Boss && !repeated
 }
 
-// Unanswered marks an asks note the boss inbox repeats: "<question> (unanswered for 30m)".
-const Unanswered = " (unanswered for "
+// unanswered is the end the boss inbox gives an asks note it repeats: "<question> (unanswered for 1h 30m)".
+var unanswered = regexp.MustCompile(` \(unanswered for \d+[mhd](?: \d+[mhd])*\)$`)
+
+// Unanswered is text without the end the boss inbox gives a question it repeats, and whether it had it.
+func Unanswered(text string) (question string, repeated bool) {
+	if loc := unanswered.FindStringIndex(text); loc != nil {
+		return text[:loc[0]], true
+	}
+	return text, false
+}
 
 // BossRuns reports a @dev_started_by value v naming a boss among sessions that hears its workers' asks notes: its
 // coordinator's agent runs and its inbox is on.

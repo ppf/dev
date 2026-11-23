@@ -902,4 +902,12 @@ func TestObserveUnsentQuestion(t *testing.T) {
 	if got, _ := o2.round(4*AskAgain, done); got != "" {
 		t.Errorf("an answered question repeated: %q", got)
 	}
+	// A health note took the question's place on its pane: the question still repeats
+	o3 := newObserver(t)
+	o3.s.health("w").Question, o3.s.health("w").AskedAt = "Merge?", o3.now.Unix()
+	full := worker("idle", "", o3.ago(0))
+	full.Note = "high context: 85% used"
+	if got, _ := o3.round(AskAgain, full); !strings.Contains(got, "w asks: Merge? (unanswered for 30m)") {
+		t.Errorf("under a health note = %q", got)
+	}
 }

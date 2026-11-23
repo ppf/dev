@@ -265,6 +265,11 @@ func (s *server) start(req request, it map[string]any) (int, string) {
 	if mine {
 		it["status"], it["status_on"] = todo.StatusStarting, req.Boss
 	}
+	if it["parked"] == true {
+		// The boss's own, started: no longer parked
+		it["status"] = todo.StatusIdle
+		delete(it, "parked")
+	}
 	it["column"], it["assignee"] = "progress", map[string]any{"kind": "boss", "name": req.Boss, "running": true}
 	it["started"] = map[string]any{"at": time.Now().Unix(), "to": req.Boss}
 	delete(it, "start_late")

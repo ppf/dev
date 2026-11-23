@@ -223,9 +223,7 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 			}
 		case resting(w.trusted, w.WaitingFor) && !w.waiting:
 			kind, text, _ := strings.Cut(w.Note, ": ")
-			if i := strings.Index(text, sidebar.Unanswered); i >= 0 {
-				text = text[:i]
-			}
+			text, _ = sidebar.Unanswered(text)
 			recorded := h.Question != "" && text == h.Question
 			if kind == Asks && text != "" && !recorded {
 				// Its question never reached this box (asked while the inbox was off, or before the boss reopened): now it
@@ -234,12 +232,13 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 					s.add(n)
 				}
 				h.Question, h.AskedAt, h.Reminded = text, now.Unix(), 0
-			} else if asked := now.Sub(time.Unix(h.AskedAt, 0)); kind == Asks && recorded && asked >= AskAgain<<h.Reminded {
+			} else if asked := now.Sub(time.Unix(h.AskedAt, 0)); (kind == Asks && recorded || h.Question != "" && sidebar.HealthNote(kind)) && asked >= AskAgain<<h.Reminded {
+				// Still its question: its note, or a health note that took its place (an answer clears both)
 				// Past several (rounds missed while it worked or the previews were closed): one repeat
 				for asked >= AskAgain<<h.Reminded {
 					h.Reminded++
 				}
-				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + sidebar.Unanswered + Span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded),
+				queue(Note{Worker: w.Session, Kind: Asks, Text: h.Question + " (unanswered for " + Span(asked) + ")", Key: h.Question + strconv.Itoa(h.Reminded),
 					Outside: w.Outside != ""})
 			}
 		}

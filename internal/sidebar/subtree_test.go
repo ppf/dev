@@ -613,3 +613,20 @@ func TestAsksBoss(t *testing.T) {
 		t.Errorf("w and r (under Claude's idle reminder) don't read asks its boss in gold:\n%s", ansi.Strip(raw))
 	}
 }
+
+// Only the inbox's own end marks a repeat: a question that says the words itself is no repeat.
+func TestUnanswered(t *testing.T) {
+	for _, c := range []struct {
+		in, q string
+		rep   bool
+	}{
+		{"Merge? (unanswered for 30m)", "Merge?", true},
+		{"Merge? (unanswered for 6h 1m)", "Merge?", true},
+		{"Escalate tickets (unanswered for 30m) automatically?", "Escalate tickets (unanswered for 30m) automatically?", false},
+		{"Merge?", "Merge?", false},
+	} {
+		if q, rep := Unanswered(c.in); q != c.q || rep != c.rep {
+			t.Errorf("%q: %q %v, want %q %v", c.in, q, rep, c.q, c.rep)
+		}
+	}
+}
