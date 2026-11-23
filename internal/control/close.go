@@ -226,7 +226,10 @@ func Delivered(path string) (Delivery, error) {
 	var d Delivery
 	mainRoot, wt, ok := worktree.SessionWorktree(path)
 	if !ok {
-		mainRoot, wt, ok = worktree.T3Worktree(path)
+		var err error
+		if mainRoot, wt, ok, err = worktree.T3Worktree(path); err != nil {
+			return d, d.refused(err)
+		}
 	}
 	if !ok {
 		return d, d.refused(fmt.Errorf("%s isn't in a .claude/worktrees or T3 Code worktree", path))

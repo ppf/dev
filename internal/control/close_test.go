@@ -150,6 +150,12 @@ func TestDelivered(t *testing.T) {
 	t.Setenv("T3CODE_HOME", t3Home)
 	check("T3 Code's home set", inT3Home, Delivery{Delivered: true, Head: git(inT3Home, "rev-parse", "HEAD"), Reason: "in origin/main"})
 	check("~/.t3 with T3 Code's home set elsewhere", inT3Default, Delivery{Reason: inT3Default + " isn't in a .claude/worktrees or T3 Code worktree"})
+	// A home that isn't a directory is an error, not "no T3 Code worktree"
+	t.Setenv("T3CODE_HOME", filepath.Join(inT3Home, "README"))
+	if err := os.WriteFile(filepath.Join(inT3Home, "README"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check("T3 Code's home a file", inT3Default, Delivery{Reason: "T3 Code's worktrees: "})
 	t.Setenv("T3CODE_HOME", "")
 	check("~/.t3", inT3Default, Delivery{Delivered: true, Head: git(inT3Default, "rev-parse", "HEAD"), Reason: "in origin/main"})
 	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees or T3 Code worktree"})
