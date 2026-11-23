@@ -40,6 +40,12 @@ func TestTodoDetailsResult(t *testing.T) {
 	run(t, "", "todo", "done", "5", "--text", "Board's", "--result", "called")
 	t.Setenv("CLAUDECODE", "")
 	run(t, "", "todo", "done", "4")
+	if _, _, err := execute(t, strings.Repeat("x", 64<<10+1), "todo", "add", "x", "--details", "-"); err == nil || !strings.Contains(err.Error(), "stdin is over") {
+		t.Errorf("--details - over the byte cap: %v", err)
+	}
+	if _, _, err := execute(t, "", "todo", "ask", "Q?", "--option", "A (Recommended)", "--option", "B", "--details", strings.Repeat("x", todo.MaxDetails+1)); err == nil || !strings.Contains(err.Error(), "at most 1500") {
+		t.Errorf("ask over MaxDetails: %v", err)
+	}
 	var l struct {
 		Items []struct {
 			ID      int    `json:"id"`

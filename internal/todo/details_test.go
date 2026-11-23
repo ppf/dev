@@ -46,9 +46,10 @@ func TestDetails(t *testing.T) {
 func TestCleanDetails(t *testing.T) {
 	for in, want := range map[string]string{
 		"one": "one",
-		"\n\n  first  para \r\n\r\n\r\n- a\t b\n- c\n\n": "first para\n\n- a b\n- c",
-		"x\x07y\n \n \nz": "x y\n\nz",
-		"\n \n":           "",
+		"\n\n  first  para \r\n\r\n\r\n- a\t b\n- c\n\n": "  first para\n\n- a b\n- c",
+		"- step\n  - sub  a\n\t- sub b":                  "- step\n  - sub a\n - sub b",
+		"x\x07y\n \n \nz":                                "x y\n\nz",
+		"\n \n":                                          "",
 	} {
 		if got := CleanDetails(in); got != want {
 			t.Errorf("CleanDetails(%q) = %q, want %q", in, got, want)

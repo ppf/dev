@@ -367,6 +367,8 @@ keeping its number: a pick the user made before it still answers it while the qu
 
 const detailsHelp = "its longer text: what it is, its steps, what's out of scope; at most 1500 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
 
+const maxDetailsBytes = 64 << 10
+
 // detailsFlag is --details as stored (todo.CleanDetails), read from stdin for -; given but empty is an error.
 func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
 	if !cmd.Flags().Changed("details") {
@@ -374,9 +376,13 @@ func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
 	}
 	stdin := raw == "-"
 	if stdin {
-		b, err := io.ReadAll(cmd.InOrStdin())
-		if err != nil {
+		// Bytes enough for MaxDetails characters, however spaced: a log piped in by mistake is refused, not read whole
+		b, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxDetailsBytes+1))
+		switch {
+		case err != nil:
 			return "", fmt.Errorf("--details -: %w", err)
+		case len(b) > maxDetailsBytes:
+			return "", fmt.Errorf("--details -: stdin is over %d bytes, at most %d characters kept", maxDetailsBytes, todo.MaxDetails)
 		}
 		raw = string(b)
 	}
@@ -386,7 +392,8 @@ func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
 	case raw == "":
 		return "", errors.New("--details is empty")
 	}
-	return raw, nil
+	// Before any store opens: a desktop boss's first write takes over an earlier list
+	return raw, todo.CheckDetails(raw)
 }
 
 const quietHelp = "a test item: a TEST tag on the boards, left out of their tallies and roll-ups (a column still lists it), the boss above not told; kept by --replaces"
@@ -573,7 +580,8 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 				return err
 			}
 			s = s.WithResult(result)
-			if os.Getenv("CLAUDECODE") == "" {
+			// Outside Claude Code and a T3 Code thread: the user ran it
+			if os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == "" {
 				s = s.ByUser()
 			}
 			now := time.Now()

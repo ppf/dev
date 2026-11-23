@@ -665,7 +665,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			return 0, err
 		}
 	}
-	if err := checkDetails(it.Details); err != nil {
+	if err := CheckDetails(it.Details); err != nil {
 		return 0, err
 	}
 	err = s.update(now, func(f *file) error {
@@ -710,7 +710,7 @@ func (s Store) ReplaceAsk(id int, it Item, now time.Time) (renamed bool, err err
 }
 
 func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) error {
-	if err := checkDetails(it.Details); err != nil {
+	if err := CheckDetails(it.Details); err != nil {
 		return err
 	}
 	return s.update(now, func(f *file) error {
@@ -1422,12 +1422,15 @@ func Clean(s string) string {
 	}, s)), " ")
 }
 
-// CleanDetails is s as --details stores it: each line cleaned (Clean), one blank line at most between paragraphs, none
-// at its ends.
+// CleanDetails is s as --details stores it: each line cleaned (Clean) after its indent, one blank line at most between
+// paragraphs, none at its ends.
 func CleanDetails(s string) string {
 	var out []string
-	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
-		l = Clean(l)
+	for _, raw := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		l := Clean(raw)
+		if l != "" {
+			l = strings.Repeat(" ", len(raw)-len(strings.TrimLeft(raw, " \t"))) + l
+		}
 		if l == "" && (len(out) == 0 || out[len(out)-1] == "") {
 			continue
 		}
@@ -1436,8 +1439,8 @@ func CleanDetails(s string) string {
 	return strings.TrimSuffix(strings.Join(out, "\n"), "\n")
 }
 
-// checkDetails refuses details over MaxDetails.
-func checkDetails(details string) error {
+// CheckDetails refuses details over MaxDetails.
+func CheckDetails(details string) error {
 	if n := utf8.RuneCountInString(details); n > MaxDetails {
 		return fmt.Errorf("--details is %d characters, at most %d: put the rest in a file named in a --context line", n, MaxDetails)
 	}

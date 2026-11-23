@@ -75,7 +75,7 @@ func TestBoardGolden(t *testing.T) {
 	}
 	for _, it := range []todo.Item{
 		{Text: "Merge #148 now or after the release?", Options: []string{"Merge now | CI green (Recommended)", "After the release"}, Context: []string{"Release is Friday", "~/memo.md"}},
-		{Text: "Read the plan", Link: "https://example.com/plan", Until: 1700086400, Details: "Sections 2 and 3 only.\n\n- mark open questions"},
+		{Text: "Read the plan", Link: "https://example.com/plan", Until: 1700086400, Details: "Sections 2 and 3 only.\n\n- mark open questions in " + home + "/plan.md"},
 		{Text: "Send the invoice", On: "alice"},
 		{Text: "Fix the login", On: "a-fix"},
 	} {
@@ -84,10 +84,10 @@ func TestBoardGolden(t *testing.T) {
 		}
 	}
 	// A ticked item past the 5 s it stays in the list: finished
-	if _, err := s.Add(todo.Item{Text: "Ship the notes", Context: []string{"notes in ~/notes.md"}, Details: "Send them to the team."}, now); err != nil {
+	if _, err := s.Add(todo.Item{Text: "Ship the notes", Context: []string{"notes in " + home + "/notes.md"}, Details: "Send them to the team."}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.WithResult("Sent to the team channel 12:40").Done([]int{5}, now.Add(-time.Minute)); err != nil {
+	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{5}, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	b, err := todo.ForPane(c, tmux.SessionTarget("boss-b"))

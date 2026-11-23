@@ -60,7 +60,7 @@
           "link": "https://example.com/plan",
           "done": false,
           "until": 1700086400,
-          "details": "Sections 2 and 3 only.\n\n- mark open questions",
+          "details": "Sections 2 and 3 only.\n\n- mark open questions in ~/plan.md",
           "added": 1700000000,
           "status": "yours",
           "column": "todo",
@@ -112,7 +112,7 @@
             "notes in ~/notes.md"
           ],
           "details": "Send them to the team.",
-          "result": "Sent to the team channel 12:40",
+          "result": "Sent ~/notes.md to the team channel 12:40",
           "done_by": "boss-a",
           "assignee": {
             "kind": "you"
