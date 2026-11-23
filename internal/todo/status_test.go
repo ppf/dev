@@ -140,6 +140,13 @@ func TestSetStatusNow(t *testing.T) {
 			t.Errorf("item %d (%s): Note = %q, want %q", i+1, l.Items[i].Status, l.Items[i].Note, note)
 		}
 	}
+	// A question to its running boss: the item keeps its Now and the asks note
+	ask := sidebar.Session{Name: "ask-a", ID: "$4", Agent: "Claude", State: "idle", Doing: "x", Note: "asks: A or B?", BossRuns: true}
+	l = List{Items: []Shown{{ID: 6, On: "ask-a", Session: &Session{ID: "$4", Name: "ask-a"}}}}
+	l.SetStatus(Owner{Name: "boss-x", Workers: []sidebar.Session{ask}})
+	if it := l.Items[0]; it.Status != StatusAsks || it.Now != "x" || it.Note != "asks: A or B?" {
+		t.Errorf("asks: %s now %q note %q", it.Status, it.Now, it.Note)
+	}
 	var asked []string
 	l = List{Items: items()}
 	l.SetStatus(Owner{Name: "boss-x", Workers: []sidebar.Session{fix, idle}, Doing: func(s sidebar.Session) string {

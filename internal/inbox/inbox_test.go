@@ -369,10 +369,13 @@ func TestObserveAsksAgain(t *testing.T) {
 	o := newObserver(t)
 	o.s.health("w").Question, o.s.health("w").AskedAt = "Merge it?", o.now.Unix()
 	idle := worker("idle", "", o.ago(0))
+	idle.Note = "asks: Merge it?"
 	if got, _ := o.round(AskAgain-time.Second, idle); got != "" {
 		t.Errorf("before AskAgain: %q", got)
 	}
-	if got, _ := o.round(time.Second, worker("waiting", "idle_prompt", o.ago(0))); got != "[dev boss inbox] 1 worker update(s):\n- w asks: Merge it? (unanswered for 30m)" {
+	reminded := worker("waiting", "idle_prompt", o.ago(0))
+	reminded.Note = "asks: Merge it?"
+	if got, _ := o.round(time.Second, reminded); got != "[dev boss inbox] 1 worker update(s):\n- w asks: Merge it? (unanswered for 30m)" {
 		t.Errorf("first repeat = %q", got)
 	}
 	if got, _ := o.round(AskAgain-time.Second, idle); got != "" {
@@ -385,6 +388,7 @@ func TestObserveAsksAgain(t *testing.T) {
 	if got, _ := o.round(0, worker("working", "", o.ago(0))); got != "" {
 		t.Errorf("working: %q", got)
 	}
+	idle.Note = "asks: Merge it? (unanswered for 1h)" // the repeat's own note on the pane
 	if got, _ := o.round(time.Minute, idle); got != "[dev boss inbox] 1 worker update(s):\n- w asks: Merge it? (unanswered for 6h 1m)" {
 		t.Errorf("past several waits = %q; want one repeat", got)
 	}
@@ -602,7 +606,7 @@ func TestObserveBoss(t *testing.T) {
 	o := newObserver(t)
 	o.s.health("w").Question, o.s.health("w").AskedAt = "Merge it?", o.now.Unix()
 	w := worker("idle", "", o.ago(0))
-	w.Context, w.Herd = "85", "1"
+	w.Context, w.Herd, w.Note = "85", "1", "asks: Merge it?"
 	got, holding := o.round(AskAgain, w)
 	if got != "[dev boss inbox] 1 worker update(s):\n- w asks: Merge it? (unanswered for 30m)" {
 		t.Errorf("queued = %q", got)
@@ -871,9 +875,31 @@ func TestObserveUnsentQuestion(t *testing.T) {
 	if got, _ := o.round(time.Minute, idle); got != "" {
 		t.Errorf("sent once: %q", got)
 	}
+	if got, _ := o.round(AskAgain, idle); got != "[dev boss inbox] 1 worker update(s):\n- w asks: Red or blue? (unanswered for 31m)" {
+		t.Errorf("then repeated as any asked question: %q", got)
+	}
+	held := worker("idle", "", o.ago(time.Hour))
+	held.Session, held.Note, held.waiting = "w3", "asks: Later?", true
+	if got, _ := o.round(0, held); got != "" {
+		t.Errorf("a worker in its planned wait: %q", got)
+	}
 	busy := worker("working", "", o.ago(time.Minute))
 	busy.Session, busy.Note = "w2", "asks: Old?"
 	if got, _ := o.round(0, busy); got != "" {
 		t.Errorf("a working worker's old note: %q", got)
+	}
+	// Answered while the inbox was off (the box kept the old question): a new question is sent, the old never repeated
+	o2 := newObserver(t)
+	o2.s.health("w").Question, o2.s.health("w").AskedAt = "Old?", o2.now.Unix()
+	next := worker("idle", "", o2.ago(0))
+	next.Note = "asks: New?"
+	if got, _ := o2.round(AskAgain, next); got != "[dev boss inbox] 1 worker update(s):\n- w asks: New?" {
+		t.Errorf("a new question over an old one = %q", got)
+	}
+	done := worker("idle", "", o2.ago(0))
+	o2.s.health("w").Question, o2.s.health("w").AskedAt = "Old?", o2.now.Unix()
+	done.Note = "finished: merged"
+	if got, _ := o2.round(4*AskAgain, done); got != "" {
+		t.Errorf("an answered question repeated: %q", got)
 	}
 }

@@ -571,6 +571,7 @@ func TestAsksBoss(t *testing.T) {
 		{"boss runs", []Session{boss, asks}, RankIdle, "idle", 0},
 		{"boss runs, idle reminder", []Session{boss, reminder}, RankIdle, "idle", 0},
 		{"boss runs, a dialog", []Session{boss, dialog}, RankNeedsYou, "1 need you", 1},
+		{"boss runs, left unanswered past AskAgain", []Session{boss, worker(Session{State: agent.Idle, Note: "asks: Merge? (unanswered for 30m)"})}, RankNeedsYou, "1 need you", 1},
 		{"no boss running", []Session{asks}, RankNeedsYou, "", 1},
 		{"boss's coordinator gone", []Session{{Name: "b", ID: "$b", Boss: true, State: agent.Idle}, asks}, RankNeedsYou, "", 1},
 		{"started by a coordinator outside tmux", []Session{boss, func() Session { s := asks; s.Outside = true; return s }()}, RankNeedsYou, "1 need you", 1},

@@ -65,8 +65,14 @@ func (s Session) Asking() bool {
 }
 
 // AsksBoss reports a plain worker Asking whose boss runs: the boss answers it, so it doesn't need the user. A worker
-// that is a boss hands its asks up, and one with no running boss is the user's to answer.
-func (s Session) AsksBoss() bool { return s.Asking() && s.BossRuns && !s.Boss }
+// that is a boss hands its asks up, one with no running boss is the user's to answer, and so is one its boss left
+// unanswered past inbox.AskAgain (its note repeated, Unanswered).
+func (s Session) AsksBoss() bool {
+	return s.Asking() && s.BossRuns && !s.Boss && !strings.Contains(s.Note, Unanswered)
+}
+
+// Unanswered marks an asks note the boss inbox repeats: "<question> (unanswered for 30m)".
+const Unanswered = " (unanswered for "
 
 // BossRuns reports a @dev_started_by value v naming a boss among sessions that hears its workers' asks notes: its
 // coordinator's agent runs and its inbox is on.
@@ -109,7 +115,7 @@ func (c *ListCount) Add(it NeedItem) {
 // Rollup is a boss's whole subtree: the strongest Rank across it and every session under it, and its counts.
 type Rollup struct {
 	Rank      Rank
-	Questions int  // sessions that need the user: dialogs and asks notes, its own too
+	Questions int  // sessions that need the user: dialogs and asks notes no running boss answers (AsksBoss), its own too
 	Decide    int  // asks on its and its bosses' lists
 	Working   int  // sessions under it working
 	Waiting   int  // sessions under it in a planned wait or rate-limit resume

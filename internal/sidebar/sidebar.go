@@ -76,7 +76,7 @@ type Session struct {
 	ID        string // tmux session id ($N)
 	Boss      bool   // a dev boss session (OptHerd)
 	StartedBy string // @dev_started_by: see Starter
-	BossRuns  bool   // the boss that started it runs, its inbox on (MarkBossRuns)
+	BossRuns  bool   // the boss that started it has its agent running and its inbox on, no outside coordinator started it (MarkBossRuns)
 	Outside   bool   // a coordinator outside tmux started it with --boss (@dev_started_outside)
 	InboxOff  bool   // a boss whose inbox is off (@dev_boss_inbox): its workers' notes don't reach it
 	Depth     int    // how deep Order nested it under the session that started it

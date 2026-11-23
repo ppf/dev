@@ -154,6 +154,19 @@ func TestTodoStatus(t *testing.T) {
 		}
 	}
 
+	// The boss's inbox off: no one is told the question, so it is the user's again
+	s.T("set-option", "-t", "=boss-a:", "@dev_boss_inbox", "off")
+	out, _ = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "todo", "--all", "--json")
+	if err := json.Unmarshal([]byte(out), &placed); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range placed[0].Items {
+		if it.Text == "asks its boss" && (it.Column != "progress" || !it.NeedsYou) {
+			t.Errorf("❌ inbox off: %q placed %s, needs you %v; want progress, needs you", it.Text, it.Column, it.NeedsYou)
+		}
+	}
+	s.T("set-option", "-u", "-t", "=boss-a:", "@dev_boss_inbox")
+
 	// An item an older dev filed on the boss's own name reads yours, and a board's tick (done --text) ticks it
 	files, _ := filepath.Glob(filepath.Join(tmp, "state", "dev", "todo", "*boss-a.json"))
 	if len(files) != 1 {
