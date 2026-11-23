@@ -68,8 +68,8 @@ func OwnerOf(live []sidebar.Session, boss string, closed bool) Owner {
 //   - on the boss itself (--on boss): check when its PR moved, else working while it says it does it (Doing), else
 //     parked (Parked), idle once started, naming the boss (boss for a desktop app boss's, which has no name);
 //   - on a linked session o didn't start, or no longer listed: gone;
-//   - on a worker in a dialog, or resting after a failed turn: blocked;
-//   - on a worker whose turn ended on a question as text (asking): asks, its boss answers;
+//   - on a worker in a dialog, with a question no running boss answers, or resting after a failed turn: blocked;
+//   - on a worker whose turn ended on a question as text its running boss answers (sidebar.Session.AsksBoss): asks;
 //   - its linked PR moved: check;
 //   - on a name that is none of o's workers with an agent: waiting, on a person;
 //   - on a worker, by its rank: working, waiting (a planned wait or a rate-limit resume), else idle (an agentless

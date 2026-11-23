@@ -250,3 +250,32 @@ func TestBossListsFinishedOnly(t *testing.T) {
 		t.Errorf("bossLists = %+v, %v: want none", got, err)
 	}
 }
+
+// A plain worker's question to this boss, while its coordinator runs, is the boss's: its card rests and says
+// "asks its boss", with no NEEDS YOU row; with no coordinator agent it asks the user.
+func TestSnapshotAsksBoss(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		command string
+		want    section
+		rows    int
+	}{{"coordinator runs", "claude", restingSection, 0}, {"no coordinator", "zsh", needsYouSection, 1}} {
+		boss := row{Session: "boss-a", SessionID: "$1", ID: "%1", Window: 1, Command: c.command, State: agent.Idle, StateCmd: "claude", Herd: "1"}
+		w := row{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1",
+			Note: inbox.Note{Kind: inbox.Asks, Text: "Merge?"}.Summary()}
+		s, err := buildSnapshot([]row{boss, w}, nil, "%1", "", &fakeLookups{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tl := s.tiles[index(s.tiles, "w")]
+		if tl.section() != c.want {
+			t.Errorf("%s: section %d, want %d", c.name, tl.section(), c.want)
+		}
+		if c.want == restingSection && statusText(tl, restingSection) != "asks its boss" {
+			t.Errorf("%s: says %q, want asks its boss", c.name, statusText(tl, restingSection))
+		}
+		if rows := sidebar.NeedRows(s.all, nil, s.name); len(rows) != c.rows {
+			t.Errorf("%s: %d NEEDS YOU rows, want %d", c.name, len(rows), c.rows)
+		}
+	}
+}

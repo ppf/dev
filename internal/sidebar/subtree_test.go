@@ -599,15 +599,16 @@ func TestAsksBoss(t *testing.T) {
 		t.Errorf("a boss's own asks under a running manager: BossRuns %v rank %d, want true and needs you", own[1].BossRuns, own[1].Rank())
 	}
 	// The sidebar row: a resting dot, "asks its boss" in gold, not red
-	ss := []Session{boss, asks, worker(Session{Name: "x", State: agent.Idle, Note: "asks: Merge?"})}
+	ss := []Session{boss, asks, worker(Session{State: agent.Idle, Note: "asks: Merge?"}), reminder}
 	ss[2].Name, ss[2].ID, ss[2].StartedBy = "x", "$x", "gone-boss"
+	ss[3].Name, ss[3].ID = "r", "$r"
 	MarkBossRuns(ss)
 	mdl := Model{snap: snapshot{width: 60, height: 24, current: "b", sessions: Order(ss)}}
 	raw := strings.Join(mdl.render().lines, "\n")
 	if n := strings.Count(raw, red+"●"+reset); n != 1 {
 		t.Errorf("red dots = %d, want 1 (x, whose boss is gone):\n%s", n, raw)
 	}
-	if !strings.Contains(raw, gold+"asks its boss") || strings.Count(ansi.Strip(raw), "asks its boss") != 1 {
-		t.Errorf("w doesn't read asks its boss in gold:\n%s", ansi.Strip(raw))
+	if !strings.Contains(raw, gold+"asks its boss") || strings.Count(ansi.Strip(raw), "asks its boss") != 2 {
+		t.Errorf("w and r (under Claude's idle reminder) don't read asks its boss in gold:\n%s", ansi.Strip(raw))
 	}
 }
