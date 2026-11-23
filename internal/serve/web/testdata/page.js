@@ -569,6 +569,25 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   ctx.location.hash = '#/';
   run('state.errors = {}; render()');
 
+  // A Done row's link is held as an option is: a redraw between a press on it and its release keeps it drawn
+  ctx.location.hash = '#/';
+  lists = [{ boss: 'boss-a', items: [], finished: [{ id: 30, text: 'Sent it', assignee: { kind: 'you' }, done_at: 1000 }] }];
+  tag = 'DH';
+  es().on.board({ data: 'W/"DHv2"' });
+  await settle();
+  const doneA = () => walk(els.view, n => n.attrs?.href === '#/done/boss-a/30/1000')[0];
+  const link = doneA();
+  fire('pointerdown');
+  lists = [{ boss: 'boss-a', items: [{ id: 31, text: 'New', status: 'yours', column: 'todo', assignee: { kind: 'you' } }], finished: lists[0].finished }];
+  tag = 'DI';
+  es().on.board({ data: 'W/"DIv2"' });
+  await settle();
+  check('a redraw between a press on a Done row and its release keeps the row drawn', !!link && doneA() === link);
+  fire('pointerup');
+  fire('click');
+  await past('RELEASE_MS');
+  check('… and the board redraws after its click', doneA() !== link && walk(els.view, n => n.attrs?.href === '#/item/boss-a/31').length === 1);
+
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
