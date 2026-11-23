@@ -55,7 +55,7 @@ const (
 
 const (
 	// MaxDetails is the longest --details, in characters
-	MaxDetails = 1500
+	MaxDetails = 4000
 	// MaxResult is the longest --result, in characters: one line
 	MaxResult = 300
 )

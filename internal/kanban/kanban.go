@@ -255,7 +255,7 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		c := cs[m.card]
-		v := itemview.New(itemview.Item{Boss: c.boss, Closed: c.closed, Shown: c.it}, m.acts, m.managerRuns)
+		v := itemview.New(itemview.Item{Boss: c.boss, Closed: c.closed, DoneAt: c.doneAt, Shown: c.it}, m.acts, m.managerRuns)
 		m.switched.Store(false)
 		m.item = &v
 		return m, nil
@@ -378,6 +378,7 @@ func (m Model) all() []card {
 		}
 		for _, f := range l.Finished {
 			it := todo.Shown{ID: f.ID, Text: f.Text, Link: f.Link, Answer: f.Answer, On: f.On, Quiet: f.Quiet, Done: true,
+				Context: f.Context, Details: f.Details, Result: f.Result, DoneBy: f.DoneBy,
 				Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: f.Assignee}}
 			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: true, doneAt: f.DoneAt})
 		}

@@ -30,10 +30,12 @@ const (
 	cursorCell = "\x1b[7m \x1b[27m"
 )
 
-// Item is one item of boss's list as dev todo --all --json gives it, its status set; Closed for a closed boss's.
+// Item is one item of boss's list as dev todo --all --json gives it, its status set; Closed for a closed boss's; DoneAt
+// when a finished one was ticked, unix seconds (0: not known).
 type Item struct {
 	Boss   string
 	Closed bool
+	DoneAt int64
 	todo.Shown
 }
 
@@ -375,8 +377,12 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 	for _, l := range strings.Split(ansi.Wrap(strings.Join(strings.Fields(it.Text), " "), in, ""), "\n") {
 		head = append(head, bold+l+reset)
 	}
+	head = append(head, m.block(in, now)...)
+	details := detailLines(it.Details, in)
+	shown := len(details) // the details lines kept: the first a cut drops, their last ones first
+	var context []string
 	for _, c := range it.Context {
-		head = append(head, sidebar.Muted+ansi.Truncate(c, in, "…")+reset)
+		context = append(context, sidebar.Muted+ansi.Truncate(c, in, "…")+reset)
 	}
 	list, sel, first := m.listLines(in), m.sel, 0
 	facts := m.facts(in, now)
@@ -389,6 +395,11 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 	}
 	tail = append(tail, "", ansi.Truncate(m.keys(), in, "…"))
 	lines := func() ([]string, []int) {
+		head := slices.Concat(head, details[:shown])
+		if shown < len(details) {
+			head = append(head, sidebar.Muted+fmt.Sprintf("… %d more lines of details: open it on the page", len(details)-shown)+reset)
+		}
+		head = append(head, context...)
 		out := append(append([]string{""}, head...), "")
 		out = append(out, list...)
 		if len(facts) > 0 {
@@ -405,6 +416,10 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 cut:
 	for all, _ := lines(); len(all) > room; all, _ = lines() {
 		switch {
+		case shown > 1:
+			shown--
+		case len(context) > 0:
+			context = context[:len(context)-1]
 		case len(head) > 1:
 			head = head[:len(head)-1]
 		case len(facts) > 0:
@@ -428,6 +443,111 @@ cut:
 	}
 	out = append(out, sidebar.Faint+"╰"+strings.Repeat("─", w-2)+"╯"+reset)
 	return out, append(append([]int{-1}, at[cut:]...), -1)
+}
+
+// block is the part under the title: the session on it (a worker's state, how long, what it does now, its latest note,
+// its PR and check; the boss's own item: its doing line), or what was done on a finished one; none for the others.
+func (m Model) block(in int, now time.Time) []string {
+	it := m.it
+	rule := func(left, right string) string {
+		fill := max(1, in-ansi.StringWidth(left)-ansi.StringWidth(right)-6)
+		return sidebar.Faint + "─ " + reset + bold + left + reset + " " + sidebar.Faint + strings.Repeat("─", fill) + reset + " " + right + sidebar.Faint + " ─" + reset
+	}
+	row := func(k, v string) []string {
+		var out []string
+		for i, l := range strings.Split(ansi.Wrap(v, in-8, ""), "\n") {
+			if i == 3 {
+				break
+			}
+			out = append(out, sidebar.Muted+fmt.Sprintf("%-8s", map[bool]string{true: k}[i == 0])+reset+l)
+		}
+		return out
+	}
+	end := sidebar.Faint + strings.Repeat("─", in) + reset
+	switch {
+	case it.Done && it.Result != "":
+		right := ticked(m.it, now)
+		out := []string{rule("what was done", sidebar.Green+right+reset)}
+		for _, l := range strings.Split(ansi.Wrap(it.Result, in, ""), "\n") {
+			out = append(out, l)
+		}
+		return append(out, end)
+	case it.Done:
+		return nil
+	case todo.OnBoss(it.On, it.Session) && it.Doing != nil:
+		since := "since " + time.Unix(it.Doing.At, 0).Format("15:04")
+		return append([]string{rule(m.assignee(), sidebar.Green+"doing"+reset+sidebar.Muted+" · "+since+reset)}, append(row("now", cmp.Or(it.Doing.Text, "on it")), end)...)
+	case !m.worker(), it.Status == "" && it.Now == "" && it.Note == "":
+		return nil
+	}
+	word := cmp.Or(liveWords[it.Status], it.Status, "no status")
+	right := sidebar.StatusColours[it.Status] + word + reset
+	if it.Added != 0 {
+		right += sidebar.Muted + " · on it " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + reset
+	}
+	out := []string{rule(it.Session.Name, right)}
+	if it.Now != "" {
+		out = append(out, row("now", it.Now)...)
+	}
+	if it.Note != "" {
+		out = append(out, row("last", it.Note)...)
+	}
+	pr := ""
+	if n := it.PR(); n != 0 {
+		pr = "#" + strconv.Itoa(n)
+	}
+	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed {
+		pr = strings.TrimSpace(pr + " " + it.Check.Tone().Colour() + it.Check.Kind + reset)
+	}
+	if pr != "" {
+		out = append(out, row("pr", pr)...)
+	}
+	return append(out, end)
+}
+
+// liveWords are the statuses a session's block says otherwise
+var liveWords = map[string]string{sidebar.StatusBlocked: "needs you", sidebar.StatusGone: "session gone"}
+
+// ticked is when a finished item was ticked and by whom: "12:41 · boss-vitay"; "" when neither is known.
+func ticked(it Item, now time.Time) string {
+	var parts []string
+	if it.DoneAt != 0 {
+		at := time.Unix(it.DoneAt, 0)
+		f := "15:04"
+		if y, d := at.YearDay(), now.YearDay(); y != d || at.Year() != now.Year() {
+			f = "Jan 2 15:04"
+		}
+		parts = append(parts, at.Format(f))
+	}
+	switch it.DoneBy {
+	case "":
+	case todo.DoneByUntil:
+		parts = append(parts, "by itself, at its time")
+	case todo.DoneByPR:
+		parts = append(parts, "by itself, at its PR's move")
+	default:
+		parts = append(parts, "by "+it.DoneBy)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// detailLines are details wrapped to in, a blank line between paragraphs, an indented line keeping its indent.
+func detailLines(details string, in int) []string {
+	if details == "" {
+		return nil
+	}
+	var out []string
+	for _, l := range strings.Split(details, "\n") {
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		for i, w := range strings.Split(ansi.Wrap(strings.TrimLeft(l, " "), max(1, in-indent-2), ""), "\n") {
+			pad := indent
+			if i > 0 && (strings.HasPrefix(strings.TrimLeft(l, " "), "- ") || strings.HasPrefix(strings.TrimLeft(l, " "), "* ")) {
+				pad += 2 // a list item's next lines under its text
+			}
+			out = append(out, strings.Repeat(" ", pad)+w)
+		}
+	}
+	return out
 }
 
 // Click runs a left click at x, y of the box drawn w×h: on an option or action it does what that line's key does
@@ -563,13 +683,17 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Doing != nil {
 		doing = it.Doing.Text
 	}
-	if doing != "" {
+	live := len(m.block(in, now)) > 0
+	if doing != "" && !live {
 		facts = append(facts, [2]string{"doing", doing})
+	}
+	if t := ticked(m.it, now); it.Done && t != "" {
+		facts = append(facts, [2]string{"ticked", t})
 	}
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})
 	}
-	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed {
+	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed && !(live && !it.Done) {
 		facts = append(facts, [2]string{"check", it.Check.Tone().Colour() + it.Check.Short(now) + reset})
 	}
 	out := make([]string, len(facts))
