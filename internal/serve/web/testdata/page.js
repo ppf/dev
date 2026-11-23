@@ -17,7 +17,7 @@ const pc = { a: { light: '#4246c0', dark: '#9a9cf0' }, x: { light: '#086a85', da
 const board = () => {
   const ls = lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }];
   // Each list's project a colour, as the server gives one to every list
-  const project_colours = { ...pc, ...Object.fromEntries(ls.map(l => [l.boss.replace(/^boss-/, ''), pc.a])) };
+  const project_colours = { ...pc, ...Object.fromEntries(ls.map(l => [l.boss.startsWith('local_') ? 'desktop' : l.boss.replace(/^boss-/, ''), pc.a])) };
   return { version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1, project_colours, lists: ls };
 };
 const calls = [], posts = [], media = { matches: false, addEventListener() {} };

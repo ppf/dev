@@ -211,11 +211,19 @@ func TestProjectColours(t *testing.T) {
 	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.Muted+"all"+reset+"  "+bold+alpha+"alpha"+reset) {
 		t.Errorf("❌ p: alpha not bold in its colour:\n%q", out)
 	}
-	// A desktop app boss's card is desktop's, in its colour, as on the page
+	// A desktop app boss's card and filter name take desktop's colour, as its dot on the page; a project named local_… its own
 	m, _ = board(t, append(fixture(0), List{Boss: "local_ab12", Items: []todo.Shown{{ID: 4, Text: "Desk", Status: sidebar.StatusYours,
-		Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}}), 200, 55)
-	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.ProjectColourOf("desktop").ANSI()+"desktop #4"+reset) {
-		t.Errorf("❌ a desktop app boss's card:\n%q", out)
+		Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}}, List{Boss: "boss-local_api", Items: []todo.Shown{{ID: 5, Text: "Api",
+		Status: sidebar.StatusYours, Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}}), 200, 55)
+	desk, api := sidebar.ProjectColourOf("desktop").ANSI(), sidebar.ProjectColourOf("local_api").ANSI()
+	out = strings.Join(m.lines(time.Now()), "\n")
+	for _, want := range []string{desk + "local_ab12 #4" + reset, desk + "local_ab12" + reset, api + "local_api #5" + reset, api + "local_api" + reset} {
+		if !strings.Contains(out, want) {
+			t.Errorf("❌ %q missing:\n%q", want, out)
+		}
+	}
+	if desk == api {
+		t.Fatal("❌ the case needs desktop and local_api apart")
 	}
 }
 
