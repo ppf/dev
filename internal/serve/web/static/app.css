@@ -8,7 +8,6 @@
   --act: #1d4fc2; --act-ink: #fff; --act-wash: #e3ebfc;
   --s-todo: #5b6878; --s-prog: #1d4fc2; --s-wait: #955700; --s-review: #0a6f6b; --s-done: #2b7543;
   --wait-wash: #fbeeda; --review-wash: #dcf0ee; --done-wash: #e0f0e5;
-  --p-dev: #2c64c9; --p-nocworx: #187650; --p-vitay: #a9581e;
   --live: #3dd27a;
   --shadow: 0 1px 0 rgba(18, 25, 34, .05), 0 1px 3px rgba(18, 25, 34, .07);
   --lift: 0 14px 30px rgba(18, 25, 34, .20), 0 3px 8px rgba(18, 25, 34, .12);
@@ -30,7 +29,6 @@
     --act: #86a9ff; --act-ink: #0b1428; --act-wash: #1b2742;
     --s-todo: #9aa6b3; --s-prog: #86a9ff; --s-wait: #f0aa4b; --s-review: #4fc7bf; --s-done: #6bcb8b;
     --wait-wash: #372a15; --review-wash: #12312f; --done-wash: #17301f;
-    --p-dev: #5b8be6; --p-nocworx: #3aa477; --p-vitay: #cf7e43;
     --shadow: 0 1px 0 rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .30);
     --lift: 0 16px 34px rgba(0, 0, 0, .55), 0 3px 8px rgba(0, 0, 0, .40);
     --scrim: rgba(0, 0, 0, .55);
@@ -80,7 +78,8 @@ a { color: var(--act); }
 .seg { display: flex; flex-wrap: wrap; min-width: 0; gap: 2px; padding: 3px; background: var(--well); border-radius: 10px; }
 .seg button { border: 0; background: none; color: var(--ink2); border-radius: var(--r-ctl); padding: 5px 11px; font-size: 13px; display: flex; align-items: center; gap: 7px; }
 .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
-.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--h); }
+.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--hl); }
+@media (prefers-color-scheme: dark) { .pdot { background: var(--hd); } }
 .avs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .avbtn { border: 0; background: none; padding: 2px 8px 2px 2px; border-radius: var(--r-ctl); display: flex; align-items: center; gap: 6px; font-size: var(--fs-meta); font-weight: 600; color: var(--ink2); }
 .avbtn .avname { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

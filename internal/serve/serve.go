@@ -122,6 +122,8 @@ type board struct {
 	// ManagerRuns: Start on a closed boss's item needs it
 	ManagerRuns bool            `json:"manager_runs"`
 	Lists       json.RawMessage `json:"lists"`
+	// ProjectColours are the lists' projects' colours, by sidebar.BoardProject (model.js project)
+	ProjectColours map[string]sidebar.ProjectColour `json:"project_colours"`
 }
 
 func (cfg Config) board(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +152,7 @@ func (cfg Config) read() (board, string, error) {
 		return board{}, "", fmt.Errorf("board not read: %w", err)
 	}
 	var statuses []struct {
+		Boss  string `json:"boss"`
 		Items []struct {
 			Status   string        `json:"status"`
 			Quiet    bool          `json:"quiet"`
@@ -161,8 +164,11 @@ func (cfg Config) read() (board, string, error) {
 	if err := json.Unmarshal(lists, &statuses); err != nil {
 		return board{}, "", fmt.Errorf("board not decoded: %w", err)
 	}
-	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns()}
+	b := board{Version: cfg.Version, Statuses: todo.Statuses, Lists: lists, ManagerRuns: cfg.ManagerRuns != nil && cfg.ManagerRuns(),
+		ProjectColours: map[string]sidebar.ProjectColour{}}
 	for _, l := range statuses {
+		p := sidebar.BoardProject(l.Boss)
+		b.ProjectColours[p] = sidebar.ProjectColourOf(p)
 		for _, it := range l.Items {
 			if it.Quiet || it.Done {
 				continue

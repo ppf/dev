@@ -3,7 +3,7 @@
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 
 function node() {
-  const n = { children: [], dataset: {}, style: { setProperty() {} }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
+  const n = { children: [], dataset: {}, style: { setProperty(k, v) { this[k] = v; } }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
     classList: { set: new Set(), toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); }, contains(c) { return this.set.has(c); } },
     attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, addEventListener() {}, focus() {},
     contains() { return false; }, append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
@@ -12,11 +12,17 @@ function node() {
 }
 const els = {};
 let version = 'v1', tag = 'A', status = 200, text = '', lists = null, postStatus = 200, held = null, postHeld = null;
-const board = () => ({ version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1,
-  lists: lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }] });
+// The server's project colours (sidebar.ProjectColourOf) of the bosses here
+const pc = { a: { light: '#4246c0', dark: '#9a9cf0' }, x: { light: '#086a85', dark: '#5cc8e0' } };
+const board = () => {
+  const ls = lists || [{ boss: 'boss-a', items: [{ id: 1, text: text || 'item ' + tag, done: false, status: 'yours' }] }];
+  // Each list's project a colour, as the server gives one to every list
+  const project_colours = { ...pc, ...Object.fromEntries(ls.map(l => l.boss.startsWith('local_') ? 'desktop' : l.boss.replace(/^boss-/, '')).map(p => [p, pc[p] ?? pc.a])) };
+  return { version, statuses: [], counts: { decide: 0, yours: 0 }, manager_runs: false, generated: 1, project_colours, lists: ls };
+};
 const calls = [], posts = [], media = { matches: false, addEventListener() {} };
 const ctx = {
-  console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
+  pc, console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
     createElement: tag => Object.assign(node(), { tag }), addEventListener() {}, querySelectorAll: () => [], querySelector: () => null, body: node() },
@@ -131,18 +137,18 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await settle();
   run('render()');
   check('a short text: a title only', JSON.stringify(sheet()) === JSON.stringify([['sh-text', text, 'sheet-text']]));
-  run("state.board = { lists: [{ boss: 'boss-a', error: 'list not read: todo x: bad', items: [] }] }");
+  run("state.board = { project_colours: pc, lists: [{ boss: 'boss-a', error: 'list not read: todo x: bad', items: [] }] }");
   const top = run('board()')[0];
   check('a list read error shows first, without the server prefix', top.className === 'err' && top.children.join('') === 'boss-a: its list could not be read: todo x: bad');
   const sheetText = () => run("item('boss-x', 4)")[1].children.join('');
-  run("state.board = { lists: [{ boss: 'boss-x', error: 'invalid character' }] }");
+  run("state.board = { project_colours: pc, lists: [{ boss: 'boss-x', error: 'invalid character' }] }");
   check('an item of an unreadable list says the list could not be read', /could not be read: invalid character/.test(sheetText()));
-  run("state.board = { lists: [{ boss: 'boss-x', items: [] }] }");
+  run("state.board = { project_colours: pc, lists: [{ boss: 'boss-x', items: [] }] }");
   check('an item gone from a readable list is no longer open', /no longer open/.test(sheetText()));
   const drawn = () => els.sheet.children[1].children.join('');
-  run("state.board = { lists: [{ boss: 'boss-x', error: 'invalid character' }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
+  run("state.board = { project_colours: pc, lists: [{ boss: 'boss-x', error: 'invalid character' }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
   check('an open sheet shows the read error', /could not be read/.test(drawn()));
-  run("state.board = { lists: [{ boss: 'boss-x', items: [] }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
+  run("state.board = { project_colours: pc, lists: [{ boss: 'boss-x', items: [] }] }; sheet({ name: 'item', boss: 'boss-x', id: 4 })");
   check('an open sheet redraws once the list reads again', /no longer open/.test(drawn()));
 
   // The fakeserve board, every kind of card, on the phone and the wide screen
@@ -152,6 +158,8 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   const drawnCards = () => run('board()').flatMap(n => walk(n, c => /^card\b/.test(c.className || '')));
   const lanes = () => run('board()').flatMap(n => walk(n, c => c.tag === 'section'));
   const cardCount = run('cards(state.board).length');
+  const gardenDot = walk(drawnCards().find(c => walk(c, a => /^#\/item\/boss-garden\//.test(a.attrs?.href || '')).length), c => c.className === 'pdot')[0];
+  check('a project dot takes the server\'s colours: ' + JSON.stringify(gardenDot?.style), gardenDot?.style['--hl'] === '#8f6ad8' && gardenDot?.style['--hd'] === '#c9b3f5');
   const todo = run("lanes(cards(state.board)).find(l => l.key === 'todo').xs");
   const shownTodo = () => walk(lanes().find(l => l.attrs['data-k'] === 'todo'), c => /^card\b/.test(c.className || ''));
   check('phone: five lanes in order', JSON.stringify(lanes().map(c => c.attrs['data-k'])) === JSON.stringify(['todo', 'progress', 'waiting', 'review', 'done']));
@@ -183,16 +191,20 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('a flagged card keeps its other tags (merged PR)', walk(byHref('#/item/boss-kitchen/5'), x => /\btag ok\b/.test(x.className || '')).length === 1);
   run("state.more = false");
   // To do of only asks past TODO_SHOWN: every one shown, no toggle
-  const asks = n => ({ lists: [{ boss: 'boss-a', items: Array.from({ length: n }, (_, i) => ({ id: i + 1, text: 'ask ' + i, status: 'decide', needs_you: true, column: 'todo', options: ['a', 'b'], assignee: { kind: 'you' } }))
+  const asks = n => ({ project_colours: pc, lists: [{ boss: 'boss-a', items: Array.from({ length: n }, (_, i) => ({ id: i + 1, text: 'ask ' + i, status: 'decide', needs_you: true, column: 'todo', options: ['a', 'b'], assignee: { kind: 'you' } }))
     .concat([{ id: 50, text: 'plain', status: 'yours', column: 'todo', assignee: { kind: 'you' } }]) }] });
   ctx.asks = asks(7);
+  run('state.board = { lists: asks.lists }');
+  check('a board without project colours (an older server) still draws its cards, dots grey', drawnCards().length === 7
+    && walk(drawnCards()[0], c => c.className === 'pdot')[0]?.style['--hl'] === 'var(--meta)');
+
   run('state.board = asks');
   const toggle = () => drawnCards().length + ' ' + run('board()').flatMap(n => walk(n, c => c.className === 'more')).map(textOf).join();
   check('7 asks and a plain card: the asks shown, 1 more: ' + toggle(), toggle() === '7 Show 1 more');
   ctx.asks = asks(7).lists[0].items.slice(0, 7);
-  run('state.board = { lists: [{ boss: "boss-a", items: asks }] }');
+  run('state.board = { project_colours: pc, lists: [{ boss: "boss-a", items: asks }] }');
   check('only asks past TODO_SHOWN: all shown, no toggle: ' + toggle(), toggle() === '7 ');
-  ctx.late = { lists: [{ boss: 'boss-a', items: [{ id: 1, text: 'late', status: 'starting', start_late: true, needs_you: true, column: 'progress', started: { at: 1, to: 'boss-a' }, assignee: { kind: 'boss', name: 'boss-a' } }] }] };
+  ctx.late = { project_colours: pc, lists: [{ boss: 'boss-a', items: [{ id: 1, text: 'late', status: 'starting', start_late: true, needs_you: true, column: 'progress', started: { at: 1, to: 'boss-a' }, assignee: { kind: 'boss', name: 'boss-a' } }] }] };
   run('state.board = late');
   check('the flag says why: a start not picked up', textOf(drawnCards()[0].children[0]) === 'Needs you · start not picked up');
   media.matches = false;

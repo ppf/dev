@@ -19,6 +19,7 @@
   "needs_you": 5,
   "mine": 9
  },
+ "project_colours": {"attic": {"light": "#8f6ad8", "dark": "#c9b3f5"}, "desktop": {"light": "#4f8fae", "dark": "#a8dcef"}, "garden": {"light": "#8f6ad8", "dark": "#c9b3f5"}, "kitchen": {"light": "#4f8fae", "dark": "#a8dcef"}, "shed": {"light": "#96266f", "dark": "#e070c0"}},
  "lists": [
   {
    "boss": "boss-garden",

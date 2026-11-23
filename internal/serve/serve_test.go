@@ -10,9 +10,12 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/sidebar"
 )
 
 const lists = `[{"boss":"boss-a","items":[{"id":1,"text":"Merge?","done":false,"options":["Merge","Wait"],"status":"decide"},` +
@@ -211,6 +214,24 @@ func TestBoardCounts(t *testing.T) {
 	}
 	if want := (counts{Decide: 1, Yours: 1, NeedsYou: 2, Mine: 2}); b.Counts != want {
 		t.Errorf("counts %+v, want %+v", b.Counts, want)
+	}
+}
+
+// The board gives each list's project its colour, by the project's name as the page has it: a desktop app boss's is desktop.
+func TestBoardProjectColours(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	l := `[{"boss":"boss-nocworx-core","items":[]},{"boss":"boss-vitay","items":[]},{"boss":"local_ab12","items":[]}]`
+	w := get(t, handler(&now, &l), "/v1/board", "")
+	var b struct {
+		ProjectColours map[string]sidebar.ProjectColour `json:"project_colours"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]sidebar.ProjectColour{"nocworx-core": sidebar.ProjectColourOf("nocworx"), "vitay": {Light: "#9b3db5", Dark: "#c678dd"},
+		"desktop": sidebar.ProjectColourOf("desktop")}
+	if !reflect.DeepEqual(b.ProjectColours, want) {
+		t.Errorf("project colours %v, want %v", b.ProjectColours, want)
 	}
 }
 

@@ -503,6 +503,28 @@ func (m Model) cardRows() int { return max(0, m.h-8) }
 // project is a list's project as the boards label it: its boss's name less "boss-".
 func project(boss string) string { return strings.TrimPrefix(boss, "boss-") }
 
+// colourOf is boss's list's project colour, as the page's dot (a desktop app boss's: desktop's).
+func colourOf(boss string) string { return sidebar.ProjectColourOf(sidebar.BoardProject(boss)).ANSI() }
+
+// projectName is p on the filter line in its colour ("" is all, muted unless shown), bold when shown.
+func (m Model) projectName(p string, shown bool) string {
+	colour := ""
+	if p == "" && !shown {
+		colour = sidebar.Muted
+	}
+	// By a list of it: its name alone can't tell a desktop app boss's local_… from a project of that name
+	for _, l := range m.lists {
+		if p != "" && project(l.Boss) == p {
+			colour = colourOf(l.Boss)
+			break
+		}
+	}
+	if shown {
+		colour = bold + colour
+	}
+	return colour + cmp.Or(p, "all") + reset
+}
+
 // View is the board w×h, the item view centred over it while open.
 func (m Model) View() string {
 	if m.w < 1 || m.h < 1 {
@@ -671,12 +693,7 @@ func (m Model) filterLine(cols, shown, in int) (string, []span) {
 	projects := m.projects()
 	var ps []string
 	for _, p := range projects {
-		name := cmp.Or(p, "all")
-		if p == m.project {
-			ps = append(ps, bold+name+reset)
-		} else {
-			ps = append(ps, sidebar.Muted+name+reset)
-		}
+		ps = append(ps, m.projectName(p, p == m.project))
 	}
 	l := sidebar.Muted + "project " + reset + strings.Join(ps, "  ")
 	var spans []span
@@ -689,7 +706,7 @@ func (m Model) filterLine(cols, shown, in int) (string, []span) {
 	if ansi.StringWidth(l) > room {
 		// Too many to list: the one shown, and where it is among them
 		n := strconv.Itoa(slices.Index(projects, m.project)+1) + " of " + strconv.Itoa(len(projects))
-		l = sidebar.Muted + "project " + reset + bold + cmp.Or(m.project, "all") + reset + sidebar.Muted + " (" + n + ", p next)" + reset
+		l = sidebar.Muted + "project " + reset + m.projectName(m.project, true) + sidebar.Muted + " (" + n + ", p next)" + reset
 		spans = []span{{len("project "), ansi.StringWidth(l), -1}}
 	}
 	l = ansi.Truncate(l, max(0, room), "…")
@@ -761,7 +778,7 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	// A long project is cut, the number kept
 	id := " #" + strconv.Itoa(it.ID)
 	name := ansi.Truncate(project(c.boss), max(1, cw-ansi.StringWidth(mark+id)), "…")
-	num := ansi.Truncate(mark+sidebar.Muted+name+id+reset, cw, "")
+	num := ansi.Truncate(mark+colourOf(c.boss)+name+id+reset, cw, "")
 	word := ansi.Truncate(mk.state, max(0, cw-ansi.StringWidth(num)-1), "…")
 	lines := []string{num + strings.Repeat(" ", max(0, cw-ansi.StringWidth(num)-ansi.StringWidth(word))) + mk.stateColour + word + reset}
 	style := ""

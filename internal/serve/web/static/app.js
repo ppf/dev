@@ -12,10 +12,6 @@ const TIMEOUT_MS = 4000;
 const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
 const WHO_SHOWN = 10; // assignee chips shown until "+N"
 const TODO_SHOWN = 5; // To do's cards shown until "Show N more", what needs the user always
-// Far from the preset project colours below
-const HUES = ['#c2477a', '#8a6b2f', '#4c8f8a', '#9b5bb0', '#6b7f8f'];
-// The design's own project colours, by a project name's first part (nocworx-core: nocworx)
-const PROJECT_HUES = { dev: 'var(--p-dev)', nocworx: 'var(--p-nocworx)', vitay: 'var(--p-vitay)' };
 const AVATARS = ['#3c6e91', '#5b7d3a', '#8c4f6e', '#7a6a2a', '#3f7f7a', '#6a5a9a'];
 // A mark's tone (model.js): its tag's class
 const TAGS = { red: 'hot', 'soft-red': 'hot', green: 'ok', amber: 'wait', blue: 'act' };
@@ -77,9 +73,9 @@ function due(unix) {
 }
 const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-// hue is a project's colour: by its place among the board's projects, so up to 8 never share one
-let hues = new Map();
-const hue = name => hues.get(name);
+// From the server (sidebar.ProjectColourOf); grey from an older server (a rollback while a draft holds off the reload)
+const NO_HUE = { light: 'var(--meta)', dark: 'var(--meta)' };
+const hue = name => state.board.project_colours?.[name] ?? NO_HUE;
 const key = (boss, id) => boss + '/' + id;
 const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
 const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;
@@ -439,7 +435,10 @@ function prChip(it) {
   return el('span', { class: 'tag link' }, pr ? '#' + pr[1] : 'link');
 }
 
-const dot = name => el('span', { class: 'pdot', vars: { '--h': hue(name) } });
+function dot(name) {
+  const { light, dark } = hue(name);
+  return el('span', { class: 'pdot', vars: { '--hl': light, '--hd': dark } });
+}
 
 // flag is what a card that needs the user says on its top.
 function flag(it) {
@@ -699,8 +698,6 @@ function board() {
   // A pressed assignee whose cards are gone has no chip left to unpress
   const ws = whos(all, state.filter.project);
   state.filter.who = state.filter.who.filter(w => ws.some(([k]) => k === w));
-  const preset = p => PROJECT_HUES[p.split('-')[0]], others = projects.filter(p => !preset(p));
-  hues = new Map(projects.map(p => [p, preset(p) || HUES[others.indexOf(p) % HUES.length]]));
   // A boss's kind wins over a card that names it by on alone
   const kinds = new Map();
   for (const x of all) if (kindOf(x) === 'boss' || !kinds.get(whoOf(x))) kinds.set(whoOf(x), kindOf(x));
