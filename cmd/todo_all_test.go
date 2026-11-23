@@ -61,3 +61,22 @@ func TestPrintAll(t *testing.T) {
 		t.Errorf("text:\n%s", text)
 	}
 }
+
+// --all says who is on an item, but not that a closed boss is on its own: no one is.
+func TestPrintBossListDoing(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	items := []todo.Shown{{ID: 1, Text: "mine", Doing: &todo.Doing{}}, {ID: 2, Text: "its", On: todo.Boss, Doing: &todo.Doing{}}}
+	for _, tt := range []struct {
+		closed bool
+		want   string
+	}{
+		{false, "boss-a\t1\t☐\tmine\tthe user is on it\nboss-a\t2\t☐\tits\tboss's own\tthe boss is on it\n"},
+		{true, "boss-a\t1\t☐\tmine\tthe user is on it\nboss-a\t2\t☐\tits\tboss's own\n"},
+	} {
+		var out bytes.Buffer
+		printBossList(&out, bossList{Boss: "boss-a", Closed: tt.closed, List: todo.List{Items: items}}, now)
+		if out.String() != tt.want {
+			t.Errorf("closed %v: %q, want %q", tt.closed, out.String(), tt.want)
+		}
+	}
+}
