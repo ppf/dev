@@ -57,9 +57,9 @@ func TakeOver(c *tmux.Client, pane string, a Agent, projectDir func(project stri
 		return done, err
 	}
 	root, _ := worktree.Root(dir)
-	if root != mainRoot || worktree.Sanitize(done.Name) != done.Name || sidebar.SessionName(a.Project, done.Name) != a.Session {
+	if session := sidebar.SessionName(a.Project, done.Name); root != mainRoot || worktree.Sanitize(done.Name) != done.Name || session != a.Session {
 		return done, fmt.Errorf("%s can't start again as itself: dev agent start %s %s would open %s in %s", a.Session, a.Project, done.Name,
-			sidebar.SessionName(a.Project, done.Name), filepath.Join(root, ".claude/worktrees", done.Name))
+			session, filepath.Join(root, ".claude/worktrees", done.Name))
 	}
 	if done.Base, err = worktree.FetchDefault(mainRoot); err != nil {
 		return done, fmt.Errorf("can't check %s's commits: %w", a.Session, err)
