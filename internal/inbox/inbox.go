@@ -44,6 +44,9 @@ const (
 	UserOn   = "the user is on"          // the user works on their own item themselves: dev todo doing
 	// WaitsOnYou is from a boss under this one: it put an item for the user on its list (dev todo add, ask)
 	WaitsOnYou = "waits on you"
+	// AskAnswered is from a boss under this one: the user answered an ask on its list (an Answered note to that boss)
+	// other than via this one
+	AskAnswered = "ask answered"
 	// ToDo is an item on the boss's own list that may be out of date, or ticked by itself (todo.Nudge, todo.Ticked)
 	ToDo = "to do"
 )
@@ -102,6 +105,8 @@ func (n Note) String() string {
 	case n.Of != "":
 		return fmt.Sprintf("%s (%s's worker) %s; ask the user, then send-keys only their pick to %s yourself (its boss leaves it to you)",
 			n.Worker, n.Of, n.Summary(), n.Worker)
+	case n.Kind == AskAnswered:
+		return n.Worker + " " + n.Summary() + "; drop its question: don't ask or relay it"
 	}
 	return n.Worker + " " + n.Summary()
 }

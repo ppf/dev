@@ -23,11 +23,13 @@ func pageAnswer(boss string, id int, question, answer string) error {
 	if !running(c, boss) {
 		return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("%s isn't running: its asks can't be answered", boss)}
 	}
-	it, b, err := answerTick(c, boss, id, question, answer, 0, nil)
+	it, b, pane, err := answerTick(c, boss, id, question, answer, todo.ViaPage, 0, nil)
 	if err != nil {
 		return refused(err)
 	}
-	queued, err := b.Send(c, control.RealClock, inbox.AnswerPage(it.ID, it.Text, it.Answer))
+	note := inbox.AnswerPage(it.ID, it.Text, it.Answer)
+	tellAbove(c, pane, it, note, func(s string) { log.Printf("dev serve: %s", s) })
+	queued, err := b.Send(c, control.RealClock, note)
 	switch {
 	case !queued:
 		err = fmt.Errorf("#%d answered and ticked, not sent to %s (tell it yourself): %w", id, boss, err)
