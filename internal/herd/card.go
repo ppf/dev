@@ -35,8 +35,8 @@ func (t tile) section() section {
 
 // own is t's own section, the first that holds: asking while a dialog waits on the user; waiting while its
 // planned wait (dev agent wait-until) holds; working while its agent works; asking when its turn ended on
-// a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself decides);
-// waiting when the newest marker in its last reply is WAITING; else resting.
+// a question (an asks note; a needs a decision note outlives its dialog, so the dialog itself decides) its boss
+// doesn't answer (bossAnswers); waiting when the newest marker in its last reply is WAITING; else resting.
 func (t tile) own() section {
 	switch {
 	case t.deciding:
@@ -45,7 +45,7 @@ func (t tile) own() section {
 		return waitingSection
 	case t.sess.State == agent.Working:
 		return workingSection
-	case noteKind(t.note) == inbox.Asks:
+	case noteKind(t.note) == inbox.Asks && !t.bossAnswers:
 		return needsYouSection
 	}
 	if st, _, _ := desktop.Marker(t.tail.Lines); st == desktop.StatusWaiting {

@@ -106,7 +106,7 @@ func TestTodoDesktopStatus(t *testing.T) {
 		return got
 	}
 	got := statuses()
-	want := map[string]string{"Fix W": "gone W", "Run": "working Busy", "Pick": "blocked Asks", "Staging": "waiting Marek", "Answer Vince": "yours ", "Broken": " ", "Parked": "idle boss"}
+	want := map[string]string{"Fix W": "gone W", "Run": "working Busy", "Pick": "blocked Asks", "Staging": "waiting Marek", "Answer Vince": "yours ", "Broken": " ", "Parked": "parked boss"}
 	for text, w := range want {
 		if got[text] != w {
 			t.Errorf("%s = %q, want %q", text, got[text], w)

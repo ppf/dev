@@ -113,7 +113,7 @@ type NeedKind int
 
 const (
 	NeedDialog  NeedKind = iota // a session's open dialog
-	NeedAsk                     // a turn that ended on a question (an asks note)
+	NeedAsk                     // a turn that ended on a question (an asks note) no running boss answers (Session.AsksBoss)
 	NeedListAsk                 // the user's card with options
 	NeedPlain                   // the user's card without options
 	NeedOn                      // a card not the user's: the boss's, a worker's, a person's

@@ -22,6 +22,7 @@ type Placement struct {
 	Assignee   Assignee `json:"assignee,omitzero"`
 	WaitingFor string   `json:"waiting_for,omitempty"`
 	NeedsYou   bool     `json:"needs_you,omitempty"`
+	Parked     bool     `json:"parked,omitempty"` // the boss's own that no one has taken up: no doing line, no start (Parked)
 }
 
 // place is its placement on o's list, the first that holds (Status's order, with the column's own branches; the user's
@@ -33,10 +34,10 @@ type Placement struct {
 //     the closed boss's (on it or a session);
 //   - the user's own: an ask to do, needing the user; in progress while Doing; review when its PR moved, needing the
 //     user; else to do;
-//   - the boss's own (OnBoss): review when its PR moved, in progress while Doing, else to do;
+//   - the boss's own (OnBoss): review when its PR moved, in progress while Doing, else to do, parked;
 //   - workers unread: a linked session's in progress, a person's waiting;
 //   - a linked session gone: to do, its boss's;
-//   - a worker blocked: in progress, needing the user;
+//   - a worker blocked: in progress, needing the user; one asking its boss: in progress;
 //   - its PR moved: review, the worker's, a person's boss's;
 //   - on a person: waiting, the boss's;
 //   - on a worker: working in progress, a planned wait or rate limit waiting, idle in review while its PR is open,
@@ -92,6 +93,7 @@ func (o Owner) place(it Shown) Placement {
 		case it.Doing != nil:
 			return at(sidebar.ColumnProgress, false)
 		}
+		p.Parked = Parked(it)
 		return at(sidebar.ColumnTodo, false)
 	case o.Unread:
 		if it.Session != nil {
@@ -102,6 +104,8 @@ func (o Owner) place(it Shown) Placement {
 		return Placement{Column: sidebar.ColumnTodo, Assignee: boss}
 	case live && blocked(w):
 		return at(sidebar.ColumnProgress, true)
+	case live && asking(w):
+		return at(sidebar.ColumnProgress, false)
 	case moved:
 		return at(sidebar.ColumnReview, false)
 	case !live:

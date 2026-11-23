@@ -43,7 +43,10 @@ func TestStatus(t *testing.T) {
 	workers := []sidebar.Session{
 		{Name: "busy", Agent: "Claude", State: agent.Working},
 		{Name: "asking", Agent: "Claude", State: agent.Waiting, Deciding: true},
-		{Name: "asked", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": which one?"},
+		{Name: "asked", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": which one?", BossRuns: true},
+		{Name: "asked-alone", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": which one?"},
+		{Name: "asked-dialog", Agent: "Claude", State: agent.Waiting, Deciding: true, Note: sidebar.NoteAsks + ": which one?", BossRuns: true},
+		{Name: "asked-working", Agent: "Claude", State: agent.Working, Note: sidebar.NoteAsks + ": which one?"},
 		{Name: "failed", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteFailed + ": API error"},
 		{Name: "stuck", Agent: "Claude", State: agent.Working, Note: sidebar.NoteStuck + ": no progress for 20m"},
 		{Name: "planned", Agent: "Claude", State: agent.Idle, Wait: held},
@@ -78,7 +81,14 @@ func TestStatus(t *testing.T) {
 		{"linked, gone", live, Shown{On: "old", Session: link("old"), Check: merged}, StatusGone, "old"},
 		{"linked to a session it didn't start", live, Shown{On: "other", Session: link("other")}, StatusGone, "other"},
 		{"dialog", live, Shown{On: "asking", Session: link("asking"), Check: merged}, StatusBlocked, "asking"},
-		{"turn ended on a question", live, Shown{On: "asked"}, StatusBlocked, "asked"},
+		{"turn ended on a question: its boss answers", live, Shown{On: "asked"}, StatusAsks, "asked"},
+		{"turn ended on a question, PR merged", live, Shown{On: "asked", Session: link("asked"), Check: merged}, StatusAsks, "asked"},
+		{"a question no running boss answers (inbox off, coordinator gone, outside)", live, Shown{On: "asked-alone", Session: link("asked-alone")}, StatusBlocked, "asked-alone"},
+		{"a question, then a dialog", live, Shown{On: "asked-dialog", Session: link("asked-dialog")}, StatusBlocked, "asked-dialog"},
+		{"a question, working again", live, Shown{On: "asked-working", Session: link("asked-working")}, StatusWorking, "asked-working"},
+		{"on boss: parked", live, Shown{On: Boss}, StatusParked, "boss-x"},
+		{"on boss, doing", live, Shown{On: Boss, Doing: &Doing{Text: "x"}}, StatusWorking, "boss-x"},
+		{"on boss, started", live, Shown{On: Boss, Started: &Started{To: "boss-x"}}, StatusIdle, "boss-x"},
 		{"failed turn", live, Shown{On: "failed", Session: link("failed")}, StatusBlocked, "failed"},
 		{"stuck note", live, Shown{On: "stuck", Session: link("stuck")}, StatusWorking, "stuck"},
 		{"working, PR merged", live, Shown{On: "busy", Session: link("busy"), Check: merged}, StatusCheck, "busy"},
@@ -129,6 +139,13 @@ func TestSetStatusNow(t *testing.T) {
 		if note := map[bool]string{true: fix.Note}[want != ""]; l.Items[i].Note != note {
 			t.Errorf("item %d (%s): Note = %q, want %q", i+1, l.Items[i].Status, l.Items[i].Note, note)
 		}
+	}
+	// A question to its running boss: the item keeps its Now and the asks note
+	ask := sidebar.Session{Name: "ask-a", ID: "$4", Agent: "Claude", State: "idle", Doing: "x", Note: "asks: A or B?", BossRuns: true}
+	l = List{Items: []Shown{{ID: 6, On: "ask-a", Session: &Session{ID: "$4", Name: "ask-a"}}}}
+	l.SetStatus(Owner{Name: "boss-x", Workers: []sidebar.Session{ask}})
+	if it := l.Items[0]; it.Status != StatusAsks || it.Now != "x" || it.Note != "asks: A or B?" {
+		t.Errorf("asks: %s now %q note %q", it.Status, it.Now, it.Note)
 	}
 	var asked []string
 	l = List{Items: items()}

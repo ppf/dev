@@ -12,6 +12,8 @@ const COLUMNS = [
 ];
 const ME = ':me'; // the user, as an assignee filter's key: no session name holds a colon
 const WORKER_WORDS = ['working', 'idle', 'waiting'];
+// How the boards say a status (sidebar.StatusWord): asks as "asks its boss", the others as they are
+const wordOf = s => s === 'asks' ? 'asks its boss' : s;
 
 // The project is the boss's name without boss-: the board has no project of its own.
 const project = l => l.boss.startsWith('local_') ? 'desktop' : l.boss.replace(/^boss-/, '');
@@ -51,9 +53,9 @@ function whoOf(x) {
 const needsYou = x => !x.done && !!x.it.needs_you;
 
 // marks are what a card shows beside its text: band [text, tone] across its top, word (its worker's state),
-// chips [text, tone], line (what is done on it now) and red (it needs the user).
+// chips [text, tone], line (what is done on it now), red (it needs the user) and parked (the boss's own, no one on it).
 function marks(x, now = Date.now()) {
-  const { list, it } = x, m = { band: null, word: '', chips: [], line: '', red: needsYou(x) };
+  const { list, it } = x, m = { band: null, word: '', chips: [], line: '', red: needsYou(x), parked: false };
   if (x.done) return m;
   if (it.start_late) m.band = ['start not picked up', 'red'];
   else if (it.started) m.band = ['starting · ' + it.started.to, 'blue'];
@@ -63,11 +65,13 @@ function marks(x, now = Date.now()) {
   if (!it.status) m.word = '?'; // its boss's workers unread
   else if (it.assignee?.kind === 'worker' && WORKER_WORDS.includes(it.status)) m.word = it.status;
   if (it.status === 'decide') m.chips.push(['decide', 'red']);
+  else if (it.status === 'asks') m.chips.push([wordOf(it.status), 'amber']);
   else if (m.red && !m.band?.[0].includes('needs you') && !it.start_late) m.chips.push(['needs you', 'red']);
   if (it.waiting_for) m.chips.push(['waiting for ' + it.waiting_for + (list.closed ? ' · no one follows up' : ''), 'amber']);
   if (list.closed) m.chips.push(['boss closed', '']);
   if (it.part_of) m.chips.push(['⇄ with #' + it.part_of, 'blue']);
   m.line = it.doing?.text || it.now || '';
+  m.parked = !!it.parked;
   return m;
 }
 

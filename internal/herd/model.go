@@ -67,6 +67,8 @@ type row struct {
 	Socket       string `tmux:"socket_path"`
 	Created      string `tmux:"session_created"`
 	Conversation string `tmux:"@agent_session"`
+	InboxOff     string `tmux:"@dev_boss_inbox"`      // inbox.OptOff
+	Outside      string `tmux:"@dev_started_outside"` // OptStartedOutside
 }
 
 // tile is one worker session's preview.
@@ -87,6 +89,9 @@ type tile struct {
 	ci       ci              // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh
 	via      string          // for a session one of this boss's bosses started (deeper too), the boss that did: shown only while it needs the user, closed only by that boss; "" for this boss's own
 	roll     *sidebar.Rollup // a boss's whole subtree (sidebar.Subtree), which places its card; nil for a worker or a deeper session
+
+	// bossAnswers: a plain worker whose boss runs, so its asks note is the boss's to answer (sidebar.Session.AsksBoss)
+	bossAnswers bool
 }
 
 // snapshot is what one refresh saw.
@@ -562,6 +567,16 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	created, socket := map[string]string{}, ""
 	meta := map[string]tile{}
 	under := descendants(names, panes, s.self, s.name)
+	// Who runs as a boss, for each session's BossRuns
+	bosses := make([]sidebar.Session, 0, len(names))
+	for _, name := range names {
+		r := panes[name][0]
+		b := sidebar.Session{Name: name, ID: r.SessionID, Boss: r.Herd != "", InboxOff: r.InboxOff == "off"}
+		if a, ok := agent.Detect(agentPanes(panes[name]), r.Sidebar); ok {
+			b.Agent = a.Label
+		}
+		bosses = append(bosses, b)
+	}
 	for _, name := range names {
 		rs := panes[name]
 		via, deep := under[name]
@@ -575,14 +590,10 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			}
 			s.started[name] = true
 		}
-		ps := make([]agent.Pane, len(rs))
-		for i, r := range rs {
-			ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,
-				Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost}
-		}
-		a, ok := agent.Detect(ps, rs[0].Sidebar)
+		a, ok := agent.Detect(agentPanes(rs), rs[0].Sidebar)
 		// As the sidebar reads it (its buildSnapshot), so the roll-ups agree
-		full := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "", StartedBy: rs[0].StartedBy}
+		full := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "", StartedBy: rs[0].StartedBy,
+			BossRuns: rs[0].Outside == "" && sidebar.BossRuns(rs[0].StartedBy, bosses)}
 		created[rs[0].SessionID], socket = rs[0].Created, rs[0].Socket
 		var r row
 		if ok {
@@ -597,7 +608,8 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 		if !ok || !mine && !deep {
 			continue
 		}
-		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort, via: via}
+		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort, via: via,
+			bossAnswers: !full.Boss && full.BossRuns && !repeated(r.Note)}
 		t.sess = sidebar.Session{State: a.State, Wait: wait.FromOptions(r.WaitUntil, r.WaitReason)}
 		t.question, _ = agent.ParseQuestion(r.Question)
 		// An asking one's capture tells (see refresh)
@@ -758,3 +770,16 @@ func tail(lines []string, n int) []string {
 	}
 	return lines
 }
+
+// agentPanes are a session's rows as agent.Detect reads them.
+func agentPanes(rs []row) []agent.Pane {
+	ps := make([]agent.Pane, len(rs))
+	for i, r := range rs {
+		ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,
+			Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost}
+	}
+	return ps
+}
+
+// repeated reports an asks note the boss inbox repeated unanswered (sidebar.Unanswered): the user's again.
+func repeated(note string) bool { _, r := sidebar.Unanswered(note); return r }

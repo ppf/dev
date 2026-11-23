@@ -2251,8 +2251,9 @@ test("rows go by dev's status in todo.Statuses' order, an unknown one last, each
     { id: 2, text: 'Staging access', on: 'Marek', done: false, status: 'waiting', status_on: 'Marek' },
     { id: 3, text: 'Old spike', on: 'spike', session: { id: 'local_gone', name: 'spike' }, done: false, status: 'gone', status_on: 'spike' },
     { id: 4, text: 'Fix login', on: 'login', session: { id: 'local_n', name: 'login' }, done: false, status: 'blocked', status_on: 'login' },
+    { id: 8, text: 'Pick a colour', on: 'pick', session: { id: 'local_p', name: 'pick' }, done: false, status: 'asks', status_on: 'pick' },
     { id: 5, text: 'Approve the deploy', done: false, status: 'yours' },
-    { id: 6, text: 'Something new', on: 'x', done: false, status: 'parked', status_on: 'x' },
+    { id: 6, text: 'Something new', on: 'x', done: false, status: 'later', status_on: 'x' },
     { id: 7, text: 'Merge #148?', done: false, options: ['Merge', 'Wait'], status: 'decide' },
   ]
   await start($, on, ok(WORKERS), { todo: todoRan(items) })
@@ -2264,17 +2265,19 @@ test("rows go by dev's status in todo.Statuses' order, an unknown one last, each
     '☐ Approve the deploy yours',
     '◌ Rework companion working · renamed',
     '◌ Fix login blocked · login',
+    '◌ Pick a colour asks its boss · pick',
     '◌ Staging access waiting · Marek',
     '◌ Old spike gone · spike',
-    '◌ Something new parked · x',
+    '◌ Something new later · x',
     '▼ show fewer',
   ])
   const color = async (text: string) => (await ui.findAll({ type: 'Text', text })).find(el => el.text === text)?.props.color
-  expect(await Promise.all(['decide', 'yours', 'working · renamed', 'blocked · login', 'waiting · Marek', 'gone · spike', 'parked · x'].map(color))).toEqual([
+  expect(await Promise.all(['decide', 'yours', 'working · renamed', 'blocked · login', 'asks its boss · pick', 'waiting · Marek', 'gone · spike', 'later · x'].map(color))).toEqual([
     'error',
     undefined,
     'success',
     'error',
+    'warning',
     'warning',
     'error',
     'subtle',

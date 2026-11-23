@@ -29,7 +29,7 @@ func newTodoStartCmd(boss *string) *cobra.Command {
 worker is gone, or a closed boss's one on a session or its own. The boss's inbox gets "you were asked to start #<n> \"<text>\"", worded by whose it is, and it starts
 a worker on it and links it (dev todo add --replaces <n> --on <worker>), or does a parked one itself. A closed boss's
 item goes to the manager, which reopens that boss; refused when no manager takes it (none runs, or its inbox is off), as
-for a live boss with its inbox off. The item reads starting (the user's own; the others keep their word, In progress)
+for a live boss with its inbox off. The item reads starting (the user's own; the boss's own parked one idle, the others keep their word; In progress)
 until that --replaces (or a set), and dev todo --json marks it start_late after 10 minutes. A second start is refused
 until then, and sent again after. --question refuses it unless item n still reads that text. Refused in a Claude Code
 session ($CLAUDECODE set), as dev todo answer is, for a desktop app boss, which has no dev inbox, and on the manager's

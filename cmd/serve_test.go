@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,14 +52,21 @@ func TestBoardGolden(t *testing.T) {
 		case "display-message":
 			return tmux.FormatRow("/tmp/tmux-1/default", strings.Trim(args[3], "=:"), "1", "$1", "1700000000"), nil
 		case "list-panes":
-			// boss-a live: every field 0 but its name and id; its worker a-fix working, its transcript under home
+			// boss-a live: every field 0 but its name and id; its worker a-fix working, its transcript under home; a-ask
+			// idle on a question as text
 			rows := ""
-			for _, set := range []map[string]string{{"#{session_name}": "boss-a", "#{session_id}": "$1"},
+			for _, set := range []map[string]string{{"#{session_name}": "boss-a", "#{session_id}": "$1", "#{pane_id}": "%1", "#{window_index}": "1"},
 				{"#{session_name}": "a-fix", "#{session_id}": "$2", "#{pane_id}": "%2", "#{window_index}": "1", "#{@agent_state}": "working",
-					"#{@dev_started_by}": "boss-a", "#{@agent_transcript}": transcript, "#{@dev_boss_note}": "finished: tests pass in " + home + "/src"}} {
+					"#{@dev_started_by}": "boss-a", "#{@agent_transcript}": transcript, "#{@dev_boss_note}": "finished: tests pass in " + home + "/src"},
+				{"#{session_name}": "a-ask", "#{session_id}": "$3", "#{pane_id}": "%3", "#{window_index}": "1", "#{@agent_state}": "idle",
+					"#{@dev_started_by}": "boss-a", "#{@dev_boss_note}": "asks: A or B?", "#{@dev_resume_at}": "", "#{@dev_herd}": "", "#{@dev_started_outside}": ""}} {
 				var row []string
 				for _, f := range strings.Split(args[len(args)-1], tmux.Sep) {
-					row = append(row, cmp.Or(set[f], "0"))
+					v, ok := set[f]
+					if !ok {
+						v = "0"
+					}
+					row = append(row, v)
 				}
 				rows += tmux.FormatRow(row[:len(row)-1]...)
 			}
@@ -78,6 +84,8 @@ func TestBoardGolden(t *testing.T) {
 		{Text: "Read the plan", Link: "https://example.com/plan", Until: 1700086400, Details: "Sections 2 and 3 only.\n\n- mark open questions in " + home + "/plan.md"},
 		{Text: "Send the invoice", On: "alice"},
 		{Text: "Fix the login", On: "a-fix"},
+		{Text: "Pick the layout", On: "a-ask"},
+		{Text: "Parked: the phone's Done", On: todo.Boss},
 	} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
@@ -87,7 +95,7 @@ func TestBoardGolden(t *testing.T) {
 	if _, err := s.Add(todo.Item{Text: "Ship the notes", Context: []string{"notes in " + home + "/notes.md"}, Details: "Send them to the team."}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{5}, now.Add(-time.Minute)); err != nil {
+	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{7}, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	b, err := todo.ForPane(c, tmux.SessionTarget("boss-b"))

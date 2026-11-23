@@ -35,6 +35,9 @@ func TestTodoStatus(t *testing.T) {
 	s.T("new-session", "-d", "-s", "boss-a", "sleep", "3600")
 	s.T("set-option", "-t", "=boss-a:", "@dev_herd", "1")
 	boss := s.T("display", "-t", "=boss-a:", "-p", "#{pane_id}")
+	// Its coordinator runs: it answers a plain worker's question
+	s.T("set-option", "-p", "-t", boss, "@agent_cmd", "sleep")
+	s.T("set-option", "-p", "-t", boss, "@agent_state", "idle")
 	bossID := s.T("display", "-t", "=boss-a:", "-p", "#{session_id}")
 	// worker starts a session boss-a started, its agent in state (waiting on a dialog when deciding), with note
 	worker := func(name, state string, deciding bool, note string) {
@@ -57,6 +60,7 @@ func TestTodoStatus(t *testing.T) {
 	worker("w-busy", "working", false, "")
 	worker("w-old", "idle", false, "")
 	worker("w-failed", "idle", false, "failed: API error")
+	worker("w-question", "idle", false, "asks: red or blue?")
 
 	env := []string{"TMUX_PANE=" + boss, "CLAUDECODE=1"}
 	dev(env, "todo", "add", "mine")
@@ -67,6 +71,7 @@ func TestTodoStatus(t *testing.T) {
 	dev(env, "todo", "add", "--on", "w-ask", "asks")
 	dev(env, "todo", "add", "--on", "w-busy", "works")
 	dev(env, "todo", "add", "--on", "w-failed", "failed")
+	dev(env, "todo", "add", "--on", "w-question", "asks its boss")
 	dev(env, "todo", "add", "--on", "w-old", "gone")
 	dev(env, "todo", "add", "--on", "Ola", "a person's")
 	s.T("kill-session", "-t", "=w-old")
@@ -79,10 +84,11 @@ func TestTodoStatus(t *testing.T) {
 	}
 	want := []item{
 		{"mine", "", "yours", ""},
-		{"the boss's own", "boss", "idle", "boss-a"},
+		{"the boss's own", "boss", "parked", "boss-a"},
 		{"asks", "w-ask", "blocked", "w-ask"},
 		{"works", "w-busy", "working", "w-busy"},
 		{"failed", "w-failed", "blocked", "w-failed"},
+		{"asks its boss", "w-question", "asks", "w-question"},
 		{"gone", "w-old", "gone", "w-old"},
 		{"a person's", "Ola", "waiting", "Ola"},
 	}
@@ -132,7 +138,8 @@ func TestTodoStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	columns := map[string]string{"mine": "todo you  false", "the boss's own": "todo boss boss-a false", "asks": "progress worker w-ask true",
-		"works": "progress worker w-busy false", "failed": "progress worker w-failed true", "gone": "todo boss boss-a false",
+		"works": "progress worker w-busy false", "failed": "progress worker w-failed true",
+		"asks its boss": "progress worker w-question false", "gone": "todo boss boss-a false",
 		"a person's": "waiting boss boss-a false Ola"}
 	if len(placed[0].Items) != len(columns) {
 		t.Errorf("❌ placed %d items, want %d", len(placed[0].Items), len(columns))
@@ -146,6 +153,19 @@ func TestTodoStatus(t *testing.T) {
 			t.Errorf("❌ %q placed %q, want %q", it.Text, got, columns[it.Text])
 		}
 	}
+
+	// The boss's inbox off: no one is told the question, so it is the user's again
+	s.T("set-option", "-t", "=boss-a:", "@dev_boss_inbox", "off")
+	out, _ = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "todo", "--all", "--json")
+	if err := json.Unmarshal([]byte(out), &placed); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range placed[0].Items {
+		if it.Text == "asks its boss" && (it.Column != "progress" || !it.NeedsYou) {
+			t.Errorf("❌ inbox off: %q placed %s, needs you %v; want progress, needs you", it.Text, it.Column, it.NeedsYou)
+		}
+	}
+	s.T("set-option", "-u", "-t", "=boss-a:", "@dev_boss_inbox")
 
 	// An item an older dev filed on the boss's own name reads yours, and a board's tick (done --text) ticks it
 	files, _ := filepath.Glob(filepath.Join(tmp, "state", "dev", "todo", "*boss-a.json"))

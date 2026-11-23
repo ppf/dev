@@ -126,8 +126,8 @@ func desktopSession(w desktop.Worker) sidebar.Session {
 
 // doing is what tmux worker s is doing now, as the boss board's card says it (herd's own section and statusText):
 // "" in a dialog (herd reads that off the screen); its planned wait; working, its tool call's description, else the
-// tool; its question when its turn ended on one; else what its reply's newest WAITING marker names. A transcript not
-// written yet says nothing.
+// tool; its question when its turn ended on one (herd's card says "asks its boss" instead when its boss answers it);
+// else what its reply's newest WAITING marker names. A transcript not written yet says nothing.
 func doing(s sidebar.Session, now time.Time, stderr io.Writer) string {
 	switch {
 	case s.Deciding:

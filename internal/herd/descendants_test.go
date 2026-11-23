@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,7 +21,7 @@ import (
 )
 
 // A manager's board tiles the sessions it started, plus those its bosses started (deeper too) while they need the
-// user (a dialog, a question its turn ended on, or one its hook recorded, for the capture to tell), each tagged
+// user (a dialog, or a question its hook recorded, for the capture to tell; not one its running boss answers), each tagged
 // with the boss that started it; never in started. A worker's own sessions and a cycle outside aren't followed.
 func TestSnapshotDescendants(t *testing.T) {
 	agentRow := func(name, id, pane, by, state string) row {
@@ -53,8 +54,13 @@ func TestSnapshotDescendants(t *testing.T) {
 	for _, tl := range s.tiles {
 		got = append(got, tl.sess.Name+" via "+tl.via)
 	}
-	if want := []string{"w-asks via boss-a", "w-deep via boss-b", "w-dialog via boss-a", "w-asking via boss-b", "boss-a via "}; !slices.Equal(got, want) {
+	if want := []string{"w-deep via boss-b", "w-dialog via boss-a", "w-asking via boss-b", "boss-a via "}; !slices.Equal(got, want) {
 		t.Errorf("tiles = %q, want %q", got, want)
+	}
+	// boss-a's inbox off: no one answers w-asks, so the manager's board tiles it
+	rows[1].InboxOff = "off"
+	if s, err := buildSnapshot(rows, nil, "%1", "", &fakeLookups{}); err != nil || index(s.tiles, "w-asks") >= len(s.tiles) || s.tiles[index(s.tiles, "w-asks")].sess.Name != "w-asks" {
+		t.Errorf("w-asks under a boss with its inbox off: not tiled (%v)", err)
 	}
 	if q := s.tiles[index(s.tiles, "w-dialog")].question; q.Tool != "Bash" || q.Command != "echo hi" {
 		t.Errorf("w-dialog's question = %+v", q)
@@ -122,9 +128,9 @@ func TestRefreshViaDialogGone(t *testing.T) {
 	rule := strings.Repeat("─", 40)
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, dialogScreen} {
 		state := "waiting"
 		c := tmux.NewFake(func(args []string) (string, error) {
@@ -248,5 +254,40 @@ func TestBossListsFinishedOnly(t *testing.T) {
 	got, err := bossLists(c, []string{"boss-a"}, true, time.Now())
 	if err != nil || len(got) != 0 {
 		t.Errorf("bossLists = %+v, %v: want none", got, err)
+	}
+}
+
+// A plain worker's question to this boss, while its coordinator runs, is the boss's: its card rests and says
+// "asks its boss", with no NEEDS YOU row; with no coordinator agent it asks the user.
+func TestSnapshotAsksBoss(t *testing.T) {
+	for _, c := range []struct {
+		name                     string
+		command, off, from, note string
+		want                     section
+		rows                     int
+	}{
+		{"coordinator runs", "claude", "", "", "", restingSection, 0},
+		{"repeated unanswered", "claude", "", "", "asks: Merge? (unanswered for 30m)", needsYouSection, 1},
+		{"no coordinator", "zsh", "", "", "", needsYouSection, 1},
+		{"its inbox off", "claude", "off", "", "", needsYouSection, 1},
+		{"started by a coordinator outside tmux", "claude", "", "1", "", needsYouSection, 1},
+	} {
+		boss := row{Session: "boss-a", SessionID: "$1", ID: "%1", Window: 1, Command: c.command, State: agent.Idle, StateCmd: "claude", Herd: "1", InboxOff: c.off}
+		w := row{Session: "w", SessionID: "$2", ID: "%2", Window: 1, Command: "claude", State: agent.Idle, StateCmd: "claude", StartedBy: "$1", Outside: c.from,
+			Note: cmp.Or(c.note, inbox.Note{Kind: inbox.Asks, Text: "Merge?"}.Summary())}
+		s, err := buildSnapshot([]row{boss, w}, nil, "%1", "", &fakeLookups{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tl := s.tiles[index(s.tiles, "w")]
+		if tl.section() != c.want {
+			t.Errorf("%s: section %d, want %d", c.name, tl.section(), c.want)
+		}
+		if c.want == restingSection && statusText(tl, restingSection) != "asks its boss" {
+			t.Errorf("%s: says %q, want asks its boss", c.name, statusText(tl, restingSection))
+		}
+		if rows := sidebar.NeedRows(s.all, nil, s.name); len(rows) != c.rows {
+			t.Errorf("%s: %d NEEDS YOU rows, want %d", c.name, len(rows), c.rows)
+		}
 	}
 }

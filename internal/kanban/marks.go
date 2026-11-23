@@ -12,18 +12,19 @@ import (
 type chip struct{ text, colour string }
 
 // marks are what a card shows beside its text, as the web page's marks: state (a start's, a PR's, its worker's) at the
-// head's right, chips on the foot, line (what is done on it now), red (it waits on the user).
+// head's right, chips on the foot, line (what is done on it now, or that no one is: parked) in lineColour, red (it waits
+// on the user).
 type marks struct {
 	state, stateColour string
 	chips              []chip
-	line               string
+	line, lineColour   string
 	red                bool
 }
 
 // marksOf is c's marks; a ticked card has none.
 func marksOf(c card, now time.Time) marks {
 	it := c.it
-	m := marks{red: c.needsYou()}
+	m := marks{red: c.needsYou(), lineColour: sidebar.Gold}
 	if c.done {
 		return m
 	}
@@ -34,6 +35,8 @@ func marksOf(c card, now time.Time) marks {
 		m.state, m.stateColour = "starting · "+it.Started.To+" · "+sidebar.AgeSpan(now.Sub(time.Unix(it.Started.At, 0))), sidebar.Gold
 	case it.Status == sidebar.StatusBlocked:
 		m.state, m.stateColour = "blocked · needs you", sidebar.Red
+	case it.Status == sidebar.StatusAsks:
+		m.state, m.stateColour = sidebar.StatusWord(it.Status), sidebar.StatusColours[it.Status]
 	case it.Status == sidebar.StatusGone:
 		who := it.On
 		if it.Session != nil {
@@ -72,8 +75,11 @@ func marksOf(c card, now time.Time) marks {
 		m.chips = append(m.chips, chip{"⇄ #" + strconv.Itoa(it.PartOf), sidebar.Gold})
 	}
 	m.line = it.Now
-	if it.Doing != nil {
+	switch {
+	case it.Doing != nil:
 		m.line = it.Doing.Text
+	case it.Parked:
+		m.line, m.lineColour = "parked · "+sidebar.ParkedLine(it.Assignee.Name), sidebar.Muted
 	}
 	return m
 }

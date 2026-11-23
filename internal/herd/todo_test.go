@@ -62,7 +62,7 @@ func TestRefreshTodo(t *testing.T) {
 	c := tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
-			return tmux.FormatRow("herd", "$1", "1", "0", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""), nil
+			return tmux.FormatRow("herd", "$1", "1", "0", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
 			if strings.Contains(args[len(args)-1], "@dev_herd") {
 				looked++

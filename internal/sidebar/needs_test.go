@@ -905,6 +905,10 @@ func TestGroupsCoverStatuses(t *testing.T) {
 			t.Errorf("%s before %s", Groups[i-1].Title, Groups[i].Title)
 		}
 	}
+	// A parked item groups as its card's column: To do
+	if g := Groups[GroupOf(StatusParked)]; g.Title != ColumnTitles[ColumnTodo] {
+		t.Errorf("parked in %q, want To do", g.Title)
+	}
 }
 
 // space opens the list item under the cursor in its popup, with its text to check it by.

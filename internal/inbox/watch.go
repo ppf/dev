@@ -64,6 +64,7 @@ type paneRow struct {
 	WaitUntil   string `tmux:"@dev_wait_until"`
 	WaitReason  string `tmux:"@dev_wait_reason"`
 	WaitPrompts string `tmux:"@dev_wait_prompts"`
+	Note        string `tmux:"@dev_boss_note"` // OptNote
 }
 
 // teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
@@ -221,7 +222,18 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since, w.managed && h.Handed == w.Since)
 			}
 		case resting(w.trusted, w.WaitingFor) && !w.waiting:
-			if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
+			kind, text, _ := strings.Cut(w.Note, ": ")
+			text, _ = sidebar.Unanswered(text)
+			recorded := h.Question != "" && text == h.Question
+			if kind == Asks && text != "" && !recorded {
+				// Its question never reached this box (asked while the inbox was off, or before the boss reopened): now it
+				// does. Not held for the pane, which has the note: a prompt since clears it there
+				if n := (Note{Worker: w.Session, Kind: Asks, Text: text, Key: Asks + "\x00" + text, Outside: w.Outside != ""}); w.Herd == "" || up(n.Kind) {
+					s.add(n)
+				}
+				h.Question, h.AskedAt, h.Reminded = text, now.Unix(), 0
+			} else if asked := now.Sub(time.Unix(h.AskedAt, 0)); (kind == Asks && recorded || h.Question != "" && sidebar.HealthNote(kind)) && asked >= AskAgain<<h.Reminded {
+				// Still its question: its note, or a health note that took its place (an answer clears both)
 				// Past several (rounds missed while it worked or the previews were closed): one repeat
 				for asked >= AskAgain<<h.Reminded {
 					h.Reminded++
@@ -422,6 +434,17 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			}
 		}
 		sights = append(sights, w)
+	}
+	// A prompt since list-panes clears an asks note (its hook): read it again, so an answered question isn't sent
+	for i, w := range sights {
+		if kind, _, _ := strings.Cut(w.Note, ": "); kind != Asks {
+			continue
+		}
+		note, err := c.Run("show-options", "-pqv", "-t", w.Pane, OptNote)
+		if err != nil && !strings.Contains(err.Error(), "can't find pane") {
+			return err
+		}
+		sights[i].Note = strings.TrimSpace(note)
 	}
 	var holding []Note
 	if err := b.Box.update(func(s *state) error {

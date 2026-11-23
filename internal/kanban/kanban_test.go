@@ -311,6 +311,12 @@ func TestCardMarks(t *testing.T) {
 		{"decide", mk(base, func(s *todo.Shown) { s.Status, s.NeedsYou = sidebar.StatusDecide, true }), []string{"! ", "decide"}, []string{"needs you"}},
 		{"needs you", mk(base, func(s *todo.Shown) { s.NeedsYou, s.Status = true, sidebar.StatusCheck }), []string{"needs you"}, nil},
 		{"blocked", mk(base, func(s *todo.Shown) { s.Status, s.NeedsYou = sidebar.StatusBlocked, true }), []string{"blocked · needs you"}, []string{"· needs you ·"}},
+		{"asks its boss", mk(base, func(s *todo.Shown) {
+			s.Status, s.Now, s.Assignee = sidebar.StatusAsks, "A or B?", todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "w"}
+		}), []string{"asks its boss", "▸ A or B?"}, []string{"!", "needs you"}},
+		{"parked", mk(base, func(s *todo.Shown) {
+			s.Status, s.On, s.Parked, s.Assignee = sidebar.StatusParked, todo.Boss, true, todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-x"}
+		}), []string{"▸ parked · boss-x has not taken it up"}, nil},
 		{"gone", mk(base, func(s *todo.Shown) { s.Status, s.On = sidebar.StatusGone, "dev-x" }), []string{"worker dev-x gone"}, nil},
 		{"PR moved", mk(base, func(s *todo.Shown) {
 			s.Check = &sidebar.Check{PR: 18, Kind: sidebar.CheckMerged, Since: now.Add(-72 * time.Hour).Unix()}
