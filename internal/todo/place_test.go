@@ -54,6 +54,7 @@ func TestPlace(t *testing.T) {
 		{"3d own", live, Shown{}, sidebar.ColumnTodo, you, "", false, StatusYours, ""},
 		{"3d own, on the boss's own name", live, Shown{On: "Boss-X"}, sidebar.ColumnTodo, you, "", false, StatusYours, ""},
 		{"4a on boss, PR moved", live, Shown{On: Boss, Check: merged, Doing: doing}, sidebar.ColumnReview, boss, "", false, StatusCheck, "boss-x"},
+		{"4a on boss, PR moved, no doing", live, Shown{On: Boss, Check: merged}, sidebar.ColumnReview, boss, "", false, StatusCheck, "boss-x"},
 		{"4b on boss, doing", live, Shown{On: Boss, Doing: doing}, sidebar.ColumnProgress, boss, "", false, StatusWorking, "boss-x"},
 		{"4c on boss", live, Shown{On: Boss}, sidebar.ColumnTodo, boss, "", false, StatusParked, "boss-x"},
 		{"4c on boss, workers unread", unread, Shown{On: Boss}, sidebar.ColumnTodo, bossClosed, "", false, StatusParked, "boss-x"},

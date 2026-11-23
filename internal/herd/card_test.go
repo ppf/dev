@@ -37,6 +37,9 @@ func TestSection(t *testing.T) {
 		{"a planned wait, its turn still running", tile{sess: sidebar.Session{State: agent.Working, Wait: wait.Wait{Until: time.Unix(1, 0), Reason: "x"}}}, waitingSection},
 		{"a dialog in a planned wait", tile{sess: sidebar.Session{State: agent.Waiting, Wait: wait.Wait{Until: time.Unix(1, 0), Reason: "x"}}, deciding: true}, needsYouSection},
 		{"no state", tile{}, restingSection},
+		{"its question to its running boss", tile{sess: sidebar.Session{State: agent.Idle}, note: "asks: Merge?", bossAnswers: true}, restingSection},
+		{"its question to its running boss, under the idle reminder", tile{sess: sidebar.Session{State: agent.Waiting}, note: "asks: Merge?", bossAnswers: true}, restingSection},
+		{"a dialog with its boss running", tile{sess: sidebar.Session{State: agent.Waiting}, deciding: true, bossAnswers: true}, needsYouSection},
 	}
 	for _, tt := range tests {
 		if got := tt.t.section(); got != tt.want {

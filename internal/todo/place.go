@@ -22,7 +22,7 @@ type Placement struct {
 	Assignee   Assignee `json:"assignee,omitzero"`
 	WaitingFor string   `json:"waiting_for,omitempty"`
 	NeedsYou   bool     `json:"needs_you,omitempty"`
-	Parked     bool     `json:"parked,omitempty"` // the boss's own that no one has taken up (Parked)
+	Parked     bool     `json:"parked,omitempty"` // the boss's own that no one has taken up: no doing line, no start (Parked)
 }
 
 // place is its placement on o's list, the first that holds (Status's order, with the column's own branches; the user's

@@ -52,8 +52,10 @@ const STATUS_COLORS: Record<string, string | undefined> = {
   starting: TONE.ok,
   working: TONE.ok,
   blocked: TONE.danger,
+  asks: TONE.caution,
   waiting: TONE.caution,
   idle: TONE.muted,
+  parked: TONE.muted,
   gone: TONE.danger,
   check: TONE.caution,
   'boss closed': TONE.muted,
@@ -1128,7 +1130,7 @@ export const register: Register = on => {
       const [box, boxColor] = it.done ? ['☑', 'success'] : it.on ? ['◌', 'subtle'] : ['☐', 'subtle']
       const named = b.workers.filter(w => it.status_on !== undefined && label(w) === it.status_on)
       const worker = it.session !== undefined ? b.workers.find(w => w.id === it.session?.id) : named.length === 1 ? named[0] : undefined
-      const said = it.status ? [it.status, it.status_on].filter(Boolean).join(' · ') : it.on ? `on ${it.on}` : ''
+      const said = it.status ? [it.status === 'asks' ? 'asks its boss' : it.status, it.status_on].filter(Boolean).join(' · ') : it.on ? `on ${it.on}` : ''
       const saidText = (
         <Text size={SIZE.meta} color={it.status ? statusColor(it.status) : TONE.caution} wrap="truncate-end">
           {said}

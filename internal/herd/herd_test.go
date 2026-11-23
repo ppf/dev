@@ -235,10 +235,10 @@ func (f *fakeLookups) Tail(path string) (desktop.Tail, error) {
 func TestRefresh(t *testing.T) {
 	rows := func(active string) string {
 		r := tmux.FormatRow
-		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+		return r("herd", "$1", "1", active, "0", "%1", "/h", "", "claude", "idle", "claude", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+			r("herd", "$1", "1", active, active, "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+			r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "working", "claude", "0.5", "app", "", "", "$1", "", "", "stored", "2", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+			r("plain", "$3", "1", "1", "1", "%4", "/p", "", "zsh", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	for _, active := range []string{"1", "0"} {
 		var ran []string
@@ -291,8 +291,8 @@ func TestRefreshDialogGone(t *testing.T) {
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	open := rule + "\n Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "$1", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, open} {
 		var ran []string
 		state := "waiting"
@@ -706,10 +706,10 @@ func TestReplyBoxLooks(t *testing.T) {
 // The keys offer o PR only while the selected worker has a PR, or a lookup error to say.
 func TestHintPR(t *testing.T) {
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for i, name := range []string{"has", "none", "failed"} {
 		rows += r(name, fmt.Sprint("$", i+3), "1", "1", "1", fmt.Sprint("%", i+3), "/"+name, "", "claude", "idle", "claude",
-			"", "", "", "", "$1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+			"", "", "", "", "$1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	c := tmux.NewFake(func(args []string) (string, error) {
 		if args[0] == "list-panes" {
@@ -791,6 +791,7 @@ func TestPromptAskRules(t *testing.T) {
 			"Checks a plugin or hook asks for after your answer count as lookups too",
 			"dev todo note decided|said|risk",
 			"write a five-line contract file", "An item you do yourself or park is --on boss", "--waiting-for <who>, never a free-text owner", "state: your standing state off the board", `ending "leave it to the manager" is the manager's`, `in a "via manager (...)" note only the answer after the colon is`, "stop it after the first step and ask before the rest", `open -a "Google Chrome" <file>`,
+			`answer it in the turn it reaches you`, "never the user's unsent typing",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",

@@ -154,6 +154,8 @@ func TestAskRules(t *testing.T) {
 			"**Scope gate:**",
 			"**A mockup the user must see is opened for them.**",
 			`open -a "Google Chrome" <file>`,
+			"**A worker's question is answered in the same turn.**",
+			"never the user's unsent typing",
 			"Put the question, context and option texts in single quotes, or keep \"$\" and backticks out of them",
 		} {
 			if !strings.Contains(text, want) {

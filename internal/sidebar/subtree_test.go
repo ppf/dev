@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -545,5 +546,66 @@ func TestQuietCountsNowhere(t *testing.T) {
 		if got := ansi.Strip(Tag(r.Quiet, r.Text)); got != map[int]string{1: "TEST test?", 2: "TEST test", 3: "real"}[r.ID] {
 			t.Errorf("row #%d shows %q", r.ID, got)
 		}
+	}
+}
+
+// A plain worker's question to its running boss is the boss's: no need you, no NEEDS YOU row, a resting dot and
+// "asks its boss"; with no running boss (closed, or a session the user started) it stays the user's, as does a boss's
+// own question and a dialog.
+func TestAsksBoss(t *testing.T) {
+	boss := Session{Name: "b", ID: "$b", Boss: true, Agent: "Claude", State: agent.Idle}
+	worker := func(s Session) Session {
+		s.Name, s.ID, s.StartedBy, s.Depth, s.Agent, s.Group, s.Project = "w", "$w", "b", 1, "Claude", "g", "g"
+		return s
+	}
+	asks := worker(Session{State: agent.Idle, Note: "asks: Merge?"})
+	reminder := worker(Session{State: agent.Waiting, Note: "asks: Merge?"})
+	dialog := worker(Session{State: agent.Waiting, Deciding: true, Note: "asks: Merge?"})
+	for _, c := range []struct {
+		name     string
+		sessions []Session
+		rank     Rank
+		text     string
+		rows     int
+	}{
+		{"boss runs", []Session{boss, asks}, RankIdle, "idle", 0},
+		{"boss runs, idle reminder", []Session{boss, reminder}, RankIdle, "idle", 0},
+		{"boss runs, a dialog", []Session{boss, dialog}, RankNeedsYou, "1 need you", 1},
+		{"no boss running", []Session{asks}, RankNeedsYou, "", 1},
+		{"boss runs, its inbox off", []Session{{Name: "b", ID: "$b", Boss: true, InboxOff: true, Agent: "Claude", State: agent.Idle}, asks}, RankNeedsYou, "1 need you", 1},
+		{"started by a worker, not a boss", []Session{{Name: "b", ID: "$b", Agent: "Claude", State: agent.Idle}, asks}, RankNeedsYou, "", 1},
+	} {
+		ss := slices.Clone(c.sessions)
+		MarkBossRuns(ss)
+		w := ss[len(ss)-1]
+		if w.Rank() != c.rank {
+			t.Errorf("%s: rank %d, want %d", c.name, w.Rank(), c.rank)
+		}
+		if r := Subtree(ss, nil)["b"]; c.text != "" && r.Text() != c.text {
+			t.Errorf("%s: roll-up %q, want %q", c.name, r.Text(), c.text)
+		}
+		rows := NeedRows(ss, nil, "")
+		if len(rows) != c.rows || Count(rows).NeedYou != c.rows {
+			t.Errorf("%s: %d NEEDS YOU rows, need you %d; want %d", c.name, len(rows), Count(rows).NeedYou, c.rows)
+		}
+	}
+	// A boss's own question stays its user's, whoever started it
+	m := Session{Name: "m", ID: "$m", Boss: true, Agent: "Claude", State: agent.Idle}
+	own := []Session{m, {Name: "b", ID: "$b", Boss: true, StartedBy: "m", Agent: "Claude", State: agent.Idle, Note: "asks: VPN?"}}
+	MarkBossRuns(own)
+	if !own[1].BossRuns || own[1].Rank() != RankNeedsYou {
+		t.Errorf("a boss's own asks under a running manager: BossRuns %v rank %d, want true and needs you", own[1].BossRuns, own[1].Rank())
+	}
+	// The sidebar row: a resting dot, "asks its boss" in gold, not red
+	ss := []Session{boss, asks, worker(Session{Name: "x", State: agent.Idle, Note: "asks: Merge?"})}
+	ss[2].Name, ss[2].ID, ss[2].StartedBy = "x", "$x", "gone-boss"
+	MarkBossRuns(ss)
+	mdl := Model{snap: snapshot{width: 60, height: 24, current: "b", sessions: Order(ss)}}
+	raw := strings.Join(mdl.render().lines, "\n")
+	if n := strings.Count(raw, red+"●"+reset); n != 1 {
+		t.Errorf("red dots = %d, want 1 (x, whose boss is gone):\n%s", n, raw)
+	}
+	if !strings.Contains(raw, gold+"asks its boss") || strings.Count(ansi.Strip(raw), "asks its boss") != 1 {
+		t.Errorf("w doesn't read asks its boss in gold:\n%s", ansi.Strip(raw))
 	}
 }

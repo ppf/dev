@@ -449,7 +449,8 @@ cut:
 	return out, append(append([]int{-1}, at[cut:]...), -1)
 }
 
-// block is the part under the title: the session on it, or what was done on a finished one; none for the others.
+// block is the part under the title: the session on it, the boss's own doing or parked line, or what was done on a
+// finished one; none for the others.
 func (m Model) block(in int, now time.Time) []string {
 	it := m.it
 	rule := func(left, right string) string {

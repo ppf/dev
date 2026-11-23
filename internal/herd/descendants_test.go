@@ -20,7 +20,7 @@ import (
 )
 
 // A manager's board tiles the sessions it started, plus those its bosses started (deeper too) while they need the
-// user (a dialog, a question its turn ended on, or one its hook recorded, for the capture to tell), each tagged
+// user (a dialog, or a question its hook recorded, for the capture to tell; not one its running boss answers), each tagged
 // with the boss that started it; never in started. A worker's own sessions and a cycle outside aren't followed.
 func TestSnapshotDescendants(t *testing.T) {
 	agentRow := func(name, id, pane, by, state string) row {
@@ -53,7 +53,7 @@ func TestSnapshotDescendants(t *testing.T) {
 	for _, tl := range s.tiles {
 		got = append(got, tl.sess.Name+" via "+tl.via)
 	}
-	if want := []string{"w-asks via boss-a", "w-deep via boss-b", "w-dialog via boss-a", "w-asking via boss-b", "boss-a via "}; !slices.Equal(got, want) {
+	if want := []string{"w-deep via boss-b", "w-dialog via boss-a", "w-asking via boss-b", "boss-a via "}; !slices.Equal(got, want) {
 		t.Errorf("tiles = %q, want %q", got, want)
 	}
 	if q := s.tiles[index(s.tiles, "w-dialog")].question; q.Tool != "Bash" || q.Command != "echo hi" {
@@ -122,9 +122,9 @@ func TestRefreshViaDialogGone(t *testing.T) {
 	rule := strings.Repeat("─", 40)
 	gone := "  ⎿  Interrupted · What should Claude do instead?\n\n" + rule + "\n❯ \n" + rule + "\n  ? for shortcuts\n"
 	r := tmux.FormatRow
-	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
-		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
+	rows := r("herd", "$1", "1", "1", "1", "%2", "/h", "", "dev", "", "", "", "", "", "1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("boss-a", "$3", "1", "1", "1", "%4", "/b", "", "sleep", "", "", "", "", "", "1", "herd", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "") +
+		r("w1", "$2", "1", "1", "1", "%3", "/w1", "", "claude", "waiting", "claude", "", "", "", "", "boss-a", "permission_prompt", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	for _, screen := range []string{gone, dialogScreen} {
 		state := "waiting"
 		c := tmux.NewFake(func(args []string) (string, error) {

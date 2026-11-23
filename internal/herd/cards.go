@@ -569,10 +569,14 @@ func statusText(t tile, sec section) string {
 		_, what, _ := desktop.Marker(t.tail.Lines)
 		return clean(what)
 	}
-	if healthNotes[noteKind(t.note)] || staleNote(t) {
+	switch kind := noteKind(t.note); {
+	case healthNotes[kind] || staleNote(t):
 		return ""
+	case kind == inbox.Asks:
+		return sidebar.StatusWord(sidebar.StatusAsks)
+	default:
+		return kind
 	}
-	return noteKind(t.note)
 }
 
 // staleNote reports a needs a decision note outliving its dialog (answered No or Esc, which fires no hook):

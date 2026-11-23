@@ -89,11 +89,16 @@ func (m Model) render() frame {
 			styled = bold + display + reset
 		}
 		lead := s.lead()
-		// An idle session whose note asks a question reads as a dialog does: red dot, "asks"
+		// An idle session whose note asks a question reads as a dialog does: red dot, "asks"; one its boss answers
+		// rests, "asks its boss", Claude's idle reminder too
 		asks := s.State != agent.Waiting && s.Rank() == RankNeedsYou
+		asksBoss := s.AsksBoss()
 		dotState := s.State
-		if asks {
+		switch {
+		case asks:
 			dotState = agent.Waiting
+		case asksBoss:
+			dotState = agent.Idle
 		}
 		line := lead + " " + statusDot(s.Agent, dotState) + " " + styled
 		if indent != "" {
@@ -132,6 +137,10 @@ func (m Model) render() frame {
 				body = "asks"
 			case asks:
 				body += " · asks"
+			case asksBoss && s.Agent == "Claude":
+				body, colour = StatusWord(StatusAsks), gold
+			case asksBoss:
+				body, colour = body+" · "+StatusWord(StatusAsks), gold
 			case s.State == "":
 			case s.Agent == "Claude":
 				// Claude is the default agent: its name is left out of the line
@@ -141,7 +150,7 @@ func (m Model) render() frame {
 			}
 			cost, title = s.Cost, s.Title
 		}
-		if s.State == agent.Waiting || asks {
+		if s.State == agent.Waiting && !asksBoss || asks {
 			colour = red
 		}
 		// The second line starts under the name, past the indent

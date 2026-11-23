@@ -10,10 +10,10 @@ const (
 	StatusStarting   = "starting"    // the user's own, asked to start (dev todo start) and not yet on a worker
 	StatusWorking    = "working"     // on a worker that works
 	StatusBlocked    = "blocked"     // on a worker that waits on the user: a dialog, or a failed turn
-	StatusAsks       = "asks"        // on a worker whose turn ended on a question as text: its boss answers (StatusWord)
+	StatusAsks       = "asks"        // on a tmux worker whose turn ended on a question as text: its boss answers (StatusWord)
 	StatusWaiting    = "waiting"     // on a person, or on a worker in a planned wait or a rate-limit resume
 	StatusIdle       = "idle"        // on a worker that rests, or a session it started with no agent
-	StatusParked     = "parked"      // the boss's own (--on boss) that no one has taken up: no doing line
+	StatusParked     = "parked"      // the boss's own (--on boss) that no one has taken up: no doing line, no start
 	StatusGone       = "gone"        // on a worker session no longer listed
 	StatusCheck      = "check"       // its linked PR moved (merged, closed, approved, …): see its check
 	StatusBossClosed = "boss closed" // its boss session is gone

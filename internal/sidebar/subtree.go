@@ -3,6 +3,7 @@ package sidebar
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ppf/dev/internal/agent"
@@ -40,7 +41,8 @@ const (
 )
 
 // Rank is s's own state, the first that holds: a dialog, a planned wait, working, a rate-limit resume, a turn
-// that ended on a question (an asks note; a needs a decision note outlives its dialog), else idle.
+// that ended on a question (an asks note; a needs a decision note outlives its dialog) unless its boss answers it
+// (AsksBoss), else idle.
 func (s Session) Rank() Rank {
 	switch {
 	case s.Deciding:
@@ -51,10 +53,32 @@ func (s Session) Rank() Rank {
 		return RankWorking
 	case s.Resume:
 		return RankWaiting
-	case NoteKind(s.Note) == NoteAsks:
+	case NoteKind(s.Note) == NoteAsks && !s.AsksBoss():
 		return RankNeedsYou
 	}
 	return RankIdle
+}
+
+// Asking reports s's turn ended on a question as text (an asks note): no dialog, planned wait, work or resume since.
+func (s Session) Asking() bool {
+	return !s.Deciding && !s.Wait.Held() && s.State != agent.Working && !s.Resume && NoteKind(s.Note) == NoteAsks
+}
+
+// AsksBoss reports a plain worker Asking whose boss runs: the boss answers it, so it doesn't need the user. A worker
+// that is a boss hands its asks up, and one with no running boss is the user's to answer.
+func (s Session) AsksBoss() bool { return s.Asking() && s.BossRuns && !s.Boss }
+
+// BossRuns reports a @dev_started_by value v naming a boss among sessions whose inbox is on: one that hears its
+// workers' asks notes.
+func BossRuns(v string, sessions []Session) bool {
+	return slices.ContainsFunc(sessions, func(b Session) bool { return b.Boss && !b.InboxOff && Names(v, b.ID, b.Name, true) })
+}
+
+// MarkBossRuns sets each session's BossRuns from the others.
+func MarkBossRuns(sessions []Session) {
+	for i, s := range sessions {
+		sessions[i].BossRuns = BossRuns(s.StartedBy, sessions)
+	}
 }
 
 // ListCount is what a boss's to do list adds to the roll-ups, by its items' statuses: asks to decide, the user's own
