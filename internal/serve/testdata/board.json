@@ -7,8 +7,10 @@
     "starting",
     "working",
     "blocked",
+    "asks",
     "waiting",
     "idle",
+    "parked",
     "gone",
     "check",
     "boss closed"
@@ -100,13 +102,46 @@
             "name": "a-fix",
             "running": true
           }
+        },
+        {
+          "id": 5,
+          "text": "Pick the layout",
+          "on": "a-ask",
+          "done": false,
+          "added": 1700000000,
+          "status": "asks",
+          "status_on": "a-ask",
+          "now": "A or B?",
+          "note": "asks: A or B?",
+          "column": "progress",
+          "assignee": {
+            "kind": "worker",
+            "name": "a-ask",
+            "running": true
+          }
+        },
+        {
+          "id": 6,
+          "text": "Parked: the phone's Done",
+          "on": "boss",
+          "done": false,
+          "added": 1700000000,
+          "status": "parked",
+          "status_on": "boss-a",
+          "column": "todo",
+          "assignee": {
+            "kind": "boss",
+            "name": "boss-a",
+            "running": true
+          },
+          "parked": true
         }
       ],
       "updated": 1699999940,
       "stale": false,
       "finished": [
         {
-          "id": 5,
+          "id": 7,
           "text": "Ship the notes",
           "context": [
             "notes in ~/notes.md"

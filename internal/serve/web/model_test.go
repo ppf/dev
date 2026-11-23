@@ -42,11 +42,12 @@ const ROWS = [
   row('3d own', live, { status: 'yours', column: 'todo', assignee: you }),
   row('4a boss, PR moved', live, { status: 'check', on: 'boss', check: { kind: 'merged', pr: 7 }, column: 'review', assignee: boss }),
   row('4b boss, doing', live, { status: 'working', on: 'boss', doing: { text: 'writing notes', at: t }, column: 'progress', assignee: boss }),
-  row('4c boss', live, { status: 'idle', on: 'boss', column: 'todo', assignee: boss }),
+  row('4c boss', live, { status: 'parked', on: 'boss', column: 'todo', assignee: boss, parked: true }),
   row('5a unread, session', live, { on: 'dev-x', session: { name: 'dev-x' }, column: 'progress', assignee: worker('dev-x', false) }),
   row('5b unread, no session', live, { on: 'Carl', column: 'waiting', assignee: { ...boss, running: false }, waiting_for: 'Carl' }),
   row('6 gone', live, { status: 'gone', on: 'dev-ios', session: { name: 'dev-ios' }, column: 'todo', assignee: boss }),
   row('7 blocked', live, { status: 'blocked', on: 'dev-pop', session: { name: 'dev-pop' }, column: 'progress', assignee: worker('dev-pop'), needs_you: true }),
+  row('7 asks its boss', live, { status: 'asks', on: 'dev-ask', session: { name: 'dev-ask' }, now: 'A or B?', column: 'progress', assignee: worker('dev-ask') }),
   row('8 PR moved', live, { status: 'check', on: 'dev-y', check: { kind: 'changes requested', pr: 9 }, column: 'review', assignee: worker('dev-y') }),
   row('9 on a person', live, { status: 'waiting', on: 'Carl', column: 'waiting', assignee: boss, waiting_for: 'Carl' }),
   row('10a working', live, { status: 'working', on: 'dev-web', now: 'Edit app.js', column: 'progress', assignee: worker('dev-web') }),
@@ -80,6 +81,7 @@ const WANT = {
   '5b unread, no session': ['waiting', 'boss-dev', null, '?', [['waiting for Carl', 'amber']], '', false],
   '6 gone': ['todo', 'boss-dev', ['worker dev-ios gone', 'soft-red'], '', [], '', false],
   '7 blocked': ['progress', 'dev-pop', ['blocked · needs you', 'red'], '', [], '', true],
+  '7 asks its boss': ['progress', 'dev-ask', null, '', [['asks its boss', 'amber']], 'A or B?', false],
   '8 PR moved': ['review', 'dev-y', ['PR #9 changes requested', 'soft-red'], '', [], '', false],
   '9 on a person': ['waiting', 'boss-dev', null, '', [['waiting for Carl', 'amber']], '', false],
   '10a working': ['progress', 'dev-web', null, 'working', [], 'Edit app.js', false],
@@ -90,6 +92,7 @@ const WANT = {
 for (const r of ROWS) {
   const x = card(r.name), m = marks(x, now);
   say(r.name, [columnOf(x), whoOf(x), m.band, m.word, m.chips, m.line, m.red], WANT[r.name]);
+  say(r.name + ': parked', m.parked, r.name === '4c boss');
 }
 say('every row has a want', ROWS.length, Object.keys(WANT).length);
 say('unchanged 2 days on a check item: its band', marks({ list: live, it: { id: 1, status: 'check', check: { kind: 'unchanged', since: t - 3 * 86400 }, column: 'todo', assignee: you } }, now).band, ['unchanged 3d', 'amber']);
@@ -101,7 +104,7 @@ const fin = { boss: 'boss-dev', items: [{ id: 1, text: 'open #1', column: 'todo'
 const xs = cards({ lists: [fin] });
 say('finished: a done card beside an open one of the same id', xs.map(x => [x.it.text, x.done, columnOf(x), whoOf(x)]),
   [['open #1', false, 'todo', ME], ['finished #1', true, 'done', 'dev-web']]);
-say('finished: no marks', marks(xs[1], now), { band: null, word: '', chips: [], line: '', red: false });
+say('finished: no marks', marks(xs[1], now), { band: null, word: '', chips: [], line: '', red: false, parked: false });
 say('no lists: no cards', cards({}), []);
 `)
 }
@@ -176,14 +179,18 @@ const want = [
   ['Read the plan', 'todo', ME, false, false],
   ['Send the invoice', 'waiting', 'boss-a', false, false],
   ['Fix the login', 'progress', 'a-fix', false, false],
+  ['Pick the layout', 'progress', 'a-ask', false, false],
+  ["Parked: the phone's Done", 'todo', 'boss-a', false, false],
   ['Ship the notes', 'done', ME, false, true],
 ];
 if (JSON.stringify(got) !== JSON.stringify(want)) console.log('golden board: ' + JSON.stringify(got));
 const sent = cards(board).find(x => x.it.text === 'Send the invoice');
 if (marks(sent).chips[0]?.[0] !== 'waiting for alice') console.log('waiting_for not read: ' + JSON.stringify(marks(sent)));
+if (!marks(cards(board).find(x => x.it.on === 'boss')).parked) console.log('parked not read');
+if (tally(cards(board)).need !== 1) console.log('an asks card counted as needing you: ' + tally(cards(board)).need);
 if (lanes(cards(board))[4].xs[0]?.it.done_at !== 1699999940) console.log('done_at not read');
 const chips = whos(cards(board)), openSum = chips.reduce((n, [, c]) => n + c, 0);
-if (openSum !== tally(cards(board)).open || openSum !== 4) console.log('chip counts ' + JSON.stringify(chips) + ' do not add up to the tally: ' + tally(cards(board)).open);
+if (openSum !== tally(cards(board)).open || openSum !== 6) console.log('chip counts ' + JSON.stringify(chips) + ' do not add up to the tally: ' + tally(cards(board)).open);
 `)
 }
 

@@ -384,7 +384,7 @@ func (r needRow) right(now time.Time, named bool) (text, colour string) {
 		add("?")
 		colour = sidebar.Muted
 	case r.Assignee.Kind == sidebar.AssigneeWorker || r.Status == sidebar.StatusGone:
-		add(r.Status)
+		add(sidebar.StatusWord(r.Status))
 		colour = sidebar.StatusColours[r.Status]
 	case r.WaitingFor != "":
 		add("waiting for " + r.WaitingFor)

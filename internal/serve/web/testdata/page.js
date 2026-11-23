@@ -516,6 +516,17 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('a check shown in the block is not a fact again', !/Check/.test(textOf(s.at(-1))));
   s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
   check('a worker asking you: needs you', cls(/^live\b/)(s)[0]?.attrs['data-st'] === 's-decide' && /needs you/.test(textOf(cls(/^live\b/)(s)[0])));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'asks', note: 'asks: A or B?' }] }], "item('boss-a', 5)");
+  check('a worker asking its boss: no flag, its word, the boss answers', !cls(/^flag$/)(s).length && cls(/^live\b/)(s)[0]?.attrs['data-st'] === 's-asks'
+    && /asks its boss/.test(textOf(cls(/^live\b/)(s)[0])) && /^boss-a answers\./.test(textOf(cls(/^hint$/)(s)[0] || {})));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 8, text: 'Parked: the phone', status: 'parked', status_on: 'boss-a', on: 'boss', column: 'todo', parked: true,
+    assignee: { kind: 'boss', name: 'boss-a', running: true }, added: Math.floor(Date.now() / 1000) - 2 * 86400 }] }], "item('boss-a', 8)");
+  const parkedLv = textOf(cls(/^live\b/)(s)[0] || {});
+  check("a parked item: its block says no one is on it: " + parkedLv, /boss-aparkedadded 2d agoNowno one on it: boss-a has not taken it up$/.test(parkedLv.replace(/^[A-Z]+/, ''))
+    && /parked/.test(textOf(s[0])) && s.some(n => walk(n, c => c.tag === 'button' && c.children[0] === 'Start').length));
+  const parkedCard = drawnCards()[0];
+  check('a parked card: its own line where Now goes, Start kept', textOf(cls(/^now parked$/)([parkedCard])[0] || {}) === 'Parkedboss-a has not taken it up'
+    && !cls(/^now$/)([parkedCard]).length && walk(parkedCard, c => c.tag === 'button' && c.children[0] === 'Start').length === 1);
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },
     doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) } }] }], "item('boss-a', 6)");
   const bossLv = textOf(cls(/^live\b/)(s)[0] || {});

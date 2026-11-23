@@ -484,10 +484,16 @@ func (m Model) block(in int, now time.Time) []string {
 	case todo.OnBoss(it.On, it.Session) && it.Doing != nil:
 		since := "since " + clock(time.Unix(it.Doing.At, 0), now)
 		return append([]string{rule(m.assignee(), sidebar.Green+"doing"+reset+sidebar.Muted+" · "+since+reset)}, append(row("now", cmp.Or(it.Doing.Text, "on it")), end)...)
+	case it.Parked:
+		right := sidebar.Muted + sidebar.StatusParked + reset
+		if it.Added != 0 {
+			right += sidebar.Muted + " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago" + reset
+		}
+		return append([]string{rule(m.assignee(), right)}, append(row("now", "no one on it: "+sidebar.ParkedLine(m.assignee())), end)...)
 	case !m.worker(), it.Status == "" && it.Now == "" && it.Note == "":
 		return nil
 	}
-	word := cmp.Or(liveWords[it.Status], it.Status, "no status")
+	word := cmp.Or(liveWords[it.Status], sidebar.StatusWord(it.Status), "no status")
 	right := sidebar.StatusColours[it.Status] + word + reset
 	if it.Added != 0 {
 		right += sidebar.Muted + " · on it " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + reset
@@ -659,7 +665,7 @@ func (m Model) statusText(waiting bool, now time.Time) string {
 	switch {
 	case it.Status == sidebar.StatusBossClosed, waiting && it.Status == sidebar.StatusWaiting:
 	default:
-		parts = append(parts, cmp.Or(it.Status, "—"))
+		parts = append(parts, cmp.Or(sidebar.StatusWord(it.Status), "—"))
 	}
 	if it.StatusOn != "" && it.StatusOn != it.Boss && !waiting {
 		parts = append(parts, it.StatusOn)

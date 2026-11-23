@@ -9,7 +9,7 @@ const QUIET_MS = 40000;
 const RETRY_MAX_MS = 15000;
 const RELOADED = 'dev-reloaded';
 const TIMEOUT_MS = 4000;
-const ON_WORKER = ['working', 'blocked', 'idle', 'gone'];
+const ON_WORKER = ['working', 'blocked', 'asks', 'idle', 'gone'];
 const WHO_SHOWN = 10; // assignee chips shown until "+N"
 const TODO_SHOWN = 5; // To do's cards shown until "Show N more", what needs the user always
 const AVATARS = ['#3c6e91', '#5b7d3a', '#8c4f6e', '#7a6a2a', '#3f7f7a', '#6a5a9a'];
@@ -409,7 +409,7 @@ const statusOf = it => it.status || 'no status';
 
 function statusWord(it) {
   if (it.start_late) return el('span', { class: 'st s-decide' }, 'start not picked up');
-  return el('span', { class: 'st ' + statusClass(statusOf(it)) }, statusOf(it));
+  return el('span', { class: 'st ' + statusClass(statusOf(it)) }, wordOf(statusOf(it)));
 }
 
 // pick takes option value on an ask's card and opens its sheet with it ready to send.
@@ -491,6 +491,7 @@ function openCard(x) {
     el('a', { class: 'title', href: h, 'data-f': h }, title || it.text),
     title && rest && el('div', { class: 'sub' }, rest),
     line && el('div', { class: 'now', title: line }, el('b', null, it.doing && mine ? 'You, now' : 'Now'), el('span', null, line)),
+    m.parked && el('div', { class: 'now parked' }, el('b', null, 'Parked'), el('span', null, parkedLine(x))),
     answerable(list, it) && el('div', { class: 'quick' }, choices(it).map((c, i) =>
       el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': h + '/' + c.value, onclick: () => pick(list, it, c.value) },
         el('span', { class: 'k' }, String(i + 1)), c.label, c.detail && el('small', null, c.detail)))),
@@ -734,7 +735,7 @@ function listErrors() {
 function statusRow(x) {
   const { it } = x, col = titleOf(columnOf(x)), st = it.start_late ? 'start not picked up' : it.status;
   if (x.done || !st) return col;
-  const word = ['yours', 'boss closed'].includes(st) || st === 'waiting' && it.waiting_for ? '' : st;
+  const word = ['yours', 'boss closed'].includes(st) || st === 'waiting' && it.waiting_for ? '' : wordOf(st);
   // The session it names when the card is not on it (a worker gone, a closed boss's: the card is on its boss); a person is in the rows below
   const on = !it.waiting_for && it.status_on !== whoOf(x) ? it.status_on : '';
   return [col, word, on].filter(Boolean).join(' · ');
@@ -818,14 +819,23 @@ function details(text) {
 }
 
 // A worker's state as its live block says it, with its class; the others say their status
-const LIVE_WORDS = { blocked: ['needs you', 's-decide'], gone: ['session gone', 's-gone'] };
+const LIVE_WORDS = { blocked: ['needs you', 's-decide'], asks: ['asks its boss', 's-asks'], gone: ['session gone', 's-gone'] };
+// parkedLine is what a parked card says (sidebar.ParkedLine)
+const parkedLine = x => whoOf(x) + ' has not taken it up';
 // checkTone is a PR check's tag class: what failed or wants changes red, what passed green
 const checkTone = kind => /failing|changes|closed|lookup/.test(kind) ? 'hot' : /green|approved|merged/.test(kind) ? 'ok' : 'wait';
 
-// liveBlock is the session block of open item x; the boss's own item only its doing line, none for the user's or a person's.
+// liveBlock is the session block of open item x; the boss's own item only its doing line, or that it is parked; none for
+// the user's or a person's.
 function liveBlock(x) {
   const { list, it } = x, boss = it.on === 'boss' && !it.session;
-  if (own(list, it) || !(boss ? it.doing : it.session || onWorker(x))) return null;
+  if (own(list, it) || !(boss ? it.doing || it.parked : it.session || onWorker(x))) return null;
+  if (boss && !it.doing) {
+    return el('section', { class: 'live', 'data-st': 's-parked', 'aria-label': 'Boss' },
+      el('div', { class: 'lv-top' }, avatar(whoOf(x), kindOf(x), true, 'sm'), el('span', { class: 'lv-who' }, whoOf(x)), el('span', { class: 'st s-parked' }, 'parked'),
+        it.added && el('span', { class: 'lv-since' }, 'added ' + age(it.added) + ' ago')),
+      el('div', { class: 'lv-row' }, el('b', null, 'Now'), el('span', null, 'no one on it: ' + parkedLine(x))));
+  }
   const who = boss ? whoOf(x) : it.session?.name || it.status_on || it.on; // a gone worker's card is on its boss
   const [word, cls] = boss ? ['doing', 's-working'] : LIVE_WORDS[it.status] || [statusOf(it), statusClass(statusOf(it))];
   const since = boss ? 'since ' + when(it.doing.at).replace(/^today /, '') : it.added ? 'on it ' + age(it.added) : '';
@@ -921,7 +931,8 @@ function item(boss, id, at) {
   if (acts.length) {
     out.push(el('div', { class: 'acts' }, acts), el('p', { class: 'hint' }, hints.join(' ')));
   } else if (!own(list, it)) {
-    out.push(el('p', { class: 'hint' }, onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
+    out.push(el('p', { class: 'hint' }, it.status === 'asks' ? list.boss + ' answers. If it hands the question up, it shows in NEEDS YOU on your Mac.'
+      : onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
   }
   out.push(facts(x, !!lv, !!lv && !(it.on === 'boss' && !it.session)));
   return out;

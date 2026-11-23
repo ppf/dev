@@ -16,8 +16,10 @@ const (
 	StatusStarting   = sidebar.StatusStarting
 	StatusWorking    = sidebar.StatusWorking
 	StatusBlocked    = sidebar.StatusBlocked
+	StatusAsks       = sidebar.StatusAsks
 	StatusWaiting    = sidebar.StatusWaiting
 	StatusIdle       = sidebar.StatusIdle
+	StatusParked     = sidebar.StatusParked
 	StatusGone       = sidebar.StatusGone
 	StatusCheck      = sidebar.StatusCheck
 	StatusBossClosed = sidebar.StatusBossClosed
@@ -64,10 +66,10 @@ func OwnerOf(live []sidebar.Session, boss string, closed bool) Owner {
 //   - on no one, or unlinked on the list's own boss (an older dev filed --on <own name> as a person): decide for an
 //     ask, else check when its PR moved, else yours; an ask handed to someone goes by whom it's on, as below;
 //   - on the boss itself (--on boss): check when its PR moved, else working while it says it does it (Doing), else
-//     idle, naming the boss (boss for a desktop app boss's, which has no name);
+//     parked (Parked), idle once started, naming the boss (boss for a desktop app boss's, which has no name);
 //   - on a linked session o didn't start, or no longer listed: gone;
-//   - on a worker asking the user (sidebar.Rank: a dialog, a turn ended on a question), or resting after a failed
-//     turn: blocked;
+//   - on a worker in a dialog, or resting after a failed turn: blocked;
+//   - on a worker whose turn ended on a question as text (asking): asks, its boss answers;
 //   - its linked PR moved: check;
 //   - on a name that is none of o's workers with an agent: waiting, on a person;
 //   - on a worker, by its rank: working, waiting (a planned wait or a rate-limit resume), else idle (an agentless
@@ -104,6 +106,8 @@ func (o Owner) Status(it Shown) (status, on string) {
 			return StatusCheck, o.bossName()
 		case it.Doing != nil:
 			return StatusWorking, o.bossName()
+		case Parked(it):
+			return StatusParked, o.bossName()
 		}
 		return StatusIdle, o.bossName()
 	case o.Unread:
@@ -115,6 +119,8 @@ func (o Owner) Status(it Shown) (status, on string) {
 		return StatusGone, it.Session.Name
 	case worker && blocked(w):
 		return StatusBlocked, w.Name
+	case worker && asking(w):
+		return StatusAsks, w.Name
 	case moved:
 		return StatusCheck, cmp.Or(w.Name, it.On)
 	case !worker:
@@ -129,11 +135,19 @@ func (o Owner) Status(it Shown) (status, on string) {
 	return StatusIdle, w.Name
 }
 
-// blocked reports worker w waiting on the user (sidebar.Rank: a dialog, a turn ended on a question), or resting after
-// a failed turn.
+// blocked reports worker w waiting on the user in a dialog, or resting after a failed turn.
 func blocked(w sidebar.Session) bool {
-	rank := w.Rank()
-	return rank == sidebar.RankNeedsYou || rank == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed
+	return w.Deciding || w.Rank() == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed
+}
+
+// asking reports worker w's turn ended on a question as text (an asks note, sidebar.Rank), no dialog: its boss answers.
+func asking(w sidebar.Session) bool {
+	return !w.Deciding && w.Rank() == sidebar.RankNeedsYou
+}
+
+// Parked reports an item its list's boss does itself (OnBoss) that no one has taken up: no doing line, no start.
+func Parked(it Shown) bool {
+	return OnBoss(it.On, it.Session) && it.Doing == nil && it.Started == nil
 }
 
 // bossName is o's session name, Boss for a desktop app boss's (no name).
@@ -190,7 +204,7 @@ func (l List) SetStatus(o Owner) {
 		l.Items[i].Placement = o.place(it)
 		l.Items[i].Now, l.Items[i].Note = "", ""
 		switch l.Items[i].Status {
-		case StatusWorking, StatusWaiting, StatusBlocked, StatusIdle, StatusCheck:
+		case StatusWorking, StatusWaiting, StatusBlocked, StatusAsks, StatusIdle, StatusCheck:
 			if w, ok := o.worker(it); ok && !Own(it.On, it.Session, o.Name) && !OnBoss(it.On, it.Session) {
 				l.Items[i].Now, l.Items[i].Note = w.Doing, w.Note
 				if o.Doing != nil {

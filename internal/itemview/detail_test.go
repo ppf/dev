@@ -100,6 +100,10 @@ func TestSessionBlock(t *testing.T) {
 	if v := ansi.Strip(New(it, Actions{}, false).View(Width, 40, now)); !strings.Contains(v, "needs you · on it 42m") {
 		t.Errorf("blocked:\n%s", v)
 	}
+	it.Status, it.StatusOn = sidebar.StatusAsks, "item-detail-1"
+	if v := ansi.Strip(New(it, Actions{}, false).View(Width, 40, now)); !strings.Contains(v, "asks its boss · on it 42m") || !strings.Contains(v, "status  asks its boss") || strings.Contains(v, "needs you") {
+		t.Errorf("asks its boss:\n%s", v)
+	}
 }
 
 // A narrow box keeps every row to its width: a long session name, a tick by itself on another day, the cut line.
@@ -116,6 +120,18 @@ func TestNarrowBlocks(t *testing.T) {
 					t.Errorf("width %d, #%d row %d: %d wide: %q", w, it.ID, i, got, ansi.Strip(r))
 				}
 			}
+		}
+	}
+}
+
+// The boss's parked item: a block saying no one is on it, status parked, Start kept.
+func TestParkedBlock(t *testing.T) {
+	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 136, Text: "Parked: the phone's Done", On: todo.Boss, Status: sidebar.StatusParked, StatusOn: "boss-dev",
+		Added: now.Add(-48 * time.Hour).Unix(), Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev", Running: true}, Parked: true}}}
+	v := ansi.Strip(New(it, Actions{}, false).View(Width, 40, now))
+	for _, want := range []string{"─ boss-dev ─", "parked · added 2d ago ─", "now     no one on it: boss-dev has not taken it up", "status  parked", "Start"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
 		}
 	}
 }

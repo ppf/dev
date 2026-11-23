@@ -132,6 +132,8 @@ a { color: var(--act); }
 .now { display: flex; gap: 7px; align-items: baseline; min-width: 0; font-size: 12.5px; color: var(--ink2); background: var(--act-wash); border-radius: var(--r-chip); padding: 5px 8px; }
 .now b { color: var(--s-prog); font-weight: 650; white-space: nowrap; }
 .now span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.now.parked { background: none; border: 1px dashed var(--edge-strong); color: var(--meta); }
+.now.parked b { color: var(--ink2); }
 .quick { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 5px; }
 .quick button { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; width: 100%; text-align: left; border: 1px solid var(--edge); background: var(--card); border-radius: var(--r-ctl); padding: 7px 9px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .quick button:hover { border-color: var(--edge-strong); }
@@ -288,7 +290,7 @@ textarea { min-height: 3.6em; resize: vertical; }
 .details > :first-child { color: var(--ink); }
 /* the live block: the session on the item, or what was done on a finished one; its edge the state's colour */
 .live { --lv: var(--meta); display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--edge); border-left: 4px solid var(--lv); border-radius: var(--r-card); background: var(--ground); padding: 10px 12px; font-size: 13.5px; color: var(--ink2); }
-.live[data-st="s-working"] { --lv: var(--s-done); } .live[data-st="s-waiting"], .live[data-st="s-check"] { --lv: var(--s-wait); } .live[data-st="s-decide"], .live[data-st="s-gone"] { --lv: var(--hot); }
+.live[data-st="s-working"] { --lv: var(--s-done); } .live[data-st="s-waiting"], .live[data-st="s-check"], .live[data-st="s-asks"] { --lv: var(--s-wait); } .live[data-st="s-decide"], .live[data-st="s-gone"] { --lv: var(--hot); }
 .lv-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .lv-who { font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-since { margin-left: auto; font-size: 12.5px; color: var(--meta); }
@@ -317,6 +319,6 @@ textarea { min-height: 3.6em; resize: vertical; }
 .st { font-weight: 600; }
 .s-decide, .s-blocked, .s-gone { color: var(--hot-text); }
 .s-working { color: var(--s-done); }
-.s-waiting, .s-check { color: var(--s-wait); }
-.s-idle, .s-boss-closed, .s-no-status { color: var(--meta); }
+.s-waiting, .s-check, .s-asks { color: var(--s-wait); }
+.s-idle, .s-parked, .s-boss-closed, .s-no-status { color: var(--meta); }
 .s-starting { color: var(--s-prog); }

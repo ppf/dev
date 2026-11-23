@@ -17,6 +17,7 @@ func TestPlace(t *testing.T) {
 	workers := []sidebar.Session{
 		{Name: "busy", Agent: "Claude", State: agent.Working},
 		{Name: "asking", Agent: "Claude", State: agent.Waiting, Deciding: true},
+		{Name: "asked", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": A or B?"},
 		{Name: "planned", Agent: "Claude", State: agent.Idle, Wait: wait.Wait{Until: time.Now().Add(time.Hour)}},
 		{Name: "resting", Agent: "Claude", State: agent.Idle},
 	}
@@ -54,12 +55,15 @@ func TestPlace(t *testing.T) {
 		{"3d own, on the boss's own name", live, Shown{On: "Boss-X"}, sidebar.ColumnTodo, you, "", false, StatusYours, ""},
 		{"4a on boss, PR moved", live, Shown{On: Boss, Check: merged, Doing: doing}, sidebar.ColumnReview, boss, "", false, StatusCheck, "boss-x"},
 		{"4b on boss, doing", live, Shown{On: Boss, Doing: doing}, sidebar.ColumnProgress, boss, "", false, StatusWorking, "boss-x"},
-		{"4c on boss", live, Shown{On: Boss}, sidebar.ColumnTodo, boss, "", false, StatusIdle, "boss-x"},
-		{"4c on boss, workers unread", unread, Shown{On: Boss}, sidebar.ColumnTodo, bossClosed, "", false, StatusIdle, "boss-x"},
+		{"4c on boss", live, Shown{On: Boss}, sidebar.ColumnTodo, boss, "", false, StatusParked, "boss-x"},
+		{"4c on boss, workers unread", unread, Shown{On: Boss}, sidebar.ColumnTodo, bossClosed, "", false, StatusParked, "boss-x"},
+		{"1 on boss, started", live, Shown{On: Boss, Started: &Started{To: "boss-x"}}, sidebar.ColumnProgress, boss, "", false, StatusIdle, "boss-x"},
 		{"5a unread, linked", unread, Shown{On: "busy", Session: link("busy")}, sidebar.ColumnProgress, Assignee{Kind: sidebar.AssigneeWorker, Name: "busy"}, "", false, "", ""},
 		{"5b unread, no session", unread, Shown{On: "Ola"}, sidebar.ColumnWaiting, bossClosed, "Ola", false, "", ""},
 		{"6 gone, PR moved", live, Shown{On: "old", Session: link("old"), Check: merged}, sidebar.ColumnTodo, boss, "", false, StatusGone, "old"},
 		{"7 blocked, PR moved", live, Shown{On: "asking", Session: link("asking"), Check: merged}, sidebar.ColumnProgress, worker("asking"), "", true, StatusBlocked, "asking"},
+		{"7 asks its boss", live, Shown{On: "asked", Session: link("asked")}, sidebar.ColumnProgress, worker("asked"), "", false, StatusAsks, "asked"},
+		{"7 asks its boss, PR moved", live, Shown{On: "asked", Session: link("asked"), Check: merged, PRState: PROpen}, sidebar.ColumnProgress, worker("asked"), "", false, StatusAsks, "asked"},
 		{"8 PR moved, a worker's", live, Shown{On: "busy", Session: link("busy"), Check: merged}, sidebar.ColumnReview, worker("busy"), "", false, StatusCheck, "busy"},
 		{"8 PR moved, a person's", live, Shown{On: "Ola", Check: merged}, sidebar.ColumnReview, boss, "Ola", false, StatusCheck, "Ola"},
 		{"9 on a person", live, Shown{On: "Ola"}, sidebar.ColumnWaiting, boss, "Ola", false, StatusWaiting, "Ola"},
@@ -73,7 +77,7 @@ func TestPlace(t *testing.T) {
 		{"10a over 10c: working, PR open", live, Shown{On: "busy", Session: link("busy"), PRState: PROpen}, sidebar.ColumnProgress, worker("busy"), "", false, StatusWorking, "busy"},
 		{"ask handed on", live, Shown{Options: []string{"a", "b"}, On: "busy", Session: link("busy")}, sidebar.ColumnProgress, worker("busy"), "", false, StatusWorking, "busy"},
 		{"quiet", live, Shown{Quiet: true, On: "Ola"}, sidebar.ColumnWaiting, boss, "Ola", false, StatusWaiting, "Ola"},
-		{"desktop boss, on boss", Owner{}, Shown{On: Boss}, sidebar.ColumnTodo, Assignee{Kind: sidebar.AssigneeBoss, Name: Boss, Running: true}, "", false, StatusIdle, Boss},
+		{"desktop boss, on boss", Owner{}, Shown{On: Boss}, sidebar.ColumnTodo, Assignee{Kind: sidebar.AssigneeBoss, Name: Boss, Running: true}, "", false, StatusParked, Boss},
 		{"desktop boss, own", Owner{}, Shown{}, sidebar.ColumnTodo, you, "", false, StatusYours, ""},
 	} {
 		l := List{Items: []Shown{tt.it}}
@@ -85,6 +89,9 @@ func TestPlace(t *testing.T) {
 		}
 		if got.Status != tt.status || got.StatusOn != tt.on {
 			t.Errorf("%s: status %q on %q, want %q on %q", tt.row, got.Status, got.StatusOn, tt.status, tt.on)
+		}
+		if want := tt.status == StatusParked; got.Parked != want {
+			t.Errorf("%s: parked %v, want %v", tt.row, got.Parked, want)
 		}
 	}
 }
@@ -135,7 +142,7 @@ func TestReadPRStateDoing(t *testing.T) {
 func TestPlaceWorkerNamedBoss(t *testing.T) {
 	l := List{Items: []Shown{{On: Boss}}}
 	l.SetStatus(Owner{Name: "boss-x", Workers: []sidebar.Session{{Name: Boss, Agent: "Claude", State: agent.Working, Doing: "x"}}})
-	if got := l.Items[0]; got.Column != sidebar.ColumnTodo || got.Assignee.Kind != sidebar.AssigneeBoss || got.Status != StatusIdle || got.Now != "" {
-		t.Errorf("on boss beside a worker named boss: %s %+v %s now %q; want todo, the boss's, idle, no now", got.Column, got.Assignee, got.Status, got.Now)
+	if got := l.Items[0]; got.Column != sidebar.ColumnTodo || got.Assignee.Kind != sidebar.AssigneeBoss || got.Status != StatusParked || got.Now != "" {
+		t.Errorf("on boss beside a worker named boss: %s %+v %s now %q; want todo, the boss's, parked, no now", got.Column, got.Assignee, got.Status, got.Now)
 	}
 }

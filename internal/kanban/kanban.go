@@ -825,7 +825,7 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	lines = append(lines, ansi.Truncate(strings.Join(foot, sidebar.Muted+" · "+reset), cw, "…"))
 	doing := ""
 	if mk.line != "" {
-		doing = sidebar.Gold + ansi.Truncate("▸ "+strings.Join(strings.Fields(mk.line), " "), cw, "…") + reset
+		doing = mk.lineColour + ansi.Truncate("▸ "+strings.Join(strings.Fields(mk.line), " "), cw, "…") + reset
 	}
 	lines = append(lines, doing)
 	if sel {

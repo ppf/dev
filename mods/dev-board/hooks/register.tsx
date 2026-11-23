@@ -45,7 +45,7 @@ const GROUP_OF: Record<Status, (typeof GROUPS)[number]> = {
   stopped: 'Idle',
 }
 // A to do item's statuses as dev words them (`status` in `dev todo --json`), in todo.Statuses' order, each in its color; an unknown one shows muted, after them
-export const STATUSES = ['decide', 'yours', 'starting', 'working', 'blocked', 'waiting', 'idle', 'gone', 'check', 'boss closed'] as const
+export const STATUSES = ['decide', 'yours', 'starting', 'working', 'blocked', 'asks', 'waiting', 'idle', 'parked', 'gone', 'check', 'boss closed'] as const
 const STATUS_COLORS: Record<string, string | undefined> = {
   decide: TONE.danger,
   yours: undefined,

@@ -9,17 +9,30 @@ const (
 	StatusYours      = "yours"       // on no one: the user's own
 	StatusStarting   = "starting"    // the user's own, asked to start (dev todo start) and not yet on a worker
 	StatusWorking    = "working"     // on a worker that works
-	StatusBlocked    = "blocked"     // on a worker that waits on the user: a dialog, a turn ended on a question, or failed
+	StatusBlocked    = "blocked"     // on a worker that waits on the user: a dialog, or a failed turn
+	StatusAsks       = "asks"        // on a worker whose turn ended on a question as text: its boss answers (StatusWord)
 	StatusWaiting    = "waiting"     // on a person, or on a worker in a planned wait or a rate-limit resume
 	StatusIdle       = "idle"        // on a worker that rests, or a session it started with no agent
+	StatusParked     = "parked"      // the boss's own (--on boss) that no one has taken up: no doing line
 	StatusGone       = "gone"        // on a worker session no longer listed
 	StatusCheck      = "check"       // its linked PR moved (merged, closed, approved, …): see its check
 	StatusBossClosed = "boss closed" // its boss session is gone
 )
 
 // Statuses is the order boards list items by status within a group (Groups).
-var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusWorking, StatusBlocked, StatusWaiting, StatusIdle, StatusGone,
-	StatusCheck, StatusBossClosed}
+var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusWorking, StatusBlocked, StatusAsks, StatusWaiting, StatusIdle,
+	StatusParked, StatusGone, StatusCheck, StatusBossClosed}
+
+// StatusWord is how the boards say status: asks as "asks its boss", the others as they are.
+func StatusWord(status string) string {
+	if status == StatusAsks {
+		return "asks its boss"
+	}
+	return status
+}
+
+// ParkedLine is what a parked item says where its now line goes, its boss named.
+func ParkedLine(boss string) string { return boss + " has not taken it up" }
 
 // StatusColours are the boards' colours of each status word, the cards' section colours: working gold, waiting
 // green, idle muted.
@@ -29,8 +42,10 @@ var StatusColours = map[string]string{
 	StatusStarting:   Gold,
 	StatusWorking:    Gold,
 	StatusBlocked:    Red,
+	StatusAsks:       Gold,
 	StatusWaiting:    Green,
 	StatusIdle:       Muted,
+	StatusParked:     Muted,
 	StatusGone:       Red,
 	StatusCheck:      Gold,
 	StatusBossClosed: Muted,
@@ -48,7 +63,7 @@ var Groups = []StatusGroup{
 	{"To decide", []string{StatusDecide}},
 	{"Yours", []string{StatusYours}},
 	{"Starting", []string{StatusStarting}},
-	{"In progress", []string{StatusWorking, StatusBlocked, StatusIdle, StatusGone}},
+	{"In progress", []string{StatusWorking, StatusBlocked, StatusAsks, StatusIdle, StatusParked, StatusGone}},
 	{"Waiting on others", []string{StatusWaiting}},
 	{"Check", []string{StatusCheck}},
 	{"Boss closed", []string{StatusBossClosed}},
