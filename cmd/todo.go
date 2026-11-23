@@ -268,19 +268,29 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 
 func newTodoAskCmd(boss *string) *cobra.Command {
 	var it todo.Item
+	var replaces int
 	cmd := &cobra.Command{
-		Use:   "ask <question>",
+		Use:   "ask [<question>]",
 		Short: "Put a decision on the list for the user, with the options to pick from; prints its number",
 		Long: `Put a decision on the list for the user, with its options (the recommended one marked "(Recommended)"),
 and go on: the boss doesn't wait for it. The question is at most 100 characters, its findings go in --context lines;
 an option is "<label> | <detail>", its label at most 30 characters. The user answers with dev todo answer (a pick or their own words), which
-ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
-		Args: cobra.ExactArgs(1),
+ticks it and sends the boss "you answered #<n> \"<question>\": <answer>". --replaces <n> corrects open ask n in place,
+keeping its number: a pick the user made before it still answers it while the question and the option picked stay.`,
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if it.Text = todo.Clean(args[0]); it.Text == "" {
-				return errors.New("empty question")
+			replace := cmd.Flags().Changed("replaces")
+			switch {
+			case len(args) == 1:
+				if it.Text = todo.Clean(args[0]); it.Text == "" {
+					return errors.New("empty question")
+				}
+			case !replace:
+				return errors.New("no question: only --replaces keeps the ask's question")
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet:
+				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --link or --quiet")
 			}
-			if len(it.Options) == 0 {
+			if len(it.Options) == 0 && !replace {
 				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
 			}
 			if len(it.Options) > todo.MaxOptions {
@@ -302,11 +312,32 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 				return err
 			}
 			it.Context = context
+			now := time.Now()
+			// Only once all is checked: a desktop boss's first call takes over an earlier list
+			if replace {
+				if err := tryAdoptable(*boss, func(t todo.Store) error {
+					_, err := t.ReplaceAsk(replaces, it, now)
+					return err
+				}); err != nil {
+					return err
+				}
+			}
 			s, err := todoStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			now := time.Now()
+			if replace {
+				renamed, err := s.ReplaceAsk(replaces, it, now)
+				if err != nil {
+					return err
+				}
+				// Only a new question is news to the boss above: it reads the rest from the list
+				if renamed {
+					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
+				}
+				baseline(s, cmd.ErrOrStderr())
+				return printCount(cmd.OutOrStdout(), s, "replaced "+strconv.Itoa(replaces)+" · ", now)
+			}
 			id, err := s.Add(it, now)
 			if err != nil {
 				return err
@@ -318,6 +349,7 @@ ticks it and sends the boss "you answered #<n> \"<question>\": <answer>".`,
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "correct open ask n in place, keeping its number and the question, options, --context, --link not given (and --quiet once set)")
 	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9: "<label> | <detail>", the label at most 30 characters (what an answer names), the detail its cost or effect; the recommended one ends with "(Recommended)"`)
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the question, in order: findings, then paths")
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")

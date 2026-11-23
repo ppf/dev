@@ -524,11 +524,22 @@ func TestTodoAsk(t *testing.T) {
 	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 2 || l.Items[0].Options != nil || strings.Join(l.Items[1].Options, "|") != "Merge (Recommended)|Wait" {
 		t.Errorf("json = %+v, %v", l, err)
 	}
+	// --replaces corrects it in place, keeping its number and what it doesn't give
+	if got := run(t, "", "todo", "ask", "--replaces", "2", "--option", "Merge | after CI (Recommended)", "--context", "CI running"); got != "replaced 2 · to do 2\n" {
+		t.Errorf("ask --replaces = %q", got)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\ta\n2\t☐\tMerge #148?\thttps://github.com/o/r/pull/148\toptions: Merge | after CI (Recommended)\n    - CI running\n" {
+		t.Errorf("rows after --replaces = %q", got)
+	}
 	for _, tt := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"todo", "ask", "Merge?"}, "no --option"},
+		{[]string{"todo", "ask"}, "no question: only --replaces keeps"},
+		{[]string{"todo", "ask", "--replaces", "2"}, "nothing to correct"},
+		{[]string{"todo", "ask", "--replaces", "1", "--context", "x"}, "item 1 is no question"},
+		{[]string{"todo", "ask", "--replaces", "2", "--option", "Merge", "--option", "merge"}, `option 2 repeats "merge"`},
 		{[]string{"todo", "ask", " ", "--option", "a"}, "empty question"},
 		{[]string{"todo", "ask", "Merge?", "--option", "a", "--option", " (Recommended)"}, "option 2 is empty"},
 		{[]string{"todo", "ask", "Merge?", "--option", "Merge", "--option", "merge (Recommended)"}, `option 2 repeats "merge"`},

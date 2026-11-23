@@ -1110,3 +1110,126 @@ func TestQuiet(t *testing.T) {
 		t.Errorf("quiet = %v, %v; want true, false", l.Items[0].Quiet, l.Items[1].Quiet)
 	}
 }
+
+// ReplaceAsk corrects an open ask in place: same number, its question kept, so a pick made before it still answers it
+// with an option kept, never one it dropped or changed; refused for an item that is no ask, ticked or answered.
+func TestReplaceAsk(t *testing.T) {
+	s := store(t)
+	asked := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Merge #148?", Options: []string{"Merge | now (Recommended)", "Wait | a day", "Drop"}, Context: []string{"wrong"}}, asked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := asked.Add(time.Minute)
+	if _, err := s.ReplaceAsk(id, Item{Options: []string{"Merge | now (Recommended)", "Wait | a week"}, Context: []string{"CI green"}, Link: "https://x/148"}, fixed); err != nil {
+		t.Fatal(err)
+	}
+	l, err := s.Read(fixed)
+	if err != nil || len(l.Items) != 1 {
+		t.Fatalf("Read = %+v, %v", l, err)
+	}
+	if it := l.Items[0]; it.ID != id || it.Text != "Merge #148?" || strings.Join(it.Options, "|") != "Merge | now (Recommended)|Wait | a week" ||
+		strings.Join(it.Context, "|") != "CI green" || it.Link != "https://x/148" {
+		t.Errorf("replaced = %+v", it)
+	}
+	// The pick came between the two: the user saw the question
+	before := asked.Unix() + 30
+	for _, tt := range []struct{ arg, want string }{
+		{"Drop", `option "Drop" was changed or removed since`},
+		{"Wait | a day", `option "Wait" was changed or removed since`},
+	} {
+		if _, err := s.AnswerPick(id, "Merge #148?", tt.arg, tt.arg, ViaManager, before, fixed); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("pick %q: %v, want %q", tt.arg, err, tt.want)
+		}
+	}
+	if it, err := s.AnswerPick(id, "Merge #148?", "Merge", "Merge", ViaManager, before, fixed); err != nil || it.Answer != "Merge" {
+		t.Errorf("a kept option: %+v, %v", it, err)
+	}
+	// The same pick relayed again after the user answered it elsewhere is the same answer
+	var already Answered
+	if _, err := s.AnswerPick(id, "Merge #148?", "Merge", "Merge", ViaManager, before, fixed); !errors.As(err, &already) || !already.Same {
+		t.Errorf("relayed again: %v, want the same answer", err)
+	}
+	for _, tt := range []struct {
+		id   int
+		want string
+	}{
+		{id, "is answered or ticked"},
+		{9, "no open item 9"},
+	} {
+		if _, err := s.ReplaceAsk(tt.id, Item{Context: []string{"x"}}, fixed); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("ReplaceAsk(%d): %v, want %q", tt.id, err, tt.want)
+		}
+	}
+	// add --replaces keeps no pick from before it
+	other, _ := s.Add(Item{Text: "Tag?", Options: []string{"Tag"}}, asked)
+	if err := s.Replace(other, Item{Link: "https://x/1"}, fixed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(other, "Tag?", "Tag", "Tag", ViaManager, before, fixed); err == nil || !strings.Contains(err.Error(), "newer than the user's latest prompt") {
+		t.Errorf("a pick from before add --replaces: %v, want refused", err)
+	}
+	plain, _ := s.Add(Item{Text: "Ship"}, fixed)
+	if _, err := s.ReplaceAsk(plain, Item{Context: []string{"x"}}, fixed); err == nil || !strings.Contains(err.Error(), "is no question") {
+		t.Errorf("ReplaceAsk(plain): %v, want refused", err)
+	}
+	// A new question starts afresh: a pick from before it no longer counts
+	q, _ := s.Add(Item{Text: "Deploy?", Options: []string{"Yes", "No"}}, asked)
+	if _, err := s.ReplaceAsk(q, Item{Text: "Deploy today?", Options: []string{"Yes", "No", "Later"}}, fixed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(q, "Deploy?", "Yes", "Yes", ViaManager, before, fixed); err == nil || !strings.Contains(err.Error(), `is "Deploy today?" now`) {
+		t.Errorf("a changed question: %v, want refused", err)
+	}
+	if _, err := s.ReplaceAsk(q, Item{Options: []string{"Yes", strings.Repeat("x", 31)}}, fixed); err == nil || !strings.Contains(err.Error(), "at most 30") {
+		t.Errorf("a long label: %v, want refused", err)
+	}
+}
+
+// Corrections add up: the first ask's time and every option dropped since stay, an option given back can be picked
+// again, and a new question drops both.
+func TestReplaceAskTwice(t *testing.T) {
+	s := store(t)
+	asked := time.Unix(1700000000, 0)
+	id, err := s.Add(Item{Text: "Merge?", Options: []string{"Merge", "Wait", "Drop"}}, asked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := asked.Unix() + 30
+	for i, opts := range [][]string{{"Merge", "Wait"}, {"Merge", "Wait"}, {"Merge"}, {"Merge", "Wait"}} {
+		if _, err := s.ReplaceAsk(id, Item{Options: opts}, asked.Add(time.Duration(i+1)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := asked.Add(10 * time.Minute)
+	if _, err := s.AnswerPick(id, "Merge?", "Drop", "Drop", ViaManager, before, now); err == nil || !strings.Contains(err.Error(), `option "Drop" was changed or removed`) {
+		t.Errorf("an option dropped two replaces ago: %v, want refused", err)
+	}
+	if _, err := s.AnswerPick(id, "Merge?", "Wait", "Merge", ViaManager, before, now); err == nil || !strings.Contains(err.Error(), `the user picked "Merge"`) {
+		t.Errorf("arg other than the pick: %v, want refused", err)
+	}
+	if it, err := s.AnswerPick(id, "Merge?", "Wait", "Wait", ViaManager, before, now); err != nil || it.Answer != "Wait" {
+		t.Errorf("an option given back: %+v, %v", it, err)
+	}
+	q, _ := s.Add(Item{Text: "Deploy?", Options: []string{"Yes", "No"}}, asked)
+	if _, err := s.ReplaceAsk(q, Item{Text: "Deploy now?", Options: []string{"Yes"}}, asked.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(q, "Deploy now?", "Yes", "Yes", ViaManager, before, now); err == nil || !strings.Contains(err.Error(), "newer than the user's latest prompt") {
+		t.Errorf("a new question picked before it: %v, want refused", err)
+	}
+	if it, err := s.AnswerPick(q, "Deploy now?", "No", "", "", 0, now); err != nil || it.Answer != "No" {
+		t.Errorf("a new question keeps no dropped options: %+v, %v", it, err)
+	}
+	// A label alone names the option it still has; the option as stored before its detail changed is refused
+	d, _ := s.Add(Item{Text: "Cache?", Options: []string{"Keep | free", "Drop"}}, asked)
+	if _, err := s.ReplaceAsk(d, Item{Options: []string{"Keep | 2 GB", "Drop"}}, asked.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AnswerPick(d, "Cache?", "Keep | free", "", "", 0, now); err == nil || !strings.Contains(err.Error(), `option "Keep" was changed or removed`) {
+		t.Errorf("the option as stored before: %v, want refused", err)
+	}
+	if it, err := s.AnswerPick(d, "Cache?", "Keep", "Keep", ViaManager, before, now); err != nil || it.Answer != "Keep" {
+		t.Errorf("a label picked before its detail changed: %+v, %v", it, err)
+	}
+}

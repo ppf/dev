@@ -74,6 +74,8 @@ type Item struct {
 	Quiet   bool     `json:"quiet,omitempty"`   // a test item (--quiet): counted nowhere, the boss above not told
 	Doing   *Doing   `json:"doing,omitempty"`   // someone works on it now: the user on their own, the boss on its own
 	PartOf  int      `json:"part_of,omitempty"` // the id of its other half, a task split between two assignees
+	Asked   int64    `json:"asked,omitempty"`   // an ask replaced with its question kept: when that question was put
+	Dropped []string `json:"dropped,omitempty"` // options its replaces removed or changed: a pick of one is refused (droppedPick)
 }
 
 // Doing is what an item's doer said it does now, and since when, unix seconds.
@@ -659,12 +661,34 @@ func sameSession(a, b *Session) bool {
 // without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a new PartOf
 // checkPartOf refuses (one restated is kept as it is).
 func (s Store) Replace(id int, it Item, now time.Time) error {
+	return s.replace(id, it, false, new(bool), now)
+}
+
+// ReplaceAsk is Replace for open ask id, refusing a non-ask or a label over MaxLabel; with the question kept, an
+// earlier pick still answers it (Asked, Dropped). renamed reports a new question.
+func (s Store) ReplaceAsk(id int, it Item, now time.Time) (renamed bool, err error) {
+	err = s.replace(id, it, true, &renamed, now)
+	return renamed, err
+}
+
+func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) error {
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
 		if i < 0 {
+			if ask && slices.ContainsFunc(f.Items, func(old Item) bool { return old.ID == id }) {
+				return fmt.Errorf("item %d is answered or ticked: ask anew", id)
+			}
 			return fmt.Errorf("no open item %d", id)
 		}
 		old := f.Items[i]
+		if ask {
+			if len(old.Options) == 0 {
+				return fmt.Errorf("item %d is no question (dev todo ask): replace it with dev todo add --replaces", id)
+			}
+			if err := checkLabels(it.Options); err != nil {
+				return err
+			}
+		}
 		// A new Added even within its second: its checks start afresh
 		it.ID, it.Done, it.Added = id, 0, max(now.Unix(), old.Added+1)
 		switch it.On {
@@ -703,7 +727,18 @@ func (s Store) Replace(id int, it Item, now time.Time) error {
 		if err := it.checkDoneOn(); err != nil {
 			return err
 		}
+		it.Asked, it.Dropped = 0, nil
+		if ask && it.Text == old.Text {
+			// The user may have seen the question already: a late pick of an option kept still answers it
+			it.Asked = cmp.Or(old.Asked, old.Added)
+			for _, o := range append(old.Dropped, old.Options...) {
+				if !slices.ContainsFunc(it.Options, sameChoice(o)) && !slices.ContainsFunc(it.Dropped, sameChoice(o)) {
+					it.Dropped = append(it.Dropped, o)
+				}
+			}
+		}
 		f.Items[i] = it
+		*renamed = it.Text != old.Text
 		if it.Text == old.Text && it.Link == old.Link && it.On == old.On && sameSession(it.Session, old.Session) {
 			return s.keepTold(old, it)
 		}
@@ -939,7 +974,8 @@ func (a Answered) Error() string {
 
 // Answer ticks the user's own open ask id with what arg answers it (Pick), and returns the item as answered. An item
 // that isn't an ask, is on someone else or isn't open is an error; so is one whose text isn't question ("" skips the check),
-// as item numbers restart once a list empties. A before other than 0 also refuses an item not added before it (unix seconds).
+// as item numbers restart once a list empties. A before other than 0 also refuses an item not asked (Asked, else
+// Added) before it (unix seconds).
 // One answered already is an Answered error: still on the list, or with question, among its finished items.
 func (s Store) Answer(id int, question, arg string, before int64, now time.Time) (Item, error) {
 	return s.AnswerPick(id, question, arg, "", "", before, now)
@@ -983,8 +1019,13 @@ func (s Store) AnswerPick(id int, question, arg, picked, via string, before int6
 			return fmt.Errorf("item %d is no question (dev todo ask): tick it with dev todo done", id)
 		case before != 0 && p.Added == 0:
 			return fmt.Errorf("item %d has no time added (an older dev's): the user answers it", id)
-		case before != 0 && p.Added >= before:
+		case before != 0 && cmp.Or(p.Asked, p.Added) >= before:
 			return fmt.Errorf("item %d is newer than the user's latest prompt: the user hasn't seen it", id)
+		}
+		for _, a := range []string{arg, picked} {
+			if err := p.droppedPick(a); err != nil {
+				return err
+			}
 		}
 		answer, err := Pick(p.Options, arg)
 		if err != nil {
@@ -1011,6 +1052,34 @@ func (s Store) AnswerPick(id int, question, arg, picked, via string, before int6
 	return it, err
 }
 
+// sameChoice matches an option with o's label and detail.
+func sameChoice(o string) func(string) bool {
+	c := Split(o)
+	return func(x string) bool {
+		d := Split(x)
+		return strings.EqualFold(c.Label, d.Label) && strings.EqualFold(c.Detail, d.Detail)
+	}
+}
+
+// droppedPick refuses arg naming an option a replace dropped or changed (Dropped); a bare label names the kept one.
+func (it Item) droppedPick(arg string) error {
+	if arg == "" {
+		return nil
+	}
+	want := Split(Clean(arg))
+	names := func(o string) bool {
+		c := Split(o)
+		return strings.EqualFold(c.Label, want.Label) && (want.Detail == "" || strings.EqualFold(c.Detail, want.Detail))
+	}
+	if slices.ContainsFunc(it.Options, names) {
+		return nil
+	}
+	if j := slices.IndexFunc(it.Dropped, names); j >= 0 {
+		return fmt.Errorf("item %d's option %q was changed or removed since: look at the list again", it.ID, Split(it.Dropped[j]).Label)
+	}
+	return nil
+}
+
 // answeredItem is the newest finished item id reading question when it is an answered ask, nil for none, another or
 // with no question (numbers restart); its caller holds the list's lock.
 func (s Store) answeredItem(f *file, id int, question string, now time.Time) (*Item, error) {
@@ -1033,7 +1102,8 @@ func (s Store) answeredItem(f *file, id int, question string, now time.Time) (*I
 func answeredAlready(it Item, arg string, before int64) error {
 	a := Answered{Item: it, arg: arg}
 	if answer, err := Pick(it.Options, arg); err == nil {
-		a.Same, a.arg = answer == it.Answer && (before == 0 || it.Added != 0 && it.Added < before), answer
+		asked := cmp.Or(it.Asked, it.Added)
+		a.Same, a.arg = answer == it.Answer && (before == 0 || asked != 0 && asked < before), answer
 	}
 	return a
 }

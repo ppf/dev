@@ -60,7 +60,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`For a feature request (not a fix), write a five-line contract file (goal, constraints, deliverable, done when, first ` +
 	`visible step with a wall-clock guess, never human-day sizes) and put it to the user as a dev todo ask, the file as the ` +
 	`last --context line, before starting its workers; research or a mockup for it may come first. A later remark on a ` +
-	`feature whose contract is picked updates the file: tick the old ask and ask anew, showing the scope change; ` +
+	`feature whose contract is picked updates the file: while its ask is open, correct it with dev todo ask --replaces <n> ` +
+	`(same number, never a tick and a new ask; once answered, ask anew), showing the scope change; ` +
 	`prompt the running worker with it only after the pick, as one change. When a worker's plan grows past its contract ` +
 	`(more slices than the first step, or more than one PR), stop it after the first step and ask before the rest. ` +
 	`Pass --model and --effort on every dev agent start of a Claude worker, chosen by the table in the dev-agents skill ` +
