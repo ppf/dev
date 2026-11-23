@@ -871,7 +871,7 @@ func answerOf(options []string, o string) string {
 
 // Where the user answered an ask (Item.Via), when not in a shell, the sidebar or a board.
 const (
-	ViaPage    = "the phone page"
+	ViaPage    = "page"
 	ViaManager = "manager"
 )
 
@@ -886,11 +886,11 @@ func (a Answered) Error() string {
 	where := "in the sidebar, a board or a shell"
 	switch a.Item.Via {
 	case ViaPage:
-		where = "on " + ViaPage
+		where = "on the phone page"
 	case ViaManager:
-		where = "via " + ViaManager
+		where = "via manager"
 	}
-	msg := fmt.Sprintf("item %d is answered already: the user picked %q %s", a.Item.ID, a.Item.Answer, where)
+	msg := fmt.Sprintf("item %d is answered already: the user answered %q %s", a.Item.ID, a.Item.Answer, where)
 	if !a.Same {
 		msg += fmt.Sprintf(", not %q", a.arg)
 	}
@@ -908,12 +908,17 @@ func (s Store) Answer(id int, question, arg string, before int64, now time.Time)
 // AnswerPick is Answer refusing an answer other than picked, the user's pick for it, when given; via is where (Item.Via).
 func (s Store) AnswerPick(id int, question, arg, picked, via string, before int64, now time.Time) (Item, error) {
 	var it Item
+	var unread error
 	err := s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && (it.Done == 0 || it.Answer != "") })
 		if i < 0 {
 			was, err := s.answeredItem(f, id, question, now)
-			if err != nil || was == nil {
-				return errors.Join(fmt.Errorf("no open item %d", id), err)
+			switch {
+			case err != nil:
+				unread = err
+				return err
+			case was == nil:
+				return fmt.Errorf("no open item %d", id)
 			}
 			return answeredAlready(*was, arg)
 		}
@@ -950,6 +955,10 @@ func (s Store) AnswerPick(id int, question, arg, picked, via string, before int6
 		it = *p
 		return nil
 	}))
+	if unread != nil {
+		// A failed read of the finished items is no refusal
+		return it, unread
+	}
 	return it, err
 }
 
@@ -974,7 +983,7 @@ func (s Store) answeredItem(f *file, id int, question string, now time.Time) (*I
 func answeredAlready(it Item, arg string) error {
 	a := Answered{Item: it, arg: arg}
 	if answer, err := Pick(it.Options, arg); err == nil {
-		a.Same, a.arg = answer == it.Answer, answer
+		a.Same, a.arg = strings.EqualFold(answer, it.Answer), answer
 	}
 	return a
 }

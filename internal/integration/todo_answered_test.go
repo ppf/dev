@@ -107,7 +107,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 	time.Sleep(5500 * time.Millisecond)
 	pick("boss-a #2: Filter row?", "B: label + filter row")
 	out, stderr, err := relay("2", "B: label + filter row", "Filter row?")
-	if want := `#2 not sent to boss-a: item 2 is answered already: the user picked "B: label + filter row" on the phone page` + "\n"; err != nil || out != want {
+	if want := `#2 not sent to boss-a: item 2 is answered already: the user answered "B: label + filter row" on the phone page` + "\n"; err != nil || out != want {
 		t.Errorf("❌ late relay of the same answer: %q %v %s, want %q", out, err, stderr, want)
 	}
 	if pending, err := b.Box.Pending(); err != nil || pending {
@@ -128,7 +128,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 	if got, want := take(), `- boss-a ask answered: #3 "Tag it?": Tag; drop its question: don't ask or relay it`; !strings.Contains(got, want) {
 		t.Errorf("❌ the manager's batch after the board's answer:\n%s\nwant %q", got, want)
 	}
-	if _, stderr, err := relay("3", "Skip", "Tag it?"); err == nil || !strings.Contains(stderr, `item 3 is answered already: the user picked "Tag" in the sidebar, a board or a shell, not "Skip"`) {
+	if _, stderr, err := relay("3", "Skip", "Tag it?"); err == nil || !strings.Contains(stderr, `item 3 is answered already: the user answered "Tag" in the sidebar, a board or a shell, not "Skip"`) {
 		t.Errorf("❌ late relay of another answer: %v %q", err, stderr)
 	}
 	// The manager's own relay tells no one above

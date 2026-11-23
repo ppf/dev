@@ -606,7 +606,7 @@ func TestAnswer(t *testing.T) {
 	if l := read(t, s, now); !l.Items[0].Done || l.Items[0].Answer != "Wait" {
 		t.Errorf("after answer: %+v", l.Items[0])
 	}
-	if _, err := s.Answer(id, "", "1", 0, now); err == nil || err.Error() != `item 1 is answered already: the user picked "Wait" in the sidebar, a board or a shell, not "Merge"` {
+	if _, err := s.Answer(id, "", "1", 0, now); err == nil || err.Error() != `item 1 is answered already: the user answered "Wait" in the sidebar, a board or a shell, not "Merge"` {
 		t.Errorf("second answer: %v, want answered already", err)
 	}
 	plain, _ := s.Add(Item{Text: "Answer Vince"}, now)
@@ -637,8 +637,8 @@ func TestAnswerAnsweredElsewhere(t *testing.T) {
 		same bool
 		want string
 	}{
-		{"2", true, `item 1 is answered already: the user picked "B: label + filter row" on the phone page`},
-		{"A: chips", false, `item 1 is answered already: the user picked "B: label + filter row" on the phone page, not "A: chips"`},
+		{"2", true, `item 1 is answered already: the user answered "B: label + filter row" on the phone page`},
+		{"A: chips", false, `item 1 is answered already: the user answered "B: label + filter row" on the phone page, not "A: chips"`},
 	} {
 		_, err := s.AnswerPick(id, "Filter row?", tt.arg, tt.arg, ViaManager, 0, later)
 		var a Answered

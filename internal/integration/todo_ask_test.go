@@ -83,7 +83,7 @@ func TestTodoAskAnswer(t *testing.T) {
 	})
 	out, _ = dev(boss, "todo")
 	check(t, "ticked with its answer", out, "1\t☑\tMerge #148?\tanswered: Merge\n")
-	if _, err := dev(user, "todo", "answer", "boss-a", "1", "Wait"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), `item 1 is answered already: the user picked "Merge" in the sidebar, a board or a shell, not "Wait"`) {
+	if _, err := dev(user, "todo", "answer", "boss-a", "1", "Wait"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), `item 1 is answered already: the user answered "Merge" in the sidebar, a board or a shell, not "Wait"`) {
 		t.Errorf("❌ second answer: %v, want answered already", err)
 	}
 

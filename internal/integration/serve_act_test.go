@@ -200,7 +200,7 @@ func TestServeAnswerDone(t *testing.T) {
 	ticked("--all --json after the page's answer", all(), "boss-a", 1, "Merge")
 	ticked("board after the page's answer", changed(etag), "boss-a", 1, "Merge")
 	if _, stderr, err := dev(user, "todo", "answer", "--question", "Merge #148?", "boss-a", "1", "Wait"); err == nil ||
-		!strings.Contains(stderr, `item 1 is answered already: the user picked "Merge" on the phone page, not "Wait"`) {
+		!strings.Contains(stderr, `item 1 is answered already: the user answered "Merge" on the phone page, not "Wait"`) {
 		t.Errorf("❌ second answer on the Mac: %v %s, want refused", err, stderr)
 	}
 	ticked("--all --json after the refused second answer", all(), "boss-a", 1, "Merge")
@@ -221,7 +221,7 @@ func TestServeAnswerDone(t *testing.T) {
 	must(user, "todo", "answer", "--question", "Release?", "boss-a", "2", "Now")
 	ticked("board after the Mac's answer", changed(etag), "boss-a", 2, "Now")
 	code, body = post("v1/answer", `{"boss":"boss-a","id":2,"question":"Release?","option":"Later"}`, true)
-	refused("second answer on the page", code, body, `item 2 is answered already: the user picked \"Now\" in the sidebar, a board or a shell, not \"Later\"`)
+	refused("second answer on the page", code, body, `item 2 is answered already: the user answered \"Now\" in the sidebar, a board or a shell, not \"Later\"`)
 	ticked("--all --json after the refused second answer", all(), "boss-a", 2, "Now")
 	_, etag, _ = board("")
 	must(user, "todo", "done", "--boss", "boss-a", "--text", "Update the docs", "4")

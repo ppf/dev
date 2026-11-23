@@ -34,6 +34,11 @@ func answerTick(c *tmux.Client, name string, id int, question, answer, via strin
 		}
 	}
 	it, err := s.AnswerPick(id, question, answer, picked, via, before, time.Now())
+	var already todo.Answered
+	if errors.As(err, &already) && already.Same {
+		// The pick is spent on the user's own answer, given elsewhere: nothing to undo
+		return it, b, pane, err
+	}
 	if err != nil {
 		return it, b, pane, errors.Join(err, undo())
 	}
