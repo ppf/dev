@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -13,8 +14,10 @@ import (
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/herd"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 func newHerdCmd() *cobra.Command {
@@ -151,9 +154,50 @@ func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, sta
 		if _, err := control.AwaitAgent(c, control.RealClock, session, timeout); err != nil {
 			return err
 		}
+		if err := askStarts(c, session, cmd.ErrOrStderr()); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev boss: %s not asked to start: %v; ask it in its session\n", session, err)
+		}
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), session)
 	return nil
+}
+
+// askStarts sends a new boss session the start note of each open item started via the manager while it was closed:
+// its SessionStart reminder takes no turn and nothing else prompts a detached boss. Starts it got itself are skipped:
+// it may already have a worker on them.
+func askStarts(c *tmux.Client, session string, warn io.Writer) error {
+	s, err := todo.ForPane(c, tmux.SessionTarget(session))
+	if err != nil {
+		return err
+	}
+	l, err := s.Read(time.Now())
+	if err != nil {
+		return err
+	}
+	var to inbox.Boss
+	var errs []error
+	for _, it := range l.Items {
+		if it.Done || it.Started == nil || it.Started.To != inbox.Manager {
+			continue
+		}
+		if to.Name == "" {
+			if to, err = inbox.Recipient(c, session); err != nil {
+				return err
+			}
+		}
+		sh, err := placed(c, s, session, it.ID, false, time.Now(), warn)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("#%d: %w", it.ID, err))
+			continue
+		}
+		switch queued, err := to.Send(c, control.RealClock, inbox.Started(session, sh, false)); {
+		case !queued:
+			errs = append(errs, fmt.Errorf("#%d: %w", it.ID, err))
+		case err != nil:
+			fmt.Fprintf(warn, "⚠ dev boss: #%d queued in %s's inbox, delivered when it next rests: %v\n", it.ID, session, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // openManager is bare dev boss: the manager attached, or without a terminal started detached when missing and
