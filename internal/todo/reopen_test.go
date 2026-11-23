@@ -169,7 +169,7 @@ func TestReopenNewNumberAndDroppedFields(t *testing.T) {
 	if _, err := s.Add(Item{Text: "on merge", Link: prURL, DoneOn: OnMerged, Until: t0.Unix() + 1}, t0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AnswerPick(1, "ask?", "Yes", "Yes", 0, t0); err != nil {
+	if _, err := s.AnswerPick(1, "ask?", "Yes", "Yes", "", 0, t0); err != nil {
 		t.Fatal(err)
 	}
 	// #2 ticks by itself at its --until; then the list empties and numbers restart

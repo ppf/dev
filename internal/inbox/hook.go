@@ -391,3 +391,14 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
 	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
 }
+
+// AnsweredUp tells the boss above, as WaitsOn, that the user answered an ask of the boss session pane is in, answer
+// being the note that boss got: an AskAnswered note, so the boss above drops its question for it.
+func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, answer Note) (queued bool, err error) {
+	b, w, ok, err := BossOf(c, pane)
+	if !ok || err != nil || w.Herd == "" {
+		return false, err
+	}
+	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
+	return b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(answer.Text), Key: key})
+}
