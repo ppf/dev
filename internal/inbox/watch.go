@@ -64,6 +64,7 @@ type paneRow struct {
 	WaitUntil   string `tmux:"@dev_wait_until"`
 	WaitReason  string `tmux:"@dev_wait_reason"`
 	WaitPrompts string `tmux:"@dev_wait_prompts"`
+	Note        string `tmux:"@dev_boss_note"` // OptNote
 }
 
 // teammates is the set of panes in rows that aren't their session's agent pane (agent.Detect, as dev agent
@@ -221,7 +222,12 @@ func (s *state) observe(now time.Time, live map[string]bool, sights []sight) []N
 				stuck("waiting on a decision for "+Span(held)+", unanswered", w.trusted+w.Since, w.managed && h.Handed == w.Since)
 			}
 		case resting(w.trusted, w.WaitingFor) && !w.waiting:
-			if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
+			kind, text, _ := strings.Cut(w.Note, ": ")
+			if h.Question == "" && kind == Asks && text != "" {
+				// Its question never reached this box (asked while the inbox was off, or before the boss reopened): now it does
+				queue(Note{Worker: w.Session, Kind: Asks, Text: text, Key: text, Outside: w.Outside != ""})
+				h.Question, h.AskedAt, h.Reminded = text, now.Unix(), 0
+			} else if asked := now.Sub(time.Unix(h.AskedAt, 0)); h.Question != "" && asked >= AskAgain<<h.Reminded {
 				// Past several (rounds missed while it worked or the previews were closed): one repeat
 				for asked >= AskAgain<<h.Reminded {
 					h.Reminded++

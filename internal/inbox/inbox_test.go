@@ -858,3 +858,22 @@ func TestRestoreKeepsNewerDoing(t *testing.T) {
 		t.Errorf("after restore: %+v, want the answer, then only the stop", got.Notes)
 	}
 }
+
+// A question its box never recorded (asked while the boss's inbox was off) is queued once the watcher sees it resting
+// with that asks note: the boss gets it, then it repeats only as any asked question does.
+func TestObserveUnsentQuestion(t *testing.T) {
+	o := newObserver(t)
+	idle := worker("idle", "", o.ago(time.Hour))
+	idle.Note = "asks: Red or blue?"
+	if got, _ := o.round(0, idle); got != "[dev boss inbox] 1 worker update(s):\n- w asks: Red or blue?" {
+		t.Errorf("unsent question = %q", got)
+	}
+	if got, _ := o.round(time.Minute, idle); got != "" {
+		t.Errorf("sent once: %q", got)
+	}
+	busy := worker("working", "", o.ago(time.Minute))
+	busy.Session, busy.Note = "w2", "asks: Old?"
+	if got, _ := o.round(0, busy); got != "" {
+		t.Errorf("a working worker's old note: %q", got)
+	}
+}
