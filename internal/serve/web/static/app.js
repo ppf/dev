@@ -832,7 +832,8 @@ function liveBlock(x) {
   const row = (k, ...v) => el('div', { class: 'lv-row' }, el('b', null, k), el('span', null, ...v));
   const note = it.note?.match(/^([^:]+): (.*)$/s);
   const check = it.check && it.check.kind !== 'boss closed' && el('span', { class: 'tag ' + checkTone(it.check.kind) }, it.check.kind);
-  return el('section', { class: 'live ' + cls, 'aria-label': boss ? 'Boss' : 'Session' },
+  // The state on data-st, not a class: an s-* class colours the block's text too
+  return el('section', { class: 'live', 'data-st': cls, 'aria-label': boss ? 'Boss' : 'Session' },
     el('div', { class: 'lv-top' }, avatar(who, kindOf(x), true, 'sm'), el('span', { class: 'lv-who' }, who), el('span', { class: 'st ' + cls }, word),
       since && el('span', { class: 'lv-since' }, since)),
     boss ? row('Now', it.doing.text || 'on it') : it.now && row('Now', it.now),

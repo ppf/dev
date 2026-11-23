@@ -503,7 +503,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
     link: 'https://github.com/o/r/pull/285', check: { kind: 'checks failing', pr: 285 }, details: 'Only the token expiry.' };
   s = await sheetOf([{ boss: 'boss-a', items: [fixing] }], "item('boss-a', 5)");
   const lv = cls(/^live\b/)(s)[0], lvText = textOf(lv || {});
-  check('In progress: the live block first, under the title: ' + lvText, !!lv && s.indexOf(lv) === 2 && s.indexOf(lv) < s.indexOf(cls(/^details$/)(s)[0]) && lv.className === 'live s-working');
+  check('In progress: the live block first, under the title, its state on data-st, not a text-colouring class: ' + lvText, !!lv && s.indexOf(lv) === 2 && s.indexOf(lv) < s.indexOf(cls(/^details$/)(s)[0]) && lv.className === 'live' && lv.attrs['data-st'] === 's-working');
   check('live block: state, how long, now, last note with its kind, PR and check', /dev-xworkingon it 42m/.test(lvText) && /Nowgo test/.test(lvText) && /Lastfinished: PR #285 open/.test(lvText)
     && /#285checks failing/.test(lvText) && walk(lv, c => c.tag === 'i')[0]?.children[0] === 'finished');
   check('In progress: Now left out of the facts, the block says it', !Object.keys(Object.fromEntries(walk(s.at(-1), n => n.tag === 'div').map(d => [textOf(d.children[0]), 1]))).includes('Now'));
@@ -515,7 +515,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('details: an indented line under a list item stays in it', steps.children.length === 1 && steps.children[0].children.length === 2 && textOf(steps.children[0].children[0]) === 'step one\nmore on step one');
   check('a check shown in the block is not a fact again', !/Check/.test(textOf(s.at(-1))));
   s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
-  check('a worker asking you: needs you', cls(/^live\b/)(s)[0]?.className === 'live s-decide' && /needs you/.test(textOf(cls(/^live\b/)(s)[0])));
+  check('a worker asking you: needs you', cls(/^live\b/)(s)[0]?.attrs['data-st'] === 's-decide' && /needs you/.test(textOf(cls(/^live\b/)(s)[0])));
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },
     doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) } }] }], "item('boss-a', 6)");
   const bossLv = textOf(cls(/^live\b/)(s)[0] || {});

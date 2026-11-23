@@ -288,7 +288,7 @@ textarea { min-height: 3.6em; resize: vertical; }
 .details > :first-child { color: var(--ink); }
 /* the live block: the session on the item, or what was done on a finished one; its edge the state's colour */
 .live { --lv: var(--meta); display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--edge); border-left: 4px solid var(--lv); border-radius: var(--r-card); background: var(--ground); padding: 10px 12px; font-size: 13.5px; color: var(--ink2); }
-.live.s-working { --lv: var(--s-done); } .live.s-waiting, .live.s-check { --lv: var(--s-wait); } .live.s-decide, .live.s-gone { --lv: var(--hot); }
+.live[data-st="s-working"] { --lv: var(--s-done); } .live[data-st="s-waiting"], .live[data-st="s-check"] { --lv: var(--s-wait); } .live[data-st="s-decide"], .live[data-st="s-gone"] { --lv: var(--hot); }
 .lv-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .lv-who { font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lv-since { margin-left: auto; font-size: 12.5px; color: var(--meta); }
