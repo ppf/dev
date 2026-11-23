@@ -93,7 +93,7 @@ set -- "" `+shellQuote(log)+`
 	ok("new boss", "boss-a\n", env, "boss", "a", "--background", "--no-serve", "--timeout", "30s")
 	boss := append(env, "TMUX_PANE="+coordinator(), "CLAUDECODE=1")
 	for i, text := range []string{"Ship it", "Read the plan", "Write the notes"} {
-		ok("add", fmt.Sprintf("added %d · to do %d\n", i+1, i+1), boss, "todo", "add", text)
+		ok("add", fmt.Sprintf("added %d · to do %d\n", i+1, i+1), boss, "todo", "add", text, "--details", "why")
 	}
 	// Started while open: the old boss got the note, the reopened one must not. Ahead of #3, so a stray note pastes first
 	ok("start while open", "#1 sent to boss-a\n", user, "todo", "start", "boss-a", "1", "--question", "Ship it")

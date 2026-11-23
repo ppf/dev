@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -427,7 +428,7 @@ func TestParseUntil(t *testing.T) {
 
 // Reminder lists the open items with their number, who they wait on and until when; "" with none open.
 func TestReminder(t *testing.T) {
-	l := List{Items: []Shown{{ID: 1, Text: "a"}, {ID: 2, Text: "b", Done: true}, {ID: 3, Text: "c", On: "Marek", Until: time.Date(2026, 11, 16, 10, 0, 0, 0, time.Local).Unix()}}}
+	l := List{Items: []Shown{{ID: 1, Text: "a", Details: "d"}, {ID: 2, Text: "b", Done: true}, {ID: 3, Text: "c", On: "Marek", Details: "d", Until: time.Date(2026, 11, 16, 10, 0, 0, 0, time.Local).Unix()}}}
 	want := "[dev todo] Your open to do list:\n1. a\n3. c (on Marek) (until 2026-11-16 10:00)\n" +
 		`Tick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> "<new text>".` + whoLine
 	if got := l.Reminder(nil, time.Now()); got != want {
@@ -442,7 +443,7 @@ func TestReminder(t *testing.T) {
 func TestStartReminder(t *testing.T) {
 	var l List
 	for i := 1; i <= startShown+3; i++ {
-		l.Items = append(l.Items, Shown{ID: i, Text: "t" + strconv.Itoa(i), Done: i == 1})
+		l.Items = append(l.Items, Shown{ID: i, Text: "t" + strconv.Itoa(i), Details: "d", Done: i == 1})
 	}
 	got := l.StartReminder(true, "2h ago", nil, time.Now())
 	if !strings.HasPrefix(got, "[dev todo] Your open to do list (kept from your last boss session, updated 2h ago):\n2. t2\n") ||
@@ -541,7 +542,7 @@ func TestMarkGone(t *testing.T) {
 	if got := []bool{l.Items[0].Gone, l.Items[1].Gone, l.Items[2].Gone, l.Items[3].Gone}; !slices.Equal(got, []bool{false, false, true, false}) {
 		t.Errorf("gone = %v, want only the open item on old", got)
 	}
-	if got := l.Reminder(nil, time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola)\n2. b (on live)\n") {
+	if got := l.Reminder(nil, time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola) (no details)\n2. b (on live)\n") {
 		t.Errorf("Reminder = %q", got)
 	}
 }
@@ -683,7 +684,7 @@ func TestAnswerAnsweredElsewhere(t *testing.T) {
 
 // The open list a boss gets names an ask's options, so a cleared boss knows it still waits on the user.
 func TestReminderAsk(t *testing.T) {
-	l := List{Items: []Shown{{ID: 2, Text: "Merge?", Options: []string{"Merge (Recommended)", "Wait"}}}}
+	l := List{Items: []Shown{{ID: 2, Text: "Merge?", Details: "d", Options: []string{"Merge (Recommended)", "Wait"}}}}
 	if got := l.lines(0, time.Now()); got != "\n2. Merge? (asked, options: Merge (Recommended) · Wait)" {
 		t.Errorf("lines = %q", got)
 	}
@@ -1231,5 +1232,44 @@ func TestReplaceAskTwice(t *testing.T) {
 	}
 	if it, err := s.AnswerPick(d, "Cache?", "Keep", "Keep", ViaManager, before, now); err != nil || it.Answer != "Keep" {
 		t.Errorf("a label picked before its detail changed: %+v, %v", it, err)
+	}
+}
+
+// The start list marks an open item without details that the user does or a person owes, never a worker's, the
+// boss's own, a gone worker's or a test item, and ends with how to add them only when one is marked.
+func TestReminderNoDetails(t *testing.T) {
+	sess := &Session{ID: "w", Name: "w"}
+	l := List{Items: []Shown{
+		{ID: 1, Text: "bare"},
+		{ID: 2, Text: "waits", On: "Ola"},
+		{ID: 3, Text: "documented", Details: "d"},
+		{ID: 4, Text: "worker's", On: "w", Session: sess},
+		{ID: 5, Text: "own", On: Boss},
+		{ID: 6, Text: "test", Quiet: true},
+		{ID: 7, Text: "gone", On: "w", Session: sess, Gone: true},
+		{ID: 8, Text: "done", Done: true},
+		{ID: 10, Text: "start asked", Started: &Started{}},
+		{ID: 9, Text: "pr", On: "Ola", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}},
+	}}
+	got := l.StartReminder(false, "now", nil, time.Now())
+	for _, want := range []string{"\n1. bare (no details)", "\n2. waits (on Ola) (no details)", "\n3. documented\n", "\n6. test\n", "\n9. pr (on Ola) ⚠ boss closed (no details)", "--details '<what it is and why"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("StartReminder lacks %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "(no details)"); n != 4 {
+		t.Errorf("%d marks, want 3 on items and 1 in the closing line:\n%s", n, got)
+	}
+	// A mark past the cut is not shown, so no closing line either
+	var long List
+	for i := 1; i <= startShown; i++ {
+		long.Items = append(long.Items, Shown{ID: i, Text: "x", Details: "d"})
+	}
+	long.Items = append(long.Items, Shown{ID: 99, Text: "hidden"})
+	if got := long.StartReminder(false, "now", nil, time.Now()); strings.Contains(got, "no details") {
+		t.Errorf("mark past the cut: %s", got)
+	}
+	if got := (List{Items: []Shown{{ID: 1, Text: "a", Details: "d"}}}).StartReminder(false, "now", nil, time.Now()); strings.Contains(got, "no details") {
+		t.Errorf("all documented: %s", got)
 	}
 }

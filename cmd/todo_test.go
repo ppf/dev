@@ -832,3 +832,54 @@ func TestTodoAddLongHint(t *testing.T) {
 		t.Errorf("items not added: %s", got)
 	}
 }
+
+// add and ask without --details warn on stderr and still add; a worker's item, --quiet, and a replace of an item that
+// has details stay quiet; an ask whose last --context is a file still warns.
+func TestTodoNoDetailsWarning(t *testing.T) {
+	todoEnv(t)
+	const warn = "no details: add them with --details"
+	for _, tt := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"add", []string{"add", "Mail Vince"}, true},
+		{"add waiting", []string{"add", "Reply from Ola", "--waiting-for", "Ola"}, true},
+		{"add --on me", []string{"add", "Mine", "--on", "me"}, true},
+		{"add with details", []string{"add", "Documented", "--details", "what and why"}, false},
+		{"add on worker", []string{"add", "W's", "--on", "w"}, false},
+		{"add on boss", []string{"add", "Own", "--on", "boss"}, false},
+		{"add quiet", []string{"add", "Test", "--quiet"}, false},
+		{"ask", []string{"ask", "Merge?", "--option", "a", "--option", "b"}, true},
+		{"ask with file context", []string{"ask", "Ship?", "--option", "a", "--option", "b", "--context", "/tmp/draft.md"}, true},
+		{"ask with details", []string{"ask", "Pick?", "--option", "a", "--option", "b", "--details", "why"}, false},
+		{"ask quiet", []string{"ask", "T?", "--option", "a", "--option", "b", "--quiet"}, false},
+	} {
+		if _, errOut, err := execute(t, "", append([]string{"todo"}, tt.args...)...); err != nil || strings.Contains(errOut, warn) != tt.want {
+			t.Errorf("%s: err %v, stderr %q, want warning %v", tt.name, err, errOut, tt.want)
+		}
+	}
+	if got := strings.Count(run(t, "", "todo", "--json"), `"text"`); got != 11 {
+		t.Errorf("%d items added, want 11", got)
+	}
+
+	todoEnv(t)
+	run(t, "", "todo", "add", "Documented", "--details", "what and why")
+	run(t, "", "todo", "add", "Bare")
+	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "1", "--on", "Marek"); err != nil || strings.Contains(errOut, warn) {
+		t.Errorf("replace of an item with details: err %v, stderr %q", err, errOut)
+	}
+	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "2", "--on", "Marek"); err != nil || !strings.Contains(errOut, warn) {
+		t.Errorf("replace of a bare item: err %v, stderr %q, want the warning", err, errOut)
+	}
+
+	todoEnv(t)
+	run(t, "", "todo", "ask", "Documented?", "--option", "a", "--option", "b", "--details", "why")
+	run(t, "", "todo", "ask", "Bare?", "--option", "a", "--option", "b")
+	if _, errOut, err := execute(t, "", "todo", "ask", "--replaces", "1", "--context", "x"); err != nil || strings.Contains(errOut, warn) {
+		t.Errorf("ask --replaces of an ask with details: err %v, stderr %q", err, errOut)
+	}
+	if _, errOut, err := execute(t, "", "todo", "ask", "--replaces", "2", "--context", "x"); err != nil || !strings.Contains(errOut, warn) {
+		t.Errorf("ask --replaces of a bare ask: err %v, stderr %q, want the warning", err, errOut)
+	}
+}
