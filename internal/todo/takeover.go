@@ -576,7 +576,7 @@ func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	}
 	for _, it := range src.Items {
 		old := it.ID
-		it.ID, it.PartOf = ids[it.ID], ids[it.PartOf]
+		it.ID, it.PartOf, it.For = ids[it.ID], ids[it.PartOf], ids[it.For]
 		dst.Items = append(dst.Items, it)
 		t.Items = append(t.Items, TakenItem{old, it})
 	}

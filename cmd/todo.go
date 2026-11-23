@@ -76,7 +76,7 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
@@ -295,7 +295,9 @@ func newTodoAskCmd(boss *string) *cobra.Command {
 and go on: the boss doesn't wait for it. The question is at most 100 characters, its findings go in --context lines;
 an option is "<label> | <detail>", its label at most 30 characters. The user answers with dev todo answer (a pick or their own words), which
 ticks it and sends the boss "you answered #<n> \"<question>\": <answer>". --replaces <n> corrects open ask n in place,
-keeping its number: a pick the user made before it still answers it while the question and the option picked stay.`,
+keeping its number: a pick the user made before it still answers it while the question and the option picked stay.
+--for <n> links it to open item n that waits on its answer: n's card and opened item show "waits on your answer to
+#<ask>" with its options, an answer there answering the ask; --replaces keeps the link.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			replace := cmd.Flags().Changed("replaces")
@@ -306,8 +308,14 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 			case !replace:
 				return errors.New("no question: only --replaces keeps the ask's question")
-			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details"):
-				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link or --quiet")
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && !cmd.Flags().Changed("for"):
+				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link, --for or --quiet")
+			}
+			if it.For < 0 {
+				return fmt.Errorf("--for %d: an item's number, or 0 to unlink", it.For)
+			}
+			if replace && cmd.Flags().Changed("for") && it.For == 0 {
+				it.For = todo.NoFor
 			}
 			if len(it.Options) == 0 && !replace {
 				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
@@ -336,8 +344,12 @@ keeping its number: a pick the user made before it still answers it while the qu
 			}
 			now := time.Now()
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
-			if replace {
+			if replace || it.For != 0 {
 				if err := tryAdoptable(*boss, func(t todo.Store) error {
+					if !replace {
+						_, err := t.Add(it, now)
+						return err
+					}
 					_, err := t.ReplaceAsk(replaces, it, now)
 					return err
 				}); err != nil {
@@ -379,6 +391,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
+	cmd.Flags().IntVar(&it.For, "for", 0, "open item n of this list that waits on this answer: its card and opened item show the ask's options (with --replaces, links it anew; 0 unlinks it)")
 	return cmd
 }
 

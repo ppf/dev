@@ -647,3 +647,44 @@ func TestFactsWaitingFor(t *testing.T) {
 		}
 	}
 }
+
+// An item that waits on an ask (WaitsOn) shows it and takes its options: 1-9 and own words answer the ask, by its
+// number and question, beside the item's own actions.
+func TestWaitsOnAsk(t *testing.T) {
+	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 6, Text: "Contract: a worker's question", On: todo.Boss, Status: sidebar.StatusParked, StatusOn: "boss-dev",
+		Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev", Running: true}, Parked: true},
+		WaitsOn:   &todo.WaitsOn{ID: 8, Text: "Start the worker for #6 now?", Options: []string{"Start now | a worker on #6 (Recommended)", "Later"}}}}
+	var r recorder
+	m := New(it, r.actions(), false)
+	v := ansi.Strip(m.View(Width, 40, now))
+	for _, want := range []string{"waits on your answer to #8", "Start the worker for #6 now?", "1  ★ Start now", "2    Later", "m    In your own words…", "▸ s    Start"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
+		}
+	}
+	if m := press(m, "1"); !m.Done || m.Result != "ok answer boss-dev Start the worker for #6 now? Start now | a worker on #6 (Recommended)" {
+		t.Errorf("1: %q", m.Result)
+	}
+	if m := press(New(it, r.actions(), false), "m", "n", "o", "enter"); m.Result != "ok answer boss-dev Start the worker for #6 now? no" {
+		t.Errorf("own words: %q", m.Result)
+	}
+	if v := ansi.Strip(m.View(Width, 40, now)); !strings.Contains(v, "1-2 answer · m own words · j/k ⏎ run · s start") {
+		t.Errorf("keys line:\n%s", v)
+	}
+	if m := press(New(it, r.actions(), false), "enter"); m.Result != "ok start boss-dev Contract: a worker's question" {
+		t.Errorf("⏎ unpicked runs the item's own first action, not the ask's first option: %q", m.Result)
+	}
+	if m := press(New(it, r.actions(), false), "s"); m.Result != "ok start boss-dev Contract: a worker's question" {
+		t.Errorf("s still starts the item: %q", m.Result)
+	}
+	// The user's own waiting item: what I'm on it took never goes out as the ask's answer
+	mine := it
+	mine.On, mine.Status, mine.Placement = "", sidebar.StatusYours, todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}
+	if m := press(New(mine, r.actions(), false), "i", "x", "esc", "m", "enter"); m.Done || m.msg != "Type an answer, or esc" {
+		t.Errorf("i's text answered the ask: done %v result %q msg %q", m.Done, m.Result, m.msg)
+	}
+	it.Closed = true
+	if v := ansi.Strip(New(it, r.actions(), false).View(Width, 40, now)); strings.Contains(v, "waits on your answer") {
+		t.Errorf("a closed boss's item offers its ask:\n%s", v)
+	}
+}

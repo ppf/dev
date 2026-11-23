@@ -67,6 +67,7 @@ type Model struct {
 	sel         int
 	typing      string // the key of the line whose field takes the keys (m own words, i I'm on it), "" for none
 	field       []rune // its text
+	fieldFor    string // the key the field was last typed for
 	busy        string // the action under way
 	msg         string // the last action's failure, or why a key does nothing
 	Done        bool
@@ -83,6 +84,10 @@ type doneMsg struct {
 func New(it Item, acts Actions, managerRuns bool) Model {
 	m := Model{it: it, acts: acts, managerRuns: managerRuns}
 	m.entries = m.list()
+	if _, _, options, ok := m.question(); ok && !m.ask() && len(m.entries) > len(options)+1 {
+		// The item's own first action: ⏎ never answers the ask it waits on unpicked
+		m.sel = len(options) + 1
+	}
 	return m
 }
 
@@ -92,6 +97,20 @@ func (m Model) ask() bool    { return !m.it.Done && m.own() && len(m.it.Options)
 func (m Model) worker() bool { return !m.it.Done && !m.own() && m.it.Session != nil }
 func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options) == 0 }
 func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
+
+// question is the ask the view answers: the item itself when it is the user's own ask, else the open ask it waits on
+// (todo.Shown.WaitsOn) unless its boss is closed; ok false for none.
+func (m Model) question() (id int, text string, options []string, ok bool) {
+	switch w := m.it.WaitsOn; {
+	case m.ask():
+		return m.it.ID, m.it.Text, m.it.Options, true
+	case w != nil && !m.it.Done && !m.it.Closed:
+		return w.ID, w.Text, w.Options, true
+	}
+	return 0, "", nil, false
+}
+
+func (m Model) answers() bool { _, _, _, ok := m.question(); return ok }
 
 // canStart is what todo.Start takes, as the web page offers it: a late start, else a To do card, no ask, whoever's it
 // is; on the manager's own list only the user's; a closed boss's only while the manager runs; never a desktop app
@@ -130,15 +149,17 @@ func (m Model) canReopen() bool {
 // list is what the view lists: an ask's options then own words; else its actions.
 func (m Model) list() []entry {
 	var out []entry
-	if m.ask() {
-		for i, o := range m.it.Options {
+	if _, _, options, ok := m.question(); ok {
+		for i, o := range options {
 			c := todo.Split(o)
 			out = append(out, entry{key: strconv.Itoa(i + 1), word: c.Label, detail: c.Detail, rec: c.Recommended})
 		}
 		if !m.it.Closed {
 			out = append(out, entry{key: "m", detail: "In your own words…"})
 		}
-		return out
+		if m.ask() {
+			return out
+		}
 	}
 	if m.canStart() {
 		out = append(out, entry{key: "s", word: "Start", detail: "ask " + m.startTo() + " to start it"})
@@ -256,18 +277,20 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 	}
 	it := m.it
 	switch {
-	case len(k) == 1 && k >= "1" && k <= "9" && m.ask() && !it.Closed:
+	case len(k) == 1 && k >= "1" && k <= "9" && m.answers() && !it.Closed:
+		id, text, options, _ := m.question()
 		n := int(k[0] - '1')
-		if n >= len(it.Options) {
-			m.msg = fmt.Sprintf("#%d has %d options", it.ID, len(it.Options))
+		if n >= len(options) {
+			m.msg = fmt.Sprintf("#%d has %d options", id, len(options))
 			return m, nil
 		}
-		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, it.Options[n]) })
-	case k == "m" && m.ask() && !it.Closed, k == "i" && m.canDoing():
-		if k == "i" {
-			// A fresh line each time; own words wait for the next m
+		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, id, text, options[n]) })
+	case k == "m" && m.answers() && !it.Closed, k == "i" && m.canDoing():
+		if k == "i" || m.fieldFor == "i" {
+			// A fresh line each time; own words wait for the next m, unless I'm on it took the field since
 			m.field = nil
 		}
+		m.fieldFor = k
 		m.typing = k
 		m.sel = slices.IndexFunc(m.entries, func(e entry) bool { return e.key == k })
 		return m, nil
@@ -322,7 +345,8 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 			m.msg = "Type an answer, or esc"
 			return m, nil
 		}
-		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, text) })
+		id, question, _, _ := m.question()
+		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, id, question, text) })
 	case tea.KeySpace:
 		m.field = append(m.field, ' ')
 	case tea.KeyRunes:
@@ -378,6 +402,10 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 		head = append(head, bold+l+reset)
 	}
 	head = append(head, m.block(in, now)...)
+	if id, q, _, ok := m.question(); ok && !m.ask() {
+		head = append(head, "", sidebar.Red+bold+"waits on your answer to #"+strconv.Itoa(id)+reset)
+		head = append(head, strings.Split(ansi.Wrap(q, in, ""), "\n")...)
+	}
 	details := detailLines(it.Details, in)
 	shown := len(details) // the details lines kept: the first a cut drops, their last ones first
 	var context []string
@@ -627,7 +655,7 @@ func (m Model) listLines(in int) []string {
 			mark = "▸ "
 		}
 		star := ""
-		if m.ask() {
+		if m.answers() {
 			star = "  "
 			if e.rec {
 				star = sidebar.Gold + "★ " + reset
@@ -739,6 +767,12 @@ func (m Model) keys() string {
 	case m.ask():
 		if !m.it.Closed {
 			ks = [][2]string{{"1-" + strconv.Itoa(min(9, len(m.it.Options))), "answer"}, {"j/k ⏎", "pick"}, {"m", "own words"}}
+		}
+	case m.answers():
+		_, _, options, _ := m.question()
+		ks = [][2]string{{"1-" + strconv.Itoa(min(9, len(options))), "answer"}, {"m", "own words"}, {"j/k ⏎", "run"}}
+		for _, e := range m.entries[len(options)+1:] {
+			ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
 		}
 	default:
 		ks = [][2]string{{"j/k ⏎", "run"}}

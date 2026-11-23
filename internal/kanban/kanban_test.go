@@ -317,6 +317,9 @@ func TestCardMarks(t *testing.T) {
 		{"parked", mk(base, func(s *todo.Shown) {
 			s.Status, s.On, s.Parked, s.Assignee = sidebar.StatusParked, todo.Boss, true, todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-x"}
 		}), []string{"▸ parked · boss-x has not taken it up"}, nil},
+		{"waits on an ask", mk(base, func(s *todo.Shown) {
+			s.WaitsOn, s.Doing = &todo.WaitsOn{ID: 8, Text: "Start now?", Options: []string{"Yes", "No"}}, &todo.Doing{Text: "asked"}
+		}), []string{"▸ waits on your answer to #8"}, []string{"asked"}},
 		{"gone", mk(base, func(s *todo.Shown) { s.Status, s.On = sidebar.StatusGone, "dev-x" }), []string{"worker dev-x gone"}, nil},
 		{"PR moved", mk(base, func(s *todo.Shown) {
 			s.Check = &sidebar.Check{PR: 18, Kind: sidebar.CheckMerged, Since: now.Add(-72 * time.Hour).Unix()}
@@ -341,10 +344,12 @@ func TestCardMarks(t *testing.T) {
 			}
 		}
 	}
-	// A closed boss's card says so, and a person it waits for is no one's to follow up
-	closed := mk(base, func(s *todo.Shown) { s.WaitingFor = "Carl" })
+	// A closed boss's card says so, and a person it waits for is no one's to follow up; an ask it waits on goes unsaid
+	closed := mk(base, func(s *todo.Shown) {
+		s.WaitingFor, s.WaitsOn = "Carl", &todo.WaitsOn{ID: 8, Text: "Q?", Options: []string{"a", "b"}}
+	})
 	closed.closed = true
-	if out := render(closed, 80); !strings.Contains(out, "boss closed") || !strings.Contains(out, "waiting for Carl · no one follows up") {
+	if out := render(closed, 80); !strings.Contains(out, "boss closed") || !strings.Contains(out, "waiting for Carl · no one follows up") || strings.Contains(out, "waits on your answer") {
 		t.Errorf("❌ closed boss's card:\n%s", out)
 	}
 	// An open item waiting on a person names who follows up; a closed boss's names no one, and a ticked one keeps its assignee

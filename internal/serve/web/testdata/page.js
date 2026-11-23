@@ -527,6 +527,33 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   const parkedCard = drawnCards()[0];
   check('a parked card: its own line where Now goes, Start kept', textOf(cls(/^now parked$/)([parkedCard])[0] || {}) === 'Parkedboss-a has not taken it up'
     && !cls(/^now$/)([parkedCard]).length && walk(parkedCard, c => c.tag === 'button' && c.children[0] === 'Start').length === 1);
+  // An item waiting on an ask (waits_on): its card's line and the ask's options; its sheet the ask's form, sent as the ask's answer
+  const theAsk = { id: 8, text: 'Start the worker for #7 now?', status: 'decide', column: 'todo', assignee: { kind: 'you' }, needs_you: true, for: 7,
+    options: ['Start now | a worker on #7 (Recommended)', 'Later'], added: Math.floor(Date.now() / 1000) - 60 };
+  const waiting = { id: 7, text: 'Contract: a question', status: 'parked', status_on: 'boss-a', on: 'boss', column: 'todo', parked: true,
+    assignee: { kind: 'boss', name: 'boss-a', running: true }, waits_on: { id: 8, text: theAsk.text, options: theAsk.options } };
+  s = await sheetOf([{ boss: 'boss-a', items: [theAsk, waiting] }], "item('boss-a', 7)");
+  const waitCard = drawnCards().find(c => walk(c, x => x.tag === 'a' && x.attrs.href === '#/item/boss-a/7').length);
+  check('a waiting card: its line names the ask, its options under it', textOf(cls(/^now waits$/)([waitCard])[0] || {}) === 'Nowwaits on your answer to #8'
+    && !cls(/^now parked$/)([waitCard]).length && walk(cls(/^quick$/)([waitCard])[0] || {}, c => c.tag === 'button').length === 2);
+  const form = cls(/^waits$/)(s)[0];
+  check('its sheet: the ask and its form, sent to the ask: ' + textOf(form || {}), /^#8 · Start the worker for #7 now\?/.test(textOf(form || {}))
+    && walk(form, c => c.tag === 'button' && c.children[0] === 'Send answer to #8').length === 1);
+  run("state.errors['boss-a/8'] = 'Refused: changed'");
+  check('the ask\'s refusal shows on the item\'s sheet', /Refused: changed/.test(textOf(cls(/^waits$/)(run("item('boss-a', 7)"))[0] || {})));
+  run("delete state.errors['boss-a/8']");
+  s = await sheetOf([{ boss: 'boss-a', closed: true, items: [theAsk, waiting] }], "item('boss-a', 7)");
+  check('a closed boss\'s item: no ask to answer on its sheet or card', !cls(/^waits$/)(s).length
+    && !drawnCards().some(c => cls(/^now waits$/)([c]).length));
+  s = await sheetOf([{ boss: 'boss-a', items: [theAsk, waiting] }], "item('boss-a', 7)");
+  walk(cls(/^quick$/)([drawnCards().find(c => walk(c, x => x.tag === 'a' && x.attrs.href === '#/item/boss-a/7').length)])[0], c => c.tag === 'button')[1].on.click();
+  check('a card option picks for the ask, opening the item', run("state.picks['boss-a/8']?.option") === 'Later' && ctx.location.hash === '#/item/boss-a/7');
+  posts.length = 0;
+  run("send(find('boss-a', 8).list, find('boss-a', 8).it)");
+  await settle();
+  check('sent from the item\'s sheet, it closes: ' + ctx.location.hash, ctx.location.hash === '#/');
+  check('sent as the ask\'s answer: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/answer' && JSON.parse(posts[0][1]).id === 8
+    && JSON.parse(posts[0][1]).option === 'Later' && JSON.parse(posts[0][1]).question === theAsk.text);
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },
     doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) } }] }], "item('boss-a', 6)");
   const bossLv = textOf(cls(/^live\b/)(s)[0] || {});

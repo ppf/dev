@@ -16,10 +16,10 @@
     "boss closed"
   ],
   "counts": {
-    "decide": 1,
+    "decide": 2,
     "yours": 1,
-    "needs_you": 1,
-    "mine": 2
+    "needs_you": 2,
+    "mine": 3
   },
   "manager_runs": true,
   "lists": [
@@ -69,6 +69,33 @@
           "assignee": {
             "kind": "you"
           }
+        },
+        {
+          "id": 7,
+          "text": "Start the phone's Done now?",
+          "done": false,
+          "options": [
+            "Start now | a worker on #6 (Recommended)",
+            "Later"
+          ],
+          "choices": [
+            {
+              "label": "Start now",
+              "detail": "a worker on #6",
+              "recommended": true
+            },
+            {
+              "label": "Later"
+            }
+          ],
+          "added": 1700000000,
+          "status": "decide",
+          "for": 6,
+          "column": "todo",
+          "assignee": {
+            "kind": "you"
+          },
+          "needs_you": true
         },
         {
           "id": 3,
@@ -128,6 +155,24 @@
           "added": 1700000000,
           "status": "parked",
           "status_on": "boss-a",
+          "waits_on": {
+            "id": 7,
+            "text": "Start the phone's Done now?",
+            "options": [
+              "Start now | a worker on #6 (Recommended)",
+              "Later"
+            ],
+            "choices": [
+              {
+                "label": "Start now",
+                "detail": "a worker on #6",
+                "recommended": true
+              },
+              {
+                "label": "Later"
+              }
+            ]
+          },
           "column": "todo",
           "assignee": {
             "kind": "boss",
@@ -141,7 +186,7 @@
       "stale": false,
       "finished": [
         {
-          "id": 7,
+          "id": 8,
           "text": "Ship the notes",
           "context": [
             "notes in ~/notes.md"
