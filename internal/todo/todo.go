@@ -1360,6 +1360,9 @@ func (l List) lines(limit int, now time.Time) string {
 		if it.Check != nil {
 			b.WriteString(" ⚠ " + it.Check.Long(now))
 		}
+		if it.NeedsDetails() {
+			b.WriteString(detailsMark)
+		}
 	}
 	if len(flagged) > 0 {
 		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):")
@@ -1379,6 +1382,23 @@ func (l List) lines(limit int, now time.Time) string {
 	return b.String()
 }
 
+// detailsMark ends a list line of an item that needs details.
+const detailsMark = " (no details)"
+
+// NeedsDetails reports an open item without details that the user does or a person owes: not one on a worker session
+// (or the boss itself), a --quiet test item, or one with a pending start (its --replaces takes the details).
+func (it Shown) NeedsDetails() bool {
+	return !it.Done && !it.Quiet && it.Details == "" && it.Started == nil && it.Session == nil && !it.Gone && it.On != Boss
+}
+
+// detailsLine asks a boss to fill the items marked "(no details)" in items, the list lines it shows.
+func detailsLine(items string) string {
+	if strings.Contains(items, detailsMark) {
+		return "\nAn item marked (no details) gets them: dev todo add --replaces <n> --details '<what it is and why, where it stands, what done looks like>' (an ask: dev todo ask --replaces <n> --details '…')."
+	}
+	return ""
+}
+
 // Flagged reports an open item to re-check: its worker is gone, or it has a Check.
 func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
 
@@ -1393,7 +1413,7 @@ func (l List) Reminder(ticked []Ticked, now time.Time) string {
 		return tickedText(ticked)
 	}
 	return withTicked(ticked, "[dev todo] Your open to do list:"+items+
-		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."+whoLine)
+		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."+whoLine+detailsLine(items))
 }
 
 // StartReminder is the items ticked by themselves (tickedText), then the open items for a boss starting or /clear'ed
@@ -1409,7 +1429,7 @@ func (l List) StartReminder(kept bool, age string, ticked []Ticked, now time.Tim
 		from = "kept from your last boss session, " + from
 	}
 	return withTicked(ticked, "[dev todo] Your open to do list ("+from+"):"+items+
-		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."+whoLine)
+		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."+whoLine+detailsLine(items))
 }
 
 // Clean is s as one board row: control characters dropped, space runs collapsed, trimmed.
