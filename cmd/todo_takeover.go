@@ -175,7 +175,6 @@ func tmuxSocket(c *tmux.Client) (string, error) {
 		return strings.TrimSpace(out), nil
 	case errors.Is(err, exec.ErrNotFound):
 		// No tmux, no dev boss: no tmux list is anyone's live one
-		err = nil
 	case !tmux.IsNoServer(err):
 		return "", err
 	}
