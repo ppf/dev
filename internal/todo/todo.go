@@ -792,6 +792,20 @@ func (s Store) Unstart(id int, at int64, prev Item, now time.Time) error {
 	})
 }
 
+// Handed moves open item id's start made at at from session from to session to, keeping its time; moved reports it did.
+func (s Store) Handed(id int, at int64, from, to string, now time.Time) (moved bool, err error) {
+	err = s.update(now, func(f *file) error {
+		i := slices.IndexFunc(f.Items, func(it Item) bool {
+			return it.ID == id && it.Done == 0 && it.Started != nil && it.Started.At == at && it.Started.To == from
+		})
+		if moved = i >= 0; moved {
+			f.Items[i].Started.To = to
+		}
+		return nil
+	})
+	return moved, err
+}
+
 // MaxOptions is the most options an ask has: a board answers one with a key, 1 to 9.
 const MaxOptions = 9
 

@@ -126,4 +126,8 @@ set -- "" `+shellQuote(log)+`
 	if closed() {
 		t.Error("❌ boss-a's list still closed after the reopen")
 	}
+	// The start is the boss's now: a later reopen or --background doesn't send it again
+	if out, _, _ := runDev(user, "", "todo", "--all", "--json"); placedAs(t, out, "boss-a", 3) != "starting boss-a progress" {
+		t.Errorf("❌ #3 after the reopen = %q, want starting on boss-a", placedAs(t, out, "boss-a", 3))
+	}
 }

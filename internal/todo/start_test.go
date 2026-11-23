@@ -246,3 +246,35 @@ func TestStartLines(t *testing.T) {
 		}
 	}
 }
+
+// A start sent to the manager moves to the reopened boss once: not from another receiver nor another start's time.
+func TestHanded(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	s := store(t)
+	if _, err := s.Add(Item{Text: "a"}, now); err != nil {
+		t.Fatal(err)
+	}
+	it, _, err := s.Start(placed(t, s, Owner{Name: "boss-x", Closed: true}, 1, now), "a", "manager", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := it.Started.At
+	for _, tt := range []struct {
+		name     string
+		at       int64
+		from, to string
+		moved    bool
+	}{
+		{"another start", at + 1, "manager", "boss-x", false},
+		{"another receiver", at, "boss-y", "boss-x", false},
+		{"claimed", at, "manager", "boss-x", true},
+		{"claimed again", at, "manager", "boss-x", false},
+	} {
+		if moved, err := s.Handed(1, tt.at, tt.from, tt.to, now); err != nil || moved != tt.moved {
+			t.Errorf("%s: moved %v, %v; want %v", tt.name, moved, err, tt.moved)
+		}
+	}
+	if got := read(t, s, now).Items[0].Started; got == nil || got.To != "boss-x" || got.At != at {
+		t.Errorf("started = %+v, want to boss-x at %d", got, at)
+	}
+}

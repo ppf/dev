@@ -154,17 +154,18 @@ func openBackground(cmd *cobra.Command, c *tmux.Client, project, dir string, sta
 		if _, err := control.AwaitAgent(c, control.RealClock, session, timeout); err != nil {
 			return err
 		}
-		if err := askStarts(c, session, cmd.ErrOrStderr()); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev boss: %s not asked to start: %v; ask it in its session\n", session, err)
-		}
+	}
+	// An existing one too: the user may have opened it before the manager got to the start
+	if err := askStarts(c, session, cmd.ErrOrStderr()); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev boss: %s not asked to start: %v; ask it in its session\n", session, err)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), session)
 	return nil
 }
 
-// askStarts sends a new boss session the start note of each open item started via the manager while it was closed:
-// its SessionStart reminder takes no turn and nothing else prompts a detached boss. Starts it got itself are skipped:
-// it may already have a worker on them.
+// askStarts takes over for boss session each open item's start sent to the manager while it was closed and sends it
+// the start note: its SessionStart reminder takes no turn and nothing else prompts a detached boss.
+// Starts a boss got itself are skipped: it may already have a worker on them.
 func askStarts(c *tmux.Client, session string, warn io.Writer) error {
 	s, err := todo.ForPane(c, tmux.SessionTarget(session))
 	if err != nil {
@@ -185,14 +186,23 @@ func askStarts(c *tmux.Client, session string, warn io.Writer) error {
 				return err
 			}
 		}
-		sh, err := placed(c, s, session, it.ID, false, time.Now(), warn)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("#%d: %w", it.ID, err))
+		// Claimed first: an overlapping call, or an item set under the same number since, sends nothing
+		moved, err := s.Handed(it.ID, it.Started.At, inbox.Manager, session, time.Now())
+		if !moved {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("#%d: %w", it.ID, err))
+			}
 			continue
 		}
-		switch queued, err := to.Send(c, control.RealClock, inbox.Started(session, sh, false)); {
+		sh, err := placed(c, s, session, it.ID, false, time.Now(), warn)
+		queued := false
+		if err == nil {
+			queued, err = to.Send(c, control.RealClock, inbox.Started(session, sh, false))
+		}
+		switch {
 		case !queued:
-			errs = append(errs, fmt.Errorf("#%d: %w", it.ID, err))
+			_, uerr := s.Handed(it.ID, it.Started.At, session, inbox.Manager, time.Now())
+			errs = append(errs, fmt.Errorf("#%d: %w", it.ID, errors.Join(err, uerr)))
 		case err != nil:
 			fmt.Fprintf(warn, "⚠ dev boss: #%d queued in %s's inbox, delivered when it next rests: %v\n", it.ID, session, err)
 		}
