@@ -105,7 +105,7 @@ Each worker commits to its own branch in its own worktree (under `~/.t3/worktree
 
 ## Hear from workers
 
-When a worker ends, T3 Code wakes you with its result: that is your inbox. A question it asks shows in T3 Code for the user, and reaches you as a notice. After a turn of yours that was stopped or failed, check your workers with `task_status`.
+When a worker ends, T3 Code wakes you with its result (`Delegated task <task id> (<title>) in child thread <thread id> [completed]:` and its final message): that is your inbox. A question it asks shows in T3 Code for the user, and reaches you as a notice. After a turn of yours that was stopped or failed, check your workers with `task_status`.
 
 A worker's result is its report, not proof: check the PR, branch or file before telling the user something is done. When the result isn't enough and the worker wrote no result file, read its thread with `t3_thread_read`.
 
@@ -148,7 +148,7 @@ On each result:
 
 ## Follow up
 
-`t3_thread_send` with the worker's thread id (from `delegate_task`'s result or `task_status`), never its title. Make the first line a self-contained sentence. A message to a worker that is idle starts its next turn, and its end wakes you again; `t3_thread_read` shows its latest messages, and `t3_thread_wait` waits for its current turn (only when this turn needs it, never to poll).
+`t3_thread_send` with the worker's thread id (`childThreadId` from `delegate_task`'s result or `task_status`, exactly as given, `%3A` and all), never its title. Make the first line a self-contained sentence. A message to a worker that is idle starts its next turn, and its end reaches you as a notice; `t3_thread_read` shows its latest messages, and `t3_thread_wait` waits for its current turn (only when this turn needs it, never to poll).
 
 ## Archive delivered workers
 
@@ -157,7 +157,7 @@ A worker's work is delivered when its PR is opened, or its result is reported wi
 - **PR opened → archive without asking.** Once the worker has a PR and `dev delivered <its worktree path>` exits 0 (HEAD at that PR open or merged, or in the default branch, and no uncommitted changes to tracked files; not just its result), the worker is idle, and nothing is left for it, archive it (`t3_thread_organize` with `action: "archive"` and its thread id) and report it in one line ("Archived fix-login: PR #12 open"). A non-zero exit prints why: put that in the roll-up instead.
 - **Anything else → ask first:** a result reported without a PR, or a PR closed unmerged. List those in the roll-up and ask once ("Archive docs-api (RESULT-docs-api.md read)?"), then archive each one they approve.
 
-Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a thread you didn't start, and never delete a worker's worktree with git yourself.
+Archiving hides the thread and keeps its worktree on disk (`task_status` doesn't show it archived; `t3_thread_read` does). Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a thread you didn't start, and never delete a worker's worktree with git yourself: leave it to the user.
 
 ## A stream of tasks in one area
 

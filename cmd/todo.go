@@ -32,7 +32,8 @@ func newTodoCmd() *cobra.Command {
 		Long: `Keep the boss's list of what waits on the user: a dev boss's previews pane shows it at the top, and
 --json is what a desktop board reads. Without a subcommand, print it. The list belongs to the boss session it
 runs in: a dev boss session in tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a
-boss started it, else the T3 Code thread ($T3CODE_THREAD_ID) unless another thread delegated it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the
+boss started it, else the T3 Code thread ($T3CODE_THREAD_ID) unless another thread delegated it; --boss
+names one (a session name, or a desktop app session's local_… id). It outlives the
 coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
 session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
 worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
