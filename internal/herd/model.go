@@ -67,7 +67,8 @@ type row struct {
 	Socket       string `tmux:"socket_path"`
 	Created      string `tmux:"session_created"`
 	Conversation string `tmux:"@agent_session"`
-	InboxOff     string `tmux:"@dev_boss_inbox"` // inbox.OptOff
+	InboxOff     string `tmux:"@dev_boss_inbox"`      // inbox.OptOff
+	Outside      string `tmux:"@dev_started_outside"` // OptStartedOutside
 }
 
 // tile is one worker session's preview.
@@ -570,7 +571,11 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 	bosses := make([]sidebar.Session, 0, len(names))
 	for _, name := range names {
 		r := panes[name][0]
-		bosses = append(bosses, sidebar.Session{Name: name, ID: r.SessionID, Boss: r.Herd != "", InboxOff: r.InboxOff == "off"})
+		b := sidebar.Session{Name: name, ID: r.SessionID, Boss: r.Herd != "", InboxOff: r.InboxOff == "off"}
+		if a, ok := agent.Detect(agentPanes(panes[name]), r.Sidebar); ok {
+			b.Agent = a.Label
+		}
+		bosses = append(bosses, b)
 	}
 	for _, name := range names {
 		rs := panes[name]
@@ -585,15 +590,10 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			}
 			s.started[name] = true
 		}
-		ps := make([]agent.Pane, len(rs))
-		for i, r := range rs {
-			ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,
-				Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost}
-		}
-		a, ok := agent.Detect(ps, rs[0].Sidebar)
+		a, ok := agent.Detect(agentPanes(rs), rs[0].Sidebar)
 		// As the sidebar reads it (its buildSnapshot), so the roll-ups agree
 		full := sidebar.Session{Name: name, Group: sidebar.Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "", StartedBy: rs[0].StartedBy,
-			BossRuns: sidebar.BossRuns(rs[0].StartedBy, bosses)}
+			BossRuns: rs[0].Outside == "" && sidebar.BossRuns(rs[0].StartedBy, bosses)}
 		created[rs[0].SessionID], socket = rs[0].Created, rs[0].Socket
 		var r row
 		if ok {
@@ -769,4 +769,14 @@ func tail(lines []string, n int) []string {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
+}
+
+// agentPanes are a session's rows as agent.Detect reads them.
+func agentPanes(rs []row) []agent.Pane {
+	ps := make([]agent.Pane, len(rs))
+	for i, r := range rs {
+		ps[i] = agent.Pane{Session: r.Session, Window: r.Window, ID: r.ID, Path: r.Path, Title: r.Title,
+			Command: r.Command, State: r.State, StateCmd: r.StateCmd, Cost: r.Cost}
+	}
+	return ps
 }

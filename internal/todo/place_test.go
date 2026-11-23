@@ -17,7 +17,8 @@ func TestPlace(t *testing.T) {
 	workers := []sidebar.Session{
 		{Name: "busy", Agent: "Claude", State: agent.Working},
 		{Name: "asking", Agent: "Claude", State: agent.Waiting, Deciding: true},
-		{Name: "asked", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": A or B?"},
+		{Name: "asked", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": A or B?", BossRuns: true},
+		{Name: "asked-alone", Agent: "Claude", State: agent.Idle, Note: sidebar.NoteAsks + ": A or B?"},
 		{Name: "planned", Agent: "Claude", State: agent.Idle, Wait: wait.Wait{Until: time.Now().Add(time.Hour)}},
 		{Name: "resting", Agent: "Claude", State: agent.Idle},
 	}
@@ -64,6 +65,7 @@ func TestPlace(t *testing.T) {
 		{"6 gone, PR moved", live, Shown{On: "old", Session: link("old"), Check: merged}, sidebar.ColumnTodo, boss, "", false, StatusGone, "old"},
 		{"7 blocked, PR moved", live, Shown{On: "asking", Session: link("asking"), Check: merged}, sidebar.ColumnProgress, worker("asking"), "", true, StatusBlocked, "asking"},
 		{"7 asks its boss", live, Shown{On: "asked", Session: link("asked")}, sidebar.ColumnProgress, worker("asked"), "", false, StatusAsks, "asked"},
+		{"7 a question no running boss answers", live, Shown{On: "asked-alone", Session: link("asked-alone")}, sidebar.ColumnProgress, worker("asked-alone"), "", true, StatusBlocked, "asked-alone"},
 		{"7 asks its boss, PR moved", live, Shown{On: "asked", Session: link("asked"), Check: merged, PRState: PROpen}, sidebar.ColumnProgress, worker("asked"), "", false, StatusAsks, "asked"},
 		{"8 PR moved, a worker's", live, Shown{On: "busy", Session: link("busy"), Check: merged}, sidebar.ColumnReview, worker("busy"), "", false, StatusCheck, "busy"},
 		{"8 PR moved, a person's", live, Shown{On: "Ola", Check: merged}, sidebar.ColumnReview, boss, "Ola", false, StatusCheck, "Ola"},

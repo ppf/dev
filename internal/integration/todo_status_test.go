@@ -35,6 +35,9 @@ func TestTodoStatus(t *testing.T) {
 	s.T("new-session", "-d", "-s", "boss-a", "sleep", "3600")
 	s.T("set-option", "-t", "=boss-a:", "@dev_herd", "1")
 	boss := s.T("display", "-t", "=boss-a:", "-p", "#{pane_id}")
+	// Its coordinator runs: it answers a plain worker's question
+	s.T("set-option", "-p", "-t", boss, "@agent_cmd", "sleep")
+	s.T("set-option", "-p", "-t", boss, "@agent_state", "idle")
 	bossID := s.T("display", "-t", "=boss-a:", "-p", "#{session_id}")
 	// worker starts a session boss-a started, its agent in state (waiting on a dialog when deciding), with note
 	worker := func(name, state string, deciding bool, note string) {

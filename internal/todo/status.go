@@ -135,14 +135,15 @@ func (o Owner) Status(it Shown) (status, on string) {
 	return StatusIdle, w.Name
 }
 
-// blocked reports worker w waiting on the user: a dialog, a question of a worker that is itself a boss (it hands it
-// up), or resting after a failed turn.
+// blocked reports worker w waiting on the user (sidebar.Rank: a dialog, a question no running boss answers), or
+// resting after a failed turn.
 func blocked(w sidebar.Session) bool {
-	return w.Deciding || w.Boss && w.Asking() || w.Rank() == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed
+	rank := w.Rank()
+	return rank == sidebar.RankNeedsYou || rank == sidebar.RankIdle && sidebar.NoteKind(w.Note) == sidebar.NoteFailed
 }
 
-// asking reports plain worker w's turn ended on a question as text (sidebar.Session.Asking): the list's boss answers.
-func asking(w sidebar.Session) bool { return !w.Boss && w.Asking() }
+// asking reports worker w's turn ended on a question as text that its running boss answers (sidebar.Session.AsksBoss).
+func asking(w sidebar.Session) bool { return w.AsksBoss() }
 
 // Parked reports an item its list's boss does itself (OnBoss) that no one has taken up: no doing line, no start.
 func Parked(it Shown) bool {

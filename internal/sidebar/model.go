@@ -62,6 +62,7 @@ type paneRow struct {
 	Conversation string `tmux:"@agent_session"`
 	Transcript   string `tmux:"@agent_transcript"`
 	InboxOff     string `tmux:"@dev_boss_inbox"` // inbox.OptOff, "off" when a boss hears nothing
+	Outside      string `tmux:"@dev_started_outside"`
 }
 
 // agentPane returns the fields agent.Detect reads.
@@ -327,7 +328,7 @@ func buildSnapshot(rows []paneRow, clients []Client, pane, host string, branch f
 func liveSession(name string, rs []paneRow) (sess Session, a agent.Agent, i int, ok bool) {
 	// Session options: every row of the session carries the same @project and @sidebar_pane
 	sess = Session{Name: name, Group: Group(name, rs[0].Project), ID: rs[0].SessionID, Boss: rs[0].Herd != "",
-		StartedBy: rs[0].StartedBy, InboxOff: rs[0].InboxOff == "off"}
+		StartedBy: rs[0].StartedBy, InboxOff: rs[0].InboxOff == "off", Outside: rs[0].Outside != ""}
 	ps := make([]agent.Pane, len(rs))
 	for j, r := range rs {
 		ps[j] = r.agentPane()

@@ -68,16 +68,19 @@ func (s Session) Asking() bool {
 // that is a boss hands its asks up, and one with no running boss is the user's to answer.
 func (s Session) AsksBoss() bool { return s.Asking() && s.BossRuns && !s.Boss }
 
-// BossRuns reports a @dev_started_by value v naming a boss among sessions whose inbox is on: one that hears its
-// workers' asks notes.
+// BossRuns reports a @dev_started_by value v naming a boss among sessions that hears its workers' asks notes: its
+// coordinator's agent runs and its inbox is on.
 func BossRuns(v string, sessions []Session) bool {
-	return slices.ContainsFunc(sessions, func(b Session) bool { return b.Boss && !b.InboxOff && Names(v, b.ID, b.Name, true) })
+	return slices.ContainsFunc(sessions, func(b Session) bool {
+		return b.Boss && b.Agent != "" && !b.InboxOff && Names(v, b.ID, b.Name, true)
+	})
 }
 
-// MarkBossRuns sets each session's BossRuns from the others.
+// MarkBossRuns sets each session's BossRuns from the others; a session a coordinator outside tmux started (Outside)
+// has none: its notes are that coordinator's.
 func MarkBossRuns(sessions []Session) {
 	for i, s := range sessions {
-		sessions[i].BossRuns = BossRuns(s.StartedBy, sessions)
+		sessions[i].BossRuns = !s.Outside && BossRuns(s.StartedBy, sessions)
 	}
 }
 

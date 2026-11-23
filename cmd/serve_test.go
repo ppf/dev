@@ -55,11 +55,11 @@ func TestBoardGolden(t *testing.T) {
 			// boss-a live: every field 0 but its name and id; its worker a-fix working, its transcript under home; a-ask
 			// idle on a question as text
 			rows := ""
-			for _, set := range []map[string]string{{"#{session_name}": "boss-a", "#{session_id}": "$1"},
+			for _, set := range []map[string]string{{"#{session_name}": "boss-a", "#{session_id}": "$1", "#{pane_id}": "%1", "#{window_index}": "1"},
 				{"#{session_name}": "a-fix", "#{session_id}": "$2", "#{pane_id}": "%2", "#{window_index}": "1", "#{@agent_state}": "working",
 					"#{@dev_started_by}": "boss-a", "#{@agent_transcript}": transcript, "#{@dev_boss_note}": "finished: tests pass in " + home + "/src"},
 				{"#{session_name}": "a-ask", "#{session_id}": "$3", "#{pane_id}": "%3", "#{window_index}": "1", "#{@agent_state}": "idle",
-					"#{@dev_started_by}": "boss-a", "#{@dev_boss_note}": "asks: A or B?", "#{@dev_resume_at}": "", "#{@dev_herd}": ""}} {
+					"#{@dev_started_by}": "boss-a", "#{@dev_boss_note}": "asks: A or B?", "#{@dev_resume_at}": "", "#{@dev_herd}": "", "#{@dev_started_outside}": ""}} {
 				var row []string
 				for _, f := range strings.Split(args[len(args)-1], tmux.Sep) {
 					v, ok := set[f]
