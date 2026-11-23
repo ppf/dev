@@ -187,7 +187,7 @@ async function load() {
       const r = route();
       if (r.name === 'pair') return go('#/');
       if (r.name === 'item' && state.shown && !(r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at)) && !unread(r.boss)) {
-        return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
+        return go('#/', state.errors[state.shown.k] || (r.at === undefined ? 'No longer open, answered or ticked on your Mac: ' : 'No longer on the board (Done keeps an item 24 hours): ') + state.shown.text);
       }
     } else if (state.newVersion && !sameVersion(state.seen)) return; // a held reload, no longer busy
   }
@@ -751,11 +751,11 @@ function whoRows(x) {
 // linkRow is a facts row for an item's link: a web one opens in a new tab
 const linkRow = link => ['Link', /^https?:/i.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener noreferrer' }, link) : link];
 
-function facts(x, live = false) {
+function facts(x, live = false, session = false) {
   const { list, it } = x;
   const rows = [['Status', statusRow(x)], ...whoRows(x), ['List', list.boss + (list.closed ? ' (closed)' : '')]];
   if (it.link) rows.push(linkRow(it.link));
-  if (it.check && it.check.kind !== 'boss closed') rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
+  if (it.check && it.check.kind !== 'boss closed' && !session) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now && !live) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
@@ -796,13 +796,15 @@ const closeSheet = () => { location.hash = '#/'; };
 // paragraphs, "- " lines a list (indented: a sub-item).
 function details(text) {
   const out = [];
-  let p = null, ul = null;
+  let p = null, ul = null, item = null;
   for (const line of text.split('\n')) {
     const li = line.match(/^(\s*)[-*•] (.*)$/);
     if (li) {
       p = null;
       if (!ul) out.push(ul = el('ul'));
-      ul.append(el('li', li[1] ? { class: 'sub' } : null, li[2]));
+      ul.append(item = el('li', li[1] ? { class: 'sub' } : null, li[2]));
+    } else if (ul && /^\s/.test(line) && line.trim()) {
+      item.append('\n' + line.trim()); // an item's next line, indented under it
     } else if (!line.trim()) {
       p = ul = null;
     } else if (p && out.length > 1) {
@@ -824,9 +826,9 @@ const checkTone = kind => /failing|changes|closed|lookup/.test(kind) ? 'hot' : /
 function liveBlock(x) {
   const { list, it } = x, boss = it.on === 'boss' && !it.session;
   if (own(list, it) || !(boss ? it.doing : it.session || onWorker(x))) return null;
-  const who = whoOf(x);
+  const who = boss ? whoOf(x) : it.session?.name || it.status_on || it.on; // a gone worker's card is on its boss
   const [word, cls] = boss ? ['doing', 's-working'] : LIVE_WORDS[it.status] || [statusOf(it), statusClass(statusOf(it))];
-  const since = boss ? 'since ' + hhmm(new Date(it.doing.at * 1000)) : it.added ? 'on it ' + age(it.added) : '';
+  const since = boss ? 'since ' + when(it.doing.at).replace(/^today /, '') : it.added ? 'on it ' + age(it.added) : '';
   const row = (k, ...v) => el('div', { class: 'lv-row' }, el('b', null, k), el('span', null, ...v));
   const note = it.note?.match(/^([^:]+): (.*)$/s);
   const check = it.check && it.check.kind !== 'boss closed' && el('span', { class: 'tag ' + checkTone(it.check.kind) }, it.check.kind);
@@ -920,7 +922,7 @@ function item(boss, id, at) {
   } else if (!own(list, it)) {
     out.push(el('p', { class: 'hint' }, onWorker(x) ? 'On ' + owner(x) + ': follow it in its session on your Mac.' : 'Waits on ' + owner(x) + '.'));
   }
-  out.push(facts(x, !!lv));
+  out.push(facts(x, !!lv, !!lv && !(it.on === 'boss' && !it.session)));
   return out;
 }
 

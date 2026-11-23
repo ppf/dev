@@ -503,7 +503,11 @@ func TestDoneItemView(t *testing.T) {
 	m, _ := board(t, lists, 120, 40)
 	m = keys(t, m, "l", "l", "l", "l", "enter")
 	v := plain(m)
-	for _, want := range []string{"vitay #117 · Done", "what was done", "Mail sent 12:40", "Draft ready, not sent", "template: Mahnung 2", "ticked  " + at.Format("15:04") + " · by boss-vitay"} {
+	clock := at.Format("15:04")
+	if at.YearDay() != time.Now().YearDay() {
+		clock = at.Format("Jan 2 15:04") // past midnight: a tick from yesterday says its date
+	}
+	for _, want := range []string{"vitay #117 · Done", "what was done", "Mail sent 12:40", "Draft ready, not sent", "template: Mahnung 2", "ticked  " + clock + " · by boss-vitay"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}

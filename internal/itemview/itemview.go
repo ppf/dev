@@ -413,10 +413,14 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 		return out, at
 	}
 	room := max(1, h-2)
+	// The details' cut in one step, not a line a pass: a long draft has thousands
+	if all, _ := lines(); len(all) > room {
+		shown = max(0, shown-(len(all)-room))
+	}
 cut:
 	for all, _ := lines(); len(all) > room; all, _ = lines() {
 		switch {
-		case shown > 1:
+		case shown > 0:
 			shown--
 		case len(context) > 0:
 			context = context[:len(context)-1]
@@ -478,7 +482,7 @@ func (m Model) block(in int, now time.Time) []string {
 	case it.Done:
 		return nil
 	case todo.OnBoss(it.On, it.Session) && it.Doing != nil:
-		since := "since " + time.Unix(it.Doing.At, 0).Format("15:04")
+		since := "since " + clock(time.Unix(it.Doing.At, 0), now)
 		return append([]string{rule(m.assignee(), sidebar.Green+"doing"+reset+sidebar.Muted+" · "+since+reset)}, append(row("now", cmp.Or(it.Doing.Text, "on it")), end)...)
 	case !m.worker(), it.Status == "" && it.Now == "" && it.Note == "":
 		return nil
@@ -515,12 +519,7 @@ var liveWords = map[string]string{sidebar.StatusBlocked: "needs you", sidebar.St
 func ticked(it Item, now time.Time) string {
 	var parts []string
 	if it.DoneAt != 0 {
-		at := time.Unix(it.DoneAt, 0)
-		f := "15:04"
-		if y, d := at.YearDay(), now.YearDay(); y != d || at.Year() != now.Year() {
-			f = "Jan 2 15:04"
-		}
-		parts = append(parts, at.Format(f))
+		parts = append(parts, clock(time.Unix(it.DoneAt, 0), now))
 	}
 	switch it.DoneBy {
 	case "":
@@ -534,6 +533,14 @@ func ticked(it Item, now time.Time) string {
 	return strings.Join(parts, " · ")
 }
 
+// clock is at as a time of day, with its date when not today: "12:41", "Jan 13 09:00".
+func clock(at, now time.Time) string {
+	if at.YearDay() != now.YearDay() || at.Year() != now.Year() {
+		return at.Format("Jan 2 15:04")
+	}
+	return at.Format("15:04")
+}
+
 // detailLines are details wrapped to in, a blank line between paragraphs, an indented line keeping its indent.
 func detailLines(details string, in int) []string {
 	if details == "" {
@@ -542,16 +549,21 @@ func detailLines(details string, in int) []string {
 	var out []string
 	for _, l := range strings.Split(details, "\n") {
 		text := strings.TrimLeft(l, " ")
-		indent := len(l) - len(text)
+		indent := min(len(l)-len(text), in/2) // a deep indent leaves the text room
 		for i, w := range strings.Split(ansi.Wrap(text, max(1, in-indent-2), ""), "\n") {
 			pad := indent
-			if i > 0 && (strings.HasPrefix(text, "- ") || strings.HasPrefix(text, "* ")) {
+			if i > 0 && listItem(text) {
 				pad += 2 // a list item's next lines under its text
 			}
-			out = append(out, strings.Repeat(" ", pad)+w)
+			out = append(out, ansi.Truncate(strings.Repeat(" ", pad)+w, in, "…"))
 		}
 	}
 	return out
+}
+
+// listItem reports a details line that starts a list item, as the page reads it: "- ", "* " or "• ".
+func listItem(text string) bool {
+	return strings.HasPrefix(text, "- ") || strings.HasPrefix(text, "* ") || strings.HasPrefix(text, "• ")
 }
 
 // Click runs a left click at x, y of the box drawn w×h: on an option or action it does what that line's key does

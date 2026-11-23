@@ -283,15 +283,15 @@ textarea { min-height: 3.6em; resize: vertical; }
 .details { display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; line-height: 1.5; color: var(--ink2); }
 .details p { margin: 0; white-space: pre-wrap; }
 .details ul { margin: 0; padding-left: 20px; }
-.details li { margin: 2px 0; }
+.details li { margin: 2px 0; white-space: pre-wrap; }
 .details li.sub { margin-left: 18px; list-style-type: circle; }
 .details > :first-child { color: var(--ink); }
 /* the live block: the session on the item, or what was done on a finished one; its edge the state's colour */
 .live { --lv: var(--meta); display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--edge); border-left: 4px solid var(--lv); border-radius: var(--r-card); background: var(--ground); padding: 10px 12px; font-size: 13.5px; color: var(--ink2); }
 .live.s-working { --lv: var(--s-done); } .live.s-waiting, .live.s-check { --lv: var(--s-wait); } .live.s-decide, .live.s-gone { --lv: var(--hot); }
-.lv-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lv-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .lv-who { font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lv-since { margin-left: auto; flex: none; font-size: 12.5px; color: var(--meta); }
+.lv-since { margin-left: auto; font-size: 12.5px; color: var(--meta); }
 .lv-row { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .lv-row b { font-size: var(--fs-meta); font-weight: 650; color: var(--meta); }
 .lv-row i { font-style: normal; font-weight: 600; }

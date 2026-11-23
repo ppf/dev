@@ -508,9 +508,16 @@ const check = (name, ok) => { if (!ok) console.log(name); };
     && /#285checks failing/.test(lvText) && walk(lv, c => c.tag === 'i')[0]?.children[0] === 'finished');
   check('In progress: Now left out of the facts, the block says it', !Object.keys(Object.fromEntries(walk(s.at(-1), n => n.tag === 'div').map(d => [textOf(d.children[0]), 1]))).includes('Now'));
   s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'gone', assignee: { kind: 'boss', name: 'boss-a' } }] }], "item('boss-a', 5)");
+  check('a gone worker: the block names it, not the boss it went back to', /^dev-xsession gone/.test(textOf(cls(/^live\b/)(s)[0] || {}).replace(/^[A-Z]+/, '')));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, details: '- step one\n  more on step one\n- step two' }] }], "item('boss-a', 5)");
+  const steps = cls(/^details$/)(s)[0];
+  check('details: an indented line under a list item stays in it', steps.children.length === 1 && steps.children[0].children.length === 2 && textOf(steps.children[0].children[0]) === 'step one\nmore on step one');
+  check('a check shown in the block is not a fact again', !/Check/.test(textOf(s.at(-1))));
+  s = await sheetOf([{ boss: 'boss-a', items: [{ ...fixing, status: 'blocked' }] }], "item('boss-a', 5)");
   check('a worker asking you: needs you', cls(/^live\b/)(s)[0]?.className === 'live s-decide' && /needs you/.test(textOf(cls(/^live\b/)(s)[0])));
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },
-    doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) - 60 } }] }], "item('boss-a', 6)");
+    doing: { text: 'waiting on CI for #285', at: Math.floor(Date.now() / 1000) } }] }], "item('boss-a', 6)");
   const bossLv = textOf(cls(/^live\b/)(s)[0] || {});
   check("a boss's own item: only its doing line: " + bossLv, /boss-adoingsince \d\d:\d\dNowwaiting on CI for #285$/.test(bossLv));
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 7, text: 'Mine', status: 'yours', column: 'todo', assignee: { kind: 'you' } }] }], "item('boss-a', 7)");
