@@ -279,7 +279,7 @@ textarea { min-height: 3.6em; resize: vertical; }
 @media not all and (min-width: 900px) {
   #sheet .acts { flex-direction: column; }
 }
-/* the item's details: paragraphs and lists, its first line the top one (a draft's state) */
+/* the item's details: paragraphs and lists, its first line (a draft's state) a paragraph of its own, set off */
 .details { display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; line-height: 1.5; color: var(--ink2); }
 .details p { margin: 0; white-space: pre-wrap; }
 .details ul { margin: 0; padding-left: 20px; }

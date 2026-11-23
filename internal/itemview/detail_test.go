@@ -63,6 +63,11 @@ func TestLongDraft(t *testing.T) {
 			t.Errorf("row %d wide, want %d: %q", w, Width, r)
 		}
 	}
+	// An ask's options stay while its draft is cut
+	it.Options, it.Status = []string{"Send (Recommended)", "Wait"}, sidebar.StatusDecide
+	if v := ansi.Strip(New(it, Actions{}, false).View(Width, 30, now)); !strings.Contains(v, "★ Send") || !strings.Contains(v, "Wait") || !strings.Contains(v, "more lines of details") || len(strings.Split(v, "\n")) > 30 {
+		t.Errorf("ask with a long draft:\n%s", v)
+	}
 	if full := ansi.Strip(m.View(Width, 1<<16, now)); !strings.Contains(full, "Herren,") || strings.Contains(full, "more lines of details") {
 		t.Errorf("uncut, the draft whole:\n%s", full)
 	}
@@ -97,12 +102,34 @@ func TestSessionBlock(t *testing.T) {
 	}
 }
 
-// The boss's own item: only its doing line, since when.
+// A narrow box keeps every row to its width: a long session name, a tick by itself on another day, the cut line.
+func TestNarrowBlocks(t *testing.T) {
+	worker := Item{Boss: "boss-vitay", Shown: todo.Shown{ID: 3, Text: "Send it", On: "vitay-mail-reminder-worker", Session: &todo.Session{ID: "$4", Name: "vitay-mail-reminder-worker"},
+		Status: sidebar.StatusBlocked, Now: "asking", Added: now.Add(-3 * time.Hour).Unix(), Details: strings.Repeat("a line of the draft\n", 80),
+		Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeWorker, Name: "vitay-mail-reminder-worker"}}}}
+	done := Item{Boss: "boss-vitay", DoneAt: now.Add(-10 * 24 * time.Hour).Unix(), Shown: todo.Shown{ID: 4, Text: "Merged", Done: true, Result: "PR #285 merged", DoneBy: todo.DoneByPR,
+		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+	for _, w := range []int{40, 60} {
+		for _, it := range []Item{worker, done} {
+			for i, r := range strings.Split(New(it, Actions{}, false).View(w, 20, now), "\n") {
+				if got := ansi.StringWidth(r); got != w {
+					t.Errorf("width %d, #%d row %d: %d wide: %q", w, it.ID, i, got, ansi.Strip(r))
+				}
+			}
+		}
+	}
+}
+
+// The boss's own item: only its doing line, since when; its PR's check stays in the facts.
 func TestBossBlock(t *testing.T) {
 	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 19, Text: "Release v0.83.0", On: todo.Boss, Status: sidebar.StatusWorking,
 		Doing:     &todo.Doing{Text: "waiting on CI for #285", At: now.Add(-time.Minute).Unix()},
 		Placement: todo.Placement{Column: sidebar.ColumnProgress, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev"}}}}
+	it.Link, it.Check = "https://github.com/ppf/dev/pull/285", &sidebar.Check{Kind: sidebar.CheckFailing, PR: 285, Since: now.Unix()}
 	v := ansi.Strip(New(it, Actions{}, false).View(Width, 40, now))
+	if !strings.Contains(v, "check   #285 checks failing") {
+		t.Errorf("the boss's own item lost its check:\n%s", v)
+	}
 	if !strings.Contains(v, "doing · since "+now.Add(-time.Minute).Format("15:04")) || !strings.Contains(v, "now     waiting on CI for #285") || strings.Contains(v, "last ") || strings.Contains(v, "doing   ") {
 		t.Errorf("view:\n%s", v)
 	}

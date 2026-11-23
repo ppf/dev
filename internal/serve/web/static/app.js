@@ -186,7 +186,7 @@ async function load() {
       dropStalePicks();
       const r = route();
       if (r.name === 'pair') return go('#/');
-      if (r.name === 'item' && state.shown && !find(r.boss, r.id) && !unread(r.boss)) {
+      if (r.name === 'item' && state.shown && !(r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at)) && !unread(r.boss)) {
         return go('#/', state.errors[state.shown.k] || 'No longer open, answered or ticked on your Mac: ' + state.shown.text);
       }
     } else if (state.newVersion && !sameVersion(state.seen)) return; // a held reload, no longer busy
@@ -510,7 +510,7 @@ function doneRow(x) {
   // Focusable, so a card ticked from the keyboard keeps focus
   return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
     movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
-    el('a', { class: 't row', href: doneHash(list.boss, it) }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
+    el('a', { class: 't row', href: doneHash(list.boss, it), 'data-f': doneHash(list.boss, it) }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
 }
 
@@ -792,7 +792,8 @@ function answerForm(list, it) {
 
 const closeSheet = () => { location.hash = '#/'; };
 
-// details is an item's longer text: a blank line between paragraphs, "- " lines a list (indented: a sub-item).
+// details is an item's longer text: its first line a paragraph of its own (a draft's state), a blank line between
+// paragraphs, "- " lines a list (indented: a sub-item).
 function details(text) {
   const out = [];
   let p = null, ul = null;
@@ -804,7 +805,7 @@ function details(text) {
       ul.append(el('li', li[1] ? { class: 'sub' } : null, li[2]));
     } else if (!line.trim()) {
       p = ul = null;
-    } else if (p) {
+    } else if (p && out.length > 1) {
       p.append('\n' + line.trim());
     } else {
       ul = null;

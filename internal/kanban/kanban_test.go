@@ -495,6 +495,21 @@ func TestItemView(t *testing.T) {
 	}
 }
 
+// ⏎ on a Done card opens it with what its list kept: what was done, when and by whom, details, context.
+func TestDoneItemView(t *testing.T) {
+	at := time.Now().Add(-time.Hour)
+	lists := []List{{Boss: "boss-vitay", Finished: []todo.Finished{{ID: 117, Text: "Send the reminder", Result: "Mail sent 12:40", Details: "Draft ready, not sent",
+		Context: []string{"template: Mahnung 2"}, DoneBy: "boss-vitay", DoneAt: at.Unix(), Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}}
+	m, _ := board(t, lists, 120, 40)
+	m = keys(t, m, "l", "l", "l", "l", "enter")
+	v := plain(m)
+	for _, want := range []string{"vitay #117 · Done", "what was done", "Mail sent 12:40", "Draft ready, not sent", "template: Mahnung 2", "ticked  " + at.Format("15:04") + " · by boss-vitay"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
+		}
+	}
+}
+
 // A switch from the item view closes the board: the client is on the session now.
 func TestSwitchCloses(t *testing.T) {
 	m, f := board(t, fixture(2), 200, 55)

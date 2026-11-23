@@ -491,6 +491,9 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('details: the draft\'s state the first line, its own paragraph', textOf(det.children[0]) === 'Draft ready, not sent' && det.children[0].tag === 'p');
   check('details: a paragraph keeps its lines, a list its items, an indented one a sub-item', textOf(det.children[1]) === 'Hallo Frau Weber,\nanbei die Rechnung.'
     && det.children[2].tag === 'ul' && det.children[2].children.length === 3 && det.children[2].children[1].className === 'sub');
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 1, text: 'Send it', status: 'yours', column: 'todo', assignee: { kind: 'you' }, details: 'Draft ready, not sent\nHallo Frau Weber,\nanbei die Rechnung.' }] }], "item('boss-a', 1)");
+  const tight = cls(/^details$/)(s)[0];
+  check('details: the first line its own paragraph with no blank line after it', textOf(tight.children[0]) === 'Draft ready, not sent' && textOf(tight.children[1]) === 'Hallo Frau Weber,\nanbei die Rechnung.');
   const long = 'Sent today 12:40 to accounts@hartmann.example, Gmail\n\n' + 'Sehr geehrte Damen und Herren, '.repeat(130).trim();
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 1, text: 'Send it', status: 'yours', column: 'todo', assignee: { kind: 'you' }, details: long.slice(0, 4000) }] }], "item('boss-a', 1)");
   check('a 4000-character draft is drawn whole', textOf(cls(/^details$/)(s)[0]).replace(/\n/g, '').length === long.slice(0, 4000).replace(/\n/g, '').length);
@@ -525,17 +528,33 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('Done: the 24-hour limit said', /Done keeps an item 24 hours/.test(doneText) && /Ticked.*by boss-vitay/.test(doneText) && /Was onvitay-mail/.test(doneText));
   s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 21, " + (at - 60) + ')');
   check('Done: your ask shows your answer and offers Reopen', /You answeredAfter #285/.test(s.map(textOf).join('')) && reopenBtns(s).length === 1);
+  const t2 = at - 7200;
+  s = await sheetOf([{ boss: 'boss-a', items: [{ id: 9, text: 'Just ticked', done: true, assignee: { kind: 'you' } }],
+    finished: [{ id: 5, text: 'Newer five', assignee: { kind: 'you' }, done_at: at }, { id: 5, text: 'Older five', assignee: { kind: 'you' }, done_at: t2 }] }], "item('boss-a', 5, " + t2 + ')');
+  check('Done: two with one number: its tick time picks the older', /Older five/.test(s.map(textOf).join('')) && !/Newer five/.test(s.map(textOf).join('')));
+  check('Done: and the newer', /Newer five/.test(run("item('boss-a', 5, " + at + ')').map(textOf).join('')));
+  check('Done: one ticked moments ago (no time yet) has a hash without one', run("doneHash('boss-a', { id: 9 })") === '#/done/boss-a/9');
+  ctx.location.hash = '#/done/boss-a/9';
+  check('its route has at 0', run('route()').at === 0);
+  check('and its sheet draws it, not gone', /Just ticked/.test(run("item('boss-a', 9, 0)").map(textOf).join('')) && !/no longer on the board/.test(run("item('boss-a', 9, 0)").map(textOf).join('')));
+  ctx.location.hash = '#/';
+  s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 117, " + at + ')');
   check('Done: one gone from the board says so', /no longer on the board/.test(run("item('boss-vitay', 117, 5)").map(textOf).join('')));
 
   // A Done card opens its sheet: its link's hash routes to it, the sheet draws it, Reopen calls reopen
   media.matches = true;
   await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], 'render()');
   const doneLink = drawnCards().filter(c => /\bdone\b/.test(c.className)).flatMap(c => walk(c, x => x.tag === 'a')).find(a => /\/117\//.test(a.attrs.href));
-  check('a Done card links to its sheet: ' + doneLink?.attrs.href, doneLink?.attrs.href === '#/done/boss-vitay/117/' + at);
+  check('a Done card links to its sheet: ' + doneLink?.attrs.href, doneLink?.attrs.href === '#/done/boss-vitay/117/' + at && doneLink.attrs['data-f'] === doneLink.attrs.href);
   ctx.location.hash = doneLink.attrs.href;
   check('its route is the item sheet, with when it was ticked', JSON.stringify(run('route()')) === JSON.stringify({ name: 'item', boss: 'boss-vitay', id: 117, at }));
   run('render()');
   check('the sheet opens on it', els.sheet.classList.contains('on') && /What was done/.test(textOf(els.sheet)));
+  lists = [{ boss: 'boss-vitay', items: [{ id: 3, text: 'Something new', status: 'yours', column: 'todo', assignee: { kind: 'you' } }], finished: [mailed, asked] }];
+  tag = 'D' + Math.random();
+  es().on.board({ data: 'W/"' + tag + 'v2"' });
+  await settle();
+  check('a board change keeps the Done sheet open', ctx.location.hash === doneLink.attrs.href && /What was done/.test(textOf(els.sheet)));
   ctx.location.hash = '#/done/boss-vitay/21/' + (at - 60);
   run('render()');
   run("state.errors[doneKey('boss-vitay', 21)] = 'item 21 is open again'; sheet(route())");

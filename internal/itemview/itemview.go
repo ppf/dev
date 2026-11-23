@@ -397,7 +397,7 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 	lines := func() ([]string, []int) {
 		head := slices.Concat(head, details[:shown])
 		if shown < len(details) {
-			head = append(head, sidebar.Muted+fmt.Sprintf("… %d more lines of details: open it on the page", len(details)-shown)+reset)
+			head = append(head, ansi.Truncate(sidebar.Muted+fmt.Sprintf("… %d more lines of details: open it on the page", len(details)-shown)+reset, in, "…"))
 		}
 		head = append(head, context...)
 		out := append(append([]string{""}, head...), "")
@@ -449,6 +449,9 @@ cut:
 func (m Model) block(in int, now time.Time) []string {
 	it := m.it
 	rule := func(left, right string) string {
+		// A narrow box cuts the right side first, then the left: the rule stays one row
+		right = ansi.Truncate(right, max(0, in-7-min(ansi.StringWidth(left), 12)), "…")
+		left = ansi.Truncate(left, max(1, in-7-ansi.StringWidth(right)), "…")
 		fill := max(1, in-ansi.StringWidth(left)-ansi.StringWidth(right)-6)
 		return sidebar.Faint + "─ " + reset + bold + left + reset + " " + sidebar.Faint + strings.Repeat("─", fill) + reset + " " + right + sidebar.Faint + " ─" + reset
 	}
@@ -508,7 +511,7 @@ func (m Model) block(in int, now time.Time) []string {
 // liveWords are the statuses a session's block says otherwise
 var liveWords = map[string]string{sidebar.StatusBlocked: "needs you", sidebar.StatusGone: "session gone"}
 
-// ticked is when a finished item was ticked and by whom: "12:41 · boss-vitay"; "" when neither is known.
+// ticked is when a finished item was ticked and by whom: "12:41 · by boss-vitay"; "" when neither is known.
 func ticked(it Item, now time.Time) string {
 	var parts []string
 	if it.DoneAt != 0 {
@@ -685,6 +688,8 @@ func (m Model) facts(in int, now time.Time) []string {
 		doing = it.Doing.Text
 	}
 	live := len(m.block(in, now)) > 0
+	// Only a worker's block says the check: the boss's own says its doing line alone
+	session := live && m.worker()
 	if doing != "" && !live {
 		facts = append(facts, [2]string{"doing", doing})
 	}
@@ -694,7 +699,7 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})
 	}
-	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed && (!live || it.Done) {
+	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed && !session {
 		facts = append(facts, [2]string{"check", it.Check.Tone().Colour() + it.Check.Short(now) + reset})
 	}
 	out := make([]string, len(facts))
