@@ -23,6 +23,10 @@ A boss in T3 Code is invisible to dev's manager, NEEDS YOU, the boards (tmux and
 
 Your list and notes belong to this thread (`$T3CODE_THREAD_ID`): a new boss thread starts with an empty list and takes over none, and no hook hands them to you, nor with worker results. So run `dev todo` and `dev todo note` yourself at start and after a `/clear`. Nothing looks up your items' PRs either: run `dev todo check` at start and with each roll-up (`--done-on` ticks an item and `to do #n` checks show only then). Where the rules below say otherwise (boards, worker notes bringing your list, `to do #n` notes, your next boss session keeping it, `local_…` ids, a planned wait with `dev agent wait-until` in a brief: leave it out, as below), this paragraph wins.
 
+## T3 Code's own rules
+
+T3 Code's system prompt for every thread says to fix small review findings yourself, starting no delegate for them, and that every new delegate review or re-check is a new `delegate_task`, never a `t3_thread_send`. In a thread told to be the boss, this skill wins: you delegate, don't do, and review findings on a worker's PR go to that worker with `t3_thread_send` (on a finished child it starts a new turn in the same thread and worktree, its context kept). T3 Code's rule holds for a new review or re-check: that is a new worker, a fresh `delegate_task`. `delegate_task`'s result carries `next` ("Completion wakes this thread. Do not wait on it or poll it…"): follow it.
+
 ## Rules
 
 <!-- boss-core:rules -->
@@ -65,7 +69,7 @@ Set every Claude worker's model and effort when you start it: one left on the us
   - **On a yes:** a fresh worker on `opus` (effort by the table), with the word "ultracode" in its brief. Never on `fable`: a workflow's agents run on the worker's model, and on `fable` they use up the limit too fast.
 <!-- /boss-core:model-effort -->
 
-Here the model is `delegate_task`'s `target.model` (the full model id from `orchestrator_capabilities` for `opus`, `sonnet`, `haiku`), on the Claude instance you run on; a Codex worker only when the user asks for one.
+Here the model is `delegate_task`'s `target.model` (the full model id from `orchestrator_capabilities` for `opus`, `sonnet`, `haiku`), on the Claude instance you run on; a Codex worker only when the user asks for one (the table and its ceiling are for Claude models, which have no Codex match): then the Codex model the user names, else the Codex instance's own default from `orchestrator_capabilities`.
 
 A brief is self-contained: the task, the files or area, constraints, and what done looks like (e.g. "PR opened in the repo's usual style, tests green" or "findings in `RESULT-docs-api.md` in your worktree": a file name new to this worker). End every brief with: *"Put the result (PR link, or the result file's path) in the first sentence of your final message. Blocked on a question for me? Never use AskUserQuestion: end your turn on it, the question in your final message's first sentence."* For long results, have the worker write a file and reply with its path, then read that file.
 
@@ -159,7 +163,7 @@ A worker's work is delivered when its PR is opened, or its result is reported wi
 - **PR opened → archive without asking.** Once the worker has a PR and `dev delivered <its worktree path>` exits 0 (HEAD at that PR open or merged, or in the default branch, and no uncommitted changes to tracked files; not just its result), the worker is idle, and nothing is left for it, archive it (`t3_thread_organize` with `action: "archive"` and its thread id) and report it in one line ("Archived fix-login: PR #12 open"). A non-zero exit prints why: put that in the roll-up instead.
 - **Anything else → ask first:** a result reported without a PR, or a PR closed unmerged. List those in the roll-up and ask once ("Archive docs-api (RESULT-docs-api.md read)?"), then archive each one they approve.
 
-Archiving hides the thread and keeps its worktree on disk (`task_status` doesn't show it archived; `t3_thread_read` does). Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a thread you didn't start, and never delete a worker's worktree with git yourself: leave it to the user.
+Archiving hides the thread and keeps its worktree on disk (`task_status` doesn't show it archived; `t3_thread_read` does). Never archive one with undelivered work (pending review fixes, uncommitted or unpushed changes), nor a thread you didn't start, and never delete a worker's worktree with git yourself: leave it to the user, who removes an archived one by hand once `dev delivered` passed: `git -C <project> worktree remove <worktree path>`.
 
 ## A stream of tasks in one area
 
