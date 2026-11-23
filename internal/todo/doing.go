@@ -85,6 +85,34 @@ func (f *file) checkPartOf(id, partner int) error {
 	return nil
 }
 
+// checkFor refuses ask it (id 0: one being added) waiting for item it.For: no ask, itself, no open item, or an ask.
+func (f *file) checkFor(id int, it Item) error {
+	switch n := it.For; {
+	case n == 0:
+		return nil
+	case len(it.Options) == 0:
+		return fmt.Errorf("--for %d: only an ask (dev todo ask) is what an item waits on", n)
+	case n == id:
+		return fmt.Errorf("--for %d: an ask doesn't wait on itself", n)
+	case !f.open(n):
+		return fmt.Errorf("--for %d: no open item %d", n, n)
+	case slices.ContainsFunc(f.Items, func(x Item) bool { return x.ID == n && len(x.Options) > 0 }):
+		return fmt.Errorf("--for %d: item %d is an ask itself", n, n)
+	}
+	return nil
+}
+
+// askFor is the open ask item id waits on (its For), the newest when several; nil for none.
+func (f *file) askFor(id int) *Item {
+	var ask *Item
+	for i, it := range f.Items {
+		if it.For == id && it.Done == 0 && len(it.Options) > 0 && (ask == nil || it.ID > ask.ID) {
+			ask = &f.Items[i]
+		}
+	}
+	return ask
+}
+
 // unlinkGone clears the links whose other half left the list.
 func (f *file) unlinkGone() {
 	for i, it := range f.Items {

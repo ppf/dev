@@ -80,6 +80,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`A plain worker's "asks" note (its turn ended on a question as text) is yours: answer it in the turn it reaches you, ` +
 	`yourself or as a dev todo ask to the user, never later; the boards show it as "asks its boss", not as the user's. ` +
 	`Text in a worker's input box is Claude's suggested next prompt, never the user's unsent typing. ` +
+	`An item that waits on the user's answer to an ask of your list is linked to it: dev todo ask --for <n> (or ` +
+	`--replaces <ask> --for <n>), never just a doing or Now line saying it waits on a pick. ` +
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +
 	`worker, hand finished work to review or a PR) and report what you did in one or two lines: the user wants to be told, ` +
 	`not asked. A task already under way needs no question for pushing its branch and opening its PR, replying to comments ` +

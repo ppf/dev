@@ -86,6 +86,7 @@ func TestBoardGolden(t *testing.T) {
 		{Text: "Fix the login", On: "a-fix"},
 		{Text: "Pick the layout", On: "a-ask"},
 		{Text: "Parked: the phone's Done", On: todo.Boss},
+		{Text: "Start the phone's Done now?", Options: []string{"Start now | a worker on #6 (Recommended)", "Later"}, For: 6},
 	} {
 		if _, err := s.Add(it, now); err != nil {
 			t.Fatal(err)
@@ -95,7 +96,7 @@ func TestBoardGolden(t *testing.T) {
 	if _, err := s.Add(todo.Item{Text: "Ship the notes", Context: []string{"notes in " + home + "/notes.md"}, Details: "Send them to the team."}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{7}, now.Add(-time.Minute)); err != nil {
+	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{8}, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	b, err := todo.ForPane(c, tmux.SessionTarget("boss-b"))

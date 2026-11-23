@@ -90,6 +90,20 @@ func New(it Item, acts Actions, managerRuns bool) Model {
 // it is as the list decides (todo.Own), so an ask handed to a worker is the worker's. A ticked item is none of them.
 func (m Model) ask() bool    { return !m.it.Done && m.own() && len(m.it.Options) > 0 }
 func (m Model) worker() bool { return !m.it.Done && !m.own() && m.it.Session != nil }
+
+// question is the ask the view answers: the item itself when it is the user's own ask, else the open ask it waits on
+// (todo.Shown.WaitsOn); ok false for none, or a closed boss's.
+func (m Model) question() (id int, text string, options []string, ok bool) {
+	switch w := m.it.WaitsOn; {
+	case m.ask():
+		return m.it.ID, m.it.Text, m.it.Options, true
+	case w != nil && !m.it.Done && !m.it.Closed:
+		return w.ID, w.Text, w.Options, true
+	}
+	return 0, "", nil, false
+}
+
+func (m Model) answers() bool { _, _, _, ok := m.question(); return ok }
 func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options) == 0 }
 func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
 
@@ -130,15 +144,20 @@ func (m Model) canReopen() bool {
 // list is what the view lists: an ask's options then own words; else its actions.
 func (m Model) list() []entry {
 	var out []entry
-	if m.ask() {
-		for i, o := range m.it.Options {
+	if _, _, options, ok := m.question(); ok || m.ask() {
+		if m.ask() {
+			options = m.it.Options
+		}
+		for i, o := range options {
 			c := todo.Split(o)
 			out = append(out, entry{key: strconv.Itoa(i + 1), word: c.Label, detail: c.Detail, rec: c.Recommended})
 		}
 		if !m.it.Closed {
 			out = append(out, entry{key: "m", detail: "In your own words…"})
 		}
-		return out
+		if m.ask() {
+			return out
+		}
 	}
 	if m.canStart() {
 		out = append(out, entry{key: "s", word: "Start", detail: "ask " + m.startTo() + " to start it"})
@@ -256,14 +275,15 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 	}
 	it := m.it
 	switch {
-	case len(k) == 1 && k >= "1" && k <= "9" && m.ask() && !it.Closed:
+	case len(k) == 1 && k >= "1" && k <= "9" && m.answers() && !it.Closed:
+		id, text, options, _ := m.question()
 		n := int(k[0] - '1')
-		if n >= len(it.Options) {
-			m.msg = fmt.Sprintf("#%d has %d options", it.ID, len(it.Options))
+		if n >= len(options) {
+			m.msg = fmt.Sprintf("#%d has %d options", id, len(options))
 			return m, nil
 		}
-		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, it.Options[n]) })
-	case k == "m" && m.ask() && !it.Closed, k == "i" && m.canDoing():
+		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, id, text, options[n]) })
+	case k == "m" && m.answers() && !it.Closed, k == "i" && m.canDoing():
 		if k == "i" {
 			// A fresh line each time; own words wait for the next m
 			m.field = nil
@@ -322,7 +342,8 @@ func (m Model) typeKey(k tea.KeyMsg) (Model, tea.Cmd) {
 			m.msg = "Type an answer, or esc"
 			return m, nil
 		}
-		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, it.ID, it.Text, text) })
+		id, question, _, _ := m.question()
+		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, id, question, text) })
 	case tea.KeySpace:
 		m.field = append(m.field, ' ')
 	case tea.KeyRunes:
@@ -378,6 +399,12 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 		head = append(head, bold+l+reset)
 	}
 	head = append(head, m.block(in, now)...)
+	if _, q, _, ok := m.question(); ok && !m.ask() {
+		head = append(head, "", sidebar.Red+bold+"waits on your answer to #"+strconv.Itoa(it.WaitsOn.ID)+reset)
+		for _, l := range strings.Split(ansi.Wrap(q, in, ""), "\n") {
+			head = append(head, l)
+		}
+	}
 	details := detailLines(it.Details, in)
 	shown := len(details) // the details lines kept: the first a cut drops, their last ones first
 	var context []string
@@ -627,7 +654,7 @@ func (m Model) listLines(in int) []string {
 			mark = "▸ "
 		}
 		star := ""
-		if m.ask() {
+		if m.answers() {
 			star = "  "
 			if e.rec {
 				star = sidebar.Gold + "★ " + reset

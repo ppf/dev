@@ -91,6 +91,7 @@ type Item struct {
 	Quiet   bool     `json:"quiet,omitempty"`   // a test item (--quiet): counted nowhere, the boss above not told
 	Doing   *Doing   `json:"doing,omitempty"`   // someone works on it now: the user on their own, the boss on its own
 	PartOf  int      `json:"part_of,omitempty"` // the id of its other half, a task split between two assignees
+	For     int      `json:"for,omitempty"`     // an ask's: the open item that waits on its answer (dev todo ask --for)
 	Asked   int64    `json:"asked,omitempty"`   // an ask replaced with its question kept: when that question was put
 	Dropped []string `json:"dropped,omitempty"` // options its replaces removed or changed: a pick of one is refused (droppedPick)
 }
@@ -181,7 +182,18 @@ type Shown struct {
 	PRState string `json:"pr_state,omitempty"`
 	Doing   *Doing `json:"doing,omitempty"`
 	PartOf  int    `json:"part_of,omitempty"`
+	For     int    `json:"for,omitempty"`
+	// WaitsOn is the open ask whose For is this open item: its answer decides it
+	WaitsOn *WaitsOn `json:"waits_on,omitempty"`
 	Placement
+}
+
+// WaitsOn is the ask an item waits on: its number, question and options, as answering it needs.
+type WaitsOn struct {
+	ID      int      `json:"id"`
+	Text    string   `json:"text"`
+	Options []string `json:"options"`
+	Choices []Choice `json:"choices"`
 }
 
 // MarkGone marks the open items whose Session isn't among workers, read only when one has a Session.
@@ -620,9 +632,15 @@ func (s Store) Read(now time.Time) (List, error) {
 		if it.PartOf == 0 {
 			it.PartOf = partner(f.Items, it.ID)
 		}
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf, For: it.For}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
+		}
+		if a := f.askFor(it.ID); it.Done == 0 && a != nil {
+			sh.WaitsOn = &WaitsOn{ID: a.ID, Text: a.Text, Options: a.Options}
+			for _, o := range a.Options {
+				sh.WaitsOn.Choices = append(sh.WaitsOn.Choices, Split(o))
+			}
 		}
 		if !sh.Done {
 			sh.Check = check(it, facts[it.key()], now)
@@ -676,6 +694,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			f.dropDoneLinks(it.PartOf)
 		}
 		if err := f.checkPartOf(0, it.PartOf); err != nil {
+			return err
+		}
+		if err := f.checkFor(0, it); err != nil {
 			return err
 		}
 		it.ID, it.Done, it.Added = max(f.Next, 1), 0, now.Unix()
@@ -760,6 +781,13 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 			if err := f.checkPartOf(id, it.PartOf); err != nil {
 				return err
 			}
+		}
+		// Kept while the item it decides is open
+		if it.For == 0 && len(it.Options) > 0 && f.open(old.For) {
+			it.For = old.For
+		}
+		if err := f.checkFor(id, it); err != nil {
+			return err
 		}
 		if len(it.Options) > 0 && it.Text != old.Text {
 			if err := checkQuestion(it.Text); err != nil {

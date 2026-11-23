@@ -317,6 +317,9 @@ func TestCardMarks(t *testing.T) {
 		{"parked", mk(base, func(s *todo.Shown) {
 			s.Status, s.On, s.Parked, s.Assignee = sidebar.StatusParked, todo.Boss, true, todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-x"}
 		}), []string{"▸ parked · boss-x has not taken it up"}, nil},
+		{"waits on an ask", mk(base, func(s *todo.Shown) {
+			s.WaitsOn, s.Doing = &todo.WaitsOn{ID: 8, Text: "Start now?", Options: []string{"Yes", "No"}}, &todo.Doing{Text: "asked"}
+		}), []string{"▸ waits on your answer to #8"}, []string{"asked"}},
 		{"gone", mk(base, func(s *todo.Shown) { s.Status, s.On = sidebar.StatusGone, "dev-x" }), []string{"worker dev-x gone"}, nil},
 		{"PR moved", mk(base, func(s *todo.Shown) {
 			s.Check = &sidebar.Check{PR: 18, Kind: sidebar.CheckMerged, Since: now.Add(-72 * time.Hour).Unix()}

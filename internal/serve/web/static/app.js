@@ -413,11 +413,15 @@ function statusWord(it) {
 }
 
 // pick takes option value on an ask's card and opens its sheet with it ready to send.
-function pick(list, it, value) {
+// pick takes option value of ask it and opens the sheet of item at (default: the ask's) with it ready to send.
+function pick(list, it, value, at = it.id) {
   state.picks[key(list.boss, it.id)] = { question: it.text, added: it.added, option: value, text: '' };
   dropStalePicks(); // its card may be drawn from a board read before the press
-  location.hash = itemHash(list.boss, it.id);
+  location.hash = itemHash(list.boss, at);
 }
+
+// waitsOn is the open ask item it waits on (waits_on), as its list has it; null for none, or one not shown yet.
+const waitsOn = (list, it) => it.waits_on && find(list.boss, it.waits_on.id)?.it || null;
 
 // initials leave out a session's project, its name's first part (dev-board-7: B7), so a project's sessions differ
 function initials(name) {
@@ -480,7 +484,7 @@ function openCard(x) {
   const old = it.added && Date.now() / 1000 - it.added > DAY && mine;
   const startBtn = startable(list, it, managerRuns()) && el('button', { class: 'btn-s', type: 'button', 'data-f': h + '/start', disabled: !state.reachable || state.pending[k] || !!x.moving,
     onclick: e => { e.currentTarget.disabled = true; start(list, it); } }, 'Start');
-  const [title, rest] = lead(it.text), line = m.line || (it.doing && mine ? 'on it' : '');
+  const [title, rest] = lead(it.text), line = m.line || (it.doing && mine ? 'on it' : ''), ask = waitsOn(list, it);
   // The flag says what a red band or chip would: needs you, and why
   const said = tone => m.red && tone === 'red';
   return el('article', { class: 'card' + (mine ? ' mine' : '') + (m.red ? ' need' : '') + (x.moving ? ' moving' : '') },
@@ -490,8 +494,12 @@ function openCard(x) {
       it.added && el('span', { class: 'age' + (old ? ' old' : '') }, age(it.added))),
     el('a', { class: 'title', href: h, 'data-f': h }, title || it.text),
     title && rest && el('div', { class: 'sub' }, rest),
-    line && el('div', { class: 'now', title: line }, el('b', null, it.doing && mine ? 'You, now' : 'Now'), el('span', null, line)),
-    m.parked && el('div', { class: 'now parked' }, el('b', null, 'Parked'), el('span', null, parkedLine(x))),
+    ask ? el('div', { class: 'now waits' }, el('b', null, 'Now'), el('span', null, 'waits on your answer to #' + ask.id))
+      : line && el('div', { class: 'now', title: line }, el('b', null, it.doing && mine ? 'You, now' : 'Now'), el('span', null, line)),
+    ask && answerable(list, ask) && el('div', { class: 'quick' }, choices(ask).map((c, i) =>
+      el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': h + '/' + ask.id + '/' + c.value, onclick: () => pick(list, ask, c.value, it.id) },
+        el('span', { class: 'k' }, String(i + 1)), c.label, c.detail && el('small', null, c.detail)))),
+    m.parked && !ask && el('div', { class: 'now parked' }, el('b', null, 'Parked'), el('span', null, parkedLine(x))),
     answerable(list, it) && el('div', { class: 'quick' }, choices(it).map((c, i) =>
       el('button', { type: 'button', class: c.rec ? 'rec' : '', 'data-f': h + '/' + c.value, onclick: () => pick(list, it, c.value) },
         el('span', { class: 'k' }, String(i + 1)), c.label, c.detail && el('small', null, c.detail)))),
@@ -758,16 +766,18 @@ function facts(x, live = false, session = false) {
   if (it.link) rows.push(linkRow(it.link));
   if (it.check && it.check.kind !== 'boss closed' && !session) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now && !live) rows.push(['Now', it.now]);
+  if (it.waits_on) rows.push(['Waits on', '#' + it.waits_on.id]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);
   return el('dl', { class: 'facts' }, rows.map(([k, v]) => el('div', null, el('dt', null, k), el('dd', null, v))));
 }
 
-function answerForm(list, it) {
+// answerForm is ask it's options, own words and Send; from another item's sheet (from) the button names the ask.
+function answerForm(list, it, from = false) {
   const k = key(list.boss, it.id);
   const p = state.picks[k] || (state.picks[k] = { question: it.text, added: it.added, option: '', text: '' });
-  const sendBtn = el('button', { class: 'btn hot', type: 'button', onclick: () => { sendBtn.disabled = true; send(list, it); } }, 'Send answer');
+  const sendBtn = el('button', { class: 'btn hot', type: 'button', onclick: () => { sendBtn.disabled = true; send(list, it); } }, from ? 'Send answer to #' + it.id : 'Send answer');
   const sync = () => {
     for (const b of opts.querySelectorAll('.opt')) b.setAttribute('aria-checked', b.dataset.value === p.option);
     sendBtn.disabled = !state.reachable || state.pending[k] || (!p.option && !p.text.trim());
@@ -915,6 +925,11 @@ function item(boss, id, at) {
   if (lv) out.push(lv);
   if (it.details) out.push(details(it.details));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
+  const ask = waitsOn(list, it);
+  if (ask && answerable(list, ask)) {
+    out.push(el('section', { class: 'waits', 'aria-label': 'Waits on your answer' }, el('p', { class: 'waits-q' }, el('b', null, '#' + ask.id), ' · ' + ask.text),
+      ...answerForm(list, ask, true)));
+  }
   if (answerable(list, it)) out.push(...answerForm(list, it));
   else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));
   if (desktop(list)) out.push(el('p', { class: 'hint' }, 'Answer it in its chat in the desktop app.'));

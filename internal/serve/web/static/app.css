@@ -133,6 +133,10 @@ a { color: var(--act); }
 .now b { color: var(--s-prog); font-weight: 650; white-space: nowrap; }
 .now span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .now.parked { background: none; border: 1px dashed var(--edge-strong); color: var(--meta); }
+.now.waits { background: var(--hot-wash); color: var(--hot-text); }
+.now.waits b { color: var(--hot-text); }
+.waits { border-left: 3px solid var(--hot); padding-left: 12px; }
+.waits-q { font-weight: 650; }
 .now.parked b { color: var(--ink2); }
 .quick { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 5px; }
 .quick button { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; width: 100%; text-align: left; border: 1px solid var(--edge); background: var(--card); border-radius: var(--r-ctl); padding: 7px 9px; font-size: 13px; font-weight: 600; color: var(--ink); }
