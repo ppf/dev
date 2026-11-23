@@ -120,5 +120,15 @@
       "updated": 0,
       "stale": true
     }
-  ]
+  ],
+  "project_colours": {
+    "a": {
+      "light": "#4246c0",
+      "dark": "#9a9cf0"
+    },
+    "b": {
+      "light": "#96266f",
+      "dark": "#e070c0"
+    }
+  }
 }

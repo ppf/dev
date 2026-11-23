@@ -188,6 +188,37 @@ func TestColumnsFinishedOnly(t *testing.T) {
 	}
 }
 
+// A card's project label and the filter line's projects are in the project's colour, the shown one bold; "all" and the
+// marks keep theirs.
+func TestProjectColours(t *testing.T) {
+	m, _ := board(t, fixture(2), 200, 55)
+	out := strings.Join(m.lines(time.Now()), "\n")
+	alpha, beta := sidebar.ProjectColourOf("alpha").ANSI(), sidebar.ProjectColourOf("beta").ANSI()
+	for _, want := range []string{
+		sidebar.Muted + "project " + reset + bold + "all" + reset + "  " + alpha + "alpha" + reset + "  " + beta + "beta" + reset,
+		// The selected card: its band follows each reset
+		sidebar.Red + bold + "!" + reset + sidebar.SelectedBG + " " + alpha + "alpha #1" + reset,
+		alpha + "alpha #2" + reset,
+		beta + "beta #1" + reset,
+		sidebar.Gold + "waiting for Carl" + reset,
+		sidebar.Muted + "@boss-beta",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("❌ %q missing:\n%s", want, out)
+		}
+	}
+	m = keys(t, m, "p")
+	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.Muted+"all"+reset+"  "+bold+alpha+"alpha"+reset) {
+		t.Errorf("❌ p: alpha not bold in its colour:\n%q", out)
+	}
+	// A desktop app boss's card takes desktop's colour, as its dot on the page
+	m, _ = board(t, append(fixture(0), List{Boss: "local_ab12", Items: []todo.Shown{{ID: 4, Text: "Desk", Status: sidebar.StatusYours,
+		Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}}), 200, 55)
+	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.ProjectColourOf("desktop").ANSI()+"local_ab12 #4"+reset) {
+		t.Errorf("❌ a desktop app boss's card:\n%q", out)
+	}
+}
+
 func TestColumns(t *testing.T) {
 	m, _ := board(t, fixture(2), 200, 55)
 	out := plain(m)
@@ -564,6 +595,9 @@ func TestLongNames(t *testing.T) {
 		if got := ansi.StringWidth(l); got != 120 {
 			t.Fatalf("❌ line %d is %d wide", i, got)
 		}
+	}
+	if raw := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(raw, bold+sidebar.ProjectColourOf("nocworx").ANSI()+"nocworx-core-ssl-ma-demo-0"+reset) {
+		t.Errorf("❌ the cut line's project not bold in its colour:\n%q", raw)
 	}
 	out := plain(m)
 	if !strings.Contains(out, "project nocworx-core-ssl-ma-demo-0 (4 of 9, p next)") || !strings.Contains(out, "nocworx-core-ssl-ma-de… #12") {

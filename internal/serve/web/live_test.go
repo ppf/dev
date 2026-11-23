@@ -1,10 +1,15 @@
 package web
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/sidebar"
 )
 
 // node is the node binary; without one the test skips, but not in CI, where it must run.
@@ -98,5 +103,28 @@ for (const [name, text, want] of got) {
 	out, err := exec.Command(node(t), "-e", string(src)+cases).CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "" {
 		t.Errorf("%v\n%s", err, out)
+	}
+}
+
+// The page test's invented board keeps the colours the server gives its projects.
+func TestFixtureProjectColours(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "board.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var board struct {
+		ProjectColours map[string]sidebar.ProjectColour `json:"project_colours"`
+		Lists          []struct{ Boss string }          `json:"lists"`
+	}
+	if err := json.Unmarshal(b, &board); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]sidebar.ProjectColour{}
+	for _, l := range board.Lists {
+		p := sidebar.BoardProject(l.Boss)
+		want[p] = sidebar.ProjectColourOf(p)
+	}
+	if !reflect.DeepEqual(board.ProjectColours, want) {
+		t.Errorf("project_colours %v, want %v", board.ProjectColours, want)
 	}
 }
