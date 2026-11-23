@@ -446,7 +446,7 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 		switch before, after := src.changedAround(dst.TakenAt); {
 		case !after:
 			// The take stopped before the marker: its items are here already
-			if err := from.write(s.marker(src, now)); err != nil {
+			if err := s.finish(from, src, now); err != nil {
 				return t, err
 			}
 			return t, Refused{fmt.Errorf("%s taken at %s: dev todo shows it", from.Name(), atTime(dst.TakenAt, now))}
@@ -499,16 +499,17 @@ func (s Store) marker(src file, now time.Time) file {
 
 // move moves from's file src into s, whose file dst has no open items and no notes, numbers kept.
 func (s Store) move(from Store, src, dst file, now time.Time) error {
-	// What lives beside the lists first, PR checks and finished items (dst has no open item a check is of), then s, then
-	// from's marker over its list: a failure between them leaves it in both, and a retry writes the marker (takenStamp)
-	if err := os.MkdirAll(filepath.Dir(s.checksPath()), 0o700); err != nil {
+	// What lives beside the lists copied first, PR checks (dst has no open item a check is of) and finished items, then
+	// s, then from's marker over its list: a failure between them leaves it in both, and a retry finishes (takenStamp)
+	facts, err := from.readChecks()
+	if err != nil {
 		return err
 	}
-	if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
+	if err := s.writeChecks(facts); err != nil {
 		return err
 	}
 	// Its ticked items, both lists' finished ones: kept beside s
-	if err := s.takeDone(from, slices.Concat(dst.dropped, dst.Items), now); err != nil {
+	if err := s.copyDone(from, slices.Concat(dst.dropped, dst.Items), now); err != nil {
 		return err
 	}
 	moved := src
@@ -518,16 +519,25 @@ func (s Store) move(from Store, src, dst file, now time.Time) error {
 	if err := s.write(moved); err != nil {
 		return err
 	}
-	return from.write(s.marker(src, now))
+	return s.finish(from, src, now)
 }
 
-// takeDone keeps from's finished items and items beside s's, then removes from's.
-func (s Store) takeDone(from Store, items []Item, now time.Time) error {
+// copyDone keeps from's finished items and items beside s's; from's stay until finish.
+func (s Store) copyDone(from Store, items []Item, now time.Time) error {
 	theirs, err := from.readDone(true)
 	if err != nil {
 		return err
 	}
-	if err := s.keepDone(slices.Concat(items, theirs), now); err != nil {
+	return s.keepDone(slices.Concat(items, theirs), now)
+}
+
+// finish ends a take-over of from's list src into s: from's moved marker, then its PR checks and finished items,
+// copied to s, removed.
+func (s Store) finish(from Store, src file, now time.Time) error {
+	if err := from.write(s.marker(src, now)); err != nil {
+		return err
+	}
+	if err := ignoreMissing(os.Remove(from.checksPath())); err != nil {
 		return err
 	}
 	return ignoreMissing(os.Remove(from.donePath()))
@@ -536,7 +546,7 @@ func (s Store) takeDone(from Store, items []Item, now time.Time) error {
 // merge moves from's list src, pruned at now, into s's dst, pruned too, after dst's items and notes, renumbered:
 // t gets them with their numbers before and after, and the state note dropped. A note's item or a tick of an item src
 // no longer shows loses its number, which may be one of dst's. Over MaxNotes together is refused, before anything is
-// written. The PR checks and finished items go first, then s, stamped as taken from from, then from's marker.
+// written. The PR checks and finished items are copied first, then s is written, stamped as taken from from, then finish.
 func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	notes := src.Notes
 	own := slices.IndexFunc(dst.Notes, func(n Note) bool { return n.Kind == NoteState })
@@ -581,12 +591,20 @@ func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	for _, n := range notes {
 		old := n.ID
 		n.ID, n.Item = nextNote, ids[n.Item]
+		if n.ItemDone {
+			// Its number may be another item's now: numbers restart once a list empties
+			n.Item = 0
+		}
 		nextNote++
 		dst.Notes = append(dst.Notes, n)
 		t.Notes = append(t.Notes, TakenNote{old, n})
 	}
 	for _, tk := range src.Ticked {
-		tk.ID = ids[tk.ID]
+		// Only its own item's number: one an item added since has is no longer its
+		same := slices.ContainsFunc(src.Items, func(it Item) bool { return it.ID == tk.ID && it.Text == tk.Text })
+		if tk.ID = ids[tk.ID]; !same {
+			tk.ID = 0
+		}
 		dst.Ticked = append(dst.Ticked, tk)
 	}
 	dst.Next, dst.NextNote, dst.Updated = next, nextNote, now.Unix()
@@ -608,16 +626,13 @@ func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	if err := s.writeChecks(facts); err != nil {
 		return err
 	}
-	if err := ignoreMissing(os.Remove(from.checksPath())); err != nil {
-		return err
-	}
-	if err := s.takeDone(from, nil, now); err != nil {
+	if err := s.copyDone(from, nil, now); err != nil {
 		return err
 	}
 	if err := s.write(dst); err != nil {
 		return err
 	}
-	return from.write(s.marker(src, now))
+	return s.finish(from, src, now)
 }
 
 // Plural is "n word", an s added unless n is 1.

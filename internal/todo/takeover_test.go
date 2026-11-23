@@ -599,18 +599,30 @@ func TestTakeOverRetry(t *testing.T) {
 		if err := from.Lookup(now, LookupTTL, 0, func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }); err != nil {
 			t.Fatal(err)
 		}
-		src, err := os.ReadFile(from.path)
-		if err != nil {
-			t.Fatal(err)
+		saved := map[string][]byte{}
+		for _, path := range []string{from.path, from.checksPath(), from.donePath()} {
+			data, err := os.ReadFile(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+			case err != nil:
+				t.Fatal(err)
+			default:
+				saved[path] = data
+			}
+		}
+		if _, ok := saved[from.checksPath()]; !ok {
+			t.Fatal("no PR checks beside the source")
 		}
 		if _, err := to.TakeOver(from, later); err != nil {
 			t.Fatal(err)
 		}
-		// As if it stopped before the marker
-		if err := os.WriteFile(from.path, src, 0o600); err != nil {
-			t.Fatal(err)
+		// As if it stopped before the marker: the list and what lives beside it still there
+		for path, data := range saved {
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		_, err = to.TakeOver(from, later.Add(time.Minute))
+		_, err := to.TakeOver(from, later.Add(time.Minute))
 		if err == nil || err.Error() != "boss-dev taken at "+later.Format("15:04")+": dev todo shows it" {
 			t.Errorf("merge %v: retry: %v", merge, err)
 		}
@@ -623,6 +635,11 @@ func TestTakeOverRetry(t *testing.T) {
 		}
 		if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" {
 			t.Errorf("merge %v: source = %+v, want the marker", merge, f)
+		}
+		for _, path := range []string{from.checksPath(), from.donePath()} {
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("merge %v: %s left after the retry: %v", merge, path, err)
+			}
 		}
 	}
 
@@ -770,5 +787,32 @@ func TestTakeOverRetryChanged(t *testing.T) {
 	}
 	if f := rawFile(t, from); f.MovedTo != "" {
 		t.Errorf("emptied source got a marker: %+v", f)
+	}
+}
+
+// A tick of an item whose number an item added since has, on a merge: the tick loses the number, the new item keeps it.
+func TestTakeOverMergeReusedNumber(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "dated", Until: now.Add(time.Minute).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if id, err := from.Add(Item{Text: "reused"}, later); err != nil || id != 1 {
+		t.Fatalf("add after the list emptied = %d, %v, want 1", id, err)
+	}
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	ticked, err := to.TakeTicked(later, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticked) != 1 || ticked[0].ID != 0 || ticked[0].Text != "dated" {
+		t.Errorf("ticked = %+v, want dated with no number", ticked)
 	}
 }
