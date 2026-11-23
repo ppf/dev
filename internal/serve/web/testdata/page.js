@@ -536,8 +536,12 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   check('its route is the item sheet, with when it was ticked', JSON.stringify(run('route()')) === JSON.stringify({ name: 'item', boss: 'boss-vitay', id: 117, at }));
   run('render()');
   check('the sheet opens on it', els.sheet.classList.contains('on') && /What was done/.test(textOf(els.sheet)));
-  ctx.location.hash = '#/';
+  ctx.location.hash = '#/done/boss-vitay/21/' + (at - 60);
   run('render()');
+  run("state.errors[doneKey('boss-vitay', 21)] = 'item 21 is open again'; sheet(route())");
+  check('a refused Reopen shows why on the Done sheet', /item 21 is open again/.test(textOf(els.sheet)));
+  ctx.location.hash = '#/';
+  run('state.errors = {}; render()');
 
   lists = null;
   process.exit(0);

@@ -954,7 +954,8 @@ function sheet(r) {
   const s = document.getElementById('sheet'), on = r.name === 'item' && !!state.board;
   // Redraw only when what it shows changed, so a poll keeps a pick, typed words and focus.
   const x = on && (r.at === undefined ? find(r.boss, r.id) : findDone(r.boss, r.id, r.at));
-  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[key(r.boss, r.id)], !!state.moves[key(r.boss, r.id)], state.reachable, listError(r.boss)].join('\n') : '';
+  const k = on && (r.at === undefined ? key : doneKey)(r.boss, r.id);
+  const sig = on ? [location.hash, JSON.stringify(x?.it), x?.list.closed, state.board?.manager_runs, state.errors[k], !!state.moves[k], state.reachable, listError(r.boss)].join('\n') : '';
   if (on && sig !== state.sheetSig) {
     if (location.hash !== state.opener) s.scrollTop = 0; // another item's sheet starts at its top
     state.opener = location.hash;
