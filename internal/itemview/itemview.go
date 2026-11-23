@@ -90,6 +90,8 @@ func New(it Item, acts Actions, managerRuns bool) Model {
 // it is as the list decides (todo.Own), so an ask handed to a worker is the worker's. A ticked item is none of them.
 func (m Model) ask() bool    { return !m.it.Done && m.own() && len(m.it.Options) > 0 }
 func (m Model) worker() bool { return !m.it.Done && !m.own() && m.it.Session != nil }
+func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options) == 0 }
+func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
 
 // question is the ask the view answers: the item itself when it is the user's own ask, else the open ask it waits on
 // (todo.Shown.WaitsOn); ok false for none, or a closed boss's.
@@ -104,8 +106,6 @@ func (m Model) question() (id int, text string, options []string, ok bool) {
 }
 
 func (m Model) answers() bool { _, _, _, ok := m.question(); return ok }
-func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options) == 0 }
-func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
 
 // canStart is what todo.Start takes, as the web page offers it: a late start, else a To do card, no ask, whoever's it
 // is; on the manager's own list only the user's; a closed boss's only while the manager runs; never a desktop app
@@ -144,10 +144,7 @@ func (m Model) canReopen() bool {
 // list is what the view lists: an ask's options then own words; else its actions.
 func (m Model) list() []entry {
 	var out []entry
-	if _, _, options, ok := m.question(); ok || m.ask() {
-		if m.ask() {
-			options = m.it.Options
-		}
+	if _, _, options, ok := m.question(); ok {
 		for i, o := range options {
 			c := todo.Split(o)
 			out = append(out, entry{key: strconv.Itoa(i + 1), word: c.Label, detail: c.Detail, rec: c.Recommended})
@@ -399,11 +396,9 @@ func (m Model) render(w, h int, now time.Time) ([]string, []int) {
 		head = append(head, bold+l+reset)
 	}
 	head = append(head, m.block(in, now)...)
-	if _, q, _, ok := m.question(); ok && !m.ask() {
-		head = append(head, "", sidebar.Red+bold+"waits on your answer to #"+strconv.Itoa(it.WaitsOn.ID)+reset)
-		for _, l := range strings.Split(ansi.Wrap(q, in, ""), "\n") {
-			head = append(head, l)
-		}
+	if id, q, _, ok := m.question(); ok && !m.ask() {
+		head = append(head, "", sidebar.Red+bold+"waits on your answer to #"+strconv.Itoa(id)+reset)
+		head = append(head, strings.Split(ansi.Wrap(q, in, ""), "\n")...)
 	}
 	details := detailLines(it.Details, in)
 	shown := len(details) // the details lines kept: the first a cut drops, their last ones first

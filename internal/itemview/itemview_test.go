@@ -653,7 +653,7 @@ func TestFactsWaitingFor(t *testing.T) {
 func TestWaitsOnAsk(t *testing.T) {
 	it := Item{Boss: "boss-dev", Shown: todo.Shown{ID: 6, Text: "Contract: a worker's question", On: todo.Boss, Status: sidebar.StatusParked, StatusOn: "boss-dev",
 		Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeBoss, Name: "boss-dev", Running: true}, Parked: true},
-		WaitsOn: &todo.WaitsOn{ID: 8, Text: "Start the worker for #6 now?", Options: []string{"Start now | a worker on #6 (Recommended)", "Later"}}}}
+		WaitsOn:   &todo.WaitsOn{ID: 8, Text: "Start the worker for #6 now?", Options: []string{"Start now | a worker on #6 (Recommended)", "Later"}}}}
 	var r recorder
 	m := New(it, r.actions(), false)
 	v := ansi.Strip(m.View(Width, 40, now))

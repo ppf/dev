@@ -412,7 +412,6 @@ function statusWord(it) {
   return el('span', { class: 'st ' + statusClass(statusOf(it)) }, wordOf(statusOf(it)));
 }
 
-// pick takes option value on an ask's card and opens its sheet with it ready to send.
 // pick takes option value of ask it and opens the sheet of item at (default: the ask's) with it ready to send.
 function pick(list, it, value, at = it.id) {
   state.picks[key(list.boss, it.id)] = { question: it.text, added: it.added, option: value, text: '' };
