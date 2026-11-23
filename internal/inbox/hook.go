@@ -400,5 +400,5 @@ func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, answer Note) (qu
 		return false, err
 	}
 	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: answer.Text, Key: key})
+	return b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(answer.Text), Key: key})
 }

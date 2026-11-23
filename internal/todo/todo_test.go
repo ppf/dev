@@ -652,6 +652,33 @@ func TestAnswerAnsweredElsewhere(t *testing.T) {
 	if _, err := s.Answer(id, "Other?", "2", 0, later); err == nil || err.Error() != "no open item 1" {
 		t.Errorf("late answer to another question: %v, want no open item", err)
 	}
+	same := func(what string, err error, want bool) {
+		t.Helper()
+		var a Answered
+		if !errors.As(err, &a) || a.Same != want {
+			t.Errorf("%s: %v (same %v), want same %v", what, err, a.Same, want)
+		}
+	}
+	// The user's pick decides, not what the manager relays; an item added after the pick is another
+	_, err = s.AnswerPick(id, "Filter row?", "2", "A: chips", ViaManager, 0, later)
+	same("a relay other than the pick", err, false)
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, now.Unix(), later)
+	same("a pick older than the item", err, false)
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, now.Unix()+1, later)
+	same("a pick newer than the item", err, true)
+	// Its number given to a new item since
+	if _, err := s.Add(Item{Text: "Ship it?", Options: []string{"Ship"}}, later); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.AnswerPick(id, "Filter row?", "2", "2", ViaManager, 0, later)
+	same("its number reused", err, true)
+	// Typed answers match exactly
+	free, _ := s.Add(Item{Text: "Branch?", Options: []string{"main"}}, later)
+	if _, err := s.Answer(free, "Branch?", "Release/ABC", 0, later); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Answer(free, "Branch?", "release/abc", 0, later)
+	same("a typed answer in another case", err, false)
 }
 
 // The open list a boss gets names an ask's options, so a cleared boss knows it still waits on the user.

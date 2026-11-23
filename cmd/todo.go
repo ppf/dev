@@ -397,8 +397,6 @@ answer. Answered other than via manager, a boss under a boss tells the one above
 			note := inbox.Answer(it.ID, it.Text, it.Answer)
 			if said != nil {
 				note = inbox.AnswerVia(it.ID, it.Text, it.Answer, said.Text)
-			} else {
-				tellAbove(c, pane, it, note, func(s string) { fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: "+s) })
 			}
 			queued, err := b.Send(c, control.RealClock, note)
 			switch {
@@ -407,6 +405,9 @@ answer. Answered other than via manager, a boss under a boss tells the one above
 			case err != nil:
 				// Answered all the same: a board shows a failed exit as an answer to give again
 				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, name, err)
+			}
+			if said == nil {
+				tellAbove(c, pane, it, note, func(s string) { fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: "+s) })
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "#%d answered, sent to %s\n", id, name)
 			return nil

@@ -28,7 +28,6 @@ func pageAnswer(boss string, id int, question, answer string) error {
 		return refused(err)
 	}
 	note := inbox.AnswerPage(it.ID, it.Text, it.Answer)
-	tellAbove(c, pane, it, note, func(s string) { log.Printf("dev serve: %s", s) })
 	queued, err := b.Send(c, control.RealClock, note)
 	switch {
 	case !queued:
@@ -38,6 +37,7 @@ func pageAnswer(boss string, id int, question, answer string) error {
 	case err != nil:
 		log.Printf("dev serve: #%d queued in %s's inbox, delivered when it next rests: %v", id, boss, err)
 	}
+	tellAbove(c, pane, it, note, func(s string) { log.Printf("dev serve: %s", s) })
 	return nil
 }
 
