@@ -619,3 +619,35 @@ func findLive(lives []live, r record) (live, bool) {
 	}
 	return live{}, false
 }
+
+// State is an app session's folder (originCwd, "" without a record) and whether its Claude runs.
+type State struct {
+	OriginCwd string
+	Running   bool
+}
+
+// States are the states of app sessions ids, by id. Fails closed: an unreadable live file would make a running
+// session look stopped, so it is an error; so is a record it can't read. An id with no record is stopped.
+func States(p Paths, ids []string) (map[string]State, error) {
+	paths, err := filepath.Glob(filepath.Join(p.Records, "*", "*", "local_*.json"))
+	if err != nil {
+		return nil, err
+	}
+	lives, warnings := liveSessions(p.Live)
+	if len(warnings) > 0 {
+		return nil, errors.Join(warnings...)
+	}
+	states := map[string]State{}
+	for _, id := range ids {
+		r, err := own(p.Records, paths, id)
+		switch {
+		case err != nil && !slices.ContainsFunc(paths, func(path string) bool { return filepath.Base(path) == id+".json" }):
+			r = record{SessionID: id}
+		case err != nil:
+			return nil, err
+		}
+		_, running := findLive(lives, r)
+		states[id] = State{OriginCwd: r.OriginCwd, Running: running}
+	}
+	return states, nil
+}

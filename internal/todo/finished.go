@@ -136,6 +136,9 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		if err != nil {
 			return err
 		}
+		if err := s.refuseMoved(f); err != nil {
+			return err
+		}
 		f.prune(now)
 		kept, err := s.readDone(true)
 		if err != nil {

@@ -39,6 +39,7 @@ worker notes, the newest one with open items of a session in its project whose C
 and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.
 A decision for the user goes on the list with dev todo ask and its options; the user answers it with dev todo answer,
 which ticks it and tells the boss. dev todo note keeps the boss's decisions, what the user said and open risks beside the list.
+dev todo take-over takes over an earlier boss's list for this project, of any kind (tmux, desktop app, T3 Code).
 --all prints every dev boss's list on this tmux server.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,6 +59,9 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 				return err
 			}
 			out := cmd.OutOrStdout()
+			if l.Moved != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: "+l.Moved)
+			}
 			if asJSON {
 				setStatus(s, l, boss, cmd.ErrOrStderr())
 				return printJSON(out, l)
@@ -74,7 +78,7 @@ which ticks it and tells the boss. dev todo note keeps the boss's decisions, wha
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, waiting, idle, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, doing {text, at}: who does it says what they do now, part_of: the id of its other half), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
 	return cmd
 }
 
@@ -796,7 +800,13 @@ func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 	case pane != "":
 		return todo.ForPane(tmux.New(), pane)
 	case strings.HasPrefix(id, t3Boss):
-		return todo.T3(strings.TrimPrefix(id, t3Boss))
+		s, err := todo.T3(strings.TrimPrefix(id, t3Boss))
+		if err != nil {
+			return s, err
+		}
+		// Only its own thread runs this: --boss names no T3 Code thread
+		dir, err := mainCheckout()
+		return s.WithDir(dir), err
 	}
 	return desktopTodo(id, adopt && boss == "", stderr)
 }

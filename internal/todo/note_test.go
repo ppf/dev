@@ -212,7 +212,7 @@ func TestNotesSurviveBossRestart(t *testing.T) {
 	}
 	later := now.Add(time.Minute)
 	again := boss("$2", "1700000100")
-	if again != first {
+	if again.path != first.path || again.boss != first.boss {
 		t.Fatalf("restarted boss's store %v, want %v", again, first)
 	}
 	// What a start does: read the list, take what ticked, look PRs up, and a changed list
