@@ -60,6 +60,7 @@
           "link": "https://example.com/plan",
           "done": false,
           "until": 1700086400,
+          "details": "Sections 2 and 3 only.\n\n- mark open questions in ~/plan.md",
           "added": 1700000000,
           "status": "yours",
           "column": "todo",
@@ -92,6 +93,7 @@
           "status": "working",
           "status_on": "a-fix",
           "now": "Test ~/src/login.go in ~",
+          "note": "finished: tests pass in ~/src",
           "column": "progress",
           "assignee": {
             "kind": "worker",
@@ -106,6 +108,12 @@
         {
           "id": 5,
           "text": "Ship the notes",
+          "context": [
+            "notes in ~/notes.md"
+          ],
+          "details": "Send them to the team.",
+          "result": "Sent ~/notes.md to the team channel 12:40",
+          "done_by": "boss-a",
           "assignee": {
             "kind": "you"
           },

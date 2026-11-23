@@ -188,11 +188,11 @@ func (l List) SetStatus(o Owner) {
 	for i, it := range l.Items {
 		l.Items[i].Status, l.Items[i].StatusOn = o.Status(it)
 		l.Items[i].Placement = o.place(it)
-		l.Items[i].Now = ""
+		l.Items[i].Now, l.Items[i].Note = "", ""
 		switch l.Items[i].Status {
 		case StatusWorking, StatusWaiting, StatusBlocked, StatusIdle, StatusCheck:
 			if w, ok := o.worker(it); ok && !Own(it.On, it.Session, o.Name) && !OnBoss(it.On, it.Session) {
-				l.Items[i].Now = w.Doing
+				l.Items[i].Now, l.Items[i].Note = w.Doing, w.Note
 				if o.Doing != nil {
 					l.Items[i].Now = o.Doing(w)
 				}

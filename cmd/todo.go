@@ -178,6 +178,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.Context, err = contextLines(it.Context); err != nil {
 				return err
 			}
+			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
+				return err
+			}
 			stderr := cmd.ErrOrStderr()
 			// A desktop app boss's list has no name: its own is its session id
 			own := s.Boss()
@@ -260,7 +263,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --part-of not given, and its doing line unless --on changes")
+	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --details, --part-of not given, and its doing line unless --on changes")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
 	return cmd
@@ -287,8 +291,8 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 			case !replace:
 				return errors.New("no question: only --replaces keeps the ask's question")
-			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet:
-				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --link or --quiet")
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details"):
+				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link or --quiet")
 			}
 			if len(it.Options) == 0 && !replace {
 				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
@@ -312,6 +316,9 @@ keeping its number: a pick the user made before it still answers it while the qu
 				return err
 			}
 			it.Context = context
+			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
+				return err
+			}
 			now := time.Now()
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
 			if replace {
@@ -349,12 +356,44 @@ keeping its number: a pick the user made before it still answers it while the qu
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "correct open ask n in place, keeping its number and the question, options, --context, --link not given (and --quiet once set)")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "correct open ask n in place, keeping its number and the question, options, --context, --details, --link not given (and --quiet once set)")
 	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9: "<label> | <detail>", the label at most 30 characters (what an answer names), the detail its cost or effect; the recommended one ends with "(Recommended)"`)
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the question, in order: findings, then paths")
+	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	return cmd
+}
+
+const detailsHelp = "its longer text: what it is, its steps, what's out of scope; at most 1500 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
+
+const maxDetailsBytes = 64 << 10
+
+// detailsFlag is --details as stored (todo.CleanDetails), read from stdin for -; given but empty is an error.
+func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
+	if !cmd.Flags().Changed("details") {
+		return "", nil
+	}
+	stdin := raw == "-"
+	if stdin {
+		// Bytes enough for MaxDetails characters, however spaced: a log piped in by mistake is refused, not read whole
+		b, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxDetailsBytes+1))
+		switch {
+		case err != nil:
+			return "", fmt.Errorf("--details -: %w", err)
+		case len(b) > maxDetailsBytes:
+			return "", fmt.Errorf("--details -: stdin is over %d bytes, at most %d characters kept", maxDetailsBytes, todo.MaxDetails)
+		}
+		raw = string(b)
+	}
+	switch raw = todo.CleanDetails(raw); {
+	case raw == "" && stdin:
+		return "", errors.New("--details -: stdin is empty")
+	case raw == "":
+		return "", errors.New("--details is empty")
+	}
+	// Before any store opens: a desktop boss's first write takes over an earlier list
+	return raw, todo.CheckDetails(raw)
 }
 
 const quietHelp = "a test item: a TEST tag on the boards, left out of their tallies and roll-ups (a column still lists it), the boss above not told; kept by --replaces"
@@ -508,7 +547,7 @@ func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
 const leaveOpen = "Leave it open"
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
-	var text string
+	var text, result string
 	cmd := &cobra.Command{
 		Use:   "done <n>...",
 		Short: "Tick items by number: they show ticked for a few seconds, then leave",
@@ -527,9 +566,23 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			if text != "" && len(ids) != 1 {
 				return errors.New("--text ticks one item")
 			}
+			if cmd.Flags().Changed("result") {
+				if len(ids) != 1 {
+					return errors.New("--result ticks one item: say what was done for each")
+				}
+				var err error
+				if result, err = todo.CheckResult(result); err != nil {
+					return err
+				}
+			}
 			s, _, err := listStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
+			}
+			s = s.WithResult(result)
+			// Outside Claude Code and a T3 Code thread: the user ran it
+			if os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == "" {
+				s = s.ByUser()
 			}
 			now := time.Now()
 			if text != "" {
@@ -544,6 +597,7 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&text, "text", "", "the item's text: refuse when item n reads otherwise or is on someone else (a board's tick)")
+	cmd.Flags().StringVar(&result, "result", "", "what was done, one line of at most 300 characters, kept on the ticked item: what, to whom, when, the id or link that proves it")
 	return cmd
 }
 
