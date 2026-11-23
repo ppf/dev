@@ -662,6 +662,26 @@ func TestTodoLineCheck(t *testing.T) {
 	}
 }
 
+// dev todo's line says who is on the item, with what they do when they said it; without a doing mark it's as before.
+func TestTodoLineDoing(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for _, tt := range []struct {
+		it   todo.Shown
+		want string
+	}{
+		{todo.Shown{ID: 117, Text: "Teams to Jan"}, "117\t☐\tTeams to Jan"},
+		{todo.Shown{ID: 117, Text: "Teams to Jan", Doing: &todo.Doing{}}, "117\t☐\tTeams to Jan\tthe user is on it"},
+		{todo.Shown{ID: 117, Text: "Teams to Jan", Doing: &todo.Doing{Text: "writing it"}}, "117\t☐\tTeams to Jan\tthe user is on it: writing it"},
+		{todo.Shown{ID: 5, Text: "Merge #1", On: todo.Boss, Doing: &todo.Doing{}}, "5\t☐\tMerge #1\tboss's own\tthe boss is on it"},
+		{todo.Shown{ID: 6, Text: "PR #412 open", Doing: &todo.Doing{}, Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 412, Since: now.Add(-40 * time.Minute).Unix()}},
+			"6\t☐\tPR #412 open\tthe user is on it\t⚠ PR #412 merged 40m ago"},
+	} {
+		if got := todoLine(tt.it, now); got != tt.want {
+			t.Errorf("line = %q, want %q", got, tt.want)
+		}
+	}
+}
+
 // add --done-on needs a GitHub PR link; dev todo check ticks the item once its PR is so, and a desktop boss's next
 // reminder tells it once.
 func TestTodoDoneOn(t *testing.T) {

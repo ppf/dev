@@ -721,14 +721,23 @@ func printAll(out, stderr io.Writer, c *tmux.Client, asJSON bool) error {
 		return err
 	}
 	for _, bl := range lists {
-		if bl.Error != "" {
-			fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
-		}
-		for _, it := range bl.Items {
-			printItem(out, bl.Boss+"\t", it, now)
-		}
+		printBossList(out, bl, now)
 	}
 	return nil
+}
+
+// printBossList prints bl's rows for --all, each after its boss: a row for a list not read, then its items.
+func printBossList(out io.Writer, bl bossList, now time.Time) {
+	if bl.Error != "" {
+		fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
+	}
+	for _, it := range bl.Items {
+		if bl.Closed && todo.OnBoss(it.On, it.Session) {
+			// No one is on a closed boss's own item: it's To do, as its column says
+			it.Doing = nil
+		}
+		printItem(out, bl.Boss+"\t", it, now)
+	}
 }
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
@@ -988,8 +997,8 @@ func printItem(out io.Writer, prefix string, it todo.Shown, now time.Time) {
 	}
 }
 
-// todoLine is an item as text at now: number, ☐ (◌ waiting on someone else than the boss, ☑ ticked), text, who it waits on, link, why
-// to re-check it.
+// todoLine is an item as text at now: number, ☐ (◌ waiting on someone else than the boss, ☑ ticked), text, who it waits on, link,
+// who is on it (OnIt), why to re-check it.
 func todoLine(it todo.Shown, now time.Time) string {
 	box := "☐"
 	switch {
@@ -1015,6 +1024,10 @@ func todoLine(it todo.Shown, now time.Time) string {
 	}
 	if it.DoneOn != "" {
 		parts = append(parts, "done on "+it.DoneOn)
+	}
+	// Read by other bosses and the manager too (--all): no "you"
+	if on := it.OnIt("the boss is on it"); on != "" {
+		parts = append(parts, on)
 	}
 	switch {
 	case it.Answer != "":

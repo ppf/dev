@@ -139,14 +139,18 @@ func partner(items []Item, id int) int {
 // tick ticks it at at: what its doer did ends.
 func (it *Item) tick(at int64) { it.Done, it.Doing = at, nil }
 
-// doingLine is what lines() says of an item someone works on: the user on their own, the boss on its own.
-func doingLine(it Shown) string {
+// OnIt is what a list's text says of an item someone works on (Doing): the user on their own, boss (the wording for its
+// reader) on the boss's own; "" for none.
+func (it Shown) OnIt(boss string) string {
+	if it.Doing == nil {
+		return ""
+	}
 	who := "the user is on it"
 	if OnBoss(it.On, it.Session) {
-		who = "you are on it"
+		who = boss
 	}
 	if it.Doing.Text != "" {
 		who += ": " + it.Doing.Text
 	}
-	return " (" + who + ")"
+	return who
 }

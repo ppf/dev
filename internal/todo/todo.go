@@ -1211,8 +1211,8 @@ func (l List) lines(limit int, now time.Time) string {
 		if it.DoneOn != "" {
 			b.WriteString(" (done on " + it.DoneOn + ")")
 		}
-		if it.Doing != nil {
-			b.WriteString(doingLine(it))
+		if on := it.OnIt("you are on it"); on != "" {
+			b.WriteString(" (" + on + ")")
 		}
 		switch {
 		case it.Started == nil:
