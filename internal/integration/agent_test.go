@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,13 +44,7 @@ hook clear SessionEnd`, name), name)
 
 // devAgent runs dev agent args with env and returns stdout, stderr and the exit status.
 func devAgent(env []string, stdin string, args ...string) (string, string, string) {
-	cmd := exec.Command(devBin, append([]string{"agent"}, args...)...)
-	cmd.Env = env
-	cmd.Stdin = strings.NewReader(stdin)
-	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err := cmd.Run()
-	return out.String(), errOut.String(), errStatus(err)
+	return runDev(env, stdin, append([]string{"agent"}, args...)...)
 }
 
 // The control loop on a real server: list, prompt --wait, read, busy and timeout, stall, send-keys,

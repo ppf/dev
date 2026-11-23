@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -15,8 +16,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/herd"
+	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
@@ -345,11 +348,11 @@ func checkStart(cmd *cobra.Command, start agent.Start) error {
 
 func newAgentStartCmd() *cobra.Command {
 	var asJSON bool
-	var agentCmd, boss string
+	var agentCmd, boss, from string
 	var start agent.Start
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "start <project> [worktree]",
+		Use:   "start <project> [worktree] | --from <worker>",
 		Short: "Open a project (or its worktree) in the background and wait until its agent is registered",
 		Long: `Open a project's session, or its worktree's (created when missing), without attaching to it, and
 wait until its agent's first hook registers it (a Codex or Grok pane counts once its CLI runs, so read its
@@ -358,10 +361,21 @@ screen before the first prompt). An existing session is reused; one running anot
 --model and --effort start a new session's Claude with them (list --json and get --json show them, and it keeps
 them when dev restarts it). With an existing session they are an error unless they equal what it was started
 with, and with --agent codex or grok always.
-Prints the agent like get.`,
-		Args:              cobra.RangeArgs(1, 2),
+--from <worker> hands a worker's half-done branch to a fresh Claude: refused unless this session (or
+--boss's) started the worker, it is idle (or waiting only because it sat idle) and no other session has a pane
+in its worktree. Its session is closed without dev agent close's delivered and changes checks, its worktree,
+branch and uncommitted changes kept, and a new session of the same name starts there with --model and
+--effort; its to do items stay linked to it. It takes no <project> or [worktree].
+Prints the agent like get (with --from, --json adds took_over: session, worktree, branch, base, ahead, dirty, transcript).`,
+		Args:              cobra.RangeArgs(0, 2),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if from != "" && len(args) > 0 {
+				return fmt.Errorf("--from takes no <project> or [worktree]: the new session takes %s's", from)
+			}
+			if from == "" && len(args) == 0 {
+				return errors.New("requires <project> [worktree], or --from <worker>")
+			}
 			if agentCmd != agent.Claude && agentCmd != agent.Codex && agentCmd != agent.Grok {
 				return fmt.Errorf("unknown --agent %q, want claude, codex or grok", agentCmd)
 			}
@@ -370,6 +384,12 @@ Prints the agent like get.`,
 			}
 			if start != (agent.Start{}) && agentCmd != agent.Claude {
 				return fmt.Errorf("--model and --effort only apply to Claude, not --agent %s", agentCmd)
+			}
+			if from != "" {
+				if agentCmd != agent.Claude {
+					return fmt.Errorf("--from starts a fresh Claude, not --agent %s", agentCmd)
+				}
+				return startFrom(cmd, from, boss, start, timeout, asJSON)
 			}
 			wt, err := worktreeArg(args)
 			if err != nil {
@@ -411,9 +431,97 @@ Prints the agent like get.`,
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
 	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex or grok")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
+	cmd.Flags().StringVar(&from, "from", "", "worker whose worktree and branch a fresh session takes over (closes the worker, keeps its work)")
 	addBossFlag(cmd, &boss)
 	addStartFlags(cmd, &start, "session's Claude")
 	return cmd
+}
+
+// startFrom is dev agent start --from: worker from's session closed by the coordinator in this (or boss's) pane,
+// keeping its worktree, and a fresh Claude started in it under the same name, with the worker's to do items.
+func startFrom(cmd *cobra.Command, from, boss string, start agent.Start, timeout time.Duration, asJSON bool) error {
+	c := tmux.New()
+	pane, err := callerPane(c, boss)
+	if err != nil {
+		return err
+	}
+	if pane == "" {
+		return errors.New("--from takes over workers of the session it runs in: run it inside tmux, or pass --boss <session>")
+	}
+	a, err := resolveOther(c, from)
+	if err != nil {
+		return err
+	}
+	if a.Outside && !outsideBoss(boss) {
+		return fmt.Errorf("%s was started by a coordinator outside tmux (--boss): leave it to that coordinator", a.Session)
+	}
+	took, err := control.TakeOver(c, pane, a, func(name string) (string, error) {
+		projects, path, err := loadProjects(cmd)
+		if err != nil {
+			return "", err
+		}
+		p, ok := config.Find(projects, name)
+		if !ok {
+			return "", fmt.Errorf("%s's project %q isn't in %s", a.Session, name, path)
+		}
+		return p.Dir()
+	})
+	if err != nil {
+		return err
+	}
+	stderr := cmd.ErrOrStderr()
+	branch := "detached HEAD"
+	if took.Branch != "" {
+		branch = "branch " + took.Branch
+	}
+	fmt.Fprintf(stderr, "ℹ  Taking over %s (%s, %s): %s, %s ahead of %s, %s (kept)\n", a.Session, cmp.Or(a.Model, "default model"),
+		cmp.Or(a.Effort, "default effort"), branch, plural(took.Ahead, "commit"), took.Base, plural(len(took.Dirty), "uncommitted file"))
+	fmt.Fprintf(stderr, "Closed %s, kept worktree %s\n", a.Session, took.Worktree)
+	if took.Transcript != "" {
+		fmt.Fprintf(stderr, "Handover: its transcript %s\n", took.Transcript)
+	}
+	b, err := startTaken(cmd, c, pane, a.Project, took, boss, start, timeout)
+	if err != nil {
+		retry := []string{"dev agent start", a.Project, took.Name}
+		for _, f := range [][2]string{{"--model", start.Model}, {"--effort", start.Effort}, {"--boss", boss}} {
+			if f[1] != "" {
+				retry = append(retry, f[0], f[1])
+			}
+		}
+		err = fmt.Errorf("closed %s and kept its worktree and %s, but the new session failed: retry with\n   %s: %w", a.Session, branch, strings.Join(retry, " "), err)
+		// open.Run printed its error already, so Execute wouldn't print the retry
+		if errors.Is(err, open.ErrShown) {
+			fmt.Fprintln(stderr, "❌ "+err.Error())
+		}
+		return err
+	}
+	if asJSON {
+		return printJSON(cmd.OutOrStdout(), struct {
+			control.Agent
+			TookOver control.TookOver `json:"took_over"`
+		}{b, took})
+	}
+	return printAgent(cmd.OutOrStdout(), false, b)
+}
+
+// startTaken starts the session took closed again in its worktree, as the worker of the coordinator in pane. Its
+// to do items stay linked: a tmux worker's link is its session name.
+func startTaken(cmd *cobra.Command, c *tmux.Client, pane, project string, took control.TookOver, boss string, start agent.Start, timeout time.Duration) (control.Agent, error) {
+	if err := openProject(cmd, project, took.Name, true, true, agent.Claude, boss, start); err != nil {
+		return control.Agent{}, err
+	}
+	if err := herd.MarkStartedBy(c, took.Session, pane, outsideBoss(boss)); err != nil {
+		return control.Agent{}, err
+	}
+	return control.AwaitAgent(c, control.RealClock, took.Session, timeout)
+}
+
+// plural is n with one, made plural with an s unless n is 1.
+func plural(n int, one string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + one + "s"
 }
 
 func newAgentCloseCmd() *cobra.Command {

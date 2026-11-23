@@ -115,17 +115,25 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 // closable refuses a working, deciding or hookless worker, or a shared or dirty worktree, or one whose HEAD
 // moved from head, the one delivered checked.
 func closable(c *tmux.Client, a Agent, wt, head string) error {
-	if err := settled(c, a); err != nil {
+	if err := takeable(c, a, wt); err != nil {
 		return err
-	}
-	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
-		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
 	}
 	if dirty, err := worktree.Dirty(wt); err != nil || dirty {
 		return cmp.Or(err, fmt.Errorf("%s has uncommitted changes to tracked files", wt))
 	}
 	if now, err := worktree.Head(wt); err != nil || now != head {
 		return cmp.Or(err, fmt.Errorf("%s got new commits while closing", wt))
+	}
+	return nil
+}
+
+// takeable refuses a working, deciding or hookless worker, or one whose worktree wt another session has a pane in.
+func takeable(c *tmux.Client, a Agent, wt string) error {
+	if err := settled(c, a); err != nil {
+		return err
+	}
+	if shared, err := sidebar.WorktreeShared(c, a.Session, wt); err != nil || shared {
+		return cmp.Or(err, fmt.Errorf("another session has a pane in %s", wt))
 	}
 	return nil
 }
