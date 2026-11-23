@@ -293,7 +293,7 @@ textarea { min-height: 3.6em; resize: vertical; }
 .details li { margin: 2px 0; white-space: pre-wrap; }
 .details li.sub { margin-left: 18px; list-style-type: circle; }
 .details > :first-child { color: var(--ink); }
-/* the live block: the session on the item, or what was done on a finished one; its edge the state's colour */
+/* the live block: the session on the item, the boss's parked line, or what was done on a finished one; its edge the state's colour */
 .live { --lv: var(--meta); display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--edge); border-left: 4px solid var(--lv); border-radius: var(--r-card); background: var(--ground); padding: 10px 12px; font-size: 13.5px; color: var(--ink2); }
 .live[data-st="s-working"] { --lv: var(--s-done); } .live[data-st="s-waiting"], .live[data-st="s-check"], .live[data-st="s-asks"] { --lv: var(--s-wait); } .live[data-st="s-decide"], .live[data-st="s-gone"] { --lv: var(--hot); }
 .lv-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }

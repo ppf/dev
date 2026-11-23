@@ -20,8 +20,8 @@ const (
 )
 
 // Statuses is the order boards list items by status within a group (Groups).
-var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusWorking, StatusBlocked, StatusAsks, StatusWaiting, StatusIdle,
-	StatusParked, StatusGone, StatusCheck, StatusBossClosed}
+var Statuses = []string{StatusDecide, StatusYours, StatusStarting, StatusParked, StatusWorking, StatusBlocked, StatusAsks, StatusWaiting,
+	StatusIdle, StatusGone, StatusCheck, StatusBossClosed}
 
 // StatusWord is how the boards say status: asks as "asks its boss", the others as they are.
 func StatusWord(status string) string {
@@ -57,13 +57,14 @@ type StatusGroup struct {
 	Statuses []string
 }
 
-// Groups are TO DO's groups in order: each by its first status in Statuses, In progress holding a worker's every
-// state but waiting, which Waiting on others shares with a person's.
+// Groups are TO DO's groups in order: each by its first status in Statuses, To do holding the boss's parked items (its
+// cards' column), In progress a worker's every state but waiting, which Waiting on others shares with a person's.
 var Groups = []StatusGroup{
 	{"To decide", []string{StatusDecide}},
 	{"Yours", []string{StatusYours}},
 	{"Starting", []string{StatusStarting}},
-	{"In progress", []string{StatusWorking, StatusBlocked, StatusAsks, StatusIdle, StatusParked, StatusGone}},
+	{"To do", []string{StatusParked}},
+	{"In progress", []string{StatusWorking, StatusBlocked, StatusAsks, StatusIdle, StatusGone}},
 	{"Waiting on others", []string{StatusWaiting}},
 	{"Check", []string{StatusCheck}},
 	{"Boss closed", []string{StatusBossClosed}},

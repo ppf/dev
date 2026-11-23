@@ -791,7 +791,7 @@ func TestPromptAskRules(t *testing.T) {
 			"Checks a plugin or hook asks for after your answer count as lookups too",
 			"dev todo note decided|said|risk",
 			"write a five-line contract file", "An item you do yourself or park is --on boss", "--waiting-for <who>, never a free-text owner", "state: your standing state off the board", `ending "leave it to the manager" is the manager's`, `in a "via manager (...)" note only the answer after the colon is`, "stop it after the first step and ask before the rest", `open -a "Google Chrome" <file>`,
-			`answer it in the turn it reaches you`, "never the user's unsent typing", "dev todo ask --for <n>",
+			`answer it in the turn it reaches you`, "never act on it, never submit or clear it", "dev todo ask --for <n>",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",

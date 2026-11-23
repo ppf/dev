@@ -155,7 +155,7 @@ func TestAskRules(t *testing.T) {
 			"**A mockup the user must see is opened for them.**",
 			`open -a "Google Chrome" <file>`,
 			"**A worker's question is answered in the same turn.**",
-			"never the user's unsent typing",
+			"never act on it, never submit or clear it",
 			"**An item that waits on an ask is linked to it.**",
 			"`dev todo ask --for <n>`",
 			"Put the question, context and option texts in single quotes, or keep \"$\" and backticks out of them",

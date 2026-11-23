@@ -609,7 +609,7 @@ func buildSnapshot(rows []row, clients []sidebar.Client, pane, host string, look
 			continue
 		}
 		t := tile{pane: a.Pane.ID, deciding: agent.Deciding(a.State, r.WaitingFor), note: r.Note, context: r.Context, model: r.Model, effort: r.Effort, via: via,
-			bossAnswers: !full.Boss && full.BossRuns}
+			bossAnswers: !full.Boss && full.BossRuns && !repeated(r.Note)}
 		t.sess = sidebar.Session{State: a.State, Wait: wait.FromOptions(r.WaitUntil, r.WaitReason)}
 		t.question, _ = agent.ParseQuestion(r.Question)
 		// An asking one's capture tells (see refresh)
@@ -780,3 +780,6 @@ func agentPanes(rs []row) []agent.Pane {
 	}
 	return ps
 }
+
+// repeated reports an asks note the boss inbox repeated unanswered (sidebar.Unanswered): the user's again.
+func repeated(note string) bool { _, r := sidebar.Unanswered(note); return r }

@@ -129,8 +129,8 @@ func check(it Item, f fact, now time.Time) *sidebar.Check {
 	return nil
 }
 
-// stale reports an open item unchanged for two days at now: not an ask, a dated item before its Until, nor one its
-// boss parked (OnBoss, not Doing).
+// stale reports an open item unchanged for two days at now: not an ask, a dated item before its Until, nor the boss's
+// own while no one does it (OnBoss, not Doing; started too).
 func (it Item) stale(now time.Time) bool {
 	parked := OnBoss(it.On, it.Session) && it.Doing == nil
 	return it.Added != 0 && now.Sub(time.Unix(it.Added, 0)) >= unchanged && len(it.Options) == 0 && it.Until <= now.Unix() && !parked

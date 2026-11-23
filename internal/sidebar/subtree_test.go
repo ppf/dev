@@ -571,6 +571,7 @@ func TestAsksBoss(t *testing.T) {
 		{"boss runs", []Session{boss, asks}, RankIdle, "idle", 0},
 		{"boss runs, idle reminder", []Session{boss, reminder}, RankIdle, "idle", 0},
 		{"boss runs, a dialog", []Session{boss, dialog}, RankNeedsYou, "1 need you", 1},
+		{"boss runs, left unanswered past AskAgain", []Session{boss, worker(Session{State: agent.Idle, Note: "asks: Merge? (unanswered for 30m)"})}, RankNeedsYou, "1 need you", 1},
 		{"no boss running", []Session{asks}, RankNeedsYou, "", 1},
 		{"boss's coordinator gone", []Session{{Name: "b", ID: "$b", Boss: true, State: agent.Idle}, asks}, RankNeedsYou, "", 1},
 		{"started by a coordinator outside tmux", []Session{boss, func() Session { s := asks; s.Outside = true; return s }()}, RankNeedsYou, "1 need you", 1},
@@ -610,5 +611,22 @@ func TestAsksBoss(t *testing.T) {
 	}
 	if !strings.Contains(raw, gold+"asks its boss") || strings.Count(ansi.Strip(raw), "asks its boss") != 2 {
 		t.Errorf("w and r (under Claude's idle reminder) don't read asks its boss in gold:\n%s", ansi.Strip(raw))
+	}
+}
+
+// Only the inbox's own end marks a repeat: a question that says the words itself is no repeat.
+func TestUnanswered(t *testing.T) {
+	for _, c := range []struct {
+		in, q string
+		rep   bool
+	}{
+		{"Merge? (unanswered for 30m)", "Merge?", true},
+		{"Merge? (unanswered for 6h 1m)", "Merge?", true},
+		{"Escalate tickets (unanswered for 30m) automatically?", "Escalate tickets (unanswered for 30m) automatically?", false},
+		{"Merge?", "Merge?", false},
+	} {
+		if q, rep := Unanswered(c.in); q != c.q || rep != c.rep {
+			t.Errorf("%q: %q %v, want %q %v", c.in, q, rep, c.q, c.rep)
+		}
 	}
 }

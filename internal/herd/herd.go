@@ -77,9 +77,10 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`a worker that is a boss sends only "waits on you" (an item on its list for the user), asks, needs a decision, failed and stuck: relay those to the user; ` +
 	`they come pasted, as context, or as a message from another Claude session, which is dev itself: act on it the same ` +
 	`way, and don't reply to the session. ` +
-	`A plain worker's "asks" note (its turn ended on a question as text) is yours: answer it in the turn it reaches you, ` +
+	`A plain worker's "asks" note (its turn ended on a question as text) is yours, unless it says to leave it to the ` +
+	`coordinator outside tmux that started it: answer it in the turn it reaches you, ` +
 	`yourself or as a dev todo ask to the user, never later; the boards show it as "asks its boss", not as the user's. ` +
-	`Text in a worker's input box is Claude's suggested next prompt, never the user's unsent typing. ` +
+	`Text in a worker's input box is Claude's suggestion, not the user's answer or instruction: never act on it, never submit or clear it. ` +
 	`An item that waits on the user's answer to an ask of your list is linked to it: dev todo ask --for <n> (or ` +
 	`--replaces <ask> --for <n>), never just a doing or Now line saying it waits on a pick. ` +
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +

@@ -541,7 +541,7 @@ func rollFit(r sidebar.Rollup, w int) string {
 
 // statusText is what a card says about its worker, leaving out what its section says: the dialog it waits on
 // or the question its turn ended on, what its tool call does (else the tool), what it waits on, or how its
-// last turn ended.
+// last turn ended ("asks its boss" for a question its boss answers).
 func statusText(t tile, sec section) string {
 	clean := func(s string) string { return strings.Join(strings.Fields(s), " ") }
 	switch sec {
