@@ -2,7 +2,9 @@ package todo
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -201,15 +203,12 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 		}
 		out = append(out, c)
 	}
-	var busy error
-	if i := slices.IndexFunc(out, func(c Candidate) bool { return c.store.path == own.path }); i < 0 {
+	if !slices.ContainsFunc(out, func(c Candidate) bool { return c.store.path == own.path }) {
 		c := Candidate{List: own.Name(), Kind: own.Kind(), store: own}
 		if c.Kind != KindTmux {
 			c.id = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(filepath.Base(own.path), ".json"), t3Prefix), desktopPrefix)
 		}
 		out = append(out, c)
-	} else if out[i].Open > 0 || out[i].Notes > 0 {
-		busy = notEmpty(out[i].Open, out[i].Notes)
 	}
 	var states map[string]DesktopState
 	var statesErr error
@@ -249,7 +248,7 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 				c.Project = looks.Project(c.store.dir)
 			}
 		}
-		c.classify(own, ownProject, stateErr, busy, anyProject)
+		c.classify(own, ownProject, stateErr, anyProject)
 	}
 	slices.SortStableFunc(out, func(a, b Candidate) int { return cmp.Compare(b.Updated, a.Updated) })
 	return out, nil
@@ -290,9 +289,9 @@ func (c *Candidate) count(f file, now time.Time) {
 	c.store.dir = f.Dir
 }
 
-// classify sets why c can't be taken by own's boss, of project ownProject, stateErr being why its state is unknown and
-// busy why own's list takes none now; Listed and Other say where the listing puts it.
-func (c *Candidate) classify(own Store, ownProject string, stateErr, busy error, anyProject bool) {
+// classify sets why c can't be taken by own's boss, of project ownProject, stateErr being why its state
+// is unknown; Listed and Other say where the listing puts it.
+func (c *Candidate) classify(own Store, ownProject string, stateErr error, anyProject bool) {
 	refuse := func(why string, err error) {
 		if c.refusal == nil {
 			c.WhyNot, c.refusal = why, err
@@ -320,8 +319,6 @@ func (c *Candidate) classify(own Store, ownProject string, stateErr, busy error,
 		refuse("running: close it first", fmt.Errorf("%s is running: close it first (its manager's ×, or /exit in it), then take it over", c.List))
 	case c.State == StateRunning:
 		refuse("running: close it first", fmt.Errorf("%s is running: close it first (/exit in it), then take it over", c.List))
-	case busy != nil:
-		refuse("this boss's list isn't empty", busy)
 	}
 	if anyProject || c.Project != "" && c.Project == ownProject {
 		c.Takeable = c.refusal == nil
@@ -339,19 +336,44 @@ func (c *Candidate) classify(own Store, ownProject string, stateErr, busy error,
 	}
 }
 
-// Taken is what TakeOver moved: the open items and the notes, numbers kept, how many asks among the items, and the
-// workers (by name) open items are on.
-type Taken struct {
-	Items     []Item
-	Notes     []Note
-	Asks      int
-	OnWorkers []string
+// takenStamp is the list last taken over into a list (TakeOver), by its key, and when: a take-over stopped before
+// its marker is written leaves it, so its retry writes only the marker.
+type takenStamp struct {
+	TakenFrom string `json:"taken_from,omitempty"`
+	TakenAt   int64  `json:"taken_at,omitempty"`
 }
 
-// TakeOver moves from's list into s, which has no open items and no notes: its items, notes, PR checks and finished
-// items, numbers kept; s's own finished items stay. from's file then holds a moved marker, which refuses its boss's
-// writes (Moved). The move runs under both lists' locks and checks both again there: a list moved, emptied or
-// a destination no longer empty is refused (Refused), nothing moved. Whether from's boss runs is its caller's check.
+// TakenItem is an item TakeOver moved, its new number in ID, From its number before.
+type TakenItem struct {
+	From int
+	Item
+}
+
+// TakenNote is a note TakeOver moved, its new number in ID, From its number before.
+type TakenNote struct {
+	From int
+	Note
+}
+
+// Taken is what TakeOver moved: the open items and the notes, how many asks among the items, and the workers (by name)
+// open items are on. Merged: into a list with OwnItems open items or OwnNotes notes, after them, renumbered; DroppedState
+// is the older of two state notes, dropped.
+type Taken struct {
+	Items              []TakenItem
+	Notes              []TakenNote
+	Asks               int
+	OnWorkers          []string
+	Merged             bool
+	OwnItems, OwnNotes int
+	DroppedState       *Note
+}
+
+// TakeOver moves from's list into s: its items, notes, PR checks and finished items. Into a list with no open items
+// and no notes, numbers kept; else merged after s's own, renumbered, the links between them, PR checks, and notes
+// and ticks of the items moved following. Over MaxNotes together is refused; of two state notes the newer stays. from's file then
+// holds a moved marker, which refuses its boss's writes (Moved). The move runs under both lists' locks and checks both
+// again there: a list moved or emptied is refused (Refused), nothing moved. Whether from's boss runs is its caller's
+// check.
 func (s Store) TakeOver(from Store, now time.Time) (t Taken, err error) {
 	if s.path == from.path {
 		return t, Refused{fmt.Errorf("%s is this boss's own list", s.Name())}
@@ -371,6 +393,25 @@ func lockedPair(a, b Store, fn func() error) error {
 		a, b = b, a
 	}
 	return a.locked(func() error { return b.locked(fn) })
+}
+
+// key is s's list's key: its file's name, as a moved marker and a taken stamp name it.
+func (s Store) key() string { return strings.TrimSuffix(filepath.Base(s.path), ".json") }
+
+// changedAround reports whether f has items or notes added at or before at, and whether it changed after it: an item
+// or note added, or a write (Updated).
+func (f file) changedAround(at int64) (before, after bool) {
+	after = f.Updated > at
+	added := func(t int64) {
+		before, after = before || t <= at, after || t > at
+	}
+	for _, it := range f.Items {
+		added(it.Added)
+	}
+	for _, n := range f.Notes {
+		added(n.Added)
+	}
+	return before, after
 }
 
 // takeOver is TakeOver under both locks.
@@ -393,15 +434,52 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 			src.Items[i].On = ""
 		}
 	}
-	// What it moves, as its boards show it now; the file itself moves as stored
+	// What it moves, as its boards show it now; a move moves the file itself as stored
 	shown := src
 	shown.Items, shown.Notes = slices.Clone(src.Items), slices.Clone(src.Notes)
 	shown.prune(now)
-	for _, it := range shown.Items {
-		if it.Done != 0 {
-			continue
+	if shown.empty() {
+		return t, Refused{fmt.Errorf("%s is empty (no open items, no notes): nothing to take", from.Name())}
+	}
+	if dst.TakenFrom == from.key() {
+		// Only a list all added after the take is a fresh one under the same name (a dev boss reopened)
+		switch before, after := src.changedAround(dst.TakenAt); {
+		case !after:
+			// The take stopped before the marker: its items are here already
+			if err := s.finish(from, src, now); err != nil {
+				return t, err
+			}
+			return t, Refused{fmt.Errorf("%s taken at %s: dev todo shows it", from.Name(), atTime(dst.TakenAt, now))}
+		case before:
+			return t, Refused{fmt.Errorf("%s was taken at %s and changed before its marker was written: taking it again would take its items twice; nothing moved",
+				from.Name(), atTime(dst.TakenAt, now))}
 		}
-		t.Items = append(t.Items, it)
+	}
+	dst.prune(now)
+	for _, it := range dst.Items {
+		if it.Done == 0 {
+			t.OwnItems++
+		}
+	}
+	t.OwnNotes = len(dst.Notes)
+	if t.OwnItems == 0 && t.OwnNotes == 0 {
+		if err := s.move(from, src, dst, now); err != nil {
+			return Taken{}, err
+		}
+		for _, it := range shown.Items {
+			t.Items = append(t.Items, TakenItem{it.ID, it})
+		}
+		for _, n := range shown.Notes {
+			t.Notes = append(t.Notes, TakenNote{n.ID, n})
+		}
+	} else {
+		t.Merged = true
+		if err := s.merge(from, shown, dst, &t, now); err != nil {
+			return Taken{}, err
+		}
+	}
+	t.Items = slices.DeleteFunc(t.Items, func(it TakenItem) bool { return it.Done != 0 })
+	for _, it := range t.Items {
 		if len(it.Options) > 0 {
 			t.Asks++
 		}
@@ -409,62 +487,152 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 			t.OnWorkers = append(t.OnWorkers, it.Session.Name)
 		}
 	}
-	t.Notes = shown.Notes
-	if len(t.Items) == 0 && len(t.Notes) == 0 {
-		return t, Refused{fmt.Errorf("%s is empty (no open items, no notes): nothing to take", from.Name())}
+	return t, nil
+}
+
+// marker is the moved marker from's list src leaves at now, pointing at s.
+func (s Store) marker(src file, now time.Time) file {
+	return file{Updated: now.Unix(), Boss: src.Boss, Dir: src.Dir, movedMarker: movedMarker{
+		MovedTo: s.key(), MovedToName: s.Name(), MovedAt: now.Unix(),
+	}}
+}
+
+// move moves from's file src into s, whose file dst has no open items and no notes, numbers kept.
+func (s Store) move(from Store, src, dst file, now time.Time) error {
+	// What lives beside the lists copied first, PR checks (dst has no open item a check is of) and finished items, then
+	// s, then from's marker over its list: a failure between them leaves it in both, and a retry finishes (takenStamp)
+	facts, err := from.readChecks()
+	if err != nil {
+		return err
 	}
-	dst.prune(now)
-	open := 0
-	for _, it := range dst.Items {
-		if it.Done == 0 {
-			open++
-		}
+	if err := s.writeChecks(facts); err != nil {
+		return err
 	}
-	if open > 0 || len(dst.Notes) > 0 {
-		return t, notEmpty(open, len(dst.Notes))
-	}
-	// The list first, by a rename: a failure leaves it in one place, never two; then the marker, then what lives beside
-	// them, PR checks and finished items, which a failure leaves beside the marker, read by no board
-	if err := os.Rename(from.path, s.path); err != nil {
-		return t, err
+	// Its ticked items, both lists' finished ones: kept beside s
+	if err := s.copyDone(from, slices.Concat(dst.dropped, dst.Items), now); err != nil {
+		return err
 	}
 	moved := src
 	moved.Boss, moved.Dir, moved.Updated = s.boss, s.dir, now.Unix()
+	moved.takenStamp = takenStamp{TakenFrom: from.key(), TakenAt: now.Unix()}
 	moved.Ticked = slices.Concat(dst.Ticked, src.Ticked)
 	if err := s.write(moved); err != nil {
-		return t, err
+		return err
 	}
-	marker := file{Updated: now.Unix(), Boss: src.Boss, Dir: src.Dir, movedMarker: movedMarker{
-		MovedTo: strings.TrimSuffix(filepath.Base(s.path), ".json"), MovedToName: s.Name(), MovedAt: now.Unix(),
-	}}
-	if err := from.write(marker); err != nil {
-		return t, err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.checksPath()), 0o700); err != nil {
-		return t, err
-	}
-	if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
-		return t, err
-	}
-	// Its ticked items, both lists' finished ones: kept beside s
-	kept, err := s.readDone(true)
-	if err != nil {
-		return t, err
-	}
-	theirs, err := from.readDone(true)
-	if err != nil {
-		return t, err
-	}
-	if err := s.saveDone(finished(slices.Concat(kept, dst.dropped, dst.Items, theirs), now)); err != nil {
-		return t, err
-	}
-	return t, ignoreMissing(os.Remove(from.donePath()))
+	return s.finish(from, src, now)
 }
 
-// notEmpty refuses a take-over into a list with open items or notes, until a merge is built.
-func notEmpty(open, notes int) error {
-	return Refused{fmt.Errorf("this boss's list has %s and %s: taking over into a list with items or notes comes later: tick or drop them first (dev todo done <n>, dev todo note drop <n>)",
-		Plural(open, "open item"), Plural(notes, "note"))}
+// copyDone keeps from's finished items and items beside s's; from's stay until finish.
+func (s Store) copyDone(from Store, items []Item, now time.Time) error {
+	theirs, err := from.readDone(true)
+	if err != nil {
+		return err
+	}
+	return s.keepDone(slices.Concat(items, theirs), now)
+}
+
+// finish ends a take-over of from's list src into s: from's moved marker, then its PR checks and finished items,
+// copied to s, removed.
+func (s Store) finish(from Store, src file, now time.Time) error {
+	if err := from.write(s.marker(src, now)); err != nil {
+		return err
+	}
+	if err := ignoreMissing(os.Remove(from.checksPath())); err != nil {
+		return err
+	}
+	return ignoreMissing(os.Remove(from.donePath()))
+}
+
+// merge moves from's list src, pruned at now, into s's dst, pruned too, after dst's items and notes, renumbered:
+// t gets them with their numbers before and after, and the state note dropped. A note's item or a tick of an item src
+// no longer shows loses its number, which may be one of dst's. Over MaxNotes together is refused, before anything is
+// written. The PR checks and finished items are copied first, then s is written, stamped as taken from from, then finish.
+func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
+	notes := src.Notes
+	own := slices.IndexFunc(dst.Notes, func(n Note) bool { return n.Kind == NoteState })
+	theirs := slices.IndexFunc(notes, func(n Note) bool { return n.Kind == NoteState })
+	dropOwn := false
+	if own >= 0 && theirs >= 0 {
+		if dropOwn = notes[theirs].Added > dst.Notes[own].Added; dropOwn {
+			t.DroppedState = &dst.Notes[own]
+			dst.Notes = slices.Delete(slices.Clone(dst.Notes), own, own+1)
+		} else {
+			t.DroppedState = &notes[theirs]
+			notes = slices.Delete(slices.Clone(notes), theirs, theirs+1)
+		}
+	}
+	if n := len(dst.Notes) + len(notes); n > MaxNotes {
+		return Refused{fmt.Errorf("taking %s makes %d notes, at most %d: drop %d here first (dev todo note drop <n>); nothing moved",
+			from.Name(), n, MaxNotes, n-MaxNotes)}
+	}
+	next := max(dst.Next, 1)
+	for _, it := range dst.Items {
+		next = max(next, it.ID+1)
+	}
+	ids := map[int]int{}
+	for _, it := range src.Items {
+		ids[it.ID] = next
+		next++
+	}
+	for _, it := range src.Items {
+		old := it.ID
+		it.ID, it.PartOf = ids[it.ID], ids[it.PartOf]
+		dst.Items = append(dst.Items, it)
+		t.Items = append(t.Items, TakenItem{old, it})
+	}
+	nextNote := max(dst.NextNote, 1)
+	for _, n := range dst.Notes {
+		nextNote = max(nextNote, n.ID+1)
+	}
+	// Its numbers are never reused: not the dropped one's either
+	if dropOwn {
+		nextNote = max(nextNote, t.DroppedState.ID+1)
+	}
+	for _, n := range notes {
+		old := n.ID
+		n.ID, n.Item = nextNote, ids[n.Item]
+		if n.ItemDone {
+			// Its number may be another item's now: numbers restart once a list empties
+			n.Item = 0
+		}
+		nextNote++
+		dst.Notes = append(dst.Notes, n)
+		t.Notes = append(t.Notes, TakenNote{old, n})
+	}
+	for _, tk := range src.Ticked {
+		// Only its own item's number: one an item added since has is no longer its
+		same := slices.ContainsFunc(src.Items, func(it Item) bool { return it.ID == tk.ID && it.Text == tk.Text })
+		if tk.ID = ids[tk.ID]; !same {
+			tk.ID = 0
+		}
+		dst.Ticked = append(dst.Ticked, tk)
+	}
+	dst.Next, dst.NextNote, dst.Updated = next, nextNote, now.Unix()
+	dst.takenStamp = takenStamp{TakenFrom: from.key(), TakenAt: now.Unix()}
+	dst.dropped = append(dst.dropped, src.dropped...)
+	facts, err := s.readChecks()
+	if err != nil {
+		return err
+	}
+	srcFacts, err := from.readChecks()
+	if err != nil {
+		return err
+	}
+	for _, it := range t.Items {
+		if f, ok := srcFacts[Item{ID: it.From, Added: it.Added}.key()]; ok {
+			facts[it.key()] = f
+		}
+	}
+	if err := s.writeChecks(facts); err != nil {
+		return err
+	}
+	if err := s.copyDone(from, nil, now); err != nil {
+		return err
+	}
+	if err := s.write(dst); err != nil {
+		return err
+	}
+	return s.finish(from, src, now)
 }
 
 // Plural is "n word", an s added unless n is 1.
@@ -473,4 +641,29 @@ func Plural(n int, word string) string {
 		return fmt.Sprintf("%d %s", n, word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// Empty reports s's list with no open items and no notes at now, not moved (a moved list's boss has a list elsewhere):
+// one a take-over hint goes to.
+func (s Store) Empty(now time.Time) (bool, error) {
+	f, err := s.read()
+	if err != nil || f.MovedTo != "" {
+		return false, err
+	}
+	f.prune(now)
+	return f.empty(), nil
+}
+
+// empty reports f with no open items and no notes.
+func (f file) empty() bool {
+	return !slices.ContainsFunc(f.Items, func(it Item) bool { return it.Done == 0 }) && len(f.Notes) == 0
+}
+
+// Kept reports whether s's list has a file: its boss wrote to it once.
+func (s Store) Kept() (bool, error) {
+	_, err := os.Stat(s.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }

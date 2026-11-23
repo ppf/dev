@@ -53,7 +53,7 @@ func newStateCmd() *cobra.Command {
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 				}
-				out, err := desktopBossTodo(input, cmd.ErrOrStderr())
+				out, err := desktopBossTodo(cmd, input)
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: todo: "+err.Error())
 				}
@@ -123,7 +123,7 @@ func newStateCmd() *cobra.Command {
 			// Grok reads a Stop hook's stdout as a reply, and is never a boss
 			if !codex && !grok {
 				// Before Record: a Stop blocked with inbox notes keeps the boss working
-				if out, busy, err = inbox.BossHook(c, pane, input); err != nil {
+				if out, busy, err = inbox.BossHook(c, pane, input, func(s todo.Store) string { return takeOverHint(cmd, s, pane, "", time.Now()) }); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
 				}
 				// So does a worker's Stop waiting on background tasks: Claude carries on by itself when they end,
@@ -174,7 +174,8 @@ func newStateCmd() *cobra.Command {
 
 // desktopBossTodo is a desktop app boss's open to do list as hook output, on worker notes (so it ticks what they
 // closed), and on resume or /clear with its notes; "" otherwise.
-func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
+func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
+	stderr := cmd.ErrOrStderr()
 	var e struct {
 		Name   string `json:"hook_event_name"`
 		Prompt string `json:"prompt"`
@@ -194,7 +195,8 @@ func desktopBossTodo(input []byte, stderr io.Writer) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, e.Source, time.Now())
+		hint := func(s todo.Store) string { return desktopHint(cmd, s, id) }
+		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, hint, e.Source, time.Now())
 	}
 	if e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") {
 		return "", nil

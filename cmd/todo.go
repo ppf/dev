@@ -66,6 +66,7 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 				setStatus(s, l, boss, cmd.ErrOrStderr())
 				return printJSON(out, l)
 			}
+			hintT3(cmd, boss, s, time.Now())
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(boss, cmd.ErrOrStderr()) }); err != nil {
 				return err
 			}
@@ -599,6 +600,7 @@ standing rules (CLAUDE.md, memory). A note with --until drops itself then; one w
 			if err != nil {
 				return err
 			}
+			hintT3(cmd, *boss, s, now)
 			text := todo.NotesText(notes, now)
 			if text == "" {
 				text = "no notes"

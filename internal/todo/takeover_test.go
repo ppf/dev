@@ -129,7 +129,7 @@ func TestTakeOverIntoEmpty(t *testing.T) {
 	}
 }
 
-// A take-over is refused, nothing moved, from its own list, an empty one, and into a list with open items or notes.
+// A take-over is refused, nothing moved, from its own list and an empty one.
 func TestTakeOverRefused(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
@@ -148,16 +148,6 @@ func TestTakeOverRefused(t *testing.T) {
 	}
 	if _, err := to.TakeOver(empty, now.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "t3:cccccccc is empty (no open items, no notes)") {
 		t.Errorf("empty: %v", err)
-	}
-	if _, err := to.AddNote(Note{Kind: NoteRisk, Text: "flaky CI"}, now); err != nil {
-		t.Fatal(err)
-	}
-	_, err := to.TakeOver(from, now)
-	if err == nil || !strings.Contains(err.Error(), "this boss's list has 0 open items and 1 note: taking over into a list with items or notes comes later") {
-		t.Errorf("non-empty: %v", err)
-	}
-	if !errors.As(err, new(Refused)) {
-		t.Errorf("non-empty: %T, want Refused", err)
 	}
 	if got := ids(read(t, from, now)); !slices.Equal(got, []string{"1 theirs"}) {
 		t.Errorf("source after refusals = %q, want it kept", got)
@@ -362,7 +352,7 @@ func TestCandidates(t *testing.T) {
 	}
 }
 
-// Into a list with an open item, refused, both lists kept; an older dev's item on its boss's own name stays the
+// An older dev's item on its boss's own name stays the
 // user's once moved; a desktop app's adopt leaves a moved marker where it is.
 func TestTakeOverEdges(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -374,20 +364,11 @@ func TestTakeOverEdges(t *testing.T) {
 	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := to.TakeOver(from, now); err == nil || !strings.HasPrefix(err.Error(), "this boss's list has 1 open item and 0 notes") {
-		t.Errorf("into an open item: %v", err)
-	}
-	if got := ids(read(t, to, now)); !slices.Equal(got, []string{"1 mine"}) {
-		t.Errorf("destination after the refusal = %q", got)
-	}
-	if err := to.Done([]int{1}, now); err != nil {
-		t.Fatal(err)
-	}
 	later := now.Add(time.Minute)
 	if _, err := to.TakeOver(from, later); err != nil {
 		t.Fatal(err)
 	}
-	if l := read(t, to, later); len(l.Items) != 1 || l.Items[0].On != "" {
+	if l := read(t, to, later); len(l.Items) != 2 || l.Items[1].Text != "legacy" || l.Items[1].On != "" {
 		t.Errorf("legacy item = %+v, want the user's", l.Items)
 	}
 
@@ -447,11 +428,391 @@ func TestCandidatesRefusals(t *testing.T) {
 	if got["boss-dev"] != "state not read: boom" || got["local_a"] != "state not read: boom" || !strings.HasPrefix(got["t3:broken"], "not read: ") {
 		t.Errorf("rows = %q", got)
 	}
-	looks.Sessions = func() ([]string, error) { return nil, nil }
-	if _, err := own.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil {
+}
+
+// A take-over into a list with items or notes merges: the taken items after its own, renumbered, the link between two
+// halves, a note's item and a PR check following; notes after its own, renumbered, the older of two state notes dropped;
+// finished items joined; the source holds the marker, the destination the taken stamp.
+func TestTakeOverMerge(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if got := why(); got["boss-dev"] != "this boss's list isn't empty" {
-		t.Errorf("rows with a busy own list = %q", got)
+	for _, n := range []Note{{Kind: NoteState, Text: "my state"}, {Kind: NoteRisk, Text: "my risk"}} {
+		if _, err := to.AddNote(n, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prURL := "https://github.com/o/r/pull/7"
+	for _, it := range []Item{{Text: "a", Link: prURL}, {Text: "b", PartOf: 1, On: "w1", Session: &Session{ID: "w1", Name: "w1"}}, {Text: "pick?", Options: []string{"A", "B"}}, {Text: "t"}} {
+		if _, err := from.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := from.Done([]int{4}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := from.Lookup(now, LookupTTL, 0, func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.AddNote(Note{Kind: NoteDecided, Text: "b's way", Item: 2}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.AddNote(Note{Kind: NoteState, Text: "their state"}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute)
+
+	taken, err := to.TakeOver(from, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moves []string
+	for _, it := range taken.Items {
+		moves = append(moves, strconv.Itoa(it.From)+">"+strconv.Itoa(it.ID))
+	}
+	for _, n := range taken.Notes {
+		moves = append(moves, "n"+strconv.Itoa(n.From)+">n"+strconv.Itoa(n.ID))
+	}
+	if !slices.Equal(moves, []string{"1>2", "2>3", "3>4", "n1>n3", "n2>n4"}) || !taken.Merged || taken.OwnItems != 1 || taken.OwnNotes != 2 ||
+		taken.Asks != 1 || !slices.Equal(taken.OnWorkers, []string{"w1"}) || taken.DroppedState == nil || taken.DroppedState.Text != "my state" {
+		t.Errorf("taken = %v %+v", moves, taken)
+	}
+	l := read(t, to, later)
+	byText := map[string]Shown{}
+	for _, it := range l.Items {
+		byText[it.Text] = it
+	}
+	if got := []int{byText["mine"].ID, byText["a"].ID, byText["b"].ID, byText["pick?"].ID}; !slices.Equal(got, []int{1, 2, 3, 4}) {
+		t.Errorf("ids = %v", got)
+	}
+	if byText["b"].PartOf != 2 || byText["a"].PartOf != 3 || byText["a"].PRState != "open" || len(byText["pick?"].Options) != 2 {
+		t.Errorf("merged items = %+v", l.Items)
+	}
+	if len(l.Finished) != 1 || l.Finished[0].Text != "t" {
+		t.Errorf("finished = %+v", l.Finished)
+	}
+	notes, err := to.Notes(later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, n := range notes {
+		got = append(got, "n"+strconv.Itoa(n.ID)+" "+n.Text+" #"+strconv.Itoa(n.Item))
+	}
+	if !slices.Equal(got, []string{"n2 my risk #0", "n3 b's way #3", "n4 their state #0"}) {
+		t.Errorf("notes = %q", got)
+	}
+	if f := rawFile(t, to); f.Next != 5 || f.NextNote != 5 || f.TakenFrom != "t3-aaaaaaaa-1" || f.TakenAt != later.Unix() {
+		t.Errorf("destination file = %+v", f)
+	}
+	if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" || len(f.Items) != 0 || len(f.Notes) != 0 {
+		t.Errorf("marker = %+v", f)
+	}
+	for _, path := range []string{from.checksPath(), from.donePath()} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s left: %v", path, err)
+		}
+	}
+	if id, err := to.Add(Item{Text: "next"}, later); err != nil || id != 5 {
+		t.Errorf("next add = %d, %v, want 5", id, err)
+	}
+}
+
+// Over MaxNotes together is refused, both files as they were; two state notes count once, the destination's kept
+// when not older.
+func TestTakeOverMergeNoteCap(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	add := func(s Store, n int) {
+		for i := range n {
+			if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "r" + strconv.Itoa(i)}, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	add(to, 7)
+	add(from, 6)
+	before := [][]byte{}
+	for _, s := range []Store{from, to} {
+		data, err := os.ReadFile(s.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before = append(before, data)
+	}
+	_, err := to.TakeOver(from, now)
+	if err == nil || err.Error() != "taking t3:aaaaaaaa makes 13 notes, at most 12: drop 1 here first (dev todo note drop <n>); nothing moved" || !errors.As(err, new(Refused)) {
+		t.Errorf("over the cap: %v", err)
+	}
+	for i, s := range []Store{from, to} {
+		if data, _ := os.ReadFile(s.path); string(data) != string(before[i]) {
+			t.Errorf("%s changed after the refusal", s.Name())
+		}
+	}
+	for _, s := range []Store{from, to} {
+		if err := s.DropNote(1, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddNote(Note{Kind: NoteState, Text: s.Name()}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if taken, err := to.TakeOver(from, now); err != nil || len(taken.Notes) != 5 || taken.DroppedState == nil || taken.DroppedState.Text != from.Name() {
+		t.Errorf("12, the source's state note dropped (not newer): %+v, %v", taken, err)
+	}
+}
+
+// A take that stopped before the marker, a merge or a move: its retry writes only the marker, nothing taken twice, the
+// PR checks and finished items already beside the destination. One changed since is refused; a fresh list under the
+// same name since is taken again.
+func TestTakeOverRetry(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	later := now.Add(time.Minute)
+	prURL := "https://github.com/o/r/pull/7"
+	for _, merge := range []bool{true, false} {
+		from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+		for _, s := range []Store{from, to} {
+			if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+		}
+		want := []string{"1 theirs"}
+		if merge {
+			if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+				t.Fatal(err)
+			}
+			want = []string{"1 mine", "2 theirs"}
+		}
+		for _, it := range []Item{{Text: "theirs", Link: prURL}, {Text: "finished"}} {
+			if _, err := from.Add(it, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := from.Done([]int{2}, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := from.Lookup(now, LookupTTL, 0, func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }); err != nil {
+			t.Fatal(err)
+		}
+		saved := map[string][]byte{}
+		for _, path := range []string{from.path, from.checksPath(), from.donePath()} {
+			data, err := os.ReadFile(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+			case err != nil:
+				t.Fatal(err)
+			default:
+				saved[path] = data
+			}
+		}
+		if _, ok := saved[from.checksPath()]; !ok {
+			t.Fatal("no PR checks beside the source")
+		}
+		if _, err := to.TakeOver(from, later); err != nil {
+			t.Fatal(err)
+		}
+		// As if it stopped before the marker: the list and what lives beside it still there
+		for path, data := range saved {
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := to.TakeOver(from, later.Add(time.Minute))
+		if err == nil || err.Error() != "boss-dev taken at "+later.Format("15:04")+": dev todo shows it" {
+			t.Errorf("merge %v: retry: %v", merge, err)
+		}
+		l := read(t, to, later)
+		if got := ids(l); !slices.Equal(got, want) {
+			t.Errorf("merge %v: destination = %q, want each once", merge, got)
+		}
+		if i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.Text == "theirs" }); i < 0 || l.Items[i].PRState != "open" || len(l.Finished) != 1 || l.Finished[0].Text != "finished" {
+			t.Errorf("merge %v: destination = %+v, want the PR check and the finished item", merge, l)
+		}
+		if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" {
+			t.Errorf("merge %v: source = %+v, want the marker", merge, f)
+		}
+		for _, path := range []string{from.checksPath(), from.donePath()} {
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("merge %v: %s left after the retry: %v", merge, path, err)
+			}
+		}
+	}
+
+	// Changed before its marker: refused, both kept
+	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	// Its list as it was, the marker not written
+	f := rawFile(t, from)
+	f.movedMarker = movedMarker{}
+	f.Items, f.Next = []Item{{ID: 1, Text: "theirs", Added: now.Unix()}}, 2
+	if err := from.write(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "since"}, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "changed before its marker was written") {
+		t.Errorf("changed since: %v", err)
+	}
+	if got := ids(read(t, from, later)); !slices.Equal(got, []string{"1 theirs", "2 since"}) {
+		t.Errorf("source after the refusal = %q", got)
+	}
+
+	// A dev boss reopened under the name writes a fresh list over the marker
+	if err := os.WriteFile(from.path, []byte(`{"moved_to":"x","moved_to_name":"x","moved_at":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fresh := from
+	fresh.created = later.Add(time.Hour).Unix()
+	again := later.Add(2 * time.Hour)
+	if _, err := fresh.Add(Item{Text: "new"}, again); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, again); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(read(t, to, again)); !slices.Equal(got, []string{"1 theirs", "3 new"}) {
+		t.Errorf("after the second take = %q", got)
+	}
+}
+
+// A note on, and a tick of, an item that left the source's list lose its number on a merge: it may be one of the
+// destination's.
+func TestTakeOverMergeGoneItem(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "dated", Until: now.Add(time.Minute).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.AddNote(Note{Kind: NoteDecided, Text: "on dated", Item: 1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "open"}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := to.Notes(later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Item != 0 || !notes[0].ItemDone || !strings.Contains(NotesText(notes, later), "on dated (its item done)") {
+		t.Errorf("notes = %+v", notes)
+	}
+	ticked, err := to.TakeTicked(later, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticked) != 1 || ticked[0].String() != `"dated" ticked by itself: its --until time came` {
+		t.Errorf("ticked = %+v", ticked)
+	}
+}
+
+// Empty: no open items, no notes, not moved.
+func TestEmpty(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	empty := func(s Store) bool {
+		t.Helper()
+		ok, err := s.Empty(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if !empty(to) {
+		t.Error("no file: not empty")
+	}
+	if _, err := from.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if empty(from) {
+		t.Error("a note: empty")
+	}
+	if _, err := to.TakeOver(from, now); err != nil {
+		t.Fatal(err)
+	}
+	if empty(from) {
+		t.Error("moved: empty")
+	}
+}
+
+// A retry is refused once the source changed since the take with nothing added (a tick); a source emptied since is
+// refused as empty, no marker written over it.
+func TestTakeOverRetryChanged(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	later := now.Add(time.Minute)
+	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"a", "b"} {
+		if _, err := from.Add(Item{Text: text}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src, err := os.ReadFile(from.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(from.path, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := from.Done([]int{1}, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "changed before its marker was written") {
+		t.Errorf("ticked since: %v", err)
+	}
+	if err := from.Done([]int{2}, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(time.Hour)); err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Errorf("emptied since: %v", err)
+	}
+	if f := rawFile(t, from); f.MovedTo != "" {
+		t.Errorf("emptied source got a marker: %+v", f)
+	}
+}
+
+// A tick of an item whose number an item added since has, on a merge: the tick loses the number, the new item keeps it.
+func TestTakeOverMergeReusedNumber(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "dated", Until: now.Add(time.Minute).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if id, err := from.Add(Item{Text: "reused"}, later); err != nil || id != 1 {
+		t.Fatalf("add after the list emptied = %d, %v, want 1", id, err)
+	}
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	ticked, err := to.TakeTicked(later, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticked) != 1 || ticked[0].ID != 0 || ticked[0].Text != "dated" {
+		t.Errorf("ticked = %+v, want dated with no number", ticked)
 	}
 }

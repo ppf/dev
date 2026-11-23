@@ -131,7 +131,7 @@ func (s Store) Notes(now time.Time) ([]Note, error) {
 // endItems marks every note's item done, as its list is replaced: the numbers restart.
 func (f *file) endItems() {
 	for i := range f.Notes {
-		f.Notes[i].ItemDone = f.Notes[i].Item != 0
+		f.Notes[i].ItemDone = f.Notes[i].ItemDone || f.Notes[i].Item != 0
 	}
 }
 
@@ -174,6 +174,8 @@ func NotesText(notes []Note, now time.Time) string {
 			b.WriteString(" (until " + time.Unix(n.Until, 0).Format(UntilLayout) + ")")
 		}
 		switch {
+		case n.ItemDone && n.Item == 0:
+			b.WriteString(" (its item done)")
 		case n.ItemDone:
 			fmt.Fprintf(&b, " (item #%d done)", n.Item)
 		case n.Item != 0:

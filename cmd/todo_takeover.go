@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,14 +49,14 @@ func newTodoTakeOverCmd(boss *string) *cobra.Command {
 		Use:   "take-over [<list>]",
 		Short: "Take over another boss's to do list for this project (without <list>: what this boss could take)",
 		Long: `Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,
-context, doing, open asks), its notes, PR checks and finished items move to this boss's list, their numbers kept.
-For now only into an empty list (no open items, no notes): one with either is refused. The old list is left as a
-marker: its boss's writes are refused, saying where the list went; a dev boss opened under its name after the move
-starts a fresh list.
+context, doing, open asks), its notes, PR checks and finished items move to this boss's list: into an empty one
+numbers kept, else after its own items, renumbered. The old list is left as a marker: its boss's writes are refused, saying where the list
+went; a dev boss opened under its name after the move starts a fresh list.
 Without <list>, print the lists this boss could take, newest change first, and why one can't be taken.
 <list> is a dev boss's name (boss-dev), a desktop app session's local_… id, or t3:<thread id> (8 or more
 characters of it). Refused: this boss's own list, a dev boss or desktop app session still running (close it
-first), another project's list, the manager's or one of no known project (--any-project), a list moved or empty.
+first), another project's list, the manager's or one of no known project (--any-project), a list moved or empty,
+over 12 notes together.
 A T3 Code thread's list is taken without a running check (dev can't see T3 Code's threads): archive that thread.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -86,24 +87,34 @@ A T3 Code thread's list is taken without a running check (dev can't see T3 Code'
 		},
 	}
 	cmd.Flags().BoolVar(&anyProject, "any-project", false, "lists of other projects, the manager's, and lists of no known project too")
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3, project, state: running, closed, stopped or unknown, open, asks, notes, updated, takeable, why_not) and other_projects; with it, from, to ({list, kind, project} each), mode: move, items and notes ({from, to} each), asks, on_workers, warnings`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3, project, state: running, closed, stopped or unknown, open, asks, notes, updated, takeable, why_not) and other_projects; with it, from, to ({list, kind, project} each), mode: move or merge, items and notes ({from, to} each), asks, on_workers, dropped_state_note ({id, kind, text} or null), warnings`)
 	return cmd
 }
 
 // takeOverCandidates are this boss's list, its project ("" unknown) and every list beside it (todo.Candidates).
 func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (todo.Store, string, []todo.Candidate, error) {
-	stderr := cmd.ErrOrStderr()
-	own, err := todoStore("", false, stderr)
+	own, err := todoStore("", false, cmd.ErrOrStderr())
 	if err != nil {
 		return own, "", nil, err
 	}
-	project, err := projectFinder(cmd)
+	pane, id, err := todoBoss("")
 	if err != nil {
 		return own, "", nil, err
+	}
+	ownProject, cands, err := candidatesOf(cmd, own, pane, id, anyProject, now)
+	return own, ownProject, cands, err
+}
+
+// candidatesOf are the project ("" unknown) of own, the list of the boss in tmux pane, else of desktop app or T3 Code
+// session id, and every list beside it (todo.Candidates).
+func candidatesOf(cmd *cobra.Command, own todo.Store, pane, id string, anyProject bool, now time.Time) (string, []todo.Candidate, error) {
+	project, err := projectFinder(cmd)
+	if err != nil {
+		return "", nil, err
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return own, "", nil, err
+		return "", nil, err
 	}
 	paths := desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR"))
 	desktopStates := func(ids []string) (map[string]todo.DesktopState, error) {
@@ -114,10 +125,6 @@ func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (tod
 		}
 		return out, err
 	}
-	pane, id, err := todoBoss("")
-	if err != nil {
-		return own, "", nil, err
-	}
 	var ownProject string
 	switch {
 	case pane != "":
@@ -127,13 +134,13 @@ func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (tod
 	case strings.HasPrefix(id, t3Boss):
 		dir, err := mainCheckout()
 		if err != nil {
-			return own, "", nil, err
+			return "", nil, err
 		}
 		ownProject = project(dir)
 	default:
 		states, err := desktopStates([]string{id})
 		if err != nil {
-			return own, "", nil, err
+			return "", nil, err
 		}
 		if dir := states[id].Dir; dir != "" {
 			ownProject = project(dir)
@@ -142,7 +149,7 @@ func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (tod
 	c := takeOverTmux()
 	socket, err := tmuxSocket(c)
 	if err != nil {
-		return own, "", nil, err
+		return "", nil, err
 	}
 	looks := todo.Looks{
 		Socket: socket,
@@ -164,7 +171,7 @@ func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (tod
 		Project: project,
 	}
 	cands, err := todo.Candidates(own, ownProject, looks, anyProject, now)
-	return own, ownProject, cands, err
+	return ownProject, cands, err
 }
 
 // tmuxSocket is c's server's socket path; with no server running, the one TMUX names, else tmux's default.
@@ -390,7 +397,19 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 	if c.Kind == todo.KindT3 {
 		warnings = append(warnings, "dev can't see T3 Code's threads: archive "+c.List+" in T3 Code; its dev todo writes are refused from now")
 	}
+	if t.DroppedState != nil {
+		warnings = append(warnings, fmt.Sprintf("older state note dropped (one per list): %s", t.DroppedState.Text))
+	}
+	mode := "move"
+	if t.Merged {
+		mode = "merge"
+	}
 	if asJSON {
+		type dropped struct {
+			ID   int    `json:"id"`
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+		}
 		v := struct {
 			From      takenList    `json:"from"`
 			To        takenList    `json:"to"`
@@ -399,29 +418,111 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 			Notes     []renumbered `json:"notes"`
 			Asks      int          `json:"asks"`
 			OnWorkers []string     `json:"on_workers"`
+			Dropped   *dropped     `json:"dropped_state_note"`
 			Warnings  []string     `json:"warnings"`
 		}{
-			From: takenList{c.List, c.Kind, c.Project}, To: takenList{own.Name(), own.Kind(), ownProject}, Mode: "move",
+			From: takenList{c.List, c.Kind, c.Project}, To: takenList{own.Name(), own.Kind(), ownProject}, Mode: mode,
 			Items: []renumbered{}, Notes: []renumbered{}, Asks: t.Asks, OnWorkers: append([]string{}, t.OnWorkers...), Warnings: append([]string{}, warnings...),
 		}
 		for _, it := range t.Items {
-			v.Items = append(v.Items, renumbered{it.ID, it.ID})
+			v.Items = append(v.Items, renumbered{it.From, it.ID})
 		}
 		for _, n := range t.Notes {
-			v.Notes = append(v.Notes, renumbered{n.ID, n.ID})
+			v.Notes = append(v.Notes, renumbered{n.From, n.ID})
+		}
+		if d := t.DroppedState; d != nil {
+			v.Dropped = &dropped{d.ID, d.Kind, d.Text}
 		}
 		return printJSON(out, v)
 	}
-	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s\n", c.Short(), kindLabel(c.Kind), cmp.Or(c.Project, "no known project"), todo.Plural(len(t.Items), "item"), todo.Plural(len(t.Notes), "note"))
+	var after string
+	if t.Merged {
+		var yours []string
+		if t.OwnItems > 0 {
+			yours = append(yours, todo.Plural(t.OwnItems, "item"))
+		}
+		if t.OwnNotes > 0 {
+			yours = append(yours, todo.Plural(t.OwnNotes, "note"))
+		}
+		after = ", after your " + strings.Join(yours, " and ")
+	}
+	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s%s\n", c.Short(), kindLabel(c.Kind), cmp.Or(c.Project, "no known project"), todo.Plural(len(t.Items), "item"), todo.Plural(len(t.Notes), "note"), after)
 	for _, it := range t.Items {
-		fmt.Fprintf(out, "  %-9s %s\n", fmt.Sprintf("#%d → #%d", it.ID, it.ID), it.Text)
+		fmt.Fprintf(out, "  %-9s %s\n", fmt.Sprintf("#%d → #%d", it.From, it.ID), it.Text)
 	}
 	for _, n := range t.Notes {
-		fmt.Fprintf(out, "  %-9s %s: %s\n", fmt.Sprintf("n%d → n%d", n.ID, n.ID), n.Kind, n.Text)
+		fmt.Fprintf(out, "  %-9s %s: %s\n", fmt.Sprintf("n%d → n%d", n.From, n.ID), n.Kind, n.Text)
 	}
 	for _, w := range warnings {
 		fmt.Fprintln(out, "⚠ "+w)
 	}
 	_, err := fmt.Fprintln(out, "Next: dev todo check")
 	return err
+}
+
+// takeOverHint is the start-of-session line telling the boss of list own, empty (todo.Store.Empty), that an earlier
+// boss's list for its project waits: the newest it can take (candidatesOf's pane and id); "" for none. A failure is
+// reported on stderr, no line.
+func takeOverHint(cmd *cobra.Command, own todo.Store, pane, id string, now time.Time) string {
+	line, err := hintLine(cmd, own, pane, id, now)
+	if err != nil {
+		noHint(cmd, err)
+	}
+	return line
+}
+
+// hintLine is takeOverHint's line, or why it can't tell.
+func hintLine(cmd *cobra.Command, own todo.Store, pane, id string, now time.Time) (string, error) {
+	if empty, err := own.Empty(now); err != nil || !empty {
+		return "", err
+	}
+	project, cands, err := candidatesOf(cmd, own, pane, id, false, now)
+	if err != nil {
+		return "", err
+	}
+	i := slices.IndexFunc(cands, func(c todo.Candidate) bool { return c.Takeable })
+	if i < 0 {
+		return "", nil
+	}
+	c := cands[i]
+	open := fmt.Sprintf("%d open", c.Open)
+	if c.Asks > 0 {
+		open += ", " + todo.Plural(c.Asks, "ask")
+	}
+	return fmt.Sprintf("[dev todo] An earlier boss's list for %s waits: %s (%s, %s, %s): dev todo take-over %s. dev todo take-over lists all.",
+		project, c.Short(), open, todo.Plural(c.Notes, "note"), ago(c.Updated, now), c.Short()), nil
+}
+
+// hintT3 prints takeOverHint on stderr for a T3 Code boss's own list s, which no hook gives it: each bare dev todo and
+// dev todo note, while s is empty.
+func hintT3(cmd *cobra.Command, boss string, s todo.Store, now time.Time) {
+	if boss != "" || s.Kind() != todo.KindT3 {
+		return
+	}
+	_, id, err := todoBoss("")
+	if err != nil {
+		noHint(cmd, err)
+		return
+	}
+	if line := takeOverHint(cmd, s, "", id, now); line != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), line)
+	}
+}
+
+// desktopHint is takeOverHint for desktop app session id's list s, only once s has a file: every app session runs the
+// hook, and only a boss writes a list (a worker's writes are refused).
+func desktopHint(cmd *cobra.Command, s todo.Store, id string) string {
+	kept, err := s.Kept()
+	if err != nil {
+		noHint(cmd, err)
+	}
+	if !kept {
+		return ""
+	}
+	return takeOverHint(cmd, s, "", id, time.Now())
+}
+
+// noHint reports on stderr why there's no take-over hint.
+func noHint(cmd *cobra.Command, err error) {
+	fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: no take-over hint: "+err.Error())
 }

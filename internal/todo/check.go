@@ -311,6 +311,10 @@ func (t Ticked) String() string {
 		}
 		why = fmt.Sprintf("PR #%d %s (--done-on %s)", t.PR, state, t.On)
 	}
+	if t.ID == 0 {
+		// Its item left the list before a take-over renumbered it
+		return fmt.Sprintf("%q ticked by itself: %s", t.Text, why)
+	}
 	return fmt.Sprintf("#%d %q ticked by itself: %s", t.ID, t.Text, why)
 }
 
