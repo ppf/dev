@@ -13,7 +13,7 @@ import (
 	"github.com/ppf/dev/internal/todo"
 )
 
-// add and ask take --details (- reads stdin), add --replaces keeps them unless given; done --result ticks one item
+// add and ask take --details (- reads stdin), --replaces on either keeps them unless given; done --result ticks one item
 // with what was done, and the item says who ticked it: the boss in Claude Code, else the user, a board's --text tick too.
 func TestTodoDetailsResult(t *testing.T) {
 	todoEnv(t)
@@ -21,6 +21,12 @@ func TestTodoDetailsResult(t *testing.T) {
 	run(t, "Second reminder, firmer.\n\n- attach the PDF\n", "todo", "add", "Send the reminder", "--details", "-")
 	run(t, "", "todo", "add", "--replaces", "1", "--link", "https://mail.example/1")
 	run(t, "", "todo", "ask", "Send it today?", "--option", "Yes (Recommended)", "--option", "No", "--details", "The customer asked for Friday.")
+	run(t, "", "todo", "ask", "--replaces", "2", "--context", "asked on Monday")
+	if got := run(t, "", "todo", "--json"); !strings.Contains(got, `"details": "The customer asked for Friday."`) {
+		t.Errorf("ask --replaces without --details dropped them:\n%s", got)
+	}
+	run(t, "", "todo", "ask", "--replaces", "2", "--details", "The customer asked for Thursday.")
+	run(t, "", "todo", "ask", "--replaces", "2", "--details", "The customer asked for Friday.")
 	run(t, "", "todo", "add", "Other")
 	run(t, "", "todo", "add", "Mine")
 	run(t, "", "todo", "add", "Board's")

@@ -291,8 +291,8 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 			case !replace:
 				return errors.New("no question: only --replaces keeps the ask's question")
-			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet:
-				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --link or --quiet")
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details"):
+				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link or --quiet")
 			}
 			if len(it.Options) == 0 && !replace {
 				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
@@ -356,7 +356,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 			return printCount(cmd.OutOrStdout(), s, "asked "+strconv.Itoa(id)+" · ", now)
 		},
 	}
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "correct open ask n in place, keeping its number and the question, options, --context, --link not given (and --quiet once set)")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "correct open ask n in place, keeping its number and the question, options, --context, --details, --link not given (and --quiet once set)")
 	cmd.Flags().StringArrayVar(&it.Options, "option", nil, `an option, in order, up to 9: "<label> | <detail>", the label at most 30 characters (what an answer names), the detail its cost or effect; the recommended one ends with "(Recommended)"`)
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the question, in order: findings, then paths")
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)

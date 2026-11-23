@@ -11,7 +11,7 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 )
 
-// Details are stored by add, kept by a --replaces that gives none, replaced by one that does; over MaxDetails is refused.
+// Details are stored by add, kept by a --replaces (an ask's too) that gives none, replaced by one that does; over MaxDetails is refused.
 func TestDetails(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
@@ -30,6 +30,22 @@ func TestDetails(t *testing.T) {
 	}
 	if got := read(t, s, now).Items[0].Details; got != "Third reminder." {
 		t.Errorf("after --replaces with details: %q", got)
+	}
+	ask, err := s.Add(Item{Text: "Send it?", Options: []string{"Yes", "No"}, Details: "Draft ready, not sent"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReplaceAsk(ask, Item{Context: []string{"asked on Monday"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it, _ := openItem(t, s, ask); it.Details != "Draft ready, not sent" {
+		t.Errorf("after ask --replaces without details: %q", it.Details)
+	}
+	if _, err := s.ReplaceAsk(ask, Item{Details: "Sent 12:40 to Jana, Teams"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if it, _ := openItem(t, s, ask); it.Details != "Sent 12:40 to Jana, Teams" {
+		t.Errorf("after ask --replaces with details: %q", it.Details)
 	}
 	long := strings.Repeat("é", MaxDetails+1)
 	if _, err := s.Add(Item{Text: "x", Details: long}, now); err == nil || !strings.Contains(err.Error(), "at most 1500") {
