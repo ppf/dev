@@ -445,8 +445,7 @@ cut:
 	return out, append(append([]int{-1}, at[cut:]...), -1)
 }
 
-// block is the part under the title: the session on it (a worker's state, how long, what it does now, its latest note,
-// its PR and check; the boss's own item: its doing line), or what was done on a finished one; none for the others.
+// block is the part under the title: the session on it, or what was done on a finished one; none for the others.
 func (m Model) block(in int, now time.Time) []string {
 	it := m.it
 	rule := func(left, right string) string {
@@ -459,18 +458,19 @@ func (m Model) block(in int, now time.Time) []string {
 			if i == 3 {
 				break
 			}
-			out = append(out, sidebar.Muted+fmt.Sprintf("%-8s", map[bool]string{true: k}[i == 0])+reset+l)
+			label := ""
+			if i == 0 {
+				label = k
+			}
+			out = append(out, sidebar.Muted+fmt.Sprintf("%-8s", label)+reset+l)
 		}
 		return out
 	}
 	end := sidebar.Faint + strings.Repeat("─", in) + reset
 	switch {
 	case it.Done && it.Result != "":
-		right := ticked(m.it, now)
-		out := []string{rule("what was done", sidebar.Green+right+reset)}
-		for _, l := range strings.Split(ansi.Wrap(it.Result, in, ""), "\n") {
-			out = append(out, l)
-		}
+		out := []string{rule("what was done", sidebar.Green+ticked(it, now)+reset)}
+		out = append(out, strings.Split(ansi.Wrap(it.Result, in, ""), "\n")...)
 		return append(out, end)
 	case it.Done:
 		return nil
@@ -538,10 +538,11 @@ func detailLines(details string, in int) []string {
 	}
 	var out []string
 	for _, l := range strings.Split(details, "\n") {
-		indent := len(l) - len(strings.TrimLeft(l, " "))
-		for i, w := range strings.Split(ansi.Wrap(strings.TrimLeft(l, " "), max(1, in-indent-2), ""), "\n") {
+		text := strings.TrimLeft(l, " ")
+		indent := len(l) - len(text)
+		for i, w := range strings.Split(ansi.Wrap(text, max(1, in-indent-2), ""), "\n") {
 			pad := indent
-			if i > 0 && (strings.HasPrefix(strings.TrimLeft(l, " "), "- ") || strings.HasPrefix(strings.TrimLeft(l, " "), "* ")) {
+			if i > 0 && (strings.HasPrefix(text, "- ") || strings.HasPrefix(text, "* ")) {
 				pad += 2 // a list item's next lines under its text
 			}
 			out = append(out, strings.Repeat(" ", pad)+w)
@@ -693,7 +694,7 @@ func (m Model) facts(in int, now time.Time) []string {
 	if it.Until != 0 {
 		facts = append(facts, [2]string{"until", "ticks itself " + wait.Clock(time.Unix(it.Until, 0), now)})
 	}
-	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed && !(live && !it.Done) {
+	if it.Check != nil && it.Check.Kind != sidebar.CheckBossClosed && (!live || it.Done) {
 		facts = append(facts, [2]string{"check", it.Check.Tone().Colour() + it.Check.Short(now) + reset})
 	}
 	out := make([]string, len(facts))

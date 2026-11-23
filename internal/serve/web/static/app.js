@@ -748,10 +748,13 @@ function whoRows(x) {
   return [['Waiting for', it.waiting_for], ['Follows up', list.closed ? 'no one (' + who + ' is closed)' : who]];
 }
 
+// linkRow is a facts row for an item's link: a web one opens in a new tab
+const linkRow = link => ['Link', /^https?:/i.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener noreferrer' }, link) : link];
+
 function facts(x, live = false) {
   const { list, it } = x;
   const rows = [['Status', statusRow(x)], ...whoRows(x), ['List', list.boss + (list.closed ? ' (closed)' : '')]];
-  if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
+  if (it.link) rows.push(linkRow(it.link));
   if (it.check && it.check.kind !== 'boss closed') rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now && !live) rows.push(['Now', it.now]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
@@ -816,8 +819,7 @@ const LIVE_WORDS = { blocked: ['needs you', 's-decide'], gone: ['session gone', 
 // checkTone is a PR check's tag class: what failed or wants changes red, what passed green
 const checkTone = kind => /failing|changes|closed|lookup/.test(kind) ? 'hot' : /green|approved|merged/.test(kind) ? 'ok' : 'wait';
 
-// liveBlock is the block of the session on open item x: a worker's state, what it does now, its latest note, how long it
-// has been on it, its PR and check; the boss's own item only its doing line. None for the user's own or a person's.
+// liveBlock is the session block of open item x; the boss's own item only its doing line, none for the user's or a person's.
 function liveBlock(x) {
   const { list, it } = x, boss = it.on === 'boss' && !it.session;
   if (own(list, it) || !(boss ? it.doing : it.session || onWorker(x))) return null;
@@ -839,8 +841,7 @@ function liveBlock(x) {
 const BY = { you: 'you', until: 'itself, at its time', 'done-on': "itself, at its PR's move" };
 const byOf = it => BY[it.done_by] || it.done_by;
 
-// doneSheet is finished item id of boss's list, ticked at at (0: its newest), read-only: what was done, the answer,
-// details and context, when and by whom, Reopen only for the user's own.
+// doneSheet is finished item id of boss's list ticked at at (0: its newest), read-only; Reopen only for the user's own.
 function doneSheet(boss, id, at) {
   const x = findDone(boss, id, at);
   const close = el('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×');
@@ -873,7 +874,7 @@ function doneSheet(boss, id, at) {
   if (ticked) rows.push(['Ticked', ticked]);
   if (whoOf(x) !== ME) rows.push(['Was on', whoOf(x)]);
   rows.push(['List', list.boss + (list.closed ? ' (closed)' : '')]);
-  if (it.link) rows.push(['Link', /^https?:/i.test(it.link) ? el('a', { href: it.link, target: '_blank', rel: 'noopener noreferrer' }, it.link) : it.link]);
+  if (it.link) rows.push(linkRow(it.link));
   out.push(el('dl', { class: 'facts' }, rows.map(([k, v]) => el('div', null, el('dt', null, k), el('dd', null, v)))),
     el('p', { class: 'hint' }, 'Done keeps an item 24 hours after its tick (at most 50 a list), then it leaves the board.'));
   return out;
