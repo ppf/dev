@@ -403,6 +403,7 @@ function statusWord(it) {
 // pick takes option value on an ask's card and opens its sheet with it ready to send.
 function pick(list, it, value) {
   state.picks[key(list.boss, it.id)] = { question: it.text, added: it.added, option: value, text: '' };
+  dropStalePicks(); // its card may be drawn from a board read before the press
   location.hash = itemHash(list.boss, it.id);
 }
 
@@ -890,8 +891,8 @@ function render() {
   // The pair screen keeps what was typed: it is drawn once per visit.
   const sig = r.name === 'pair' ? 'pair' : [state.reachable, state.unpaired, state.etag, state.note, JSON.stringify(state.filter), state.more, state.allWho, wide.matches,
     JSON.stringify(state.moves), Math.floor(Date.now() / 60000)].join('\n');
-  // A card lifted holds the board as it was: a redraw would drop it from under the pointer
-  if (sig !== state.sig && !((settling || drag?.lifted) && b && r.name !== 'pair')) {
+  // A card lifted or pressed holds the board as it was: a redraw would drop it from under the pointer
+  if (sig !== state.sig && !((settling || drag?.lifted || held) && b && r.name !== 'pair')) {
     state.sig = sig;
     const view = document.getElementById('view');
     if (r.name === 'pair') view.replaceChildren(...pairScreen());
@@ -989,8 +990,28 @@ function anchor(x) {
 // columns (each {el, k, v: its verdict}) and the one under the pointer (over).
 let drag = null, swallow = false, dropping = 0; // dropping: drops whose call is on its way
 
+// held: a press on the board's button or link (by pointer holder) holds its redraw until its click, as one replaced
+// between press and release takes no click; RELEASE_MS past the release for a click that never comes, HOLD_MS at most.
+let held = 0, holder = null;
+const HOLD_MS = 2000, RELEASE_MS = 300;
+function hold(ms) {
+  clearTimeout(held);
+  held = setTimeout(() => {
+    held = 0;
+    render();
+  }, ms);
+}
+function unhold() {
+  clearTimeout(held);
+  held = 0;
+}
+
 function press(e) {
   if (drag?.lifted) drop(e, true); // its pointerup never came
+  if (e.button === 0 && e.target.closest?.('#view button, #view a')) {
+    holder = e.pointerId;
+    hold(HOLD_MS);
+  }
   swallow = false; // a new press: its click is its own
   if (e.pointerType === 'touch' || e.button !== 0 || !wide.matches || route().name !== 'board') return;
   const c = e.target.closest?.('#view .card'), x = c && cardOf.get(c);
@@ -1054,6 +1075,7 @@ function drop(e, end = false) {
   const d = drag;
   drag = null;
   if (!d?.lifted) return;
+  unhold(); // a drop's click is swallowed: the board shows the move at once
   // where it is released, not where it last moved; none once the board left (a sheet, the phone layout)
   const over = !end && wide.matches && route().name === 'board' && colAt(d.cols, e);
   // The click its pointerup fires opens no sheet, a cancelled drag's (button still down) too
@@ -1082,12 +1104,22 @@ document.addEventListener('pointermove', e => {
   follow(e);
 });
 document.addEventListener('pointerup', e => {
+  if (held && e.pointerId === holder) hold(RELEASE_MS); // a touch's click can come after the release's timers
   if (drag && e.pointerId === drag.id) drop(e);
   // its click comes before any timer; with none (released off the card), Enter's own click goes through
   if (swallow) setTimeout(() => { swallow = false; });
 });
-document.addEventListener('pointercancel', e => { if (drag && e.pointerId === drag.id) drop(e, true); });
+document.addEventListener('pointercancel', e => {
+  if (held && e.pointerId === holder) hold(RELEASE_MS); // a swipe took the touch: its scroll holds the lanes from here
+  if (drag && e.pointerId === drag.id) drop(e, true);
+});
 window.addEventListener('blur', e => drop(e, true));
+// A press's click has landed (not a key's: detail 0): its own render goes through, a held one follows
+document.addEventListener('click', e => {
+  if (!held || !e.detail) return;
+  unhold();
+  setTimeout(render);
+}, true);
 // The click that ends a drag opens no sheet
 document.addEventListener('click', e => {
   if (!swallow) return;
