@@ -2,7 +2,9 @@ package todo
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -396,8 +398,10 @@ func lockedPair(a, b Store, fn func() error) error {
 // key is s's list's key: its file's name, as a moved marker and a taken stamp name it.
 func (s Store) key() string { return strings.TrimSuffix(filepath.Base(s.path), ".json") }
 
-// addedAround reports whether f has items or notes added at or before at, and after it.
-func (f file) addedAround(at int64) (before, after bool) {
+// changedAround reports whether f has items or notes added at or before at, and whether it changed after it: an item
+// or note added, or a write (Updated).
+func (f file) changedAround(at int64) (before, after bool) {
+	after = f.Updated > at
 	added := func(t int64) {
 		before, after = before || t <= at, after || t > at
 	}
@@ -424,20 +428,6 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	if src.MovedTo != "" {
 		return t, Refused{fmt.Errorf("%s moved to %s at %s: nothing left to take", from.Name(), src.MovedToName, atTime(src.MovedAt, now))}
 	}
-	if dst.TakenFrom == from.key() {
-		// Only what was added after the take is a fresh list under the same name (a dev boss reopened)
-		switch before, after := src.addedAround(dst.TakenAt); {
-		case !after:
-			// The take stopped before the marker: its items are here already
-			if err := from.write(s.marker(src, now)); err != nil {
-				return t, err
-			}
-			return t, Refused{fmt.Errorf("%s taken at %s: dev todo shows it", from.Name(), atTime(dst.TakenAt, now))}
-		case before:
-			return t, Refused{fmt.Errorf("%s was taken at %s and changed before its marker was written: taking it again would take its items twice; nothing moved",
-				from.Name(), atTime(dst.TakenAt, now))}
-		}
-	}
 	// An older dev's item on its own boss's name is the user's (Own): not once another boss has it
 	for i, it := range src.Items {
 		if src.Boss != "" && it.Session == nil && it.On == src.Boss {
@@ -450,6 +440,20 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	shown.prune(now)
 	if shown.empty() {
 		return t, Refused{fmt.Errorf("%s is empty (no open items, no notes): nothing to take", from.Name())}
+	}
+	if dst.TakenFrom == from.key() {
+		// Only a list all added after the take is a fresh one under the same name (a dev boss reopened)
+		switch before, after := src.changedAround(dst.TakenAt); {
+		case !after:
+			// The take stopped before the marker: its items are here already
+			if err := from.write(s.marker(src, now)); err != nil {
+				return t, err
+			}
+			return t, Refused{fmt.Errorf("%s taken at %s: dev todo shows it", from.Name(), atTime(dst.TakenAt, now))}
+		case before:
+			return t, Refused{fmt.Errorf("%s was taken at %s and changed before its marker was written: taking it again would take its items twice; nothing moved",
+				from.Name(), atTime(dst.TakenAt, now))}
+		}
 	}
 	dst.prune(now)
 	for _, it := range dst.Items {
@@ -537,8 +541,9 @@ func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	notes := src.Notes
 	own := slices.IndexFunc(dst.Notes, func(n Note) bool { return n.Kind == NoteState })
 	theirs := slices.IndexFunc(notes, func(n Note) bool { return n.Kind == NoteState })
+	dropOwn := false
 	if own >= 0 && theirs >= 0 {
-		if notes[theirs].Added > dst.Notes[own].Added {
+		if dropOwn = notes[theirs].Added > dst.Notes[own].Added; dropOwn {
 			t.DroppedState = &dst.Notes[own]
 			dst.Notes = slices.Delete(slices.Clone(dst.Notes), own, own+1)
 		} else {
@@ -569,7 +574,8 @@ func (s Store) merge(from Store, src, dst file, t *Taken, now time.Time) error {
 	for _, n := range dst.Notes {
 		nextNote = max(nextNote, n.ID+1)
 	}
-	if t.DroppedState != nil {
+	// Its numbers are never reused: not the dropped one's either
+	if dropOwn {
 		nextNote = max(nextNote, t.DroppedState.ID+1)
 	}
 	for _, n := range notes {
@@ -636,4 +642,13 @@ func (s Store) Empty(now time.Time) (bool, error) {
 // empty reports f with no open items and no notes.
 func (f file) empty() bool {
 	return !slices.ContainsFunc(f.Items, func(it Item) bool { return it.Done == 0 }) && len(f.Notes) == 0
+}
+
+// Kept reports whether s's list has a file: its boss wrote to it once.
+func (s Store) Kept() (bool, error) {
+	_, err := os.Stat(s.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }

@@ -342,8 +342,8 @@ func TestTodoTakeOverMergeJSON(t *testing.T) {
 	}
 }
 
-// A desktop app boss with an empty list hears on resume that a stopped session's list for its project waits; a worker
-// it started doesn't, nor the boss once it has a list.
+// A desktop app boss with an empty list hears on resume that a stopped session's list for its project waits; a session
+// that never wrote a list (a worker too) doesn't, nor the boss once it has items.
 func TestTodoTakeOverDesktopHint(t *testing.T) {
 	todoEnv(t)
 	desktopSessions(t)
@@ -359,6 +359,12 @@ func TestTodoTakeOverDesktopHint(t *testing.T) {
 		t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", id)
 		return run(t, `{"hook_event_name":"SessionStart","source":"resume"}`, "state", "idle")
 	}
+	// A session that never wrote a list is no boss
+	if got := start("local_boss"); got != "" {
+		t.Errorf("session with no list: %q, want nothing", got)
+	}
+	run(t, "", "todo", "--boss", "local_boss", "set", "plan")
+	run(t, "", "todo", "--boss", "local_boss", "clear")
 	if got := start("local_boss"); !strings.Contains(got, "An earlier boss's list for proj waits: local_old (1 open, 0 notes, changed just now): dev todo take-over local_old.") {
 		t.Errorf("boss resume: %q, want the hint", got)
 	}

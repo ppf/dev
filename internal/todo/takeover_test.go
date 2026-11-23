@@ -730,3 +730,45 @@ func TestEmpty(t *testing.T) {
 		t.Error("moved: empty")
 	}
 }
+
+// A retry is refused once the source changed since the take with nothing added (a tick); a source emptied since is
+// refused as empty, no marker written over it.
+func TestTakeOverRetryChanged(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	later := now.Add(time.Minute)
+	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"a", "b"} {
+		if _, err := from.Add(Item{Text: text}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src, err := os.ReadFile(from.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(from.path, src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := from.Done([]int{1}, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "changed before its marker was written") {
+		t.Errorf("ticked since: %v", err)
+	}
+	if err := from.Done([]int{2}, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(time.Hour)); err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Errorf("emptied since: %v", err)
+	}
+	if f := rawFile(t, from); f.MovedTo != "" {
+		t.Errorf("emptied source got a marker: %+v", f)
+	}
+}

@@ -509,19 +509,14 @@ func hintT3(cmd *cobra.Command, boss string, s todo.Store, now time.Time) {
 	}
 }
 
-// desktopHint is takeOverHint for desktop app session id's list s; none for a worker another session started, which has
-// no list.
+// desktopHint is takeOverHint for desktop app session id's list s, only once s has a file: every app session runs the
+// hook, and only a boss writes a list (a worker's writes are refused).
 func desktopHint(cmd *cobra.Command, s todo.Store, id string) string {
-	home, err := os.UserHomeDir()
-	worker := false
-	if err == nil {
-		worker, err = desktop.Spawned(desktop.DefaultPaths(home, os.Getenv("CLAUDE_CONFIG_DIR")).Records, id)
-	}
+	kept, err := s.Kept()
 	if err != nil {
 		noHint(cmd, err)
-		return ""
 	}
-	if worker {
+	if !kept {
 		return ""
 	}
 	return takeOverHint(cmd, s, "", id, time.Now())
