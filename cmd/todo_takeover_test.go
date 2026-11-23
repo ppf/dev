@@ -241,11 +241,46 @@ func TestTodoTakeOverHelp(t *testing.T) {
 	for _, want := range []string{
 		"Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,\ncontext, doing, open asks), its notes, PR checks and finished items move to this boss's list, their numbers kept.",
 		"Usage:\n  dev todo take-over [<list>] [flags]",
-		"--any-project   lists of other projects, the manager's, and T3 Code lists of no known project too",
+		"--any-project   lists of other projects, the manager's, and lists of no known project too",
 		"--json          print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// A shared prefix is refused, naming each; a longer one takes; --json says what moved.
+func TestTodoTakeOverAmbiguousJSON(t *testing.T) {
+	lists := takeOverEnv(t)
+	for _, id := range []string{"49f62c8e-1111-a", "49f62c8e-2222-b"} {
+		writeList(t, lists, "t3-"+id, "", "from "+id, time.Minute)
+		f := filepath.Join(lists, "t3-"+id+".json")
+		data, _ := os.ReadFile(f)
+		if err := os.WriteFile(f, []byte(strings.Replace(string(data), `"boss":""`, `"dir":"/p/dev"`, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := execute(t, "", "todo", "take-over", "t3:49f62c8e"); err == nil || err.Error() != "t3:49f62c8e matches 2 lists (49f62c8e-1111-a, 49f62c8e-2222-b): give more of its id" {
+		t.Errorf("shared prefix: %v", err)
+	}
+	out := run(t, "", "todo", "take-over", "--json", "t3:49f62c8e-2222")
+	var v struct {
+		From, To  struct{ List, Kind, Project string }
+		Mode      string
+		Items     []struct{ From, To int }
+		Notes     []struct{ From, To int }
+		OnWorkers []string `json:"on_workers"`
+		Warnings  []string
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.From.List != "t3:49f62c8e" || v.To.List != "t3:5f1c2d90" || v.To.Kind != "t3" || v.To.Project != "dev" || v.Mode != "move" ||
+		len(v.Items) != 1 || v.Items[0].From != 1 || v.Items[0].To != 1 || len(v.Notes) != 0 || v.OnWorkers == nil || len(v.Warnings) != 1 {
+		t.Errorf("--json = %s", out)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\tfrom 49f62c8e-2222-b\n" {
+		t.Errorf("taken = %q", got)
 	}
 }

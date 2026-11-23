@@ -285,28 +285,30 @@ func (s Store) Adoptable(earlier func() (func(id string) bool, error)) (from Sto
 
 // take moves from's file to s, when s has none and from still has one; taken reports it.
 func (s Store) take(from Store) (taken bool, err error) {
-	err = s.locked(func() error {
-		return from.locked(func() error {
-			// Under both locks: another boss may have taken it, or s got a list meanwhile
-			if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			if _, err := os.Stat(from.path); errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			taken = true
-			if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
-				return err
-			}
-			// Its checks and finished items go first, under its lock, which guards them too: a retry still finds the list
-			if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
-				return err
-			}
-			if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
-				return err
-			}
-			return os.Rename(from.path, s.path)
-		})
+	err = lockedPair(s, from, func() error {
+		// Under both locks: another boss may have taken it, or s got a list meanwhile
+		if _, err := os.Stat(s.path); !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if _, err := os.Stat(from.path); errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		// Taken over meanwhile (TakeOver): its marker stays its boss's
+		if f, err := from.read(); err != nil || f.MovedTo != "" {
+			return err
+		}
+		taken = true
+		if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
+			return err
+		}
+		// Its checks and finished items go first, under its lock, which guards them too: a retry still finds the list
+		if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
+			return err
+		}
+		if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
+			return err
+		}
+		return os.Rename(from.path, s.path)
 	})
 	return taken, err
 }

@@ -422,8 +422,8 @@ func liveSessions(dir string) ([]live, []error) {
 		}
 		// Still running, so kept: worker shows it busy
 		if l.Status != StateBusy && l.Status != StateIdle && l.Status != liveWaiting {
-			warnings = append(warnings, fmt.Errorf("%s: live session %s has a status this board doesn't know (%q): shown busy",
-				path, l.SessionID, l.Status))
+			warnings = append(warnings, fmt.Errorf("%s: live session %s has a status this board doesn't know (%q): %w",
+				path, l.SessionID, l.Status, errShownBusy))
 		}
 		if alive(l) {
 			lives = append(lives, l)
@@ -627,14 +627,19 @@ type State struct {
 }
 
 // States are the states of app sessions ids, by id. Fails closed: an unreadable live file would make a running
-// session look stopped, so it is an error; so is a record it can't read. An id with no record is stopped.
+// session look stopped, so it is an error; so is a record it can't read, or a live folder missing. An id with no record runs only when a live session names it.
 func States(p Paths, ids []string) (map[string]State, error) {
 	paths, err := filepath.Glob(filepath.Join(p.Records, "*", "*", "local_*.json"))
 	if err != nil {
 		return nil, err
 	}
+	// Glob hides a folder it can't read, and a missing one would make every session look stopped
+	if _, err := os.ReadDir(p.Live); err != nil {
+		return nil, err
+	}
 	lives, warnings := liveSessions(p.Live)
-	if len(warnings) > 0 {
+	// A status it doesn't know is still a live session's
+	if warnings = slices.DeleteFunc(warnings, func(w error) bool { return errors.Is(w, errShownBusy) }); len(warnings) > 0 {
 		return nil, errors.Join(warnings...)
 	}
 	states := map[string]State{}
@@ -651,3 +656,6 @@ func States(p Paths, ids []string) (map[string]State, error) {
 	}
 	return states, nil
 }
+
+// errShownBusy ends the warning of a live session whose status the board doesn't know: kept, shown busy.
+var errShownBusy = errors.New("shown busy")

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -34,8 +33,11 @@ var mainCheckout = func() (string, error) {
 		return "", err
 	}
 	out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if err != nil {
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok && strings.Contains(string(exit.Stderr), "not a git repository") {
 		return cwd, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("the main checkout of %s: %w", cwd, err)
 	}
 	return filepath.Dir(strings.TrimSpace(string(out))), nil
 }
@@ -53,8 +55,8 @@ starts a fresh list.
 Without <list>, print the lists this boss could take, newest change first, and why one can't be taken.
 <list> is a dev boss's name (boss-dev), a desktop app session's local_… id, or t3:<thread id> (8 or more
 characters of it). Refused: this boss's own list, a dev boss or desktop app session still running (close it
-first), another project's list or the manager's (--any-project), a list moved or empty. A T3 Code thread's list
-is taken without a running check (dev can't see T3 Code's threads): archive that thread.`,
+first), another project's list, the manager's or one of no known project (--any-project), a list moved or empty.
+A T3 Code thread's list is taken without a running check (dev can't see T3 Code's threads): archive that thread.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
@@ -83,7 +85,7 @@ is taken without a running check (dev can't see T3 Code's threads): archive that
 			return printTaken(out, own, ownProject, c, t, asJSON)
 		},
 	}
-	cmd.Flags().BoolVar(&anyProject, "any-project", false, "lists of other projects, the manager's, and T3 Code lists of no known project too")
+	cmd.Flags().BoolVar(&anyProject, "any-project", false, "lists of other projects, the manager's, and lists of no known project too")
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3, project, state: running, closed, stopped or unknown, open, asks, notes, updated, takeable, why_not) and other_projects; with it, from, to ({list, kind, project} each), mode: move, items and notes ({from, to} each), asks, on_workers, warnings`)
 	return cmd
 }
@@ -171,6 +173,9 @@ func tmuxSocket(c *tmux.Client) (string, error) {
 	switch {
 	case err == nil:
 		return strings.TrimSpace(out), nil
+	case errors.Is(err, exec.ErrNotFound):
+		// No tmux, no dev boss: no tmux list is anyone's live one
+		err = nil
 	case !tmux.IsNoServer(err):
 		return "", err
 	}
@@ -224,8 +229,18 @@ func projectFinder(cmd *cobra.Command) (func(dir string) string, error) {
 // findCandidate is the list arg names: its name, a desktop app session's local_… id or t3:<thread id>, either of 8
 // characters or more.
 func findCandidate(cands []todo.Candidate, arg string) (todo.Candidate, error) {
-	if i := slices.IndexFunc(cands, func(c todo.Candidate) bool { return c.List == arg || c.Short() == arg }); i >= 0 {
-		return cands[i], nil
+	var exact []todo.Candidate
+	for _, c := range cands {
+		if c.List == arg || c.Short() == arg || c.ID() == arg {
+			exact = append(exact, c)
+		}
+	}
+	switch len(exact) {
+	case 1:
+		return exact[0], nil
+	case 0:
+	default:
+		return todo.Candidate{}, ambiguous(arg, exact)
 	}
 	var kind, id string
 	switch {
@@ -241,7 +256,7 @@ func findCandidate(cands []todo.Candidate, arg string) (todo.Candidate, error) {
 	}
 	want := arg
 	if kind == todo.KindT3 {
-		want = id
+		want = todo.T3ID(id)
 	}
 	var found []todo.Candidate
 	for _, c := range cands {
@@ -255,11 +270,16 @@ func findCandidate(cands []todo.Candidate, arg string) (todo.Candidate, error) {
 	case 1:
 		return found[0], nil
 	}
+	return todo.Candidate{}, ambiguous(arg, found)
+}
+
+// ambiguous refuses arg naming more than one list, found.
+func ambiguous(arg string, found []todo.Candidate) error {
 	names := make([]string, len(found))
 	for i, c := range found {
 		names[i] = c.ID()
 	}
-	return todo.Candidate{}, fmt.Errorf("%s matches %d lists (%s): give more of its id", arg, len(found), strings.Join(names, ", "))
+	return fmt.Errorf("%s matches %d lists (%s): give more of its id", arg, len(found), strings.Join(names, ", "))
 }
 
 // kindLabel is how the listing names a list's kind.
@@ -357,7 +377,13 @@ type renumbered struct {
 func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candidate, t todo.Taken, asJSON bool) error {
 	var warnings []string
 	if len(t.OnWorkers) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d on the old boss's workers (%s): re-check them (dev todo)", len(t.OnWorkers), strings.Join(t.OnWorkers, ", ")))
+		on := 0
+		for _, it := range t.Items {
+			if it.Session != nil {
+				on++
+			}
+		}
+		warnings = append(warnings, fmt.Sprintf("%d on the old boss's workers (%s): re-check them (dev todo)", on, strings.Join(t.OnWorkers, ", ")))
 	}
 	if t.Asks > 0 && own.Kind() == todo.KindT3 {
 		warnings = append(warnings, todo.Plural(t.Asks, "open ask")+" among them: the boards can't answer a T3 Code boss's asks: name them in your next reply")

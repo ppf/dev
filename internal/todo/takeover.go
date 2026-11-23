@@ -14,8 +14,15 @@ import (
 
 const t3Prefix = "t3-"
 
-// T3Name is the name of T3 Code thread id's list: t3: and the id's first 8 characters.
-func T3Name(id string) string { return "t3:" + id[:min(len(id), 8)] }
+// T3Name is the name of T3 Code thread id's list: t3: and the first 8 characters of the id as its file names it
+// (mcp:0c63… is mcp_0c63…), so the name a take-over prints is one it takes back.
+func T3Name(id string) string {
+	id = T3ID(id)
+	return "t3:" + id[:min(len(id), 8)]
+}
+
+// T3ID is T3 Code thread id as its list's file names it.
+func T3ID(id string) string { return strings.Trim(unsafe.ReplaceAllString(id, "_"), "_") }
 
 // movedMarker is what a list taken over (TakeOver) keeps: the key and name of the list it went to, and when.
 type movedMarker struct {
@@ -114,13 +121,14 @@ type Candidate struct {
 	Updated  int64  `json:"updated"`
 	Takeable bool   `json:"takeable"`
 	WhyNot   string `json:"why_not,omitempty"`
-	// Listed is a row of the listing: not this boss's own, moved or empty; Other a list of another or no known project
-	// the listing only counts
+	// Listed is a row of the listing: not this boss's own, moved or empty (one not read is, with why); Other a list of
+	// another or no known project the listing only counts
 	Listed  bool `json:"-"`
 	Other   bool `json:"-"`
 	id      string
 	store   Store
 	refusal error
+	unread  bool
 }
 
 // Store is the candidate's list.
@@ -187,14 +195,21 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 		}
 		c.store.name = c.List
 		if err != nil {
-			c.refusal, c.WhyNot = fmt.Errorf("%s not read: %w", c.List, err), "not read: "+err.Error()
+			c.refusal, c.WhyNot, c.unread = fmt.Errorf("%s not read: %w", c.List, err), "not read: "+err.Error(), true
 		} else {
 			c.count(f, now)
 		}
 		out = append(out, c)
 	}
-	if !slices.ContainsFunc(out, func(c Candidate) bool { return c.store.path == own.path }) {
-		out = append(out, Candidate{List: own.Name(), Kind: own.Kind(), store: own})
+	var busy error
+	if i := slices.IndexFunc(out, func(c Candidate) bool { return c.store.path == own.path }); i < 0 {
+		c := Candidate{List: own.Name(), Kind: own.Kind(), store: own}
+		if c.Kind != KindTmux {
+			c.id = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(filepath.Base(own.path), ".json"), t3Prefix), desktopPrefix)
+		}
+		out = append(out, c)
+	} else if out[i].Open > 0 || out[i].Notes > 0 {
+		busy = notEmpty(out[i].Open, out[i].Notes)
 	}
 	var states map[string]DesktopState
 	var statesErr error
@@ -234,7 +249,7 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 				c.Project = looks.Project(c.store.dir)
 			}
 		}
-		c.classify(own, ownProject, stateErr, anyProject, now)
+		c.classify(own, ownProject, stateErr, busy, anyProject)
 	}
 	slices.SortStableFunc(out, func(a, b Candidate) int { return cmp.Compare(b.Updated, a.Updated) })
 	return out, nil
@@ -252,7 +267,7 @@ func (s Store) Kind() string {
 }
 
 // count sets c's open items, asks, notes and last change from its file f at now, and its moved marker's refusal; it keeps
-// f's dir, a T3 Code list's project.
+// f's dir, which names a T3 Code list's project.
 func (c *Candidate) count(f file, now time.Time) {
 	f.Items, f.Notes = slices.Clone(f.Items), slices.Clone(f.Notes)
 	f.prune(now)
@@ -275,9 +290,9 @@ func (c *Candidate) count(f file, now time.Time) {
 	c.store.dir = f.Dir
 }
 
-// classify sets why c can't be taken by own's boss, of project ownProject, stateErr being why its state is unknown;
-// Listed and Other say where the listing puts it.
-func (c *Candidate) classify(own Store, ownProject string, stateErr error, anyProject bool, now time.Time) {
+// classify sets why c can't be taken by own's boss, of project ownProject, stateErr being why its state is unknown and
+// busy why own's list takes none now; Listed and Other say where the listing puts it.
+func (c *Candidate) classify(own Store, ownProject string, stateErr, busy error, anyProject bool) {
 	refuse := func(why string, err error) {
 		if c.refusal == nil {
 			c.WhyNot, c.refusal = why, err
@@ -288,7 +303,8 @@ func (c *Candidate) classify(own Store, ownProject string, stateErr error, anyPr
 		c.WhyNot, c.refusal = "this boss's own list", fmt.Errorf("%s is this boss's own list", c.List)
 		return
 	case c.refusal != nil:
-		// Not read, or moved
+		// Not read: listed with why; moved: left out
+		c.Listed = c.unread
 		return
 	case c.Open == 0 && c.Notes == 0:
 		refuse("empty", fmt.Errorf("%s is empty (no open items, no notes): nothing to take", c.List))
@@ -304,6 +320,8 @@ func (c *Candidate) classify(own Store, ownProject string, stateErr error, anyPr
 		refuse("running: close it first", fmt.Errorf("%s is running: close it first (its manager's ×, or /exit in it), then take it over", c.List))
 	case c.State == StateRunning:
 		refuse("running: close it first", fmt.Errorf("%s is running: close it first (/exit in it), then take it over", c.List))
+	case busy != nil:
+		refuse("this boss's list isn't empty", busy)
 	}
 	if anyProject || c.Project != "" && c.Project == ownProject {
 		c.Takeable = c.refusal == nil
@@ -333,24 +351,26 @@ type Taken struct {
 // TakeOver moves from's list into s, which has no open items and no notes: its items, notes, PR checks and finished
 // items, numbers kept; s's own finished items stay. from's file then holds a moved marker, which refuses its boss's
 // writes (Moved). The move runs under both lists' locks and checks both again there: a list moved, emptied or
-// a destination no longer empty is refused (Refused), nothing moved.
+// a destination no longer empty is refused (Refused), nothing moved. Whether from's boss runs is its caller's check.
 func (s Store) TakeOver(from Store, now time.Time) (t Taken, err error) {
 	if s.path == from.path {
 		return t, Refused{fmt.Errorf("%s is this boss's own list", s.Name())}
 	}
-	// One order for every pair: two bosses may take each other's lists at once
-	first, second := s, from
-	if from.path < s.path {
-		first, second = from, s
-	}
-	err = first.locked(func() error {
-		return second.locked(func() error {
-			var err error
-			t, err = s.takeOver(from, now)
-			return err
-		})
+	err = lockedPair(s, from, func() error {
+		var err error
+		t, err = s.takeOver(from, now)
+		return err
 	})
 	return t, err
+}
+
+// lockedPair runs fn under a's and b's locks, taken in path order: two moves of the same pair in opposite directions
+// (a take-over, a desktop app's adopt) mustn't each hold one.
+func lockedPair(a, b Store, fn func() error) error {
+	if b.path < a.path {
+		a, b = b, a
+	}
+	return a.locked(func() error { return b.locked(fn) })
 }
 
 // takeOver is TakeOver under both locks.
@@ -366,6 +386,12 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	}
 	if src.MovedTo != "" {
 		return t, Refused{fmt.Errorf("%s moved to %s at %s: nothing left to take", from.Name(), src.MovedToName, atTime(src.MovedAt, now))}
+	}
+	// An older dev's item on its own boss's name is the user's (Own): not once another boss has it
+	for i, it := range src.Items {
+		if src.Boss != "" && it.Session == nil && it.On == src.Boss {
+			src.Items[i].On = ""
+		}
 	}
 	// What it moves, as its boards show it now; the file itself moves as stored
 	shown := src
@@ -395,8 +421,30 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 		}
 	}
 	if open > 0 || len(dst.Notes) > 0 {
-		return t, Refused{fmt.Errorf("this boss's list has %s and %s: taking over into a list with items or notes comes later: tick or drop them first (dev todo done <n>, dev todo note drop <n>)",
-			Plural(open, "open item"), Plural(len(dst.Notes), "note"))}
+		return t, notEmpty(open, len(dst.Notes))
+	}
+	// The list first, by a rename: a failure leaves it in one place, never two; then the marker, then what lives beside
+	// them, PR checks and finished items, which a failure leaves beside the marker, read by no board
+	if err := os.Rename(from.path, s.path); err != nil {
+		return t, err
+	}
+	moved := src
+	moved.Boss, moved.Dir, moved.Updated = s.boss, s.dir, now.Unix()
+	moved.Ticked = slices.Concat(dst.Ticked, src.Ticked)
+	if err := s.write(moved); err != nil {
+		return t, err
+	}
+	marker := file{Updated: now.Unix(), Boss: src.Boss, Dir: src.Dir, movedMarker: movedMarker{
+		MovedTo: strings.TrimSuffix(filepath.Base(s.path), ".json"), MovedToName: s.Name(), MovedAt: now.Unix(),
+	}}
+	if err := from.write(marker); err != nil {
+		return t, err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.checksPath()), 0o700); err != nil {
+		return t, err
+	}
+	if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
+		return t, err
 	}
 	// Its ticked items, both lists' finished ones: kept beside s
 	kept, err := s.readDone(true)
@@ -410,29 +458,13 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	if err := s.saveDone(finished(slices.Concat(kept, dst.dropped, dst.Items, theirs), now)); err != nil {
 		return t, err
 	}
-	if err := ignoreMissing(os.Remove(from.donePath())); err != nil {
-		return t, err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.checksPath()), 0o700); err != nil {
-		return t, err
-	}
-	if err := ignoreMissing(os.Rename(from.checksPath(), s.checksPath())); err != nil {
-		return t, err
-	}
-	// A rename first: a failure from here on leaves the list in one place, never two
-	if err := os.Rename(from.path, s.path); err != nil {
-		return t, err
-	}
-	moved := src
-	moved.Boss, moved.Dir, moved.Updated = s.boss, s.dir, now.Unix()
-	moved.Ticked = slices.Concat(dst.Ticked, src.Ticked)
-	if err := s.write(moved); err != nil {
-		return t, err
-	}
-	marker := file{Updated: now.Unix(), Boss: src.Boss, Dir: src.Dir, movedMarker: movedMarker{
-		MovedTo: strings.TrimSuffix(filepath.Base(s.path), ".json"), MovedToName: s.Name(), MovedAt: now.Unix(),
-	}}
-	return t, from.write(marker)
+	return t, ignoreMissing(os.Remove(from.donePath()))
+}
+
+// notEmpty refuses a take-over into a list with open items or notes, until a merge is built.
+func notEmpty(open, notes int) error {
+	return Refused{fmt.Errorf("this boss's list has %s and %s: taking over into a list with items or notes comes later: tick or drop them first (dev todo done <n>, dev todo note drop <n>)",
+		Plural(open, "open item"), Plural(notes, "note"))}
 }
 
 // Plural is "n word", an s added unless n is 1.

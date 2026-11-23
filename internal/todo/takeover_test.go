@@ -361,3 +361,97 @@ func TestCandidates(t *testing.T) {
 		t.Errorf("own list with no file missing: %+v", cands)
 	}
 }
+
+// Into a list with an open item, refused, both lists kept; an older dev's item on its boss's own name stays the
+// user's once moved; a desktop app's adopt leaves a moved marker where it is.
+func TestTakeOverEdges(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := from.Add(Item{Text: "legacy", On: "boss-dev"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, now); err == nil || !strings.HasPrefix(err.Error(), "this boss's list has 1 open item and 0 notes") {
+		t.Errorf("into an open item: %v", err)
+	}
+	if got := ids(read(t, to, now)); !slices.Equal(got, []string{"1 mine"}) {
+		t.Errorf("destination after the refusal = %q", got)
+	}
+	if err := to.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute)
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(t, to, later); len(l.Items) != 1 || l.Items[0].On != "" {
+		t.Errorf("legacy item = %+v, want the user's", l.Items)
+	}
+
+	desk, _ := Desktop("local_new")
+	if adopted, err := desk.take(from); err != nil || adopted {
+		t.Errorf("adopt of a marker: %v %v, want none", adopted, err)
+	}
+	if _, err := os.Stat(desk.path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("adopting session got a file: %v", err)
+	}
+	if got := T3Name("mcp:0c638555-1111"); got != "t3:mcp_0c63" {
+		t.Errorf("T3Name of an mcp id = %q", got)
+	}
+}
+
+// A list not read is listed with why; a boss state not read refuses, listed; this boss's own list not empty refuses
+// every row.
+func TestCandidatesRefusals(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	own := t3Store(t, "5f1c2d90-own", "/p/dev")
+	if _, err := tmuxStore(t, "boss-dev").Add(Item{Text: "x"}, now); err != nil {
+		t.Fatal(err)
+	}
+	desk, _ := Desktop("local_a")
+	if _, err := desk.Add(Item{Text: "y"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(own.path), "t3-broken.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failing := errors.New("boom")
+	looks := Looks{
+		Socket:   "/tmp/tmux-1/default",
+		Sessions: func() ([]string, error) { return nil, failing },
+		Desktop:  func([]string) (map[string]DesktopState, error) { return nil, failing },
+		Project:  filepath.Base,
+	}
+	why := func() map[string]string {
+		t.Helper()
+		cands, err := Candidates(own, "dev", looks, false, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, c := range cands {
+			if c.Listed {
+				out[c.List] = c.WhyNot
+				if c.Takeable {
+					t.Errorf("%s takeable", c.List)
+				}
+			}
+		}
+		return out
+	}
+	got := why()
+	if got["boss-dev"] != "state not read: boom" || got["local_a"] != "state not read: boom" || !strings.HasPrefix(got["t3:broken"], "not read: ") {
+		t.Errorf("rows = %q", got)
+	}
+	looks.Sessions = func() ([]string, error) { return nil, nil }
+	if _, err := own.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := why(); got["boss-dev"] != "this boss's list isn't empty" {
+		t.Errorf("rows with a busy own list = %q", got)
+	}
+}
