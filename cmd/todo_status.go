@@ -67,8 +67,12 @@ func desktopOwner(boss string, stderr io.Writer) (todo.Owner, []string) {
 		return todo.Owner{Unread: true}, nil
 	}
 	_, id, err := todoBoss(boss)
-	if err != nil {
+	switch {
+	case err != nil:
 		return unread(err)
+	case strings.HasPrefix(id, t3Boss):
+		// No workers dev can see: an item on one reads as on a person
+		return todo.Owner{}, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -221,12 +221,18 @@ type Delivery struct {
 	PR        int    `json:"pr,omitempty"` // the PR/MR delivering it; 0 when HEAD is in the base branch or not delivered
 }
 
-// Delivered runs Close's non-tmux checks on the worktree at path (under .claude/worktrees).
+// Delivered runs Close's non-tmux checks on the worktree at path (under .claude/worktrees, or one T3 Code made).
 func Delivered(path string) (Delivery, error) {
 	var d Delivery
 	mainRoot, wt, ok := worktree.SessionWorktree(path)
 	if !ok {
-		return d, d.refused(fmt.Errorf("%s isn't in a .claude/worktrees worktree", path))
+		var err error
+		if mainRoot, wt, ok, err = worktree.T3Worktree(path); err != nil {
+			return d, d.refused(err)
+		}
+	}
+	if !ok {
+		return d, d.refused(fmt.Errorf("%s isn't in a .claude/worktrees or T3 Code worktree", path))
 	}
 	base, err := worktree.FetchDefault(mainRoot)
 	if err != nil {

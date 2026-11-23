@@ -45,7 +45,7 @@ func newAgentCmd() *cobra.Command {
 		Short: "Drive agent sessions from a coordinator agent (targets: session name or pane id)",
 		Long: `Drive agent sessions from a coordinator agent. A target is a session name (exact) or an agent
 pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (prompt not picked up).
-Run "dev agent skill [dev-agents|desktop-boss]" for a coordinator skill.`,
+Run "dev agent skill [dev-agents|desktop-boss|t3-boss]" for a coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(), newAgentWaitUntilCmd(),
 		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd(), newAgentMessageCmd(), newAgentReplyCmd(),
@@ -502,8 +502,8 @@ func closeBoss(cmd *cobra.Command, c *tmux.Client, pane string, a control.Agent,
 
 func newAgentSkillCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "skill [dev-agents|desktop-boss]",
-		Short: "Print a coordinator skill (SKILL.md): dev-agents (default) drives others with dev agent, desktop-boss with the desktop app's tools",
+		Use:   "skill [dev-agents|desktop-boss|t3-boss]",
+		Short: "Print a coordinator skill (SKILL.md): dev-agents (default) drives others with dev agent, desktop-boss with the desktop app's tools, t3-boss with T3 Code's",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := skill.Default

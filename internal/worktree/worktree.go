@@ -105,6 +105,41 @@ func SessionWorktree(panePath string) (mainRoot, wtPath string, ok bool) {
 	if !ok || !strings.Contains(top, "/.claude/worktrees/") {
 		return "", "", false
 	}
+	return withMain(top)
+}
+
+// T3Worktree reports the main checkout and worktree path when path is inside a worktree T3 Code made: under
+// <T3 Code's home>/worktrees, its home $T3CODE_HOME, else ~/.t3. No such directory is no T3 Code worktree; one that
+// can't be read is an error.
+func T3Worktree(path string) (mainRoot, wtPath string, ok bool, err error) {
+	home := os.Getenv("T3CODE_HOME")
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", false, err
+		}
+		home = filepath.Join(h, ".t3")
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Join(home, "worktrees"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", "", false, nil
+	} else if err != nil {
+		return "", "", false, fmt.Errorf("T3 Code's worktrees: %w", err)
+	}
+	top, ok := Root(path)
+	if !ok || !strings.HasPrefix(top, dir+string(filepath.Separator)) {
+		return "", "", false, nil
+	}
+	mainRoot, wtPath, ok = withMain(top)
+	// A repository cloned there is no worktree: its own checkout would deliver anything committed
+	if gitDir, err := gitOutput(top, "rev-parse", "--path-format=absolute", "--git-dir"); err != nil || filepath.Dir(gitDir) == top {
+		return "", "", false, err
+	}
+	return mainRoot, wtPath, ok, nil
+}
+
+// withMain is the main checkout of the worktree at top, with top.
+func withMain(top string) (mainRoot, wtPath string, ok bool) {
 	common, err := gitOutput(top, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", "", false
