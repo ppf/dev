@@ -16,16 +16,21 @@ var DevAgents string
 //go:embed desktop-boss/SKILL.md
 var DesktopBoss string
 
+// T3Boss is t3-boss/SKILL.md: how a T3 Code thread drives worker threads with T3 Code's own tools.
+//
+//go:embed t3-boss/SKILL.md
+var T3Boss string
+
 // Default is the skill `dev agent skill` prints without a name.
 const Default = "dev-agents"
 
-var byName = map[string]string{"dev-agents": DevAgents, "desktop-boss": DesktopBoss}
+var byName = map[string]string{"dev-agents": DevAgents, "desktop-boss": DesktopBoss, "t3-boss": T3Boss}
 
 // Text returns the skill named name (its directory).
 func Text(name string) (string, error) {
 	text, ok := byName[name]
 	if !ok {
-		return "", fmt.Errorf("unknown skill %q, want dev-agents or desktop-boss", name)
+		return "", fmt.Errorf("unknown skill %q, want dev-agents, desktop-boss or t3-boss", name)
 	}
 	return text, nil
 }

@@ -139,7 +139,20 @@ func TestDelivered(t *testing.T) {
 		}
 	}
 	check("in base", inBase, Delivery{Delivered: true, Head: git(inBase, "rev-parse", "HEAD"), Reason: "in origin/main"})
-	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees worktree"})
+	// T3 Code's worktrees: under $T3CODE_HOME/worktrees, else ~/.t3/worktrees; not another home's
+	t3Home, home := filepath.Join(dir, "t3home"), filepath.Join(dir, "home")
+	t3 := func(wt string) string {
+		git(root, "worktree", "add", "-q", "--detach", wt, "origin/main")
+		return wt
+	}
+	inT3Home, inT3Default := t3(filepath.Join(t3Home, "worktrees", "repo", "feature-1")), t3(filepath.Join(home, ".t3", "worktrees", "repo", "feature-2"))
+	t.Setenv("HOME", home)
+	t.Setenv("T3CODE_HOME", t3Home)
+	check("T3 Code's home set", inT3Home, Delivery{Delivered: true, Head: git(inT3Home, "rev-parse", "HEAD"), Reason: "in origin/main"})
+	check("~/.t3 with T3 Code's home set elsewhere", inT3Default, Delivery{Reason: inT3Default + " isn't in a .claude/worktrees or T3 Code worktree"})
+	t.Setenv("T3CODE_HOME", "")
+	check("~/.t3", inT3Default, Delivery{Delivered: true, Head: git(inT3Default, "rev-parse", "HEAD"), Reason: "in origin/main"})
+	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees or T3 Code worktree"})
 	check("dirty", dirty, Delivery{Head: git(dirty, "rev-parse", "HEAD"), Reason: dirty + " has uncommitted changes to tracked files"})
 	check("ahead, local origin", ahead, Delivery{Head: head, Reason: "and no PR/MR open or merged at its HEAD: origin " + origin + " isn't a GitHub or GitLab repository"})
 

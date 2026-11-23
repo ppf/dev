@@ -32,7 +32,7 @@ func newTodoCmd() *cobra.Command {
 		Long: `Keep the boss's list of what waits on the user: a dev boss's previews pane shows it at the top, and
 --json is what a desktop board reads. Without a subcommand, print it. The list belongs to the boss session it
 runs in: a dev boss session in tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a
-boss started it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the
+boss started it, else the T3 Code thread ($T3CODE_THREAD_ID) unless another thread delegated it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the
 coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
 session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
 worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
@@ -794,6 +794,8 @@ func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 		return todo.Store{}, err
 	case pane != "":
 		return todo.ForPane(tmux.New(), pane)
+	case strings.HasPrefix(id, t3Boss):
+		return todo.T3(strings.TrimPrefix(id, t3Boss))
 	}
 	return desktopTodo(id, adopt && boss == "", stderr)
 }
@@ -825,8 +827,16 @@ type unreadList struct{ error }
 
 func (e unreadList) Unwrap() error { return e.error }
 
+// t3Boss starts todoBoss's id for a T3 Code thread, before the thread's id.
+const t3Boss = "t3:"
+
+// t3Child starts the id of a thread T3 Code started for another's delegate_task: a worker, not a boss.
+const t3Child = "thread:delegated-task:"
+
+var errT3Child = errors.New("a task another T3 Code thread delegated: the to do list is its boss's")
+
 // todoBoss is the boss session whose list it is: --boss's, else the one it runs in; a pane in a tmux one, else
-// a desktop app session's id.
+// a desktop app session's id, else a T3 Code thread's id after t3Boss.
 func todoBoss(boss string) (pane, id string, err error) {
 	switch {
 	case strings.HasPrefix(boss, "local_"):
@@ -841,11 +851,18 @@ func todoBoss(boss string) (pane, id string, err error) {
 	if id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID"); id != "" {
 		return "", id, nil
 	}
-	return "", "", errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
+	if id := os.Getenv("T3CODE_THREAD_ID"); id != "" {
+		if strings.HasPrefix(id, t3Child) {
+			return "", "", fmt.Errorf("%s is %w", id, errT3Child)
+		}
+		return "", t3Boss + id, nil
+	}
+	return "", "", errors.New("no boss session: run it in a dev boss session, a desktop app session or a T3 Code thread, or pass --boss <session|local_id>")
 }
 
 // todoWorkers is the workers of the boss whose list it is: tmux sessions it started, or desktop app sessions it
-// spawned, not archived; records that can't be read are reported on stderr.
+// spawned, not archived (none for a T3 Code thread: dev can't see its threads); records that can't be read are
+// reported on stderr.
 func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
 	pane, id, err := todoBoss(boss)
 	switch {
@@ -853,6 +870,8 @@ func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
 		return nil, err
 	case pane != "":
 		return todo.Workers(tmux.New(), pane)
+	case strings.HasPrefix(id, t3Boss):
+		return nil, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -908,7 +927,7 @@ func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 // the lookup can't tell is left to desktopTodo, which says why.
 func tryAdoptable(boss string, try func(todo.Store) error) error {
 	pane, id, err := todoBoss(boss)
-	if err != nil || pane != "" || boss != "" {
+	if err != nil || pane != "" || boss != "" || strings.HasPrefix(id, t3Boss) {
 		return err
 	}
 	home, err := os.UserHomeDir()

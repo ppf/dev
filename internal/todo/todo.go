@@ -217,6 +217,9 @@ const desktopPrefix = "desktop-"
 // Desktop is the list of the desktop app boss session id (local_…).
 func Desktop(id string) (Store, error) { return open(desktopPrefix + id) }
 
+// T3 is the list of the T3 Code boss thread id.
+func T3(id string) (Store, error) { return open("t3-" + id) }
+
 // AdoptDesktop moves into s, when it has no file yet, the newest list with open items earlier accepts (Adoptable);
 // adopted reports it. Unreadable lists are skipped and returned in err.
 func (s Store) AdoptDesktop(earlier func() (func(id string) bool, error)) (adopted bool, err error) {
