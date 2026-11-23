@@ -109,11 +109,11 @@ func TestBossUnderBoss(t *testing.T) {
 	state(app, "working", `{"hook_event_name":"UserPromptSubmit"}`)
 	state(app, "waiting", `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`)
 	// Its list: items for the user, and one on its worker
-	check(t, "add", dev(app, "", "todo", "add", "Pick a name"), "added 1 · to do 1\n")
+	check(t, "add", dev(app, "", "todo", "add", "Pick a name", "--details", "why"), "added 1 · to do 1\n")
 	check(t, "add on a worker", dev(app, "", "todo", "add", "Fix CI", "--on", "app-w"), "added 2 · to do 2, 1 on others\n")
-	check(t, "ask", dev(app, "", "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait"), "asked 3 · to do 3, 1 on others\n")
-	check(t, "given back", dev(app, "", "todo", "add", "--replaces", "2", "--on", "me"), "replaced 2 · to do 3\n")
-	check(t, "a top boss's item", dev(hq, "", "todo", "add", "Book a room"), "added 1 · to do 1\n")
+	check(t, "ask", dev(app, "", "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait", "--details", "why"), "asked 3 · to do 3, 1 on others\n")
+	check(t, "given back", dev(app, "", "todo", "add", "--replaces", "2", "--on", "me", "--details", "why"), "replaced 2 · to do 3\n")
+	check(t, "a top boss's item", dev(hq, "", "todo", "add", "Book a room", "--details", "why"), "added 1 · to do 1\n")
 	dev(app, "", "agent", "message", "boss-hq", "Which API version?")
 	got := take()
 	for _, want := range []string{
