@@ -20,8 +20,9 @@ func TestProjectColourOf(t *testing.T) {
 		"kuehne":       "#e070c0",
 		"docworx":      "#8a6ee0", // spare 7
 		"":             "#8a6ee0",
-		"local_ab12":   "#a8dcef",                    // desktop's
-		"boss-vitay":   ProjectColourOf("boss").Dark, // a project of that name, not vitay
+		"desktop":      "#a8dcef",
+		"local_api":    "#8a6ee0", // spare 7: a project of that name, not desktop
+		"boss-vitay":   "#c9b3f5", // spare 4 (boss): a project of that name, not vitay
 	} {
 		if got := ProjectColourOf(name).Dark; got != want {
 			t.Errorf("%q: %s, want %s", name, got, want)

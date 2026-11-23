@@ -211,10 +211,10 @@ func TestProjectColours(t *testing.T) {
 	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.Muted+"all"+reset+"  "+bold+alpha+"alpha"+reset) {
 		t.Errorf("❌ p: alpha not bold in its colour:\n%q", out)
 	}
-	// A desktop app boss's card takes desktop's colour, as its dot on the page
+	// A desktop app boss's card is desktop's, in its colour, as on the page
 	m, _ = board(t, append(fixture(0), List{Boss: "local_ab12", Items: []todo.Shown{{ID: 4, Text: "Desk", Status: sidebar.StatusYours,
 		Placement: todo.Placement{Column: sidebar.ColumnWaiting}}}}), 200, 55)
-	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.ProjectColourOf("desktop").ANSI()+"local_ab12 #4"+reset) {
+	if out := strings.Join(m.lines(time.Now()), "\n"); !strings.Contains(out, sidebar.ProjectColourOf("desktop").ANSI()+"desktop #4"+reset) {
 		t.Errorf("❌ a desktop app boss's card:\n%q", out)
 	}
 }

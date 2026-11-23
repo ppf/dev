@@ -500,8 +500,8 @@ func (m Model) inner() int { return max(1, m.w-4) }
 // (title, rule), the message line and the keys.
 func (m Model) cardRows() int { return max(0, m.h-8) }
 
-// project is a list's project as the boards label it: its boss's name less "boss-".
-func project(boss string) string { return strings.TrimPrefix(boss, "boss-") }
+// project is a list's project as the boards label it (desktop for a desktop app boss's), as the web page does.
+func project(boss string) string { return sidebar.BoardProject(boss) }
 
 // projectName is p on the filter line in its colour ("" is all, muted unless shown), bold when shown.
 func projectName(p string, shown bool) string {

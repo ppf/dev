@@ -41,9 +41,6 @@ func BoardProject(boss string) string {
 
 // ProjectColourOf is a project's colour by its name's first part: a preset, else a spare by hash, so never by position.
 func ProjectColourOf(project string) ProjectColour {
-	if strings.HasPrefix(project, "local_") {
-		project = "desktop"
-	}
 	part, _, _ := strings.Cut(project, "-")
 	if c, ok := projectPresets[part]; ok {
 		return c

@@ -73,8 +73,9 @@ function due(unix) {
 }
 const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-// From the server (sidebar.ProjectColourOf); none from an older server (a rollback while a draft holds off the reload)
-const hue = name => state.board.project_colours?.[name] ?? {};
+// From the server (sidebar.ProjectColourOf); grey from an older server (a rollback while a draft holds off the reload)
+const NO_HUE = { light: 'var(--meta)', dark: 'var(--meta)' };
+const hue = name => state.board.project_colours?.[name] ?? NO_HUE;
 const key = (boss, id) => boss + '/' + id;
 const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
 const owner = ({ list, it }) => own(list, it) ? 'you' : it.status_on || it.on;

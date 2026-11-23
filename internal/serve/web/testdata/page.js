@@ -195,7 +195,8 @@ const check = (name, ok) => { if (!ok) console.log(name); };
     .concat([{ id: 50, text: 'plain', status: 'yours', column: 'todo', assignee: { kind: 'you' } }]) }] });
   ctx.asks = asks(7);
   run('state.board = { lists: asks.lists }');
-  check('a board without project colours (an older server) still draws its cards', drawnCards().length === 7);
+  check('a board without project colours (an older server) still draws its cards, dots grey', drawnCards().length === 7
+    && walk(drawnCards()[0], c => c.className === 'pdot')[0]?.style['--hl'] === 'var(--meta)');
 
   run('state.board = asks');
   const toggle = () => drawnCards().length + ' ' + run('board()').flatMap(n => walk(n, c => c.className === 'more')).map(textOf).join();
