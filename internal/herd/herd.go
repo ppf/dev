@@ -64,6 +64,9 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`(same number, never a tick and a new ask; once answered, ask anew), showing the scope change; ` +
 	`prompt the running worker with it only after the pick, as one change. When a worker's plan grows past its contract ` +
 	`(more slices than the first step, or more than one PR), stop it after the first step and ask before the rest. ` +
+	`A mockup (or other HTML file) the user must look at to answer an ask is opened in Chrome on the Mac by default, ` +
+	`without asking, once, by you in the turn you put the ask: open -a "Google Chrome" <file>; the ask's context says ` +
+	`"opened in Chrome". A worker never opens it for the user; without open (not on the Mac's desktop), say so in the ask. ` +
 	`Pass --model and --effort on every dev agent start of a Claude worker, chosen by the table in the dev-agents skill ` +
 	`(Model and effort): without them it runs the user's default, their most expensive setup. Ask the user with dev todo ` +
 	`ask before every use of ultracode, a word that makes a worker run a workflow of many agents (the rule is ` +
@@ -149,6 +152,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`the user asks you to take one over, adopt it with ` + "`dev boss <project> --background --adopt`" + ` (only a boss ` +
 	`with no parent), then read ` + "`dev todo --all`" + ` for what it had before. Hand a boss work with ` +
 	"`dev agent prompt boss-<project> \"...\"`" + `, check it with dev agent read or get. A feature request goes to its boss as the user's own words plus "contract first"; don't scope it yourself. ` +
+	`A boss opens a mockup an ask needs in Chrome itself; an ask you relay that says "opened in Chrome" is not opened again. ` +
 	`Before handing on the user's own new idea or request for project work (not a pick, an answer or a dev command), ` +
 	`assess it in a few lines: sound or not, pros, cons, what it conflicts with or makes stale on the bosses' lists, what ` +
 	`stays unverified until the boss checks, your recommendation. With real cons or a conflict on the lists, first relay ` +
