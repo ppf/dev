@@ -174,6 +174,8 @@ func NotesText(notes []Note, now time.Time) string {
 			b.WriteString(" (until " + time.Unix(n.Until, 0).Format(UntilLayout) + ")")
 		}
 		switch {
+		case n.ItemDone && n.Item == 0:
+			b.WriteString(" (its item done)")
 		case n.ItemDone:
 			fmt.Fprintf(&b, " (item #%d done)", n.Item)
 		case n.Item != 0:

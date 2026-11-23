@@ -49,8 +49,8 @@ func newTodoTakeOverCmd(boss *string) *cobra.Command {
 		Use:   "take-over [<list>]",
 		Short: "Take over another boss's to do list for this project (without <list>: what this boss could take)",
 		Long: `Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,
-context, doing, open asks), its notes, PR checks and finished items move to this boss's list, after its own
-items, renumbered. The old list is left as a marker: its boss's writes are refused, saying where the list
+context, doing, open asks), its notes, PR checks and finished items move to this boss's list: into an empty one
+numbers kept, else after its own items, renumbered. The old list is left as a marker: its boss's writes are refused, saying where the list
 went; a dev boss opened under its name after the move starts a fresh list.
 Without <list>, print the lists this boss could take, newest change first, and why one can't be taken.
 <list> is a dev boss's name (boss-dev), a desktop app session's local_… id, or t3:<thread id> (8 or more
@@ -493,8 +493,8 @@ func hintLine(cmd *cobra.Command, own todo.Store, pane, id string, now time.Time
 		project, c.Short(), open, todo.Plural(c.Notes, "note"), ago(c.Updated, now), c.Short()), nil
 }
 
-// hintT3 prints takeOverHint on stderr for a T3 Code boss's own list s, which no hook gives it: dev todo and dev todo
-// note run it at start.
+// hintT3 prints takeOverHint on stderr for a T3 Code boss's own list s, which no hook gives it: each bare dev todo and
+// dev todo note, while s is empty.
 func hintT3(cmd *cobra.Command, boss string, s todo.Store, now time.Time) {
 	if boss != "" || s.Kind() != todo.KindT3 {
 		return

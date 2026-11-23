@@ -230,7 +230,7 @@ func TestTodoTakeOverHelp(t *testing.T) {
 	takeOverEnv(t)
 	out := run(t, "", "todo", "take-over", "--help")
 	for _, want := range []string{
-		"Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,\ncontext, doing, open asks), its notes, PR checks and finished items move to this boss's list, after its own\nitems, renumbered.",
+		"Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,\ncontext, doing, open asks), its notes, PR checks and finished items move to this boss's list: into an empty one\nnumbers kept, else after its own items, renumbered.",
 		"Usage:\n  dev todo take-over [<list>] [flags]",
 		"--any-project   lists of other projects, the manager's, and lists of no known project too",
 		"--json          print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3",
@@ -339,5 +339,34 @@ func TestTodoTakeOverMergeJSON(t *testing.T) {
 	}
 	if got := run(t, "", "todo"); got != "1\t☐\tmine\n2\t☐\ttheirs\n" {
 		t.Errorf("merged = %q", got)
+	}
+}
+
+// A desktop app boss with an empty list hears on resume that a stopped session's list for its project waits; a worker
+// it started doesn't, nor the boss once it has a list.
+func TestTodoTakeOverDesktopHint(t *testing.T) {
+	todoEnv(t)
+	desktopSessions(t)
+	withConfig(t, "[[project]]\nname = \"proj\"\npath = \"/p\"\n")
+	// The worker runs in the project too: only being a worker keeps the hint from it
+	worker := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Claude", "claude-code-sessions", "acct", "org", "local_w.json")
+	if err := os.WriteFile(worker, []byte(`{"sessionId":"local_w","originCwd":"/p","spawnedFrom":{"sessionId":"local_boss"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, "", "todo", "--boss", "local_old", "set", "old open item")
+	start := func(id string) string {
+		t.Helper()
+		t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", id)
+		return run(t, `{"hook_event_name":"SessionStart","source":"resume"}`, "state", "idle")
+	}
+	if got := start("local_boss"); !strings.Contains(got, "An earlier boss's list for proj waits: local_old (1 open, 0 notes, changed just now): dev todo take-over local_old.") {
+		t.Errorf("boss resume: %q, want the hint", got)
+	}
+	if got := start("local_w"); got != "" {
+		t.Errorf("worker resume: %q, want nothing", got)
+	}
+	run(t, "", "todo", "--boss", "local_boss", "set", "mine")
+	if got := start("local_boss"); strings.Contains(got, "waits") {
+		t.Errorf("boss with a list: %q, want no hint", got)
 	}
 }

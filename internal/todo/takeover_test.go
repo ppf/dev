@@ -566,41 +566,89 @@ func TestTakeOverMergeNoteCap(t *testing.T) {
 	}
 }
 
-// A merge that stopped before the marker: its retry writes only the marker, nothing taken twice. A fresh list under
-// the same name since is taken again.
+// A take that stopped before the marker, a merge or a move: its retry writes only the marker, nothing taken twice, the
+// PR checks and finished items already beside the destination. One changed since is refused; a fresh list under the
+// same name since is taken again.
 func TestTakeOverRetry(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
-	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := from.Add(Item{Text: "theirs"}, now); err != nil {
-		t.Fatal(err)
-	}
-	src, err := os.ReadFile(from.path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	later := now.Add(time.Minute)
-	if _, err := to.TakeOver(from, later); err != nil {
+	prURL := "https://github.com/o/r/pull/7"
+	for _, merge := range []bool{true, false} {
+		from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+		for _, s := range []Store{from, to} {
+			if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+		}
+		want := []string{"1 theirs"}
+		if merge {
+			if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+				t.Fatal(err)
+			}
+			want = []string{"1 mine", "2 theirs"}
+		}
+		for _, it := range []Item{{Text: "theirs", Link: prURL}, {Text: "finished"}} {
+			if _, err := from.Add(it, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := from.Done([]int{2}, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := from.Lookup(now, LookupTTL, 0, func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }); err != nil {
+			t.Fatal(err)
+		}
+		src, err := os.ReadFile(from.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := to.TakeOver(from, later); err != nil {
+			t.Fatal(err)
+		}
+		// As if it stopped before the marker
+		if err := os.WriteFile(from.path, src, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = to.TakeOver(from, later.Add(time.Minute))
+		if err == nil || err.Error() != "boss-dev taken at "+later.Format("15:04")+": dev todo shows it" {
+			t.Errorf("merge %v: retry: %v", merge, err)
+		}
+		l := read(t, to, later)
+		if got := ids(l); !slices.Equal(got, want) {
+			t.Errorf("merge %v: destination = %q, want each once", merge, got)
+		}
+		if i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.Text == "theirs" }); i < 0 || l.Items[i].PRState != "open" || len(l.Finished) != 1 || l.Finished[0].Text != "finished" {
+			t.Errorf("merge %v: destination = %+v, want the PR check and the finished item", merge, l)
+		}
+		if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" {
+			t.Errorf("merge %v: source = %+v, want the marker", merge, f)
+		}
+	}
+
+	// Changed before its marker: refused, both kept
+	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	// Its list as it was, the marker not written
+	f := rawFile(t, from)
+	f.movedMarker = movedMarker{}
+	f.Items, f.Next = []Item{{ID: 1, Text: "theirs", Added: now.Unix()}}, 2
+	if err := from.write(f); err != nil {
 		t.Fatal(err)
 	}
-	// As if it stopped before the marker
-	if err := os.WriteFile(from.path, src, 0o600); err != nil {
+	if _, err := from.Add(Item{Text: "since"}, later.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	_, err = to.TakeOver(from, later.Add(time.Minute))
-	if err == nil || err.Error() != "boss-dev taken at "+later.Format("15:04")+": dev todo shows it" {
-		t.Errorf("retry: %v", err)
+	if _, err := to.TakeOver(from, later.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "changed before its marker was written") {
+		t.Errorf("changed since: %v", err)
 	}
-	if got := ids(read(t, to, later)); !slices.Equal(got, []string{"1 mine", "2 theirs"}) {
-		t.Errorf("destination = %q, want each once", got)
+	if got := ids(read(t, from, later)); !slices.Equal(got, []string{"1 theirs", "2 since"}) {
+		t.Errorf("source after the refusal = %q", got)
 	}
-	if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" {
-		t.Errorf("source = %+v, want the marker", f)
-	}
+
 	// A dev boss reopened under the name writes a fresh list over the marker
+	if err := os.WriteFile(from.path, []byte(`{"moved_to":"x","moved_to_name":"x","moved_at":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	fresh := from
 	fresh.created = later.Add(time.Hour).Unix()
 	again := later.Add(2 * time.Hour)
@@ -610,8 +658,46 @@ func TestTakeOverRetry(t *testing.T) {
 	if _, err := to.TakeOver(from, again); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(read(t, to, again)); !slices.Equal(got, []string{"1 mine", "2 theirs", "3 new"}) {
+	if got := ids(read(t, to, again)); !slices.Equal(got, []string{"1 theirs", "3 new"}) {
 		t.Errorf("after the second take = %q", got)
+	}
+}
+
+// A note on, and a tick of, an item that left the source's list lose its number on a merge: it may be one of the
+// destination's.
+func TestTakeOverMergeGoneItem(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	now := time.Unix(1_800_000_000, 0)
+	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "dated", Until: now.Add(time.Minute).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.AddNote(Note{Kind: NoteDecided, Text: "on dated", Item: 1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.Add(Item{Text: "open"}, now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if _, err := to.TakeOver(from, later); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := to.Notes(later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Item != 0 || !notes[0].ItemDone || !strings.Contains(NotesText(notes, later), "on dated (its item done)") {
+		t.Errorf("notes = %+v", notes)
+	}
+	ticked, err := to.TakeTicked(later, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticked) != 1 || ticked[0].String() != `"dated" ticked by itself: its --until time came` {
+		t.Errorf("ticked = %+v", ticked)
 	}
 }
 

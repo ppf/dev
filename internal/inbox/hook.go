@@ -151,16 +151,16 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, func(s todo.Store) string { return hint(s, pane) }, source, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
 }
 
-// Hint is the line telling the boss in tmux pane, its list s empty, that an earlier boss's list waits (dev todo
-// take-over), "" for none; it reports its own failures.
-type Hint func(s todo.Store, pane string) string
+// Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo
+// take-over), "" for none; it checks s and reports its own failures.
+type Hint func(s todo.Store) string
 
 // StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,
 // then hint's line; "" after a compaction, whose summary carries them.
-func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint func(todo.Store) string, source string, now time.Time) (string, error) {
+func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, source string, now time.Time) (string, error) {
 	if source == "compact" {
 		return "", nil
 	}

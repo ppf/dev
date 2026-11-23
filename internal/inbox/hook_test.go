@@ -220,7 +220,7 @@ func TestStartContextAge(t *testing.T) {
 	if err := s.Set([]string{"a"}, then); err != nil {
 		t.Fatal(err)
 	}
-	out, err := StartContext(s, func() ([]todo.Session, error) { return nil, nil }, noStartHint, "startup", then.Add(49*time.Hour))
+	out, err := StartContext(s, func() ([]todo.Session, error) { return nil, nil }, noHint, "startup", then.Add(49*time.Hour))
 	if err != nil || !strings.Contains(out, "updated 49h ago):") {
 		t.Errorf("StartContext = %q, %v; want updated 49h ago", out, err)
 	}
@@ -296,17 +296,17 @@ func TestStartContextTicked(t *testing.T) {
 	}
 	later := then.Add(2 * time.Hour)
 	none := func() ([]todo.Session, error) { return nil, nil }
-	if out, _ := StartContext(s, none, noStartHint, "compact", later); out != "" {
+	if out, _ := StartContext(s, none, noHint, "compact", later); out != "" {
 		t.Errorf("compact = %q, want nothing", out)
 	}
-	if _, err := StartContext(s, func() ([]todo.Session, error) { return nil, errors.New("no workers") }, noStartHint, "clear", later); err == nil {
+	if _, err := StartContext(s, func() ([]todo.Session, error) { return nil, errors.New("no workers") }, noHint, "clear", later); err == nil {
 		t.Errorf("workers failing: no error")
 	}
 	tick := `#1 \"Sync\" ticked by itself: its --until time came`
-	if out, err := StartContext(s, none, noStartHint, "clear", later); err != nil || !strings.Contains(out, tick) {
+	if out, err := StartContext(s, none, noHint, "clear", later); err != nil || !strings.Contains(out, tick) {
 		t.Errorf("clear = %q, %v; want the tick", out, err)
 	}
-	if out, _ := StartContext(s, none, noStartHint, "clear", later); strings.Contains(out, "ticked by itself") {
+	if out, _ := StartContext(s, none, noHint, "clear", later); strings.Contains(out, "ticked by itself") {
 		t.Errorf("again = %q, want the tick told once", out)
 	}
 }
@@ -320,14 +320,14 @@ func TestStartContextNotes(t *testing.T) {
 	}
 	then := time.Unix(1700000000, 0)
 	none := func() ([]todo.Session, error) { return nil, nil }
-	if out, _ := StartContext(s, none, noStartHint, "startup", then); out != "" {
+	if out, _ := StartContext(s, none, noHint, "startup", then); out != "" {
 		t.Errorf("no list, no notes = %q, want nothing", out)
 	}
 	if _, err := s.AddNote(todo.Note{Kind: todo.NoteDecided, Text: "CSV only", Why: "parser"}, then); err != nil {
 		t.Fatal(err)
 	}
 	for _, source := range []string{"startup", "clear", "resume"} {
-		out, err := StartContext(s, none, noStartHint, source, then.Add(8*24*time.Hour))
+		out, err := StartContext(s, none, noHint, source, then.Add(8*24*time.Hour))
 		if err != nil || !strings.Contains(out, "Your notes (1 of 12, oldest 8d)") || !strings.Contains(out, "CSV only (why: parser) (8d, still true?)") || strings.Contains(out, "open to do list") {
 			t.Errorf("%s, notes only = %q, %v", source, out, err)
 		}
@@ -335,31 +335,29 @@ func TestStartContextNotes(t *testing.T) {
 	if _, err := s.Add(todo.Item{Text: "Ship"}, then); err != nil {
 		t.Fatal(err)
 	}
-	out, err := StartContext(s, none, noStartHint, "clear", then.Add(time.Hour))
+	out, err := StartContext(s, none, noHint, "clear", then.Add(time.Hour))
 	list, notes := strings.Index(out, "Your open to do list"), strings.Index(out, "Your notes")
 	if err != nil || list < 0 || notes < list || strings.Contains(out, "still true?") {
 		t.Errorf("list and notes = %q, %v; want the list, then the notes, no 7d mark", out, err)
 	}
-	if out, _ := StartContext(s, none, noStartHint, "compact", then.Add(time.Hour)); out != "" {
+	if out, _ := StartContext(s, none, noHint, "compact", then.Add(time.Hour)); out != "" {
 		t.Errorf("compact = %q, want nothing", out)
 	}
 	if _, err := s.Add(todo.Item{Text: "Sync", Until: then.Add(time.Hour).Unix()}, then); err != nil {
 		t.Fatal(err)
 	}
 	later := then.Add(2 * time.Hour)
-	out, err = StartContext(s, none, noStartHint, "clear", later)
+	out, err = StartContext(s, none, noHint, "clear", later)
 	tick, notes := strings.Index(out, "ticked by itself"), strings.Index(out, "Your notes")
 	if err != nil || tick < 0 || notes < tick {
 		t.Errorf("tick and notes = %q, %v; want the tick, then the notes", out, err)
 	}
-	if out, _ := StartContext(s, none, noStartHint, "clear", later); strings.Contains(out, "ticked by itself") || !strings.Contains(out, "Your notes") {
+	if out, _ := StartContext(s, none, noHint, "clear", later); strings.Contains(out, "ticked by itself") || !strings.Contains(out, "Your notes") {
 		t.Errorf("again = %q, want the notes without the tick", out)
 	}
 }
 
-func noHint(todo.Store, string) string { return "" }
-
-func noStartHint(todo.Store) string { return "" }
+func noHint(todo.Store) string { return "" }
 
 // The take-over hint's line goes out after the list and notes, alone when they are empty; none after a compaction.
 func TestStartContextHint(t *testing.T) {

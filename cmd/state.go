@@ -123,7 +123,7 @@ func newStateCmd() *cobra.Command {
 			// Grok reads a Stop hook's stdout as a reply, and is never a boss
 			if !codex && !grok {
 				// Before Record: a Stop blocked with inbox notes keeps the boss working
-				if out, busy, err = inbox.BossHook(c, pane, input, func(s todo.Store, pane string) string { return takeOverHint(cmd, s, pane, "", time.Now()) }); err != nil {
+				if out, busy, err = inbox.BossHook(c, pane, input, func(s todo.Store) string { return takeOverHint(cmd, s, pane, "", time.Now()) }); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
 				}
 				// So does a worker's Stop waiting on background tasks: Claude carries on by itself when they end,
