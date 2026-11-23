@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ppf/dev/internal/sidebar"
 )
 
 // Details are stored by add, kept by a --replaces that gives none, replaced by one that does; over MaxDetails is refused.
@@ -146,6 +148,22 @@ func TestDoneByAndResult(t *testing.T) {
 	}
 	if it, ok := openItem(t, s, mine); !ok || it.DoneBy != "" || it.Result != "" {
 		t.Errorf("reopened = %+v, %v; want no done_by, no result", it, ok)
+	}
+}
+
+// A --done-on tick is by DoneByPR.
+func TestDoneByPR(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "on merge", Link: prURL, DoneOn: OnMerged}, t0); err != nil {
+		t.Fatal(err)
+	}
+	p := &prs{states: map[string]sidebar.PRView{prURL: {State: "MERGED"}}}
+	if err := s.Lookup(t0, LookupTTL, 0, p.view); err != nil {
+		t.Fatal(err)
+	}
+	if it := read(t, s, t0).Items[0]; !it.Done || it.DoneBy != DoneByPR {
+		t.Errorf("item = %+v, want done by %q", it, DoneByPR)
 	}
 }
 

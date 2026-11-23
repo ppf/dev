@@ -46,7 +46,7 @@ const Me = "me"
 // Boss is the --on of an item its list's boss does itself, stored without a session.
 const Boss = "boss"
 
-// Who ticked an item (Item.DoneBy), besides its boss by name (Boss for a desktop app boss's).
+// Who ticked an item (Item.DoneBy), besides its boss by name (Boss for a desktop app or T3 Code boss's).
 const (
 	DoneByYou   = "you"     // the user: a board's or the page's tick, or an answer
 	DoneByUntil = "until"   // by itself at its --until
@@ -82,7 +82,7 @@ type Item struct {
 	Context []string `json:"context,omitempty"` // an ask's lines under its question
 	Details string   `json:"details,omitempty"` // its longer text (--details): paragraphs, "- " lines
 	Result  string   `json:"result,omitempty"`  // what was done, said as it was ticked (dev todo done --result)
-	DoneBy  string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name, DoneByUntil or DoneByPR
+	DoneBy  string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name or Boss, DoneByUntil or DoneByPR
 	Answer  string   `json:"answer,omitempty"`
 	Via     string   `json:"via,omitempty"`     // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
@@ -221,7 +221,7 @@ var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is it
 type Store struct {
 	path, boss string
 	trial      bool
-	result     string
+	result, by string
 	name, dir  string
 	created    int64
 }
@@ -235,6 +235,12 @@ func (s Store) Trial() Store {
 // WithResult is s with result, what was done, stored on the item Done or DoneText ticks (CheckResult first).
 func (s Store) WithResult(result string) Store {
 	s.result = result
+	return s
+}
+
+// ByUser is s with Done's ticks by the user (DoneByYou), not its boss: a dev todo done run outside Claude Code.
+func (s Store) ByUser() Store {
+	s.by = DoneByYou
 	return s
 }
 
@@ -782,7 +788,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 	})
 }
 
-// Done ticks the open items ids, by its boss (DoneBy), with s's result (WithResult) for one; an id that isn't one
+// Done ticks the open items ids, by its boss unless ByUser, with s's result (WithResult) for one; an id that isn't one
 // changes nothing and is an error.
 func (s Store) Done(ids []int, now time.Time) error {
 	if s.result != "" && len(ids) != 1 {
@@ -794,7 +800,7 @@ func (s Store) Done(ids []int, now time.Time) error {
 			if i < 0 {
 				return fmt.Errorf("no open item %d", id)
 			}
-			f.Items[i].tick(now.Unix(), cmp.Or(s.boss, Boss))
+			f.Items[i].tick(now.Unix(), cmp.Or(s.by, s.boss, Boss))
 			f.Items[i].Result = s.result
 		}
 		return nil

@@ -365,21 +365,25 @@ keeping its number: a pick the user made before it still answers it while the qu
 	return cmd
 }
 
-const detailsHelp = "its longer text, shown when it's opened: what it is, its steps, what's out of scope; at most 1500 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
+const detailsHelp = "its longer text: what it is, its steps, what's out of scope; at most 1500 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
 
 // detailsFlag is --details as stored (todo.CleanDetails), read from stdin for -; given but empty is an error.
 func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
 	if !cmd.Flags().Changed("details") {
 		return "", nil
 	}
-	if raw == "-" {
+	stdin := raw == "-"
+	if stdin {
 		b, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
 			return "", fmt.Errorf("--details -: %w", err)
 		}
 		raw = string(b)
 	}
-	if raw = todo.CleanDetails(raw); raw == "" {
+	switch raw = todo.CleanDetails(raw); {
+	case raw == "" && stdin:
+		return "", errors.New("--details -: stdin is empty")
+	case raw == "":
 		return "", errors.New("--details is empty")
 	}
 	return raw, nil
@@ -569,6 +573,9 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 				return err
 			}
 			s = s.WithResult(result)
+			if os.Getenv("CLAUDECODE") == "" {
+				s = s.ByUser()
+			}
 			now := time.Now()
 			if text != "" {
 				err = s.DoneText(ids[0], text, now)

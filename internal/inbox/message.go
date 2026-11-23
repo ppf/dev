@@ -427,7 +427,7 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 			`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
 	}
 	if it.Details != "" && !closed {
-		n.Text += fmt.Sprintf("; it has details: read them in dev todo --json (item %d's details) and put them in the brief", id)
+		n.Text += fmt.Sprintf("; it has details: read them in dev todo --json (item %d's details), and put them in a worker's brief", id)
 	}
 	return n
 }
