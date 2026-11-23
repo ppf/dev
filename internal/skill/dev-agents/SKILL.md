@@ -236,6 +236,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
   - **A `to do #n` note** (PR moved, worker gone, unchanged 2 days) **or an open item flagged in a reminder:** `done` it, replace it with what's true now (`add --replaces <n>`), or confirm it still holds with `add --replaces <n>` alone; never leave a flagged item untouched. `--replaces` keeps `--done-on`: if the new text isn't finished by that event, `done` the old item and `add` a fresh one. A `ticked by itself` note needs only an `add` for what's left, if anything.
   - **Run `dev todo` as its own command,** not chained with others: auto mode judges a chain as a whole, and the user may allow `Bash(dev todo:*)`, which covers only a command that is `dev todo` alone.
 <!-- /boss-core:rollup -->
+- **A start-of-session `[dev todo] An earlier boss's list … waits` line:** ask the user `Take over <list>?` with `dev todo ask` (Take it (Recommended) / Leave it); on Take it, `dev todo take-over <list>` and re-check what it says to. `dev todo take-over` lists every list you could take.
 
 ## Manager
 

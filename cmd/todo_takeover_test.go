@@ -217,19 +217,10 @@ func TestTodoTakeOverRefusals(t *testing.T) {
 			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
 		}
 	}
-	if _, _, err := execute(t, "", "todo", "note", "risk", "flaky CI"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := execute(t, "", "todo", "take-over", "t3:49f62c8e-1111"); err == nil || !strings.HasPrefix(err.Error(), "this boss's list has 0 open items and 1 note: taking over into a list with items or notes comes later") {
-		t.Errorf("into a non-empty list: %v", err)
-	}
 	if out, _, err := as(t, oldThread, "todo"); err != nil || !strings.Contains(out, "theirs") {
 		t.Errorf("old list after the refusals: %q %v", out, err)
 	}
 	// With --any-project another project's list is taken
-	if _, _, err := execute(t, "", "todo", "note", "drop", "1"); err != nil {
-		t.Fatal(err)
-	}
 	if out, _, err := execute(t, "", "todo", "take-over", "--any-project", "boss-vitay"); err != nil || !strings.HasPrefix(out, "✅ Took over boss-vitay (tmux, vitay): 1 item, 0 notes\n") {
 		t.Errorf("--any-project take: %q %v", out, err)
 	}
@@ -239,7 +230,7 @@ func TestTodoTakeOverHelp(t *testing.T) {
 	takeOverEnv(t)
 	out := run(t, "", "todo", "take-over", "--help")
 	for _, want := range []string{
-		"Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,\ncontext, doing, open asks), its notes, PR checks and finished items move to this boss's list, their numbers kept.",
+		"Take over another boss's to do list for this project: its items (who does each, links, --until, --done-on,\ncontext, doing, open asks), its notes, PR checks and finished items move to this boss's list, after its own\nitems, renumbered.",
 		"Usage:\n  dev todo take-over [<list>] [flags]",
 		"--any-project   lists of other projects, the manager's, and lists of no known project too",
 		"--json          print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3",
@@ -282,5 +273,71 @@ func TestTodoTakeOverAmbiguousJSON(t *testing.T) {
 	}
 	if got := run(t, "", "todo"); got != "1\t☐\tfrom 49f62c8e-2222-b\n" {
 		t.Errorf("taken = %q", got)
+	}
+}
+
+// A T3 Code boss's dev todo and dev todo note say on stderr that an earlier boss's list waits, only while its own list
+// is empty and one can be taken; the old thread, its list moved, is told nothing.
+func TestTodoTakeOverHint(t *testing.T) {
+	takeOverEnv(t)
+	if _, stderr, err := execute(t, "", "todo"); err != nil || stderr != "" {
+		t.Errorf("nothing to take: %q %v, want no hint", stderr, err)
+	}
+	if _, _, err := as(t, oldThread, "todo", "add", "theirs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := as(t, oldThread, "todo", "note", "risk", "flaky CI"); err != nil {
+		t.Fatal(err)
+	}
+	want := "[dev todo] An earlier boss's list for dev waits: t3:49f62c8e (1 open, 1 note, changed just now): dev todo take-over t3:49f62c8e. dev todo take-over lists all.\n"
+	for _, args := range [][]string{{"todo"}, {"todo", "note"}} {
+		if _, stderr, err := execute(t, "", args...); err != nil || stderr != want {
+			t.Errorf("dev %s: stderr %q %v, want the hint", strings.Join(args, " "), stderr, err)
+		}
+	}
+	if _, stderr, _ := execute(t, "", "todo", "--json"); stderr != "" {
+		t.Errorf("--json: stderr %q, want no hint", stderr)
+	}
+	run(t, "", "todo", "add", "mine")
+	if _, stderr, err := execute(t, "", "todo"); err != nil || stderr != "" {
+		t.Errorf("own list not empty: %q %v, want no hint", stderr, err)
+	}
+	run(t, "", "todo", "take-over", "t3:49f62c8e")
+	if _, stderr, _ := as(t, oldThread, "todo"); strings.Contains(stderr, "waits") {
+		t.Errorf("moved list's boss: %q, want no hint", stderr)
+	}
+}
+
+// A take into a list with items merges: --json says mode merge, each item's and note's numbers, the dropped state note.
+func TestTodoTakeOverMergeJSON(t *testing.T) {
+	takeOverEnv(t)
+	for _, args := range [][]string{{"todo", "add", "theirs"}, {"todo", "note", "state", "their state"}} {
+		if _, _, err := as(t, oldThread, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(t, "", "todo", "add", "mine")
+	run(t, "", "todo", "note", "state", "my state")
+	out := run(t, "", "todo", "take-over", "--json", "t3:49f62c8e")
+	var v struct {
+		Mode    string
+		Items   []struct{ From, To int }
+		Notes   []struct{ From, To int }
+		Dropped *struct {
+			ID   int
+			Kind string
+			Text string
+		} `json:"dropped_state_note"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err)
+	}
+	// Both state notes were added in the same second: the destination's stays
+	if v.Mode != "merge" || len(v.Items) != 1 || v.Items[0].From != 1 || v.Items[0].To != 2 || len(v.Notes) != 0 ||
+		v.Dropped == nil || v.Dropped.Kind != "state" || v.Dropped.Text != "their state" {
+		t.Errorf("--json = %s", out)
+	}
+	if got := run(t, "", "todo"); got != "1\t☐\tmine\n2\t☐\ttheirs\n" {
+		t.Errorf("merged = %q", got)
 	}
 }

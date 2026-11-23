@@ -106,6 +106,7 @@ type file struct {
 	// Dir is the main checkout its T3 Code boss runs in, which names its project (TakeOver)
 	Dir string `json:"dir,omitempty"`
 	movedMarker
+	takenStamp
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
 	dropped []Item
 	pruned  time.Time

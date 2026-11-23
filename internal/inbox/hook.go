@@ -33,9 +33,9 @@ type bossEvent struct {
 // a boss never loops on its own hook. A UserPromptSubmit showing the batch sent over the socket clears it (Arrived).
 // Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
 // list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
-// notes still out. On SessionStart it gives the coordinator its open list (startList). Any pane but a
-// coordinator's is left alone. A PostToolUse of the coordinator's AskUserQuestion keeps the user's pick (Box.Picked).
-func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool, err error) {
+// notes still out. On SessionStart it gives the coordinator its open list (startList), then hint's line. Any pane
+// but a coordinator's is left alone. A PostToolUse of the coordinator's AskUserQuestion keeps the user's pick (Box.Picked).
+func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string, busy bool, err error) {
 	var e bossEvent
 	if json.Unmarshal(input, &e) != nil {
 		return "", false, nil
@@ -49,7 +49,7 @@ func BossHook(c *tmux.Client, pane string, input []byte) (out string, busy bool,
 				}
 			}
 		}
-		out, err = startList(c, pane, e.Source)
+		out, err = startList(c, pane, e.Source, hint)
 		return out, false, err
 	}
 	if e.Name == "PostToolUse" && e.Tool == agent.AskUserQuestion {
@@ -137,7 +137,7 @@ func openList(c *tmux.Client, pane string) (string, error) {
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
-func startList(c *tmux.Client, pane, source string) (string, error) {
+func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
 	role, err := c.Run("display-message", "-p", "-t", pane, "#{@dev_boss_pane}")
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
@@ -151,12 +151,16 @@ func startList(c *tmux.Client, pane, source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, source, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, func(s todo.Store) string { return hint(s, pane) }, source, time.Now())
 }
 
-// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes;
-// "" after a compaction, whose summary carries both.
-func StartContext(s todo.Store, workers func() ([]todo.Session, error), source string, now time.Time) (string, error) {
+// Hint is the line telling the boss in tmux pane, its list s empty, that an earlier boss's list waits (dev todo
+// take-over), "" for none; it reports its own failures.
+type Hint func(s todo.Store, pane string) string
+
+// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,
+// then hint's line; "" after a compaction, whose summary carries them.
+func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint func(todo.Store) string, source string, now time.Time) (string, error) {
 	if source == "compact" {
 		return "", nil
 	}
@@ -180,7 +184,7 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), source s
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	parts := []string{l.StartReminder(source == "startup", age, ticked, now), todo.NotesText(notes, now)}
+	parts := []string{l.StartReminder(source == "startup", age, ticked, now), todo.NotesText(notes, now), hint(s)}
 	text := strings.Join(slices.DeleteFunc(parts, func(t string) bool { return t == "" }), "\n")
 	if text == "" {
 		return "", nil

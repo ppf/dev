@@ -12,6 +12,8 @@ import (
 
 // A T3 Code thread takes over the list of dev boss boss-dev once it is closed: dev todo there shows its items, the one
 // on the old boss's worker as session gone; a boss-dev opened again afterwards starts with an empty list of its own.
+// The thread's dev todo hints at boss-dev's list once it is closed; the reopened boss's SessionStart at the thread's,
+// until it has a list of its own.
 func TestTodoTakeOver(t *testing.T) {
 	tmp := t.TempDir()
 	project := filepath.Join(tmp, "dev")
@@ -21,9 +23,10 @@ func TestTodoTakeOver(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(config, "dev", "projects.toml"), "[[project]]\nname = \"dev\"\npath = \""+project+"\"\n")
 	s := newServer(t, "set -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"), "XDG_CONFIG_HOME="+config, "HOME="+tmp)
-	dev := func(env []string, argv ...string) (string, string, error) {
+	devIn := func(stdin string, env []string, argv ...string) (string, string, error) {
 		t.Helper()
 		cmd := exec.Command(devBin, argv...)
+		cmd.Stdin = strings.NewReader(stdin)
 		// Outside git: the folder is a T3 Code boss's main checkout
 		cmd.Dir = project
 		cmd.Env = s.scriptEnv(append([]string{"CLAUDECODE=1", "CLAUDE_CODE_HOST_SESSION_ID="}, env...)...)
@@ -32,10 +35,16 @@ func TestTodoTakeOver(t *testing.T) {
 		err := cmd.Run()
 		return stdout.String(), stderr.String(), err
 	}
+	dev := func(env []string, argv ...string) (string, string, error) {
+		t.Helper()
+		return devIn("", env, argv...)
+	}
 	openBoss := func() []string {
 		s.T("new-session", "-d", "-s", "boss-dev", "-x", "120", "-y", "40", "sleep", "600")
 		s.T("set-option", "-t", "=boss-dev:", "@dev_herd", "1")
-		return []string{"TMUX_PANE=" + s.T("display", "-t", "=boss-dev:", "-p", "#{pane_id}"), "T3CODE_THREAD_ID="}
+		pane := s.T("display", "-t", "=boss-dev:", "-p", "#{pane_id}")
+		s.T("set-option", "-p", "-t", pane, "@dev_boss_pane", "coordinator")
+		return []string{"TMUX_PANE=" + pane, "T3CODE_THREAD_ID="}
 	}
 	boss := openBoss()
 	s.T("new-session", "-d", "-s", "w-takeover", "sleep", "600")
@@ -50,10 +59,16 @@ func TestTodoTakeOver(t *testing.T) {
 		}
 	}
 	thread := []string{"TMUX_PANE=", "T3CODE_THREAD_ID=5f1c2d90-aaaa-4000-8000-000000000001"}
+	if _, stderr, err := dev(thread, "todo"); err != nil || stderr != "" {
+		t.Errorf("❌ hint while boss-dev runs: %v %q, want none", err, stderr)
+	}
 	if _, _, err := dev(thread, "todo", "take-over", "boss-dev"); err == nil {
 		t.Error("❌ a running boss's list taken")
 	}
 	s.T("kill-session", "-t", "=boss-dev")
+	if _, stderr, _ := dev(thread, "todo"); !strings.HasPrefix(stderr, "[dev todo] An earlier boss's list for dev waits: boss-dev (2 open, 1 note, changed ") {
+		t.Errorf("❌ the thread's start hint: %q", stderr)
+	}
 
 	out, stderr, err := dev(thread, "todo", "take-over")
 	if err != nil || !strings.Contains(out, "Lists this boss (t3:5f1c2d90, dev) can take over") || !strings.Contains(out, "  boss-dev        tmux     closed    2 open") {
@@ -72,11 +87,18 @@ func TestTodoTakeOver(t *testing.T) {
 	}
 
 	boss = openBoss()
+	start := `{"hook_event_name":"SessionStart","source":"startup"}`
+	if out, stderr, err := devIn(start, boss, "state", "idle"); err != nil || !strings.Contains(out, "An earlier boss's list for dev waits: t3:5f1c2d90 (2 open, 1 note, ") {
+		t.Errorf("❌ reopened boss's SessionStart hint: %v %q %s", err, out, stderr)
+	}
 	out, stderr, err = dev(boss, "todo")
 	if err != nil || out != "" || stderr != "" {
 		t.Errorf("❌ reopened boss's list: %v %q %q, want empty", err, out, stderr)
 	}
 	if out, stderr, err := dev(boss, "todo", "add", "Fresh start"); err != nil || out != "added 1 · to do 1\n" {
 		t.Errorf("❌ reopened boss's add: %v %q %s", err, out, stderr)
+	}
+	if out, _, _ := devIn(start, boss, "state", "idle"); strings.Contains(out, "waits") {
+		t.Errorf("❌ hint with a list of its own: %q", out)
 	}
 }

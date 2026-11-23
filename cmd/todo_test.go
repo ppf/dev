@@ -11,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
 
@@ -21,9 +22,19 @@ func todoEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("T3CODE_THREAD_ID", "")
-	old := viewPR
+	old, oldTmux, oldCheckout := viewPR, takeOverTmux, mainCheckout
 	viewPR = func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }
-	t.Cleanup(func() { viewPR = old })
+	// A T3 Code boss's empty list looks for one to take over (hintT3): never on the live tmux server
+	takeOverTmux = func() *tmux.Client {
+		return tmux.NewFake(func(args []string) (string, error) {
+			if args[0] == "display-message" {
+				return "/tmp/tmux-1/default\n", nil
+			}
+			return "", nil
+		})
+	}
+	mainCheckout = func() (string, error) { return "/p/none", nil }
+	t.Cleanup(func() { viewPR, takeOverTmux, mainCheckout = old, oldTmux, oldCheckout })
 }
 
 func run(t *testing.T, stdin string, args ...string) string {
