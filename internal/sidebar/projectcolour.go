@@ -31,8 +31,7 @@ var projectSpares = []ProjectColour{
 	{"#4f2ca0", "#8a6ee0"},
 }
 
-// BoardProject is a list's project as the boards name it (model.js project): its boss less boss-, desktop for a desktop
-// app boss's (local_…).
+// BoardProject is a list's project as the boards name it, as model.js project does.
 func BoardProject(boss string) string {
 	if strings.HasPrefix(boss, "local_") {
 		return "desktop"
@@ -40,8 +39,7 @@ func BoardProject(boss string) string {
 	return strings.TrimPrefix(boss, "boss-")
 }
 
-// ProjectColourOf is a project's colour by its name's first part (nocworx-core: nocworx; a desktop app boss's local_…
-// is desktop): a preset, else a spare by the part's hash, whatever other lists exist.
+// ProjectColourOf is a project's colour by its name's first part: a preset, else a spare by hash, so never by position.
 func ProjectColourOf(project string) ProjectColour {
 	if strings.HasPrefix(project, "local_") {
 		project = "desktop"

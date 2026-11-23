@@ -38,7 +38,6 @@ func TestProjectColourOf(t *testing.T) {
 	}
 }
 
-// The boards name a list's project by its boss: less boss-, desktop for a desktop app boss's.
 func TestBoardProject(t *testing.T) {
 	for boss, want := range map[string]string{"boss-nocworx-core": "nocworx-core", "local_ab12": "desktop", "manager": "manager"} {
 		if got := BoardProject(boss); got != want {

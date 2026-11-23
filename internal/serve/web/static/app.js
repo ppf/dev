@@ -73,8 +73,7 @@ function due(unix) {
 }
 const statusClass = s => 's-' + s.replace(/\s+/g, '-');
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-// hue is a project's colour, light and dark, as the server gives it (sidebar.ProjectColourOf): the terminal board's too;
-// none from a server older than the page (a rollback while a draft holds off the reload)
+// From the server (sidebar.ProjectColourOf); none from an older server (a rollback while a draft holds off the reload)
 const hue = name => state.board.project_colours?.[name] ?? {};
 const key = (boss, id) => boss + '/' + id;
 const itemHash = (boss, id) => '#/item/' + encodeURIComponent(boss) + '/' + id;
