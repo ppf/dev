@@ -129,7 +129,8 @@ func (c Candidate) Store() Store { return c.store }
 // Short is its name as the listing prints it: a desktop app session id cut to local_ and 8 characters.
 func (c Candidate) Short() string {
 	if c.Kind == KindDesktop {
-		return "local_" + strings.TrimPrefix(c.id, "local_")[:min(len(strings.TrimPrefix(c.id, "local_")), 8)]
+		id := strings.TrimPrefix(c.id, "local_")
+		return "local_" + id[:min(len(id), 8)]
 	}
 	return c.List
 }
@@ -193,7 +194,7 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 		out = append(out, c)
 	}
 	if !slices.ContainsFunc(out, func(c Candidate) bool { return c.store.path == own.path }) {
-		out = append(out, Candidate{List: own.Name(), Kind: kindOf(own), store: own})
+		out = append(out, Candidate{List: own.Name(), Kind: own.Kind(), store: own})
 	}
 	var states map[string]DesktopState
 	var statesErr error
@@ -239,8 +240,8 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 	return out, nil
 }
 
-// kindOf is the kind of s's list by its file's name.
-func kindOf(s Store) string {
+// Kind is the kind of s's list by its file's name.
+func (s Store) Kind() string {
 	switch base := filepath.Base(s.path); {
 	case strings.HasPrefix(base, t3Prefix):
 		return KindT3
@@ -387,15 +388,15 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 		return t, Refused{fmt.Errorf("%s is empty (no open items, no notes): nothing to take", from.Name())}
 	}
 	dst.prune(now)
-	if n := slices.IndexFunc(dst.Items, func(it Item) bool { return it.Done == 0 }); n >= 0 || len(dst.Notes) > 0 {
-		open := 0
-		for _, it := range dst.Items {
-			if it.Done == 0 {
-				open++
-			}
+	open := 0
+	for _, it := range dst.Items {
+		if it.Done == 0 {
+			open++
 		}
-		return t, Refused{fmt.Errorf("this boss's list has %s: taking over into a list with items or notes comes later: tick or drop them first (dev todo done <n>, dev todo note drop <n>)",
-			counted(open, "open item", len(dst.Notes), "note"))}
+	}
+	if open > 0 || len(dst.Notes) > 0 {
+		return t, Refused{fmt.Errorf("this boss's list has %s and %s: taking over into a list with items or notes comes later: tick or drop them first (dev todo done <n>, dev todo note drop <n>)",
+			Plural(open, "open item"), Plural(len(dst.Notes), "note"))}
 	}
 	// Its ticked items, both lists' finished ones: kept beside s
 	kept, err := s.readDone(true)
@@ -434,13 +435,10 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 	return t, from.write(marker)
 }
 
-// counted is "n <one>s and m <other>s", each singular for 1.
-func counted(n int, one string, m int, other string) string {
-	plural := func(k int, w string) string {
-		if k == 1 {
-			return fmt.Sprintf("%d %s", k, w)
-		}
-		return fmt.Sprintf("%d %ss", k, w)
+// Plural is "n word", an s added unless n is 1.
+func Plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, word)
 	}
-	return plural(n, one) + " and " + plural(m, other)
+	return fmt.Sprintf("%d %ss", n, word)
 }

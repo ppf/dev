@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -271,14 +270,6 @@ func kindLabel(kind string) string {
 	return kind
 }
 
-// plural is "n word", an s added unless n is 1.
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
-}
-
 // ago is how long ago unix time at was, as the listing says it.
 func ago(at int64, now time.Time) string {
 	if at == 0 {
@@ -323,9 +314,13 @@ func printCandidates(out io.Writer, own todo.Store, ownProject string, cands []t
 	for _, c := range rows {
 		open := fmt.Sprintf("%2d open", c.Open)
 		if c.Asks > 0 {
-			open += ", " + plural(c.Asks, "ask")
+			open += ", " + todo.Plural(c.Asks, "ask")
 		}
-		line := fmt.Sprintf("  %-15s %-8s %-9s%-17s%-9s  %s", c.Short(), kindLabel(c.Kind), c.State, open, fmt.Sprintf("%2d %s", c.Notes, strings.TrimPrefix(plural(c.Notes, "note"), strconv.Itoa(c.Notes)+" ")), ago(c.Updated, now))
+		notes := "notes"
+		if c.Notes == 1 {
+			notes = "note"
+		}
+		line := fmt.Sprintf("  %-15s %-8s %-9s%-17s%-9s  %s", c.Short(), kindLabel(c.Kind), c.State, open, fmt.Sprintf("%2d %s", c.Notes, notes), ago(c.Updated, now))
 		if !c.Takeable {
 			line += "   ✗ " + c.WhyNot
 		}
@@ -333,7 +328,7 @@ func printCandidates(out io.Writer, own todo.Store, ownProject string, cands []t
 		fmt.Fprintln(out, line)
 	}
 	if len(others) > 0 {
-		what := plural(len(others), "list") + " of other projects"
+		what := todo.Plural(len(others), "list") + " of other projects"
 		if len(others) == 1 {
 			what = "1 list of another project"
 		}
@@ -364,8 +359,8 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 	if len(t.OnWorkers) > 0 {
 		warnings = append(warnings, fmt.Sprintf("%d on the old boss's workers (%s): re-check them (dev todo)", len(t.OnWorkers), strings.Join(t.OnWorkers, ", ")))
 	}
-	if _, id, _ := todoBoss(""); t.Asks > 0 && strings.HasPrefix(id, t3Boss) {
-		warnings = append(warnings, plural(t.Asks, "open ask")+" among them: the boards can't answer a T3 Code boss's asks: name them in your next reply")
+	if t.Asks > 0 && own.Kind() == todo.KindT3 {
+		warnings = append(warnings, todo.Plural(t.Asks, "open ask")+" among them: the boards can't answer a T3 Code boss's asks: name them in your next reply")
 	}
 	if c.Kind == todo.KindT3 {
 		warnings = append(warnings, "dev can't see T3 Code's threads: archive "+c.List+" in T3 Code; its dev todo writes are refused from now")
@@ -381,7 +376,7 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 			OnWorkers []string     `json:"on_workers"`
 			Warnings  []string     `json:"warnings"`
 		}{
-			From: takenList{c.List, c.Kind, c.Project}, To: takenList{own.Name(), takeOverKind(), ownProject}, Mode: "move",
+			From: takenList{c.List, c.Kind, c.Project}, To: takenList{own.Name(), own.Kind(), ownProject}, Mode: "move",
 			Items: []renumbered{}, Notes: []renumbered{}, Asks: t.Asks, OnWorkers: append([]string{}, t.OnWorkers...), Warnings: append([]string{}, warnings...),
 		}
 		for _, it := range t.Items {
@@ -392,7 +387,7 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 		}
 		return printJSON(out, v)
 	}
-	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s\n", c.Short(), kindLabel(c.Kind), cmp.Or(c.Project, "no known project"), plural(len(t.Items), "item"), plural(len(t.Notes), "note"))
+	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s\n", c.Short(), kindLabel(c.Kind), cmp.Or(c.Project, "no known project"), todo.Plural(len(t.Items), "item"), todo.Plural(len(t.Notes), "note"))
 	for _, it := range t.Items {
 		fmt.Fprintf(out, "  %-9s %s\n", fmt.Sprintf("#%d → #%d", it.ID, it.ID), it.Text)
 	}
@@ -404,15 +399,4 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 	}
 	_, err := fmt.Fprintln(out, "Next: dev todo check")
 	return err
-}
-
-// takeOverKind is the kind of the list of the boss dev runs in.
-func takeOverKind() string {
-	switch pane, id, _ := todoBoss(""); {
-	case pane != "":
-		return todo.KindTmux
-	case strings.HasPrefix(id, t3Boss):
-		return todo.KindT3
-	}
-	return todo.KindDesktop
 }
