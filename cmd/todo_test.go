@@ -157,6 +157,12 @@ func TestTodoT3(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "dev", "todo", "t3-0c638555-2222.json")); err != nil {
 		t.Errorf("bare uuid's list file: %v", err)
 	}
+	// A boss's own thread id on --on is its own task
+	if _, stderr, err := execute(t, "", "todo", "add", "Own", "--on", "0c638555-2222"); err != nil || !strings.Contains(stderr, "this list's own boss") {
+		t.Errorf("add --on own id = %q, %v, want --on boss", stderr, err)
+	}
+	// A T3 Code started in tmux passes its pane: the thread still decides
+	t.Setenv("TMUX_PANE", "%9")
 	t.Setenv("T3CODE_THREAD_ID", "thread:delegated-task:abc")
 	for _, args := range [][]string{{"todo"}, {"todo", "--json"}, {"todo", "add", "x"}, {"todo", "done", "1"}} {
 		if _, _, err := execute(t, "", args...); err == nil || !strings.Contains(err.Error(), "a task another T3 Code thread delegated") {
