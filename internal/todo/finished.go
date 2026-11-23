@@ -20,12 +20,16 @@ const (
 )
 
 // Finished is a ticked item that left its list (List.Finished): Assignee whose it was when ticked, by its stored shape,
-// never running; DoneAt when, unix seconds.
+// never running; DoneAt when, unix seconds; DoneBy who ticked it (Item.DoneBy).
 type Finished struct {
 	ID       int      `json:"id"`
 	Text     string   `json:"text"`
 	Link     string   `json:"link,omitempty"`
 	Answer   string   `json:"answer,omitempty"`
+	Context  []string `json:"context,omitempty"`
+	Details  string   `json:"details,omitempty"`
+	Result   string   `json:"result,omitempty"`
+	DoneBy   string   `json:"done_by,omitempty"`
 	On       string   `json:"on,omitempty"`
 	Assignee Assignee `json:"assignee"`
 	DoneAt   int64    `json:"done_at"`
@@ -119,7 +123,7 @@ func shownFinished(items []Item, boss string) []Finished {
 	out := make([]Finished, 0, len(items))
 	for _, it := range items {
 		by := o.stored(Shown{On: it.On, Session: it.Session}, Own(it.On, it.Session, boss)).Assignee
-		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet})
+		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet})
 	}
 	return out
 }
@@ -170,6 +174,7 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		// A new Added, as a --replaces gives: its checks and age start afresh
 		it.Done, it.DoneOn, it.Answer, it.Via, it.Doing, it.Started, it.PartOf, it.Added = 0, "", "", "", nil, nil, 0, max(now.Unix(), it.Added+1)
 		it.Asked, it.Dropped = 0, nil
+		it.Result, it.DoneBy = "", ""
 		if it.Until != 0 && now.Unix() >= it.Until {
 			it.Until = 0
 		}

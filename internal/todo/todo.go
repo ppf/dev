@@ -46,6 +46,20 @@ const Me = "me"
 // Boss is the --on of an item its list's boss does itself, stored without a session.
 const Boss = "boss"
 
+// Who ticked an item (Item.DoneBy), besides its boss by name (Boss for a desktop app boss's).
+const (
+	DoneByYou   = "you"     // the user: a board's or the page's tick, or an answer
+	DoneByUntil = "until"   // by itself at its --until
+	DoneByPR    = "done-on" // by itself at its linked PR's --done-on event
+)
+
+const (
+	// MaxDetails is the longest --details, in characters
+	MaxDetails = 1500
+	// MaxResult is the longest --result, in characters: one line
+	MaxResult = 300
+)
+
 // Session is the boss's worker an item is on: its tmux session name or desktop app session id (local_…), and
 // the name its board shows.
 type Session struct {
@@ -66,6 +80,9 @@ type Item struct {
 	Until   int64    `json:"until,omitempty"`
 	Options []string `json:"options,omitempty"`
 	Context []string `json:"context,omitempty"` // an ask's lines under its question
+	Details string   `json:"details,omitempty"` // its longer text (--details): paragraphs, "- " lines
+	Result  string   `json:"result,omitempty"`  // what was done, said as it was ticked (dev todo done --result)
+	DoneBy  string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name, DoneByUntil or DoneByPR
 	Answer  string   `json:"answer,omitempty"`
 	Via     string   `json:"via,omitempty"`     // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
 	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
@@ -140,6 +157,9 @@ type Shown struct {
 	Options []string       `json:"options,omitempty"`
 	Choices []Choice       `json:"choices,omitempty"` // Options split (Split)
 	Context []string       `json:"context,omitempty"`
+	Details string         `json:"details,omitempty"`
+	Result  string         `json:"result,omitempty"`
+	DoneBy  string         `json:"done_by,omitempty"`
 	Answer  string         `json:"answer,omitempty"`
 	Added   int64          `json:"added,omitempty"`
 	DoneOn  string         `json:"done_on,omitempty"`
@@ -152,7 +172,9 @@ type Shown struct {
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
 	// Now is what its worker is doing now (its sidebar.Session.Doing), once SetStatus ran; "" for none
-	Now   string `json:"now,omitempty"`
+	Now string `json:"now,omitempty"`
+	// Note is its worker's latest boss inbox note (sidebar.Session.Note), set with Now
+	Note  string `json:"note,omitempty"`
 	Quiet bool   `json:"quiet,omitempty"`
 	// PRState is its linked GitHub PR's state at the last lookup: open, merged or closed; "" for none (not looked up,
 	// another link, ticked)
@@ -199,6 +221,7 @@ var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is it
 type Store struct {
 	path, boss string
 	trial      bool
+	result     string
 	name, dir  string
 	created    int64
 }
@@ -206,6 +229,12 @@ type Store struct {
 // Trial is s with its changes tried, not written: their refusals, nothing else.
 func (s Store) Trial() Store {
 	s.trial = true
+	return s
+}
+
+// WithResult is s with result, what was done, stored on the item Done or DoneText ticks (CheckResult first).
+func (s Store) WithResult(result string) Store {
+	s.result = result
 	return s
 }
 
@@ -585,7 +614,7 @@ func (s Store) Read(now time.Time) (List, error) {
 		if it.PartOf == 0 {
 			it.PartOf = partner(f.Items, it.ID)
 		}
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
@@ -630,6 +659,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 			return 0, err
 		}
 	}
+	if err := checkDetails(it.Details); err != nil {
+		return 0, err
+	}
 	err = s.update(now, func(f *file) error {
 		if len(f.Items) == 0 {
 			f.Next = 1
@@ -672,6 +704,9 @@ func (s Store) ReplaceAsk(id int, it Item, now time.Time) (renamed bool, err err
 }
 
 func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) error {
+	if err := checkDetails(it.Details); err != nil {
+		return err
+	}
 	return s.update(now, func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(old Item) bool { return old.ID == id && old.Done == 0 })
 		if i < 0 {
@@ -705,6 +740,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 		if it.Context == nil {
 			it.Context = old.Context
 		}
+		it.Details = cmp.Or(it.Details, old.Details)
 		// Its doer goes on unless another one takes it or it becomes an ask
 		if it.On == old.On && sameSession(it.Session, old.Session) && !(len(old.Options) == 0 && len(it.Options) > 0) {
 			it.Doing = old.Doing
@@ -746,22 +782,27 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 	})
 }
 
-// Done ticks the open items ids; an id that isn't one changes nothing and is an error.
+// Done ticks the open items ids, by its boss (DoneBy), with s's result (WithResult) for one; an id that isn't one
+// changes nothing and is an error.
 func (s Store) Done(ids []int, now time.Time) error {
+	if s.result != "" && len(ids) != 1 {
+		return errors.New("a result ticks one item")
+	}
 	return s.update(now, func(f *file) error {
 		for _, id := range ids {
 			i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
 			if i < 0 {
 				return fmt.Errorf("no open item %d", id)
 			}
-			f.Items[i].tick(now.Unix())
+			f.Items[i].tick(now.Unix(), cmp.Or(s.boss, Boss))
+			f.Items[i].Result = s.result
 		}
 		return nil
 	})
 }
 
-// DoneText ticks the user's own open item id, only while it still reads text, as item numbers restart once a list
-// empties and a boss may rewrite its list under a board's row.
+// DoneText ticks the user's own open item id, by the user, with s's result (WithResult), only while it still reads
+// text, as item numbers restart once a list empties and a boss may rewrite its list under a board's row.
 func (s Store) DoneText(id int, text string, now time.Time) error {
 	return s.update(now, refusing(func(f *file) error {
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == id && it.Done == 0 })
@@ -775,7 +816,8 @@ func (s Store) DoneText(id int, text string, now time.Time) error {
 		case len(f.Items[i].Options) > 0:
 			return fmt.Errorf("item %d is a question: answer it with dev todo answer", id)
 		}
-		f.Items[i].tick(now.Unix())
+		f.Items[i].tick(now.Unix(), DoneByYou)
+		f.Items[i].Result = s.result
 		return nil
 	}))
 }
@@ -1040,7 +1082,7 @@ func (s Store) AnswerPick(id int, question, arg, picked, via string, before int6
 				return fmt.Errorf("the user picked %q, not %q", picked, answer)
 			}
 		}
-		p.tick(now.Unix())
+		p.tick(now.Unix(), DoneByYou)
 		p.Answer, p.Via = answer, via
 		it = *p
 		return nil
@@ -1123,7 +1165,7 @@ func (s Store) Clear(now time.Time) error {
 func (f *file) prune(now time.Time) {
 	for i, it := range f.Items {
 		if it.Done == 0 && it.Until != 0 && now.Unix() >= it.Until {
-			f.Items[i].tick(it.Until)
+			f.Items[i].tick(it.Until, DoneByUntil)
 			f.tell(Ticked{ID: it.ID, Text: it.Text})
 		}
 	}
@@ -1372,6 +1414,40 @@ func Clean(s string) string {
 		}
 		return r
 	}, s)), " ")
+}
+
+// CleanDetails is s as --details stores it: each line cleaned (Clean), one blank line at most between paragraphs, none
+// at its ends.
+func CleanDetails(s string) string {
+	var out []string
+	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		l = Clean(l)
+		if l == "" && (len(out) == 0 || out[len(out)-1] == "") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.TrimSuffix(strings.Join(out, "\n"), "\n")
+}
+
+// checkDetails refuses details over MaxDetails.
+func checkDetails(details string) error {
+	if n := utf8.RuneCountInString(details); n > MaxDetails {
+		return fmt.Errorf("--details is %d characters, at most %d: put the rest in a file named in a --context line", n, MaxDetails)
+	}
+	return nil
+}
+
+// CheckResult is result as --result stores it, cleaned (Clean): refused empty or over MaxResult.
+func CheckResult(result string) (string, error) {
+	result = Clean(result)
+	switch n := utf8.RuneCountInString(result); {
+	case n == 0:
+		return "", errors.New("--result is empty: say what was done")
+	case n > MaxResult:
+		return "", fmt.Errorf("--result is %d characters, at most %d: one line saying what was done", n, MaxResult)
+	}
+	return result, nil
 }
 
 var prLink = regexp.MustCompile(`/(?:pull|merge_requests)/(\d+)(?:[/?#]|$)`)

@@ -111,13 +111,13 @@ func TestSetStatus(t *testing.T) {
 	}
 }
 
-// SetStatus gives an item on a live worker its Doing as Now (its PR moved too), and none to the user's own, a person's
-// or a gone worker's, clearing what an earlier SetStatus set; Owner.Doing, when set, is asked for those workers only.
+// SetStatus gives an item on a live worker its Doing as Now and its latest note as Note (its PR moved too), and none
+// to the user's own, a person's or a gone worker's, clearing what an earlier SetStatus set; Owner.Doing, when set, is asked for those workers only.
 func TestSetStatusNow(t *testing.T) {
-	fix := sidebar.Session{Name: "fix-a", ID: "$2", Agent: "Claude", State: "working", Doing: "Run the tests"}
+	fix := sidebar.Session{Name: "fix-a", ID: "$2", Agent: "Claude", State: "working", Doing: "Run the tests", Note: "finished: PR #12 open"}
 	idle := sidebar.Session{Name: "fix-c", ID: "$3", Agent: "Claude", State: "idle", Doing: "unused"}
 	items := func() []Shown {
-		return []Shown{{ID: 1, On: "fix-a"}, {ID: 2, Now: "stale"}, {ID: 3, On: "Ola"}, {ID: 4, On: "fix-b", Session: &Session{ID: "$9", Name: "fix-b"}},
+		return []Shown{{ID: 1, On: "fix-a"}, {ID: 2, Now: "stale", Note: "stale"}, {ID: 3, On: "Ola"}, {ID: 4, On: "fix-b", Session: &Session{ID: "$9", Name: "fix-b"}},
 			{ID: 5, On: "fix-a", Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 3}}}
 	}
 	l := List{Items: items()}
@@ -125,6 +125,9 @@ func TestSetStatusNow(t *testing.T) {
 	for i, want := range []string{"Run the tests", "", "", "", "Run the tests"} {
 		if l.Items[i].Now != want {
 			t.Errorf("item %d (%s): Now = %q, want %q", i+1, l.Items[i].Status, l.Items[i].Now, want)
+		}
+		if note := map[bool]string{true: fix.Note}[want != ""]; l.Items[i].Note != note {
+			t.Errorf("item %d (%s): Note = %q, want %q", i+1, l.Items[i].Status, l.Items[i].Note, note)
 		}
 	}
 	var asked []string

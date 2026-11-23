@@ -350,6 +350,7 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 			lists[i].Error = scrub(lists[i].Error)
 			for j := range lists[i].Items {
 				lists[i].Items[j].Now = scrub(lists[i].Items[j].Now)
+				lists[i].Items[j].Note = scrub(lists[i].Items[j].Note)
 			}
 		}
 		return json.Marshal(lists)

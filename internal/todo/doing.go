@@ -136,8 +136,8 @@ func partner(items []Item, id int) int {
 	return found
 }
 
-// tick ticks it at at: what its doer did ends.
-func (it *Item) tick(at int64) { it.Done, it.Doing = at, nil }
+// tick ticks it at at, by whom (DoneBy): what its doer did ends.
+func (it *Item) tick(at int64, by string) { it.Done, it.Doing, it.DoneBy = at, nil, by }
 
 // OnIt is what a list's text says of an item someone works on (Doing): the user on their own, boss (the wording for its
 // reader) on the boss's own; "" for none.
