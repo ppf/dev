@@ -84,6 +84,10 @@ type doneMsg struct {
 func New(it Item, acts Actions, managerRuns bool) Model {
 	m := Model{it: it, acts: acts, managerRuns: managerRuns}
 	m.entries = m.list()
+	if _, _, options, ok := m.question(); ok && !m.ask() && len(m.entries) > len(options)+1 {
+		// The item's own first action: ⏎ never answers the ask it waits on unpicked
+		m.sel = len(options) + 1
+	}
 	return m
 }
 
@@ -95,7 +99,7 @@ func (m Model) plain() bool  { return !m.it.Done && m.own() && len(m.it.Options)
 func (m Model) own() bool    { return todo.Own(m.it.On, m.it.Session, m.it.Boss) }
 
 // question is the ask the view answers: the item itself when it is the user's own ask, else the open ask it waits on
-// (todo.Shown.WaitsOn); ok false for none, or a closed boss's.
+// (todo.Shown.WaitsOn) unless its boss is closed; ok false for none.
 func (m Model) question() (id int, text string, options []string, ok bool) {
 	switch w := m.it.WaitsOn; {
 	case m.ask():

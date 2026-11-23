@@ -539,7 +539,14 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   const form = cls(/^waits$/)(s)[0];
   check('its sheet: the ask and its form, sent to the ask: ' + textOf(form || {}), /^#8 · Start the worker for #7 now\?/.test(textOf(form || {}))
     && walk(form, c => c.tag === 'button' && c.children[0] === 'Send answer to #8').length === 1);
-  walk(cls(/^quick$/)([waitCard])[0], c => c.tag === 'button')[1].on.click();
+  run("state.errors['boss-a/8'] = 'Refused: changed'");
+  check('the ask\'s refusal shows on the item\'s sheet', /Refused: changed/.test(textOf(cls(/^waits$/)(run("item('boss-a', 7)"))[0] || {})));
+  run("delete state.errors['boss-a/8']");
+  s = await sheetOf([{ boss: 'boss-a', closed: true, items: [theAsk, waiting] }], "item('boss-a', 7)");
+  check('a closed boss\'s item: no ask to answer on its sheet or card', !cls(/^waits$/)(s).length
+    && !drawnCards().some(c => cls(/^now waits$/)([c]).length));
+  s = await sheetOf([{ boss: 'boss-a', items: [theAsk, waiting] }], "item('boss-a', 7)");
+  walk(cls(/^quick$/)([drawnCards().find(c => walk(c, x => x.tag === 'a' && x.attrs.href === '#/item/boss-a/7').length)])[0], c => c.tag === 'button')[1].on.click();
   check('a card option picks for the ask, opening the item', run("state.picks['boss-a/8']?.option") === 'Later' && ctx.location.hash === '#/item/boss-a/7');
   posts.length = 0;
   run("send(find('boss-a', 8).list, find('boss-a', 8).it)");

@@ -657,7 +657,7 @@ func TestWaitsOnAsk(t *testing.T) {
 	var r recorder
 	m := New(it, r.actions(), false)
 	v := ansi.Strip(m.View(Width, 40, now))
-	for _, want := range []string{"waits on your answer to #8", "Start the worker for #6 now?", "▸ 1  ★ Start now", "2    Later", "m    In your own words…", "s    Start"} {
+	for _, want := range []string{"waits on your answer to #8", "Start the worker for #6 now?", "1  ★ Start now", "2    Later", "m    In your own words…", "▸ s    Start"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}
@@ -670,6 +670,9 @@ func TestWaitsOnAsk(t *testing.T) {
 	}
 	if v := ansi.Strip(m.View(Width, 40, now)); !strings.Contains(v, "1-2 answer · m own words · j/k ⏎ run · s start") {
 		t.Errorf("keys line:\n%s", v)
+	}
+	if m := press(New(it, r.actions(), false), "enter"); m.Result != "ok start boss-dev Contract: a worker's question" {
+		t.Errorf("⏎ unpicked runs the item's own first action, not the ask's first option: %q", m.Result)
 	}
 	if m := press(New(it, r.actions(), false), "s"); m.Result != "ok start boss-dev Contract: a worker's question" {
 		t.Errorf("s still starts the item: %q", m.Result)

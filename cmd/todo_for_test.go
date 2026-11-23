@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -46,5 +48,22 @@ func TestTodoAskFor(t *testing.T) {
 	}
 	if _, _, err := execute(t, "", "todo", "ask", "Q?", "--option", "a", "--option", "b", "--details", "x", "--for", "3"); err == nil {
 		t.Error("--for an ask: no error")
+	}
+}
+
+// A refused --for on a desktop boss's first ask takes no earlier list over.
+func TestTodoAskForAdoptsNothing(t *testing.T) {
+	todoEnv(t)
+	desktopSessions(t)
+	run(t, "", "todo", "--boss", "local_old", "set", "old open item")
+	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
+	if _, _, err := execute(t, "", "todo", "ask", "Q?", "--option", "a", "--option", "b", "--details", "x", "--for", "9"); err == nil {
+		t.Error("--for 9: no error")
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "todo", "desktop-local_boss.json")); err == nil {
+		t.Error("a refused ask made local_boss a list")
+	}
+	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
+		t.Errorf("local_old's list = %q, want it kept", got)
 	}
 }

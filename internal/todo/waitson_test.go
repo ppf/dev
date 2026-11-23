@@ -69,6 +69,9 @@ func TestWaitsOn(t *testing.T) {
 	if _, err := s.ReplaceAsk(ask, Item{For: item}, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.Add(Item{Text: "Theirs?", Options: []string{"a", "b"}, On: "w1", For: item}, now); err == nil || !strings.Contains(err.Error(), "isn't the user's") {
+		t.Errorf("--for on an ask handed on: %v", err)
+	}
 	// Handed to a worker, an ask isn't the user's: the item waits on the older one
 	handed := add(Item{Text: "Theirs?", Options: []string{"Yes", "No"}, For: item})
 	if err := s.Replace(handed, Item{On: "w1"}, now); err != nil {

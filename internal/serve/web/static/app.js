@@ -218,8 +218,10 @@ function reload() {
 
 // busy is whether the user typed or picked in the open sheet, or a note is shown: a reload would lose it.
 function busy() {
-  const r = route(), p = r.name === 'item' && state.picks[key(r.boss, r.id)];
-  return !!state.note || (!!p && (!!p.option || !!p.text.trim()));
+  const r = route(), x = r.name === 'item' && find(r.boss, r.id);
+  // An item's own pick, or one for the ask it waits on
+  const drafted = k => { const p = state.picks[k]; return !!p && (!!p.option || !!p.text.trim()); };
+  return !!state.note || r.name === 'item' && (drafted(key(r.boss, r.id)) || !!x?.it.waits_on && drafted(key(r.boss, x.it.waits_on.id)));
 }
 
 // connect opens the event stream while the page is shown and paired; each "board" event names the board's ETag.
@@ -338,8 +340,11 @@ async function send(list, it) {
   const k = key(list.boss, it.id), p = state.picks[k] || {};
   const body = { boss: list.boss, id: it.id, question: it.text };
   if (p.option) body.option = p.option; else body.text = p.text.trim();
+  // The sheet it was sent from: an item's waiting on this ask, closed on success though a board read redrew it since
+  const from = state.shown?.ask === k ? state.shown.k : '';
   if (await post('/v1/answer', body, k)) {
     delete state.picks[k];
+    if (from && state.shown?.k === from) state.shown.ask = k;
     leave(k, 'Sent to ' + list.boss + ': ' + (p.option || p.text.trim()));
   }
 }
@@ -378,7 +383,7 @@ function leave(k, note) {
 
 // onBoard shows item k's outcome on the board when its sheet was closed while it was on its way.
 function onBoard(k, note) {
-  if (state.shown?.k === k) return;
+  if (state.shown?.k === k || state.shown?.ask === k) return;
   state.note = note;
   state.noteFor = route().name === 'board' ? location.hash : '#/';
 }
@@ -419,7 +424,7 @@ function pick(list, it, value, at = it.id) {
   location.hash = itemHash(list.boss, at);
 }
 
-// waitsOn is the open ask item it waits on (waits_on), as its list has it; null for none, or one not shown yet.
+// waitsOn is the open ask item it waits on (waits_on), as its list has it; null for none, a closed list's, or one not shown yet.
 const waitsOn = (list, it) => !list.closed && it.waits_on && find(list.boss, it.waits_on.id)?.it || null;
 
 // initials leave out a session's project, its name's first part (dev-board-7: B7), so a project's sessions differ
@@ -765,14 +770,14 @@ function facts(x, live = false, session = false) {
   if (it.link) rows.push(linkRow(it.link));
   if (it.check && it.check.kind !== 'boss closed' && !session) rows.push(['Check', it.check.kind + (it.check.pr ? ' · PR #' + it.check.pr : '')]);
   if (it.now && !live) rows.push(['Now', it.now]);
-  if (it.waits_on) rows.push(['Waits on', '#' + it.waits_on.id]);
+  if (waitsOn(list, it)) rows.push(['Waits on', '#' + it.waits_on.id]);
   if (it.started) rows.push(['Started', 'sent to ' + it.started.to + ' ' + when(it.started.at)]);
   if (it.until) rows.push(['Till', when(it.until)]);
   if (it.added) rows.push(['Added', when(it.added)]);
   return el('dl', { class: 'facts' }, rows.map(([k, v]) => el('div', null, el('dt', null, k), el('dd', null, v))));
 }
 
-// answerForm is ask it's options, own words and Send; from another item's sheet (from) the button names the ask.
+// answerForm is ask it's form: options, own words and Send; from another item's sheet (from) the button and hint name the ask.
 function answerForm(list, it, from = false) {
   const k = key(list.boss, it.id);
   const p = state.picks[k] || (state.picks[k] = { question: it.text, added: it.added, option: '', text: '' });
@@ -929,6 +934,7 @@ function item(boss, id, at) {
     const err = state.errors[key(boss, ask.id)];
     state.shown.ask = key(boss, ask.id); // its answer sent closes this sheet
     out.push(el('section', { class: 'waits', 'aria-label': 'Waits on your answer' }, el('p', { class: 'waits-q' }, el('b', null, '#' + ask.id), ' · ' + ask.text),
+      ask.context?.length && el('ul', { class: 'context' }, ask.context.map(c => el('li', null, c))),
       ...answerForm(list, ask, true), err && el('p', { class: 'err' }, err)));
   }
   if (answerable(list, it)) out.push(...answerForm(list, it));

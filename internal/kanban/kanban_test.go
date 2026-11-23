@@ -344,10 +344,12 @@ func TestCardMarks(t *testing.T) {
 			}
 		}
 	}
-	// A closed boss's card says so, and a person it waits for is no one's to follow up
-	closed := mk(base, func(s *todo.Shown) { s.WaitingFor = "Carl" })
+	// A closed boss's card says so, and a person it waits for is no one's to follow up; an ask it waits on goes unsaid
+	closed := mk(base, func(s *todo.Shown) {
+		s.WaitingFor, s.WaitsOn = "Carl", &todo.WaitsOn{ID: 8, Text: "Q?", Options: []string{"a", "b"}}
+	})
 	closed.closed = true
-	if out := render(closed, 80); !strings.Contains(out, "boss closed") || !strings.Contains(out, "waiting for Carl · no one follows up") {
+	if out := render(closed, 80); !strings.Contains(out, "boss closed") || !strings.Contains(out, "waiting for Carl · no one follows up") || strings.Contains(out, "waits on your answer") {
 		t.Errorf("❌ closed boss's card:\n%s", out)
 	}
 	// An open item waiting on a person names who follows up; a closed boss's names no one, and a ticked one keeps its assignee

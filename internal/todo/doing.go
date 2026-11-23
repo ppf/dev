@@ -92,6 +92,8 @@ func (f *file) checkFor(id int, it Item) error {
 		return nil
 	case len(it.Options) == 0:
 		return fmt.Errorf("--for %d: only an ask (dev todo ask) is what an item waits on", n)
+	case it.On != "":
+		return fmt.Errorf("--for %d: an ask on %s isn't the user's to answer", n, it.On)
 	case n == id:
 		return fmt.Errorf("--for %d: an ask doesn't wait on itself", n)
 	case !f.open(n):
@@ -102,8 +104,8 @@ func (f *file) checkFor(id int, it Item) error {
 	return nil
 }
 
-// askFor is the open ask of the user's item id waits on (its For), the newest when several; nil for none. One handed to
-// someone (--on) isn't the user's to answer.
+// askFor is the newest open ask on no one that item id waits on (its For); nil for none. One handed on (--on) isn't
+// the user's to answer.
 func (f *file) askFor(id int) *Item {
 	var ask *Item
 	for i, it := range f.Items {

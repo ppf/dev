@@ -183,7 +183,7 @@ type Shown struct {
 	Doing   *Doing `json:"doing,omitempty"`
 	PartOf  int    `json:"part_of,omitempty"`
 	For     int    `json:"for,omitempty"`
-	// WaitsOn is the open ask whose For is this open item: its answer decides it
+	// WaitsOn is the newest open ask on no one whose For is this open item: its answer decides it
 	WaitsOn *WaitsOn `json:"waits_on,omitempty"`
 	Placement
 }
@@ -789,7 +789,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 		switch {
 		case it.For == NoFor:
 			it.For = 0
-		case it.For == 0 && len(it.Options) > 0 && f.open(old.For):
+		case it.For == 0 && len(it.Options) > 0 && it.On == "" && f.open(old.For):
 			it.For = old.For
 		}
 		if err := f.checkFor(id, it); err != nil {
