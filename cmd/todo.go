@@ -124,6 +124,19 @@ func warnLong(stderr io.Writer, text string) {
 	}
 }
 
+func warnNoDetails(s todo.Store, stderr io.Writer, id int, now time.Time) {
+	l, err := s.Read(now)
+	if err != nil {
+		fmt.Fprintf(stderr, "⚠ details not checked: %v\n", err)
+		return
+	}
+	for _, it := range l.Items {
+		if it.ID == id && it.NeedsDetails() {
+			fmt.Fprintln(stderr, "⚠ no details: add them with --details (what it is and why, where it stands, what done looks like; for a waiting item who, what was asked, when and where)")
+		}
+	}
+}
+
 // waitingFor is person as an item's on, refused when it names what --on means otherwise: me, boss, this list's own
 // boss (own), or a session the boss started.
 func waitingFor(person, own, boss string, stderr io.Writer) (string, error) {
@@ -239,6 +252,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 					return err
 				}
 				warnLong(cmd.ErrOrStderr(), it.Text)
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
@@ -250,6 +264,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			warnLong(cmd.ErrOrStderr(), it.Text)
+			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
 			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
@@ -338,6 +353,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 				if err != nil {
 					return err
 				}
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
 				// Only a new question is news to the boss above: it reads the rest from the list
 				if renamed {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
@@ -349,6 +365,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 			if err != nil {
 				return err
 			}
+			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
 			if !it.Quiet {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
 			}
@@ -365,7 +382,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 	return cmd
 }
 
-const detailsHelp = "its longer text: what it is, its steps, what's out of scope; for a message to send (mail, chat, comment), its state on the first line (\"Draft ready, not sent\" or \"Sent <when> to <whom>, <where>\"), then the draft; at most 4000 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
+const detailsHelp = "its longer text: what it is and why, where it stands, what done looks like (for a waiting item also who, what was asked, when, where; expected on every item but a worker's or --quiet: without, a warning); its steps, what's out of scope; for a message to send (mail, chat, comment), its state on the first line (\"Draft ready, not sent\" or \"Sent <when> to <whom>, <where>\"), then the draft; at most 4000 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
 
 const maxDetailsBytes = 64 << 10
 

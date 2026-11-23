@@ -204,8 +204,8 @@ func TestUnchanged(t *testing.T) {
 func TestReminderFlagged(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	l := List{Items: []Shown{
-		{ID: 1, Text: "Review the copy"},
-		{ID: 2, Text: "PR #412 open", On: "reviewers", Check: &sidebar.Check{Kind: sidebar.CheckApproved, PR: 412, Since: now.Add(-2 * time.Hour).Unix()}},
+		{ID: 1, Text: "Review the copy", Details: "d"},
+		{ID: 2, Text: "PR #412 open", On: "reviewers", Details: "d", Check: &sidebar.Check{Kind: sidebar.CheckApproved, PR: 412, Since: now.Add(-2 * time.Hour).Unix()}},
 		{ID: 3, Text: "Rework rounding", On: "fix", Gone: true},
 	}}
 	got := l.Reminder(nil, now)
@@ -450,7 +450,7 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	var l List
 	for i := 1; i <= startShown+2; i++ {
-		it := Shown{ID: i, Text: "item " + strconv.Itoa(i)}
+		it := Shown{ID: i, Text: "item " + strconv.Itoa(i), Details: "d"}
 		if i <= 2 {
 			it.Check = &sidebar.Check{Kind: sidebar.CheckBossClosed}
 		}
@@ -462,9 +462,9 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 	}
 	l.Items = nil
 	for i := 1; i <= startShown+1; i++ {
-		l.Items = append(l.Items, Shown{ID: i, Text: "x", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}})
+		l.Items = append(l.Items, Shown{ID: i, Text: "x", Details: "d", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}})
 	}
-	l.Items = append(l.Items, Shown{ID: 99, Text: "rest"})
+	l.Items = append(l.Items, Shown{ID: 99, Text: "rest", Details: "d"})
 	if got := l.StartReminder(false, "now", nil, now); strings.Contains(got, "The rest:") {
 		t.Errorf("The rest: over no item:\n%s", got)
 	}
