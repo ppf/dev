@@ -188,6 +188,9 @@ type Shown struct {
 	Placement
 }
 
+// NoFor is a replace's For that unlinks the ask from its item (dev todo ask --replaces <n> --for 0).
+const NoFor = -1
+
 // WaitsOn is the ask an item waits on: its number, question and options, as answering it needs.
 type WaitsOn struct {
 	ID      int      `json:"id"`
@@ -636,7 +639,7 @@ func (s Store) Read(now time.Time) (List, error) {
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
-		if a := f.askFor(it.ID); it.Done == 0 && a != nil {
+		if a := f.askFor(it.ID); it.Done == 0 && len(it.Options) == 0 && a != nil {
 			sh.WaitsOn = &WaitsOn{ID: a.ID, Text: a.Text, Options: a.Options}
 			for _, o := range a.Options {
 				sh.WaitsOn.Choices = append(sh.WaitsOn.Choices, Split(o))
@@ -782,8 +785,11 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 				return err
 			}
 		}
-		// Kept while the item it decides is open
-		if it.For == 0 && len(it.Options) > 0 && f.open(old.For) {
+		// Kept while the item it decides is open; NoFor unlinks it
+		switch {
+		case it.For == NoFor:
+			it.For = 0
+		case it.For == 0 && len(it.Options) > 0 && f.open(old.For):
 			it.For = old.For
 		}
 		if err := f.checkFor(id, it); err != nil {

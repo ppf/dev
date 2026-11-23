@@ -369,7 +369,7 @@ const ACTS = { tick, start, doing: onIt, stop: offIt, reopen };
 function leave(k, note) {
   if (state.moves[k]) {
     // move shows it at the foot
-  } else if (state.shown?.k === k) {
+  } else if (state.shown?.k === k || state.shown?.ask === k) {
     state.shown = null;
     go('#/', note);
   } else onBoard(k, note);
@@ -420,7 +420,7 @@ function pick(list, it, value, at = it.id) {
 }
 
 // waitsOn is the open ask item it waits on (waits_on), as its list has it; null for none, or one not shown yet.
-const waitsOn = (list, it) => it.waits_on && find(list.boss, it.waits_on.id)?.it || null;
+const waitsOn = (list, it) => !list.closed && it.waits_on && find(list.boss, it.waits_on.id)?.it || null;
 
 // initials leave out a session's project, its name's first part (dev-board-7: B7), so a project's sessions differ
 function initials(name) {
@@ -797,7 +797,7 @@ function answerForm(list, it, from = false) {
   words.value = p.text;
   sync();
   return [opts, el('label', { class: 'own', for: 'own' }, 'Or in your own words'), words, el('div', { class: 'acts' }, sendBtn),
-    el('p', { class: 'hint' }, 'Goes to ' + list.boss + ' on your Mac and ticks the item.')];
+    el('p', { class: 'hint' }, 'Goes to ' + list.boss + ' on your Mac and ticks ' + (from ? '#' + it.id : 'the item') + '.')];
 }
 
 const closeSheet = () => { location.hash = '#/'; };
@@ -926,8 +926,10 @@ function item(boss, id, at) {
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   const ask = waitsOn(list, it);
   if (ask && answerable(list, ask)) {
+    const err = state.errors[key(boss, ask.id)];
+    state.shown.ask = key(boss, ask.id); // its answer sent closes this sheet
     out.push(el('section', { class: 'waits', 'aria-label': 'Waits on your answer' }, el('p', { class: 'waits-q' }, el('b', null, '#' + ask.id), ' · ' + ask.text),
-      ...answerForm(list, ask, true)));
+      ...answerForm(list, ask, true), err && el('p', { class: 'err' }, err)));
   }
   if (answerable(list, it)) out.push(...answerForm(list, it));
   else if (it.options?.length) out.push(el('ul', { class: 'context' }, it.options.map(option).map(c => el('li', null, c.detail ? c.label + ' — ' + c.detail : c.label))));

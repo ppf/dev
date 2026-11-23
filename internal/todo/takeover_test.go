@@ -446,7 +446,7 @@ func TestTakeOverMerge(t *testing.T) {
 		}
 	}
 	prURL := "https://github.com/o/r/pull/7"
-	for _, it := range []Item{{Text: "a", Link: prURL}, {Text: "b", PartOf: 1, On: "w1", Session: &Session{ID: "w1", Name: "w1"}}, {Text: "pick?", Options: []string{"A", "B"}}, {Text: "t"}} {
+	for _, it := range []Item{{Text: "a", Link: prURL}, {Text: "b", PartOf: 1, On: "w1", Session: &Session{ID: "w1", Name: "w1"}}, {Text: "pick?", Options: []string{"A", "B"}, For: 1}, {Text: "t"}} {
 		if _, err := from.Add(it, now); err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +488,8 @@ func TestTakeOverMerge(t *testing.T) {
 	if got := []int{byText["mine"].ID, byText["a"].ID, byText["b"].ID, byText["pick?"].ID}; !slices.Equal(got, []int{1, 2, 3, 4}) {
 		t.Errorf("ids = %v", got)
 	}
-	if byText["b"].PartOf != 2 || byText["a"].PartOf != 3 || byText["a"].PRState != "open" || len(byText["pick?"].Options) != 2 {
+	if byText["b"].PartOf != 2 || byText["a"].PartOf != 3 || byText["a"].PRState != "open" || len(byText["pick?"].Options) != 2 ||
+		byText["pick?"].For != 2 || byText["a"].WaitsOn == nil || byText["a"].WaitsOn.ID != 4 || byText["mine"].WaitsOn != nil {
 		t.Errorf("merged items = %+v", l.Items)
 	}
 	if len(l.Finished) != 1 || l.Finished[0].Text != "t" {

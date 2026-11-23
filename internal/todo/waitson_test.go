@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,11 +61,38 @@ func TestWaitsOn(t *testing.T) {
 	if _, err := s.ReplaceAsk(ask, Item{Context: []string{"more"}}, now); err != nil || waits(item) == nil {
 		t.Errorf("--replaces dropped the link: %v %+v", err, waits(item))
 	}
+	// Linked anew to another item, then back
+	other := add(Item{Text: "Other", On: Boss})
+	if _, err := s.ReplaceAsk(ask, Item{For: other}, now); err != nil || waits(other) == nil || waits(other).ID != ask || waits(item) != nil {
+		t.Errorf("--for anew: %v, other %+v, item %+v", err, waits(other), waits(item))
+	}
+	if _, err := s.ReplaceAsk(ask, Item{For: item}, now); err != nil {
+		t.Fatal(err)
+	}
+	// Two open asks for it: the newest is the one it waits on, the older once the newest goes
+	newer := add(Item{Text: "Or now?", Options: []string{"Yes", "No"}, For: item})
+	if w := waits(item); w == nil || w.ID != newer {
+		t.Errorf("two asks: waits on %+v, want %d", w, newer)
+	}
+	if err := s.Done([]int{newer}, now); err != nil {
+		t.Fatal(err)
+	}
+	if w := waits(item); w == nil || w.ID != ask {
+		t.Errorf("newest ticked: waits on %+v, want %d", w, ask)
+	}
 	if _, err := s.Answer(ask, "Start the worker for #1 now?", "Start now", 0, now); err != nil {
 		t.Fatal(err)
 	}
 	if w := waits(item); w != nil {
 		t.Errorf("answered: still waits on %+v", w)
+	}
+	// Reopened, the ask is unlinked: its decision was made
+	reopened, err := s.Reopen(ask, "Start the worker for #1 now?", now)
+	if err != nil || reopened.For != 0 || waits(item) != nil {
+		t.Errorf("reopened: %v for %d, item waits on %+v", err, reopened.For, waits(item))
+	}
+	if err := s.Done([]int{reopened.ID}, now); err != nil {
+		t.Fatal(err)
 	}
 	ask2 := add(Item{Text: "Ship it?", Options: []string{"Yes", "No"}, For: item})
 	if waits(item) == nil {
@@ -81,7 +109,17 @@ func TestWaitsOn(t *testing.T) {
 	if err := s.Done([]int{item}, now); err != nil {
 		t.Fatal(err)
 	}
+	if w := waits(item); w != nil {
+		t.Errorf("a ticked item waits on %+v", w)
+	}
 	if _, err := s.ReplaceAsk(ask3, Item{Context: []string{"x"}}, now); err != nil {
 		t.Errorf("correcting an ask whose item is ticked: %v", err)
+	}
+	f, err := s.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := f.Items[slices.IndexFunc(f.Items, func(it Item) bool { return it.ID == ask3 })]; a.For != 0 {
+		t.Errorf("the ticked item's link kept: for %d", a.For)
 	}
 }

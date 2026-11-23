@@ -173,7 +173,7 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		}
 		// A new Added, as a --replaces gives: its checks and age start afresh
 		it.Done, it.DoneOn, it.Answer, it.Via, it.Doing, it.Started, it.PartOf, it.Added = 0, "", "", "", nil, nil, 0, max(now.Unix(), it.Added+1)
-		it.Asked, it.Dropped = 0, nil
+		it.Asked, it.Dropped, it.For = 0, nil, 0
 		it.Result, it.DoneBy = "", ""
 		if it.Until != 0 && now.Unix() >= it.Until {
 			it.Until = 0

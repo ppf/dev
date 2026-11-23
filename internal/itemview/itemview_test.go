@@ -668,8 +668,17 @@ func TestWaitsOnAsk(t *testing.T) {
 	if m := press(New(it, r.actions(), false), "m", "n", "o", "enter"); m.Result != "ok answer boss-dev Start the worker for #6 now? no" {
 		t.Errorf("own words: %q", m.Result)
 	}
+	if v := ansi.Strip(m.View(Width, 40, now)); !strings.Contains(v, "1-2 answer · m own words · j/k ⏎ run · s start") {
+		t.Errorf("keys line:\n%s", v)
+	}
 	if m := press(New(it, r.actions(), false), "s"); m.Result != "ok start boss-dev Contract: a worker's question" {
 		t.Errorf("s still starts the item: %q", m.Result)
+	}
+	// The user's own waiting item: what I'm on it took never goes out as the ask's answer
+	mine := it
+	mine.On, mine.Status, mine.Placement = "", sidebar.StatusYours, todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}
+	if m := press(New(mine, r.actions(), false), "i", "x", "esc", "m", "enter"); m.Done || m.msg != "Type an answer, or esc" {
+		t.Errorf("i's text answered the ask: done %v result %q msg %q", m.Done, m.Result, m.msg)
 	}
 	it.Closed = true
 	if v := ansi.Strip(New(it, r.actions(), false).View(Width, 40, now)); strings.Contains(v, "waits on your answer") {

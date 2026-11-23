@@ -544,6 +544,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   posts.length = 0;
   run("send(find('boss-a', 8).list, find('boss-a', 8).it)");
   await settle();
+  check('sent from the item\'s sheet, it closes: ' + ctx.location.hash, ctx.location.hash === '#/');
   check('sent as the ask\'s answer: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/answer' && JSON.parse(posts[0][1]).id === 8
     && JSON.parse(posts[0][1]).option === 'Later' && JSON.parse(posts[0][1]).question === theAsk.text);
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 6, text: 'Release v0.83.0', status: 'working', status_on: 'boss-a', on: 'boss', column: 'progress', assignee: { kind: 'boss', name: 'boss-a' },

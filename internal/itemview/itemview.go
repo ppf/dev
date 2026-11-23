@@ -67,6 +67,7 @@ type Model struct {
 	sel         int
 	typing      string // the key of the line whose field takes the keys (m own words, i I'm on it), "" for none
 	field       []rune // its text
+	fieldFor    string // the key the field was last typed for
 	busy        string // the action under way
 	msg         string // the last action's failure, or why a key does nothing
 	Done        bool
@@ -281,10 +282,11 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		}
 		return m.run("answering", func() (string, error) { return m.acts.Answer(it.Boss, id, text, options[n]) })
 	case k == "m" && m.answers() && !it.Closed, k == "i" && m.canDoing():
-		if k == "i" {
-			// A fresh line each time; own words wait for the next m
+		if k == "i" || m.fieldFor == "i" {
+			// A fresh line each time; own words wait for the next m, unless I'm on it took the field since
 			m.field = nil
 		}
+		m.fieldFor = k
 		m.typing = k
 		m.sel = slices.IndexFunc(m.entries, func(e entry) bool { return e.key == k })
 		return m, nil
@@ -761,6 +763,12 @@ func (m Model) keys() string {
 	case m.ask():
 		if !m.it.Closed {
 			ks = [][2]string{{"1-" + strconv.Itoa(min(9, len(m.it.Options))), "answer"}, {"j/k ⏎", "pick"}, {"m", "own words"}}
+		}
+	case m.answers():
+		_, _, options, _ := m.question()
+		ks = [][2]string{{"1-" + strconv.Itoa(min(9, len(options))), "answer"}, {"m", "own words"}, {"j/k ⏎", "run"}}
+		for _, e := range m.entries[len(options)+1:] {
+			ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
 		}
 	default:
 		ks = [][2]string{{"j/k ⏎", "run"}}

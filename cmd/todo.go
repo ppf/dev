@@ -308,8 +308,11 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 			case !replace:
 				return errors.New("no question: only --replaces keeps the ask's question")
-			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && it.For == 0:
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && !cmd.Flags().Changed("for"):
 				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link, --for or --quiet")
+			}
+			if replace && cmd.Flags().Changed("for") && it.For == 0 {
+				it.For = todo.NoFor
 			}
 			if len(it.Options) == 0 && !replace {
 				return errors.New(`no --option: give the user the options to pick from, the recommended one marked "(Recommended)"`)
@@ -381,7 +384,7 @@ keeping its number: a pick the user made before it still answers it while the qu
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
-	cmd.Flags().IntVar(&it.For, "for", 0, "open item n of this list that waits on this answer: its card and opened item show the ask's options (with --replaces, links it anew)")
+	cmd.Flags().IntVar(&it.For, "for", 0, "open item n of this list that waits on this answer: its card and opened item show the ask's options (with --replaces, links it anew; 0 unlinks it)")
 	return cmd
 }
 

@@ -76,7 +76,7 @@ func marksOf(c card, now time.Time) marks {
 	}
 	m.line = it.Now
 	switch {
-	case it.WaitsOn != nil:
+	case it.WaitsOn != nil && !c.closed:
 		m.line, m.lineColour = "waits on your answer to #"+strconv.Itoa(it.WaitsOn.ID), sidebar.Red
 	case it.Doing != nil:
 		m.line = it.Doing.Text
