@@ -156,6 +156,10 @@ func TestDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("T3 Code's home a file", inT3Default, Delivery{Reason: "T3 Code's worktrees: "})
+	t.Setenv("T3CODE_HOME", t3Home)
+	clone := filepath.Join(t3Home, "worktrees", "repo", "clone")
+	git(dir, "clone", "-q", origin, clone)
+	check("a clone in T3 Code's worktrees", clone, Delivery{Reason: clone + " isn't in a .claude/worktrees or T3 Code worktree"})
 	t.Setenv("T3CODE_HOME", "")
 	check("~/.t3", inT3Default, Delivery{Delivered: true, Head: git(inT3Default, "rev-parse", "HEAD"), Reason: "in origin/main"})
 	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees or T3 Code worktree"})

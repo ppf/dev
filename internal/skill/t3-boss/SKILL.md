@@ -7,7 +7,7 @@ description: Be the boss (coordinator) in a T3 Code thread — start workers as 
 
 You are the coordinator (the boss) in a T3 Code thread. The user types requests here ("start workers for X and Y", "tell fix-login to add tests"); you carry them out with workers: child threads you start with `delegate_task`, each in its own worktree. T3 Code shows them under you and wakes you when one finishes, so the user sees them without you pasting their output.
 
-Your workers are the tasks you delegated (`task_status` lists them). Every other thread is the user's own: drive it only when asked.
+Your workers are the tasks you delegated: keep each one's `taskId` and `childThreadId`; `task_status` takes one `taskId`, and after a stop or a `/clear` `t3_thread_list` with `includeSubagents: true` finds them again (the threads whose `parentThreadId` is yours). Every other thread is the user's own: drive it only when asked.
 
 Below, *message* a worker means `t3_thread_send`, *check* it means `task_status` or `t3_thread_read`, and *clean it up* means `t3_thread_organize` with `action: "archive"`.
 
@@ -43,7 +43,7 @@ T3 Code's system prompt for every thread says to fix small review findings yours
 Write a bold title line and one sentence on what it will do, then call `delegate_task`:
 
 - `task`: the brief; `title` (under 60 chars, a short handle: `fix-login`, `docs-api`); `role` (`implementation`, `research`, `review`, `test`, …)
-- `isolation: "worktree"`: its own checkout from your commit (uncommitted edits stay out); `mode` left at `async`
+- `isolation: "worktree"`: its own checkout from your checkout's HEAD, not fetched (uncommitted edits stay out), so before an independent worker check you are on the default branch and up to date (`git status -sb`, `git pull`); `mode` left at `async`
 - `target`: on every start, `{providerInstanceId, model, options}` by the table under [Model and effort](#model-and-effort). The instance ids and model ids are the user's, so read them from `orchestrator_capabilities` (never guess one: a wrong model is refused with the list of the right ones); effort goes in `options` when the model offers it (`{"effort": "medium"}`).
 - Leave `runtimeMode` out: the child runs in your mode.
 
@@ -91,7 +91,7 @@ Every brief to a worker also says how it knows it is done and when to stop:
 
 In T3 Code `dev agent wait-until` refuses, so a worker waits with a bounded background command (the loop below) and ends its turn only once nothing is left to wait for.
 
-Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run in the background (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running."*
+Every brief also ends with: *"Never end a turn while waiting (CI, review) unless a background command will wake you. Wait for CI by polling `gh pr checks <n>` every 30 s in this bounded loop, run in the background, and pass its task id to `t3_background_wait` before ending your turn, else T3 Code reports you done while it runs (exit `0` all passed, `8` pending, `1` a failure; right after a push it may report no checks yet: run it again). End a waiting turn with `WAITING (background: <what>, ~N min)`, or `IDLE` when nothing is running."*
 
 <!-- boss-core:ci-wait -->
 ```bash
@@ -107,7 +107,7 @@ for i in $(seq 30); do gh pr checks <n> >/dev/null 2>&1; [ $? = 8 ] || break; sl
 A worker in a planned wait shows as Waiting, `until 16:30 · <why>`, with no stuck notes while it rests or waits on its own background tasks; a dialog it shows still reports. To end one early ("the limit was reset, go now"), prompt or message the worker: any prompt ends it (its own background task finishing doesn't).
 <!-- /boss-core:wait -->
 
-Each worker commits to its own branch in its own worktree (under `~/.t3/worktrees`, or T3 Code's home when set elsewhere): none of its work is in your checkout. Merge workers' branches here only when the user tells you to. Identify a worker by its thread id and PR, never by its worktree or branch name.
+Each worker commits to its own branch in its own worktree (under `~/.t3/worktrees`, or T3 Code's home when set elsewhere; `dev delivered` doesn't know a folder picked under Settings → Worktrees: there check it by hand): none of its work is in your checkout. Merge workers' branches here only when the user tells you to. Identify a worker by its thread id and PR, never by its worktree or branch name.
 
 ## Hear from workers
 
@@ -154,7 +154,7 @@ On each result:
 
 ## Follow up
 
-`t3_thread_send` with the worker's thread id (`childThreadId` from `delegate_task`'s result or `task_status`, exactly as given, `%3A` and all), never its title. Make the first line a self-contained sentence. A message to a worker that is idle starts its next turn, and its end reaches you as a notice; `t3_thread_read` shows its latest messages, and `t3_thread_wait` waits for its current turn (only when this turn needs it, never to poll).
+`t3_thread_send` with the worker's thread id (`childThreadId` from `delegate_task`'s result or `task_status`, exactly as given, `%3A` and all), never its title. Make the first line a self-contained sentence. An archived worker takes no message: unarchive it first (`t3_thread_organize` with `action: "unarchive"`). A message to a worker that is idle starts its next turn, and its end reaches you as a notice; `t3_thread_read` shows its latest messages, and `t3_thread_wait` waits for its current turn (only when this turn needs it, never to poll).
 
 ## Archive delivered workers
 

@@ -131,6 +131,10 @@ func T3Worktree(path string) (mainRoot, wtPath string, ok bool, err error) {
 		return "", "", false, nil
 	}
 	mainRoot, wtPath, ok = withMain(top)
+	// A repository cloned there is no worktree: its own checkout would deliver anything committed
+	if gitDir, err := gitOutput(top, "rev-parse", "--path-format=absolute", "--git-dir"); err != nil || filepath.Dir(gitDir) == top {
+		return "", "", false, err
+	}
 	return mainRoot, wtPath, ok, nil
 }
 
