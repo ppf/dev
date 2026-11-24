@@ -155,6 +155,88 @@ func TestClearOffer(t *testing.T) {
 	check(t, "resting at Claude's idle reminder: one note", take(), note)
 }
 
+// A boss's offer also comes after QuietFor of rest at BigContext or more: not while a worker works or one of its asks is
+// up in the manager's dialog; after an offer none for IdleLimit.
+func TestClearOfferBossBig(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	stub := clearStub(t, filepath.Join(tmp, "bin"))
+	pane := func(session string) string { return s.T("display", "-t", "="+session+":", "-p", "#{pane_id}") }
+	opt := func(p, name string) string { return s.T("display", "-t", p, "-p", "#{"+name+"}") }
+	s.T("new-session", "-d", "-s", "manager", "sleep 600")
+	s.T("set-option", "-t", "=manager:", "@dev_herd", "1")
+	manager := pane("manager")
+	for _, ev := range []string{"SessionStart", "UserPromptSubmit"} {
+		cmd := exec.Command(devBin, "state", map[string]string{"SessionStart": "idle", "UserPromptSubmit": "working"}[ev])
+		cmd.Env = s.scriptEnv("TMUX_PANE="+manager, "CLAUDECODE=1")
+		cmd.Stdin = strings.NewReader(`{"hook_event_name":"` + ev + `"}`)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("❌ dev state: %v %s", err, out)
+		}
+	}
+	mb, ok, err := inbox.Here(s.tmux, manager)
+	if !ok || err != nil {
+		t.Fatalf("❌ no manager inbox: %v", err)
+	}
+	take := func() string {
+		t.Helper()
+		bt, err := mb.Box.Take()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bt.String()
+	}
+	s.T("new-session", "-d", "-s", "boss-app", "-e", "STUB_DIR="+tmp, stub)
+	s.T("set-option", "-t", "=boss-app:", "@dev_herd", "1")
+	s.T("set-option", "-t", "=boss-app:", "@dev_started_by", "manager")
+	app := pane("boss-app")
+	s.T("set-option", "-p", "-t", app, "@dev_boss_pane", "coordinator")
+	waitFor(t, "boss-app registered", func() bool { return opt(app, "@agent_session") == "s0" })
+	s.T("new-session", "-d", "-s", "app-w", "sleep 600")
+	s.T("set-option", "-t", "=app-w:", "@dev_started_by", "boss-app")
+	w := pane("app-w")
+	sec, err := strconv.ParseInt(opt(app, "@agent_since"), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := func(context string, after time.Duration) {
+		t.Helper()
+		s.T("set-option", "-p", "-t", app, "@agent_context", context)
+		clk := control.Clock{Now: func() time.Time { return time.Unix(sec, 0).Add(after) }, Sleep: time.Sleep}
+		if err := bossclear.Offer(s.tmux, clk, app); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quiet := bossclear.QuietFor + time.Minute
+	round("30", quiet)
+	check(t, "under 40%", take(), "")
+	s.T("set-option", "-p", "-t", w, "@agent_state", "working", ";", "set-option", "-p", "-t", w, "@agent_cmd", "sleep")
+	round("45", quiet+2*time.Minute)
+	check(t, "40% but a worker working", take(), "")
+	s.T("set-option", "-p", "-t", w, "@agent_state", "idle")
+	if err := mb.Box.SetAsking([]inbox.Asking{{Boss: "boss-app", ID: 3, Text: "Ship v2?", At: time.Now().Unix()}}); err != nil {
+		t.Fatal(err)
+	}
+	round("45", quiet+4*time.Minute)
+	check(t, "40% but its ask is up in the manager", take(), "")
+	if err := mb.Box.SetAsking([]inbox.Asking{{Boss: "boss-other", ID: 1, Text: "Ship v3?", At: time.Now().Unix()}}); err != nil {
+		t.Fatal(err)
+	}
+	round("45", quiet+6*time.Minute)
+	check(t, "40% and quiet, another boss's ask up: offered", take(),
+		"[dev boss inbox] 1 worker update(s):\n- boss-app may be cleared: idle 9m, no worker running, context 45%: clear it? (dev agent clear boss-app, in the background)")
+	// Declined or failed: the stretch's mark gone, no new offer for IdleLimit
+	s.T("set-option", "-pu", "-t", app, bossclear.OptOffered)
+	round("45", quiet+8*time.Minute)
+	check(t, "not offered again at once", take(), "")
+	t.Log("✅ a boss's clear is offered by size after a quiet moment")
+}
+
 // The manager's offer also comes after QuietFor of rest at BigContext or more, not only after IdleLimit.
 func TestClearOfferManagerBig(t *testing.T) {
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
