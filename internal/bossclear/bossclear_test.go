@@ -1,6 +1,7 @@
 package bossclear
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -122,7 +123,15 @@ func TestVerifyHandoff(t *testing.T) {
 		t.Errorf("fact 2 = %q, want its second line joined", h.Facts[1].Text)
 	}
 
-	many := strings.Repeat("4. fact unconfirmed\n", 13)
+	// extra is goodHandoff with n more facts, numbered on from its 3
+	extra := func(n int) string {
+		var b strings.Builder
+		for i := range n {
+			b.WriteString(strconv.Itoa(4+i) + ". fact unconfirmed\n")
+		}
+		return strings.Replace(goodHandoff, "## Open asks", b.String()+"## Open asks", 1)
+	}
+	fact3 := "3. Staging deploy works (unconfirmed)"
 	for _, tt := range []struct {
 		name, text string
 		open       []int
@@ -130,9 +139,14 @@ func TestVerifyHandoff(t *testing.T) {
 	}{
 		{"section missing", strings.Replace(goodHandoff, "## Open risks", "## Risks", 1), []int{3, 12}, "sections missing: ## Open risks"},
 		{"no numbered facts", "## Key facts\nnone\n## Open asks\n## Work in flight\n## The user's standing words\n## Open risks\n## Old transcript\n" + transcript, nil, "no numbered key facts"},
-		{"15 facts pass", strings.Replace(goodHandoff, "## Open asks", strings.Repeat("4. fact unconfirmed\n", 12)+"## Open asks", 1), []int{3, 12}, ""},
-		{"over 15 facts", strings.Replace(goodHandoff, "## Open asks", many+"## Open asks", 1), []int{3, 12}, "16 key facts, at most 15"},
+		{"15 facts pass", extra(12), []int{3, 12}, ""},
+		{"over 15 facts", extra(13), []int{3, 12}, "16 key facts, at most 15"},
+		{"number used twice", strings.Replace(goodHandoff, "3. Staging", "2. Staging", 1), []int{3, 12}, "key fact numbers used twice: 2"},
 		{"unmarked fact", strings.Replace(goodHandoff, " (unconfirmed)", "", 1), []int{3, 12}, "key facts 3 end in neither"},
+		{"confirmed: mid-sentence is no mark", strings.Replace(goodHandoff, fact3, "3. Deploy confirmed: no, still pending", 1), []int{3, 12}, "key facts 3 end in neither"},
+		{"confirmed: with nothing after", strings.Replace(goodHandoff, fact3, "3. Deploy done. confirmed:", 1), []int{3, 12}, "key facts 3 end in neither"},
+		{"confirmed: after a dash", strings.Replace(goodHandoff, fact3, "3. Deploy done - confirmed: #3", 1), []int{3, 12}, ""},
+		{"indented sub-list stays in its fact", strings.Replace(goodHandoff, fact3, "3. Staging works:\n   1. api\n   2. web\n   unconfirmed", 1), []int{3, 12}, ""},
 		{"open item not named", goodHandoff, []int{3, 12, 7}, "open items not named: #7"},
 		{"#12 doesn't name #1", goodHandoff, []int{1}, "open items not named: #1"},
 		{"transcript missing", strings.Replace(goodHandoff, transcript, "lost", 1), []int{3, 12}, "the old transcript's path " + transcript},
@@ -177,6 +191,7 @@ func TestVerifyProof(t *testing.T) {
 		{"fact dropped", strings.Replace(goodProof, "2. Mail goes Friday. confirmed: #3\n", "", 1), []int{12}, "key fact 2 not restated: The user wants the mail sent Friday, not before."},
 		{"mark changed", strings.Replace(goodProof, "works. unconfirmed", "works. confirmed: staging", 1), []int{12}, "key fact 3 is marked unconfirmed in the handoff, confirmed in the proof"},
 		{"mark dropped", strings.Replace(goodProof, "works. unconfirmed", "works.", 1), []int{12}, "key fact 3 is marked unconfirmed in the handoff, neither in the proof"},
+		{"number used twice", strings.Replace(goodProof, "2. Mail goes Friday. confirmed: #3", "1. Mail goes Friday. confirmed: #3", 1), []int{12}, "key fact numbers used twice: 1"},
 		{"extra fact", strings.Replace(goodProof, "## Open asks", "4. Something new. unconfirmed\n\n## Open asks", 1), []int{12}, "1 more key facts than the handoff's 3"},
 		{"ask missing", goodProof, []int{12, 14}, "open asks not under ## Open asks: #14"},
 		{"ask only elsewhere", strings.Replace(goodProof, "#12: ", "", 1), []int{12}, "open asks not under ## Open asks: #12"},

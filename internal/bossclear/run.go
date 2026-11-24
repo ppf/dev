@@ -27,18 +27,23 @@ func Read(c *tmux.Client, a control.Agent, now time.Time) (Boss, []Pane, error) 
 		return b, nil, err
 	}
 	b.Pane, b.Conversation = p, conversation
-	// Its status line's (dev statusline)
+	// Written by dev statusline; unset when its status line doesn't run it
 	used, err := c.Run("display-message", "-p", "-t", a.Pane, "#{"+agent.OptContext+"}")
 	if err != nil {
 		return b, nil, err
 	}
-	if n, err := strconv.Atoi(strings.TrimSpace(used)); err == nil {
+	if used = strings.TrimSpace(used); used != "" {
+		n, err := strconv.Atoi(used)
+		if err != nil {
+			return b, nil, fmt.Errorf("%s %s: %w", a.Session, agent.OptContext, err)
+		}
 		b.Context = &n
 	}
 	if b.InputEmpty, err = inputEmpty(c, a.Pane); err != nil {
 		return b, nil, err
 	}
-	box, ok, err := inbox.Here(c, a.Pane)
+	// Its inbox switched off still keeps what was queued
+	box, ok, err := inbox.Coordinator(c, a.Pane)
 	if err != nil {
 		return b, nil, err
 	}
@@ -79,8 +84,9 @@ func readPane(c *tmux.Client, a control.Agent, now time.Time) (Pane, string, err
 	return p, st.Session, err
 }
 
-// Options are dev agent clear's: Facts the caller's own facts file ("" for none), Force clears under MinContext,
-// Stall and Timeout bound each prompt's turn (control.PromptWait), Out gets the progress lines.
+// Options are dev agent clear's: Facts the caller's own facts file ("" for none), Force clears under MinContext or
+// with the share unknown, Stall and Timeout bound each prompt's turn and the /clear (control.PromptWait), Out gets
+// the progress lines.
 type Options struct {
 	Facts          string
 	Force          bool
@@ -97,10 +103,11 @@ type Result struct {
 // Run clears boss a's context: Check, a fixed save prompt (list, notes, handoff file under
 // $XDG_STATE_HOME/dev/handoff/<boss>/), the handoff verified (VerifyHandoff and dev's own list: no item of the user's or
 // a person's without details), the checks again, /clear confirmed by the new session (its start hook names the
-// handoff: inbox.OptHandoff), then a proof prompt and VerifyProof. A failed verify prompts the boss once with what it
-// missed and verifies again. Nothing is cleared before the handoff passes; the handoff, facts copy and transcript stay.
-func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (Result, error) {
-	var r Result
+// handoff), then a proof prompt and VerifyProof. A failed verify prompts the boss once with what it missed and
+// verifies again. From the save on, inbox.OptHandoff holds the boss's inbox notes back (a note that came in refuses
+// the clear at the second check). Nothing is cleared before the handoff passes; the handoff, facts copy and
+// transcript stay.
+func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Result, err error) {
 	if err := check(c, a, o.Force, clk.Now()); err != nil {
 		return r, err
 	}
@@ -112,11 +119,15 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (Result,
 		}
 		facts = string(data)
 	}
-	transcript, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_transcript}")
+	out, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session}\t#{@agent_transcript}")
 	if err != nil {
 		return r, err
 	}
-	r.Transcript = strings.TrimSpace(transcript)
+	conversation, transcript, _ := strings.Cut(strings.TrimSpace(out), "\t")
+	if r.Transcript = transcript; transcript == "" {
+		// The handoff names it, so the old conversation can be read again
+		return r, fmt.Errorf("%s's hook records no transcript path: nothing cleared", a.Session)
+	}
 	dir, err := config.StateDir()
 	if err != nil {
 		return r, err
@@ -128,20 +139,35 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (Result,
 	stamp := clk.Now().Format("2006-01-02-150405")
 	r.Handoff = filepath.Join(dir, stamp+".md")
 	r.Proof = filepath.Join(dir, stamp+"-proof.md")
-	for _, p := range []string{r.Handoff, r.Proof} {
-		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
-			return r, fmt.Errorf("%s exists already: run it again in a second", p)
-		}
-	}
 	var factsCopy string
 	if facts != "" {
 		factsCopy = filepath.Join(dir, stamp+"-facts.md")
+	}
+	for _, p := range []string{r.Handoff, r.Proof, factsCopy} {
+		switch _, err := os.Stat(p); {
+		case p == "" || errors.Is(err, fs.ErrNotExist):
+		case err == nil:
+			return r, fmt.Errorf("%s exists already: run it again in a second", p)
+		default:
+			return r, err
+		}
+	}
+	if factsCopy != "" {
 		if err := os.WriteFile(factsCopy, []byte(facts), 0o600); err != nil {
 			return r, err
 		}
 	}
 
-	fmt.Fprintf(o.Out, "Saving: %s updates its list and notes and writes %s\n", a.Session, r.Handoff)
+	if _, err := c.Run("set-option", "-p", "-t", a.Pane, inbox.OptHandoff, inbox.ClearValue(conversation, r.Handoff)); err != nil {
+		return r, err
+	}
+	defer func() {
+		// Once this process ends the option holds nothing anyway (inbox.clearing)
+		if _, uerr := c.Run("set-option", "-pu", "-t", a.Pane, inbox.OptHandoff); uerr != nil {
+			err = errors.Join(err, fmt.Errorf("unsetting %s: %w", inbox.OptHandoff, uerr))
+		}
+	}()
+	fmt.Fprintf(o.Out, "Saving: %s updates its list and notes and writes %s (old transcript %s)\n", a.Session, r.Handoff, r.Transcript)
 	if err := prompt(c, clk, a, SavePrompt(r.Handoff, r.Transcript, factsCopy), o); err != nil {
 		return r, fmt.Errorf("save: %w; nothing cleared", err)
 	}
@@ -163,21 +189,17 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (Result,
 	}
 	fmt.Fprintf(o.Out, "Handoff verified: %d key facts\n", len(h.Facts))
 
-	// A worker may have finished or a note come in during the save
+	// A worker may have started or a note come in during the save
 	if err := check(c, a, o.Force, clk.Now()); err != nil {
-		return r, fmt.Errorf("%w; handoff %s kept", err, r.Handoff)
+		return r, fmt.Errorf("%w; nothing cleared, handoff %s kept", err, r.Handoff)
 	}
-	if _, err := c.Run("set-option", "-p", "-t", a.Pane, inbox.OptHandoff, r.Handoff); err != nil {
-		return r, err
-	}
-	defer func() { _, _ = c.Run("set-option", "-pu", "-t", a.Pane, inbox.OptHandoff) }()
-	if _, err := control.PromptWait(c, clk, a.Pane, "/clear", o.Stall, o.Timeout); err != nil {
-		return r, fmt.Errorf("/clear: %w; handoff %s and old transcript %s kept", err, r.Handoff, r.Transcript)
-	}
-	fmt.Fprintf(o.Out, "Cleared: %s runs a new conversation\n", a.Session)
-
 	proof := ProofPrompt(r.Handoff, r.Proof)
 	manual := fmt.Sprintf("handoff %s, old transcript %s; the proof prompt to send by hand: %s", r.Handoff, r.Transcript, proof)
+	if _, err := control.PromptWait(c, clk, a.Pane, "/clear", o.Stall, o.Timeout); err != nil {
+		return r, fmt.Errorf("/clear: %w; it may still clear: once dev agent read %s shows a fresh conversation, %s", err, a.Session, manual)
+	}
+	fmt.Fprintf(o.Out, "Cleared: %s runs a new conversation; it writes its proof to %s\n", a.Session, r.Proof)
+
 	if err := prompt(c, clk, a, proof, o); err != nil {
 		return r, fmt.Errorf("proof: %w; %s", err, manual)
 	}
@@ -243,17 +265,13 @@ func inputEmpty(c *tmux.Client, pane string) (bool, error) {
 	return inbox.InputEmpty(shot), nil
 }
 
-// list is boss a's list as read now, gone workers marked.
+// list is boss a's list as read now.
 func list(c *tmux.Client, a control.Agent) (todo.List, error) {
 	s, err := todo.ForPane(c, a.Pane)
 	if err != nil {
 		return todo.List{}, err
 	}
-	l, err := s.Read(time.Now())
-	if err != nil {
-		return l, err
-	}
-	return l, l.MarkGone(func() ([]todo.Session, error) { return todo.Workers(c, a.Pane) })
+	return s.Read(time.Now())
 }
 
 // verifyHandoff reads r's handoff and boss a's list and checks them: VerifyHandoff against its open items, and no
@@ -326,7 +344,7 @@ func SavePrompt(path, transcript, facts string) string {
 		"item's status, and --details on every item the user or a person owes (dev todo add --replaces <n> --details '…'); " +
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
-		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"confirmed: <item number, PR or file>\" or \"unconfirmed\". " +
+		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\". " +
 		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {

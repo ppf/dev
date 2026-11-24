@@ -18,28 +18,31 @@ func newAgentClearCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clear <boss> [--facts <file>] [--force]",
 		Short: "Clear an idle boss's context safely: it saves a handoff, dev verifies it, clears it, and the fresh boss proves it",
-		Long: fmt.Sprintf(`Clear an idle boss's context, for the manager that started or adopted it, or the user in a shell. A boss never
-clears itself, and in a Claude Code session only the boss's manager runs it.
-Refused, naming every failed check, unless the boss's hook records its session, it is idle with an empty input box
-(dim suggestion text counts as empty), none of its workers is working, without hook state or waiting on a decision,
-no inbox note waits for it, no planned wait or rate-limit resume is ahead for it or a worker, and its context share
-is at least %d%% (about 200k tokens of a 1M window; --force skips only this check). Open asks to the user don't
-block it.
-Then, each prompt sent only into an empty input box, and a turn ending on a permission prompt or dialog stopping it:
+		Long: fmt.Sprintf(`Clear an idle boss's context, for the session that started or adopted it (its manager), or the user in a shell.
+A boss never clears itself, and in a Claude Code session only that session runs it. It takes minutes (each turn up
+to --timeout): from an agent's Bash tool, run it in the background.
+Refused, naming every failed check, unless the boss's hook records its session and transcript, it is idle with an
+empty input box (dim suggestion text counts as empty), none of its workers is working, without hook state or
+waiting on a decision, no inbox note waits for it, no planned wait or rate-limit resume is ahead for it or a worker,
+and its context share is at least %d%% (about 200k tokens of a 1M window; --force skips only this check, also with
+the share unknown). Open asks to the user don't block it.
+From the save on, the boss's inbox notes are held back (@dev_handoff) until the command ends. Then, each prompt sent
+only into an empty input box, and a turn ending on a permission prompt or dialog stopping it:
  1. dev prompts the boss to update its list (statuses, --details on every item the user or a person owes) and notes,
     and write the handoff $XDG_STATE_HOME/dev/handoff/<boss>/<time>.md with the sections %s:
-    key facts numbered, at most %d, each ending "confirmed: <item, PR or file>" or "unconfirmed". --facts <file>
-    (the caller's own facts) is copied next to it as <time>-facts.md for the boss to merge in.
- 2. dev verifies it: the file was written with every section, 1-%d marked key facts, every open item's #number and
-    the old transcript's path, and no item of the user's or a person's on the list without details. A miss prompts
-    the boss once to fix it; a second miss stops, nothing cleared.
- 3. The checks again, then /clear, confirmed by the new session. Its start hook gives it its list, notes and the
-    handoff's path.
- 4. Proof: dev prompts it to write <time>-proof.md (%s) before touching any worker, and checks each key
-    fact is restated under its number with its mark and each open ask's number is there; a miss prompts it once
-    with what it missed.
-It prints the handoff, proof and old transcript paths. dev checks form, not meaning: compare the two files (an
-unconfirmed fact stated as done, the roles) and tell the user in one line. The files stay on disk.`,
+    key facts numbered, at most %d, each ending "unconfirmed" or in a last clause "confirmed: <item, PR or file>".
+    --facts <file> (the caller's own facts) is copied next to it as <time>-facts.md for the boss to merge in.
+ 2. dev verifies it: the file was written with every section, 1-%d marked key facts each under its own number, every
+    open item's #number and the old transcript's path, and no item of the user's or a person's on the list without
+    details. A miss prompts the boss once to fix it; a second miss stops, nothing cleared.
+ 3. The checks again (a note that came in during the save refuses it), then /clear, confirmed by the new session.
+    Its start hook gives it its list, notes and the handoff's path.
+ 4. Proof: dev prompts it to write <time>-proof.md (%s) before touching any worker, and checks
+    every section, each key fact restated under its number with its mark, no more facts than the handoff's, each
+    open ask's number under Open asks and something under Roles; a miss prompts it once with what it missed.
+It prints the handoff, proof and old transcript paths; a failure after the /clear prints them with the proof prompt
+to send by hand. dev checks form, not meaning: compare the two files (an unconfirmed fact stated as done, the roles)
+and tell the user in one line. The files stay on disk.`,
 			bossclear.MinContext, bossclear.Headings(bossclear.Sections), bossclear.MaxFacts, bossclear.MaxFacts,
 			bossclear.Headings(bossclear.ProofSections)),
 		Args: cobra.ExactArgs(1),
@@ -69,12 +72,12 @@ unconfirmed fact stated as done, the roles) and tell the user in one line. The f
 	cmd.Flags().StringVar(&o.Facts, "facts", "", "your own numbered key facts for the boss to merge into its handoff")
 	cmd.Flags().BoolVar(&o.Force, "force", false, fmt.Sprintf("clear a boss under %d%% context (or with it unknown)", bossclear.MinContext))
 	cmd.Flags().DurationVar(&o.Stall, "stall", 30*time.Second, "give up when a prompt isn't picked up within this")
-	cmd.Flags().DurationVar(&o.Timeout, "timeout", 15*time.Minute, "give up when a turn (save, proof) runs longer than this")
+	cmd.Flags().DurationVar(&o.Timeout, "timeout", 15*time.Minute, "give up when a prompt's turn (save, proof, a fix) or the /clear takes longer than this")
 	return cmd
 }
 
-// clearCaller refuses dev agent clear in a Claude Code session other than boss a's manager (its starter): another
-// boss never clears a peer.
+// clearCaller refuses dev agent clear in a Claude Code session other than the one that started or adopted boss a (its
+// manager): another boss never clears a peer.
 func clearCaller(c *tmux.Client, a control.Agent) error {
 	if os.Getenv("CLAUDECODE") == "" {
 		return nil

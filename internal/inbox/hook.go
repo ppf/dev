@@ -85,6 +85,10 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 		return "", false, err
 	}
 	werr := b.Box.WithdrawTicked(listItem(c, time.Now()))
+	if _, _, held, err := clearing(c, pane); held || err != nil {
+		// Its notes wait for the clear's end (dev agent clear refuses while any wait)
+		return "", false, errors.Join(werr, err)
+	}
 	bt, err := b.Box.Take()
 	if err != nil {
 		return "", false, errors.Join(werr, err)
@@ -156,11 +160,16 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 		return "", err
 	}
 	if source == "clear" {
-		path, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptHandoff+"}")
+		conversation, path, held, err := clearing(c, pane)
 		if err != nil {
 			return "", err
 		}
-		if path = strings.TrimSpace(path); path != "" {
+		// Only for the conversation that dev agent clear, still running, cleared: never a leftover's
+		ended, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptEndedSession+"}")
+		if err != nil {
+			return "", err
+		}
+		if held && conversation == strings.TrimSpace(ended) {
 			listHint := hint
 			hint = func(s todo.Store) string {
 				return strings.TrimSpace(listHint(s) + "\nYour handoff from before this /clear: " + path +
@@ -171,12 +180,8 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
 }
 
-// OptHandoff is the pane option holding the handoff file dev agent clear had a boss write, which its start hook
-// after the /clear names.
-const OptHandoff = "@dev_handoff"
-
 // Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo
-// take-over), "" for none; it checks s and reports its own failures.
+// take-over), and after a dev agent clear its handoff's path; "" for none; it checks s and reports its own failures.
 type Hint func(s todo.Store) string
 
 // StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,

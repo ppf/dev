@@ -13,7 +13,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 )
 
-// Sections are a handoff file's "## " headings, in order.
+// Sections are a handoff file's "## " headings, in the order the save prompt asks for (only their presence is checked).
 var Sections = []string{"Key facts", "Open asks", "Work in flight", "The user's standing words", "Open risks", "Old transcript"}
 
 // ProofSections are a proof file's.
@@ -118,17 +118,20 @@ type Fact struct {
 }
 
 var (
-	heading  = regexp.MustCompile(`^#{2,}\s+(.+?)\s*#*\s*$`)
-	numbered = regexp.MustCompile(`^\s*(\d+)[.)]\s+(.*)$`)
-	// A fact ends in "unconfirmed", or in "confirmed: <item number, PR or file>", maybe in parentheses or emphasis
+	heading = regexp.MustCompile(`^#{2,}\s+(.+?)\s*#*\s*$`)
+	// At the line's start: an indented numbered line is part of the fact above
+	numbered = regexp.MustCompile(`^(\d+)[.)]\s+(.*)$`)
+	// A fact ends in "unconfirmed", or in a last clause "confirmed: <item number, PR or file>" (after a sentence's
+	// end, a comma, a dash or in parentheses, not "deploy confirmed: no"), maybe in emphasis
 	unconfirmed = regexp.MustCompile(`(?i)(?:^|[^a-z])unconfirmed$`)
-	confirmed   = regexp.MustCompile(`(?i)(?:^|[^a-z])confirmed:\s*\S.*$`)
+	confirmed   = regexp.MustCompile(`(?i)(?:^|[.;,(]\s*|\s[-–—]\s*)confirmed:\s*\S.*$`)
 	itemRef     = regexp.MustCompile(`#(\d+)\b`)
 	trailing    = " \t.)]*_`"
 	emphasis    = strings.NewReplacer("**", "", "__", "", "`", "")
 )
 
-// sections splits markdown text at its "## " headings; a heading's key is its text, lower-cased.
+// sections splits markdown text at its headings ("##" or deeper); a heading's key is its text without emphasis or a
+// trailing colon, lower-cased.
 func sections(text string) map[string][]string {
 	out := map[string][]string{}
 	key := ""
@@ -145,7 +148,7 @@ func sections(text string) map[string][]string {
 	return out
 }
 
-// missing lists the headings of want that text's sections lack, as "## <heading>".
+// missing lists the headings of want that secs lacks, as "## <heading>".
 func missing(secs map[string][]string, want []string) []string {
 	var miss []string
 	for _, h := range want {
@@ -211,14 +214,26 @@ func numbers(ids []int) string {
 	return strings.Join(s, ", ")
 }
 
-// Handoff is a handoff file that passed VerifyHandoff: its key facts.
+// repeated is the numbers more than one of fs has.
+func repeated(fs []Fact) []string {
+	seen := map[int]int{}
+	var out []string
+	for _, f := range fs {
+		if seen[f.N]++; seen[f.N] == 2 {
+			out = append(out, strconv.Itoa(f.N))
+		}
+	}
+	return out
+}
+
+// Handoff is a handoff file's key facts as VerifyHandoff read them: a handoff only when it reported no miss.
 type Handoff struct {
 	Facts []Fact
 }
 
-// VerifyHandoff checks handoff text and returns its key facts, or every miss: a section missing, no key facts or more
-// than MaxFacts, a fact ending in neither "confirmed: …" nor "unconfirmed", an open item's number (open) it doesn't
-// name, or the old transcript's path (when known) it doesn't hold.
+// VerifyHandoff checks handoff text and returns its key facts, and every miss: a section missing, no key facts or more
+// than MaxFacts, a fact number used twice, a fact ending in neither "confirmed: …" nor "unconfirmed", an open item's
+// number (open) it doesn't name, or the old transcript's path (when known) it doesn't hold.
 func VerifyHandoff(text string, open []int, transcript string) (Handoff, []string) {
 	secs := sections(text)
 	var miss []string
@@ -231,6 +246,9 @@ func VerifyHandoff(text string, open []int, transcript string) (Handoff, []strin
 		miss = append(miss, "no numbered key facts under ## Key facts")
 	case len(fs) > MaxFacts:
 		miss = append(miss, fmt.Sprintf("%d key facts, at most %d", len(fs), MaxFacts))
+	}
+	if r := repeated(fs); len(r) > 0 {
+		miss = append(miss, "key fact numbers used twice: "+strings.Join(r, ", "))
 	}
 	var unmarked []string
 	for _, f := range fs {
@@ -251,16 +269,20 @@ func VerifyHandoff(text string, open []int, transcript string) (Handoff, []strin
 }
 
 // VerifyProof checks proof text against handoff h and returns every miss: a section missing, a key fact of h not
-// restated under its number or with another mark, or an open ask's number (asks) not under ## Open asks, or nothing
-// under ## Roles. A miss of a fact quotes it, for the boss to fix.
+// restated under its number (quoted, for the boss to fix) or with another mark, a number used twice, more facts than
+// h's, an open ask's number (asks) not under ## Open asks, or nothing under ## Roles.
 func VerifyProof(proof string, h Handoff, asks []int) []string {
 	secs := sections(proof)
 	var miss []string
 	if m := missing(secs, ProofSections); len(m) > 0 {
 		miss = append(miss, "sections missing: "+strings.Join(m, ", "))
 	}
+	fs := facts(secs["key facts"])
+	if r := repeated(fs); len(r) > 0 {
+		miss = append(miss, "key fact numbers used twice: "+strings.Join(r, ", "))
+	}
 	got := map[int]Fact{}
-	for _, f := range facts(secs["key facts"]) {
+	for _, f := range fs {
 		got[f.N] = f
 	}
 	for _, f := range h.Facts {

@@ -5,6 +5,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -12,13 +13,14 @@ import (
 // clearStub is a Claude stand-in for dev agent clear: hooks like agentStub's (SessionStart's output kept in
 // $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn after each turn, and the
 // files dev asks for copied from $STUB_DIR: save.md as the handoff, fix.md on a handoff fix, proof.md as the proof,
-// proof-fix.md on a proof fix (a missing source writes nothing).
+// proof-fix.md on a proof fix (a missing source writes nothing). On the save prompt it runs $STUB_DIR/on-save if
+// there; with $STUB_DIR/decide there, a turn ends on a permission prompt.
 func clearStub(t *testing.T, dir string) string {
 	t.Helper()
 	dev := shellQuote(devBin)
 	return filepath.Join(writeStubs(t, dir, `n=0
 box() { printf '────────────────────\n❯ \n────────────────────\n'; }
-hook() { printf '{"hook_event_name":"%s","source":"%s","session_id":"s%s","transcript_path":"%s/s%s.jsonl"}' "$2" "$3" "$n" "$STUB_DIR" "$n" | `+dev+` state "$1" > "$STUB_DIR/$2-$n.json"; }
+hook() { printf '{"hook_event_name":"%s","source":"%s","notification_type":"%s","session_id":"s%s","transcript_path":"%s/s%s.jsonl"}' "$2" "$3" "$4" "$n" "$STUB_DIR" "$n" | `+dev+` state "$1" > "$STUB_DIR/$2-$n.json"; }
 put() { f=$(printf '%s' "$line" | sed "s/$1/\\1/"); [ -f "$STUB_DIR/$2" ] && cp "$STUB_DIR/$2" "$f"; }
 stty -icanon 2>/dev/null
 hook idle SessionStart startup
@@ -33,12 +35,18 @@ while IFS= read -r line; do
 	fi
 	hook working UserPromptSubmit
 	case "$line" in
-	*"Save for a clear"*) put '.*write the handoff file \([^ ]*\) with.*' save.md ;;
+	*"Save for a clear"*)
+		put '.*write the handoff file \([^ ]*\) with.*' save.md
+		[ -x "$STUB_DIR/on-save" ] && "$STUB_DIR/on-save" ;;
 	*"fails dev's check"*) put '.*Your handoff \([^ ]*\) fails.*' fix.md ;;
 	*"Your proof "*) put '.*Your proof \([^ ]*\) misses.*' proof-fix.md ;;
 	*"Before touching any worker"*) put '.*Before touching any worker, write \([^ ]*\) with.*' proof.md ;;
 	esac
-	hook idle Stop
+	if [ -f "$STUB_DIR/decide" ]; then
+		hook waiting Notification "" permission_prompt
+	else
+		hook idle Stop
+	fi
 	box
 done`, "claude"), "claude")
 }
@@ -127,20 +135,47 @@ func TestAgentClear(t *testing.T) {
 	workerState("idle")
 	s.T("set-option", "-p", "-t", app, "@agent_context", "12")
 	refused("context under 20%", manager, "boss-app", "its context is 12%, under 20%")
+	s.T("set-option", "-pu", "-t", app, "@agent_context")
+	refused("context share unknown", manager, "boss-app", "its context share is unknown")
 	s.T("set-option", "-p", "-t", app, "@agent_context", "30")
+	if _, e, st := runDev(env, "", "agent", "clear", "boss-app"); st == "0" || !strings.Contains(e, "cleared only by its manager's coordinator pane") {
+		t.Errorf("❌ a Claude session outside tmux: exit %s, %s", st, e)
+	}
+	orphan, _ := boss("boss-orphan")
+	s.T("set-option", "-u", "-t", "=boss-orphan:", "@dev_started_by")
+	if _, e, st := dev(manager, "agent", "clear", "boss-orphan"); st == "0" || !strings.Contains(e, "cleared only by the manager") || opt(orphan, "@agent_session") != "s0" {
+		t.Errorf("❌ a boss nobody started, from the manager: exit %s, %s", st, e)
+	}
 
-	transcript := filepath.Join(appDir, "s0.jsonl")
-	good := "## Key facts\n1. The mail goes Friday. confirmed: #1\n2. v2 is ready. unconfirmed\n\n## Open asks\n#2: Ship starts the release, Wait parks it.\n\n" +
-		"## Work in flight\nNone.\n\n## The user's standing words\nMerge after green CI.\n\n## Open risks\nNone.\n\n## Old transcript\n" + transcript + "\n"
+	// handoff is a passing handoff of the boss whose files are in dir
+	handoff := func(dir string) string {
+		return "## Key facts\n1. The mail goes Friday. confirmed: #1\n2. v2 is ready. unconfirmed\n\n## Open asks\n#2: Ship starts the release, Wait parks it.\n\n" +
+			"## Work in flight\nNone.\n\n## The user's standing words\nMerge after green CI.\n\n## Open risks\nNone.\n\n## Old transcript\n" + filepath.Join(dir, "s0.jsonl") + "\n"
+	}
+	transcript, good := filepath.Join(appDir, "s0.jsonl"), handoff(appDir)
 	proof := "## Key facts\n1. Mail on Friday. confirmed: #1\n2. v2 ready. unconfirmed\n\n## Open asks\n#2: Ship → release worker; Wait → park.\n\n" +
 		"## Roles\nThe manager answers my workers' permission prompts and dialogs and relays my asks.\n"
+	// stopped runs dev agent clear on name from caller with env, and wants it to fail with every one of want and
+	// the boss on conversation s<n>
+	stopped := func(t *testing.T, env []string, caller, name, conversation string, want ...string) {
+		t.Helper()
+		_, e, st := runDev(append(env, "TMUX_PANE="+caller), "", "agent", "clear", name)
+		for _, w := range want {
+			if st == "0" || !strings.Contains(e, w) {
+				t.Fatalf("❌ exit %s, want %q in: %s", st, w, e)
+			}
+		}
+		check(t, name+"'s conversation", opt(pane(name), "@agent_session"), conversation)
+		check(t, name+"'s inbox hold released", opt(pane(name), "@dev_handoff"), "")
+	}
 
-	t.Run("handoff missing twice: not cleared", func(t *testing.T) {
+	t.Run("handoff missing twice, from the user's shell: not cleared", func(t *testing.T) {
 		web, webDir := boss("boss-web")
 		todo(web, "add", "Bare item")
-		write(webDir, "save.md", strings.Replace(good, "## Open risks", "## Risks", 1))
-		write(webDir, "fix.md", strings.Replace(good, "## Open risks", "## Risks", 1))
-		_, e, st := dev(manager, "agent", "clear", "boss-web")
+		write(webDir, "save.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
+		write(webDir, "fix.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
+		shell := slices.DeleteFunc(slices.Clone(env), func(v string) bool { return strings.HasPrefix(v, "CLAUDECODE=") })
+		_, e, st := runDev(append(shell, "TMUX_PANE="+manager), "", "agent", "clear", "boss-web")
 		if st == "0" || !strings.Contains(e, "still misses: sections missing: ## Open risks") || !strings.Contains(e, "without details on the list: #1") ||
 			!strings.Contains(e, "nothing cleared") {
 			t.Fatalf("❌ exit %s: %s", st, e)
@@ -149,6 +184,41 @@ func TestAgentClear(t *testing.T) {
 			t.Errorf("❌ boss-web was cleared")
 		}
 		t.Log("✅ two misses stop before the clear")
+	})
+
+	t.Run("handoff never written: not cleared", func(t *testing.T) {
+		boss("boss-mute")
+		stopped(t, env, manager, "boss-mute", "s0", "wasn't written", "nothing cleared")
+	})
+
+	t.Run("save turn ends on a permission prompt: not cleared", func(t *testing.T) {
+		_, dir := boss("boss-ask")
+		write(dir, "decide", "")
+		stopped(t, env, manager, "boss-ask", "s0", "turn ended on a decision (permission_prompt)", "nothing cleared")
+	})
+
+	t.Run("a worker's note during the save: held, then refuses", func(t *testing.T) {
+		_, dir := boss("boss-busy")
+		write(dir, "save.md", handoff(dir))
+		s.T("new-session", "-d", "-s", "busy-w", "sleep 600")
+		s.T("set-option", "-t", "=busy-w:", "@dev_started_by", "boss-busy")
+		w := pane("busy-w")
+		s.T("set-option", "-p", "-t", w, "@agent_state", "idle", ";", "set-option", "-p", "-t", w, "@agent_cmd", "sleep")
+		// The worker's turn ends during the save: its finished note queues for boss-busy
+		write(dir, "on-save", "#!/bin/sh\nprintf '{\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"done\"}' | TMUX_PANE="+w+" "+shellQuote(devBin)+" state idle\n")
+		if err := os.Chmod(filepath.Join(dir, "on-save"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stopped(t, env, manager, "boss-busy", "s0", "inbox notes wait for it", "nothing cleared")
+	})
+
+	t.Run("proof misses twice: cleared, paths and the proof prompt printed", func(t *testing.T) {
+		_, dir := boss("boss-lax")
+		write(dir, "save.md", handoff(dir))
+		write(dir, "proof.md", strings.Replace(proof, "## Roles", "## Who", 1))
+		write(dir, "proof-fix.md", strings.Replace(proof, "## Roles", "## Who", 1))
+		stopped(t, env, manager, "boss-lax", "s1", "still misses: sections missing: ## Roles", "the proof prompt to send by hand: [dev agent clear] Read ",
+			"old transcript "+filepath.Join(dir, "s0.jsonl"))
 	})
 
 	t.Run("cleared and proved", func(t *testing.T) {

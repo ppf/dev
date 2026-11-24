@@ -239,6 +239,9 @@ func deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	if held, err := resumeAhead(c, a.Pane, clk.Now()); held || err != nil {
 		return err
 	}
+	if _, _, held, err := clearing(c, a.Pane); held || err != nil {
+		return err
+	}
 	ready := func() (bool, error) {
 		st, err := control.ReadChecked(c, a.Pane)
 		if err != nil {
