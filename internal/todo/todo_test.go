@@ -1250,9 +1250,10 @@ func TestReminderNoDetails(t *testing.T) {
 		{ID: 8, Text: "done", Done: true},
 		{ID: 10, Text: "start asked", Started: &Started{}},
 		{ID: 9, Text: "pr", On: "Ola", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}},
+		{ID: 11, Text: "plain", NoDetails: true},
 	}}
 	got := l.StartReminder(false, "now", nil, time.Now())
-	for _, want := range []string{"\n1. bare (no details)", "\n2. waits (on Ola) (no details)", "\n3. documented\n", "\n6. test\n", "\n9. pr (on Ola) ⚠ boss closed (no details)", "--details '<what it is and why"} {
+	for _, want := range []string{"\n1. bare (no details)", "\n2. waits (on Ola) (no details)", "\n3. documented\n", "\n6. test\n", "\n11. plain\n", "\n9. pr (on Ola) ⚠ boss closed (no details)", "--details '<what it is and why"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("StartReminder lacks %q:\n%s", want, got)
 		}
@@ -1268,6 +1269,9 @@ func TestReminderNoDetails(t *testing.T) {
 	long.Items = append(long.Items, Shown{ID: 99, Text: "hidden"})
 	if got := long.StartReminder(false, "now", nil, time.Now()); strings.Contains(got, "no details") {
 		t.Errorf("mark past the cut: %s", got)
+	}
+	if got := (List{Items: []Shown{{ID: 1, Text: "a", NoDetails: true}}}).StartReminder(false, "now", nil, time.Now()); strings.Contains(got, "no details") {
+		t.Errorf("only --no-details items: %s", got)
 	}
 	if got := (List{Items: []Shown{{ID: 1, Text: "a", Details: "d"}}}).StartReminder(false, "now", nil, time.Now()); strings.Contains(got, "no details") {
 		t.Errorf("all documented: %s", got)

@@ -76,7 +76,7 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for one added --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for the user's own item marked --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
@@ -124,15 +124,14 @@ func warnLong(stderr io.Writer, text string) {
 	}
 }
 
-func warnNoDetails(s todo.Store, stderr io.Writer, id int, noDetails bool, now time.Time) {
+func warnNoDetails(s todo.Store, stderr io.Writer, id int, now time.Time) {
 	l, err := s.Read(now)
 	if err != nil {
 		fmt.Fprintf(stderr, "⚠ details not checked: %v\n", err)
 		return
 	}
 	for _, it := range l.Items {
-		// --no-details: an item the user does needs none
-		if it.ID == id && it.NeedsDetails() && !(noDetails && it.On == "" && len(it.Options) == 0) {
+		if it.ID == id && it.NeedsDetails() {
 			fmt.Fprintln(stderr, "⚠ no details: add them with --details (what it is and why, where it stands, what done looks like; for a waiting item who, what was asked, when and where)")
 		}
 	}
@@ -164,7 +163,6 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	var it todo.Item
 	var until, person string
 	var replaces int
-	var noDetails bool
 	cmd := &cobra.Command{
 		Use:   "add <item>",
 		Short: "Add an item (or put it in place of an open one, --replaces, which may leave out its text); prints its number",
@@ -196,7 +194,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
 				return err
 			}
-			if noDetails && it.Details != "" {
+			if it.NoDetails && it.Details != "" {
 				return errors.New("--details or --no-details, not both")
 			}
 			stderr := cmd.ErrOrStderr()
@@ -240,10 +238,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				it.Until = t.Unix()
 			}
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
-			it.NoDetails = noDetails
-			need := todo.Store.NeedDetails
 			if err := tryAdoptable(*boss, func(t todo.Store) error {
-				t = need(t)
+				t = t.NeedDetails()
 				if cmd.Flags().Changed("replaces") {
 					return t.Replace(replaces, it, now)
 				}
@@ -255,13 +251,13 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if s, err = todoStore(*boss, true, stderr); err != nil {
 				return err
 			}
-			s = need(s)
+			s = s.NeedDetails()
 			if cmd.Flags().Changed("replaces") {
 				if err := s.Replace(replaces, it, now); err != nil {
 					return err
 				}
 				warnLong(cmd.ErrOrStderr(), it.Text)
-				warnNoDetails(s, cmd.ErrOrStderr(), replaces, noDetails, now)
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
@@ -273,7 +269,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			warnLong(cmd.ErrOrStderr(), it.Text)
-			warnNoDetails(s, cmd.ErrOrStderr(), id, noDetails, now)
+			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
 			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
@@ -289,7 +285,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --details, --part-of not given, and its doing line unless --on changes")
-	cmd.Flags().BoolVar(&noDetails, "no-details", false, "an item the user does that needs no details, kept on it (never marked or counted as missing them) until it gets --details: without it, one with none (none given, none kept by --replaces) is refused")
+	cmd.Flags().BoolVar(&it.NoDetails, "no-details", false, "an item the user does that needs no details, kept on it (never marked or counted as missing them) while the user does it without details (--details, --on or --waiting-for drop it); a waiting item still warns: without it or that mark, one the user does with none (none given, none kept by --replaces) is refused")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
 	return cmd
@@ -417,7 +413,7 @@ on the list ticked at once with its recommended option, decided for the user by 
 				if err != nil {
 					return err
 				}
-				warnNoDetails(s, cmd.ErrOrStderr(), replaces, false, now)
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
 				// Only a new question is news to the boss above: it reads the rest from the list
 				if renamed {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
@@ -429,7 +425,7 @@ on the list ticked at once with its recommended option, decided for the user by 
 			if err != nil {
 				return err
 			}
-			warnNoDetails(s, cmd.ErrOrStderr(), id, false, now)
+			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
 			if !it.Quiet {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
 			}

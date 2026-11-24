@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -138,9 +139,9 @@ func TestTodoAllFinishedDetails(t *testing.T) {
 	}
 }
 
-// An item the user does added --no-details (or given it by --replaces) is not marked "(no details)" on the list, nor
-// counted as missing details (todo.Shown.NeedsDetails, what dev agent clear checks); one later given --details loses
-// the mark's reason, and a plain replace keeps it.
+// An item the user does added --no-details (also --on me), kept by a plain --replaces, is not marked "(no details)" in
+// the boss's reminder nor counted as missing details (todo.Shown.NeedsDetails, what dev agent clear checks); one later
+// given --details loses NoDetails, a plain replace after keeps the details; one moved to a person loses it.
 func TestTodoNoDetailsStored(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("CLAUDECODE", "1")
@@ -148,9 +149,9 @@ func TestTodoNoDetailsStored(t *testing.T) {
 	run(t, "", "todo", "add", "--no-details", "Water the plants")
 	run(t, "", "todo", "add", "--replaces", "2", "Water the plants today")
 	run(t, "", "todo", "add", "Pay the bill", "--on", "anna")
-	if got := run(t, "", "todo"); strings.Contains(got, "Call the bank (no details)") || strings.Contains(got, "today (no details)") ||
-		!strings.Contains(got, "Pay the bill") {
-		t.Errorf("list:\n%s", got)
+	run(t, "", "todo", "add", "--no-details", "--on", "me", "Feed the cat")
+	if got := run(t, "", "todo", "--json"); strings.Count(got, `"no_details": true`) != 3 {
+		t.Errorf("--json:\n%s", got)
 	}
 	s, err := todoStore("", false, io.Discard)
 	if err != nil {
@@ -165,12 +166,22 @@ func TestTodoNoDetailsStored(t *testing.T) {
 			t.Errorf("#%d %q: NeedsDetails %v, want %v", it.ID, it.Text, it.NeedsDetails(), want)
 		}
 	}
+	if got := l.StartReminder(false, "now", nil, time.Now()); strings.Count(got, "(no details)") != 2 || !strings.Contains(got, "Pay the bill (on anna) (no details)") {
+		t.Errorf("reminder: want only the person's item marked, and the closing line:\n%s", got)
+	}
 	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")
 	run(t, "", "todo", "add", "--replaces", "1", "Call the bank today")
 	if l, err = s.Read(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if it := l.Items[0]; it.NoDetails || it.Details != "Ask about the fee; done when called." || it.NeedsDetails() {
+	if it := l.Items[slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == 1 })]; it.NoDetails || it.Details != "Ask about the fee; done when called." || it.NeedsDetails() {
 		t.Errorf("after --details and a plain replace: %+v", it)
+	}
+	run(t, "", "todo", "add", "--replaces", "2", "--waiting-for", "Ola")
+	if l, err = s.Read(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if it := l.Items[slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == 2 })]; it.NoDetails || !it.NeedsDetails() {
+		t.Errorf("moved to a person: %+v", it)
 	}
 }
