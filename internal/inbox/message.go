@@ -496,6 +496,52 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 	return n
 }
 
+// UserTicked is the note telling a boss the user ticked its item id, text, where ("the web page", "the board", "the
+// sidebar", "his shell"); with closed, the list of that closed boss, sent to the Manager. Keyed by the text, as numbers
+// are reused.
+func UserTicked(boss string, id int, text, where string, closed bool) Note {
+	return Note{Kind: User, Key: tickedKey(boss, text), Text: fmt.Sprintf(`ticked%s #%d "%s" on %s: his word that it is done; verify where it matters; dev ticked it already, don't tick it again`,
+		ofClosed(boss, closed), id, text, where)}
+}
+
+// UserReopened is the note telling a boss the user reopened its item id, text, as item now; dropped: its tick note was
+// still queued and went.
+func UserReopened(boss string, id int, text string, newID int, closed, dropped bool) Note {
+	n := Note{Kind: User, Key: "reopened " + boss + "\x00" + text, Text: fmt.Sprintf(`reopened%s #%d "%s": #%d is open again`, ofClosed(boss, closed), id, text, newID)}
+	if dropped {
+		n.Text += "; his tick of it, not yet delivered, is dropped"
+	}
+	return n
+}
+
+func tickedKey(boss, text string) string { return "ticked " + boss + "\x00" + text }
+
+// ofClosed names boss in a note the Manager gets for its closed list.
+func ofClosed(boss string, closed bool) string {
+	if closed {
+		return " " + boss
+	}
+	return ""
+}
+
+// SendReopened is Send of UserReopened's note for item id, text, reopened as item newID, queued in the same write that
+// drops the user's tick note of it still queued.
+func (b Boss) SendReopened(c *tmux.Client, clk control.Clock, boss string, id int, text string, newID int, closed bool) (queued bool, err error) {
+	if err := b.Box.update(func(s *state) error {
+		key := tickedKey(boss, text)
+		i := slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind == User && n.Key == key })
+		dropped := i >= 0
+		if dropped {
+			s.Notes = slices.Delete(s.Notes, i, i+1)
+		}
+		s.add(UserReopened(boss, id, text, newID, closed, dropped))
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return true, deliver(c, clk, b)
+}
+
 // noLonger ends a UserDoing note of a stop.
 const noLonger = ": no longer on it"
 

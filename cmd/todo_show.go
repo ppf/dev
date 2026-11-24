@@ -150,7 +150,7 @@ func showItem(c *tmux.Client, stderr io.Writer, name string, id int, question st
 func showActions(c *tmux.Client, client string) itemview.Actions {
 	return itemview.Actions{
 		Answer:   sidebar.AnswerNeed,
-		Tick:     sidebar.TickNeed,
+		Tick:     sidebar.TickNeed(sidebar.WhereBoard),
 		Start:    sidebar.StartNeed,
 		Reopen:   sidebar.ReopenNeed,
 		Overrule: sidebar.OverruleNeed,

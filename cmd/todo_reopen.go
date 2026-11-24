@@ -65,15 +65,17 @@ type noReopenList struct{ error }
 func (e noReopenList) Unwrap() error { return e.error }
 
 // reopenItem reopens the user's ticked item id of boss name's list, a closed boss's too, while it reads text; a queued
-// settled note of it goes.
+// settled note of it goes, and its owner is told.
 func reopenItem(name string, id int, text string, warn io.Writer) (todo.Item, error) {
-	s, _, err := listStoreOf(name, false, true, warn)
+	s, closed, err := listStoreOf(name, false, true, warn)
 	if err != nil {
 		return todo.Item{}, noReopenList{err}
 	}
 	it, err := s.Reopen(id, text, time.Now())
 	if err == nil || errors.As(err, new(todo.StillDone)) {
-		withdrawSettled(tmux.New(), warn, name, id, text)
+		c := tmux.New()
+		withdrawSettled(c, warn, name, id, text)
+		tellReopened(c, name, closed, id, it, warn)
 	}
 	return it, err
 }

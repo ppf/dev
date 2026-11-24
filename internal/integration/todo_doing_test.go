@@ -91,8 +91,8 @@ func TestTodoDoing(t *testing.T) {
 	must(user, "todo", "doing", "boss-a", "1", "phoning ops", "--question", "Send the cert")
 	must(user, "todo", "done", "4", "--boss", "boss-a", "--text", "Book the room")
 	reason := inboxAtStop(t, s, pane)
-	if !strings.Contains(reason, `the user is on #1 "Send the cert": phoning ops`) || strings.Contains(reason, "#4") {
-		t.Errorf("❌ boss Stop reason = %q, want #1's doing, none for ticked #4", reason)
+	if !strings.Contains(reason, `the user is on #1 "Send the cert": phoning ops`) || strings.Contains(reason, "is on #4") {
+		t.Errorf("❌ boss Stop reason = %q, want #1's doing, no doing for ticked #4", reason)
 	}
 
 	// Closed: no manager, marked and no one told; with one, the manager is told, naming the boss

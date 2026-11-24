@@ -42,6 +42,7 @@ const (
 	Answered = "you answered"            // the user answered an item on the boss's list: dev todo answer
 	Start    = "you were asked to start" // the user asked to start an item: dev todo start
 	UserOn   = "the user is on"          // the user works on their own item themselves: dev todo doing
+	User     = "the user"                // the user ticked or reopened an item of the boss's list (UserTicked, UserReopened)
 	// WaitsOnYou is from a boss under this one: it put an item for the user on its list (dev todo add, ask)
 	WaitsOnYou = "waits on you"
 	// AskAnswered is from a boss under this one: the user answered an ask on its list (an Answered note to that boss)
@@ -56,7 +57,7 @@ const (
 // workerless reports a kind of note about no worker of the boss's: its line has no worker, its key no dedupe.
 func workerless(kind string) bool {
 	switch kind {
-	case Message, Answered, Start, ToDo, UserOn:
+	case Message, Answered, Start, ToDo, UserOn, User:
 		return true
 	}
 	return false
@@ -95,7 +96,7 @@ const leaveToManager = "the manager asks the user: leave it to the manager"
 // String is the note's line: "<worker> <kind>: <text>", then leaveIt when Outside, leaveToManager when Handed, or
 // for the Manager's copy "<worker> (<boss>'s worker) <kind>: <text>; <what to do>"; a Message's is "message <text>",
 // an Answered's "you answered <text>", a Start's "you were asked to start <text>", a ToDo's "to do <text>", a UserOn's
-// "the user is on <text>".
+// "the user is on <text>", a User's "the user <text>".
 func (n Note) String() string {
 	switch {
 	case workerless(n.Kind):
@@ -607,12 +608,12 @@ func (s *state) add(n Note) bool {
 		return true
 	}
 	s.Notes = append(s.Notes, n)
-	// The oldest go first, answers (also to a boss below), starts, ticks and decisions handed over never: an answered or ticked item is off the
+	// The oldest go first, answers (also to a boss below), starts, ticks (by itself, or the user's) and decisions handed over never: an answered or ticked item is off the
 	// list, a started one waits on its note, a handed decision has no one else asking. The user's doing goes last of the
 	// rest: the boss's list still says the user is on it (a closed boss's, once reopened)
 	for over := len(s.Notes) - maxNotes; over > 0; over-- {
 		i := slices.IndexFunc(s.Notes, func(n Note) bool {
-			return n.Kind != Answered && n.Kind != AskAnswered && n.Kind != Start && n.Kind != UserOn && n.Key != tickKey && n.Of == ""
+			return n.Kind != Answered && n.Kind != AskAnswered && n.Kind != Start && n.Kind != UserOn && n.Kind != User && n.Key != tickKey && n.Of == ""
 		})
 		if i < 0 {
 			i = slices.IndexFunc(s.Notes, func(n Note) bool { return n.Kind == UserOn })

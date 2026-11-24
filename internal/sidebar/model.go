@@ -139,7 +139,7 @@ func newModel(c *tmux.Client, pane string) Model {
 		// Only the hostname check in isGenericTitle is lost
 		host = ""
 	}
-	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed, openItem: OpenItem, openBoard: OpenBoard,
+	return Model{c: c, pane: pane, host: host, branches: newBranchCache(), prs: newPRCache(c), needsLoad: loadNeeds, needsAnswer: AnswerNeed, needsDone: TickNeed(WhereSidebar), openItem: OpenItem, openBoard: OpenBoard,
 		reload: selfreload.NewPane(selfreload.Version())}
 }
 
