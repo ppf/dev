@@ -46,7 +46,7 @@ const Me = "me"
 // Boss is the --on of an item its list's boss does itself, stored without a session.
 const Boss = "boss"
 
-// Who ticked an item (Item.DoneBy), besides its boss by name (Boss for a desktop app or T3 Code boss's).
+// Who ticked an item (Item.DoneBy), besides its boss by name (Boss for a desktop app boss's).
 const (
 	DoneByYou   = "you"     // the user: a board's or the page's tick, or an answer
 	DoneByUntil = "until"   // by itself at its --until
@@ -126,8 +126,6 @@ type file struct {
 	Notes   []Note   `json:"notes,omitempty"`
 	// NextNote is the id the next note gets: never reused while the file lives
 	NextNote int `json:"next_note,omitempty"`
-	// Dir is the main checkout its T3 Code boss runs in, which names its project (TakeOver)
-	Dir string `json:"dir,omitempty"`
 	movedMarker
 	takenStamp
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
@@ -239,14 +237,14 @@ func (l List) Open() (n, on int) {
 var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is its boss's")
 
 // Store is one boss's list file; boss is its session's name when known; trial: its writes write nothing (Trial). name
-// is the list's name for take-over (Name); dir the main checkout its own T3 Code boss writes (WithDir); created when its
-// tmux session was created, unix seconds, which a moved marker (TakeOver) older than it doesn't hold.
+// is the list's name for take-over (Name); created when its tmux session was created, unix seconds, which a moved
+// marker (TakeOver) older than it doesn't hold.
 type Store struct {
 	path, boss string
 	trial      bool
 	details    bool
 	result, by string
-	name, dir  string
+	name       string
 	created    int64
 }
 
@@ -312,13 +310,6 @@ const desktopPrefix = "desktop-"
 func Desktop(id string) (Store, error) {
 	s, err := open(desktopPrefix + id)
 	s.name = id
-	return s, err
-}
-
-// T3 is the list of the T3 Code boss thread id.
-func T3(id string) (Store, error) {
-	s, err := open(t3Prefix + id)
-	s.name = T3Name(id)
 	return s, err
 }
 
@@ -1360,9 +1351,6 @@ func (s Store) update(now time.Time, fn func(*file) error) error {
 func (s Store) write(f file) error {
 	if s.boss != "" {
 		f.Boss = s.boss
-	}
-	if s.dir != "" {
-		f.Dir = s.dir
 	}
 	if len(f.dropped) > 0 {
 		if err := s.keepDone(f.dropped, f.pruned); err != nil {

@@ -35,15 +35,14 @@ func newTodoCmd() *cobra.Command {
 		Short: "A boss's to do list: what waits on the user, for its board",
 		Long: `Keep the boss's list of what waits on the user: a dev boss's previews pane shows it at the top, and
 --json is what a desktop board reads. Without a subcommand, print it. The list belongs to the boss session it
-runs in: the T3 Code thread ($T3CODE_THREAD_ID) unless another thread delegated it, else a dev boss session in
-tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a boss started it; --boss names one (a
-session name, or a desktop app session's local_… id). It outlives the coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
+runs in: a dev boss session in tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a boss
+started it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
 session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
-worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss but a T3 Code one gets its open items when it is resumed or cleared,
+worker notes, the newest one with open items of a session in its project whose Claude stopped. A boss gets its open items when it is resumed or cleared,
 and a dev boss also when it starts. A ticked item shows ticked for a few seconds, then leaves.
 A decision for the user goes on the list with dev todo ask and its options; the user answers it with dev todo answer,
 which ticks it and tells the boss. dev todo note keeps the boss's decisions, what the user said and open risks beside the list.
-dev todo take-over takes over an earlier boss's list for this project, of any kind (tmux, desktop app, T3 Code).
+dev todo take-over takes over an earlier boss's list for this project, of any kind (tmux, desktop app).
 --all prints every dev boss's list on this tmux server.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -70,7 +69,6 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 				setStatus(s, l, boss, cmd.ErrOrStderr())
 				return printJSON(out, l)
 			}
-			hintT3(cmd, boss, s, time.Now())
 			if err := l.MarkGone(func() ([]todo.Session, error) { return todoWorkers(boss, cmd.ErrOrStderr()) }); err != nil {
 				return err
 			}
@@ -206,7 +204,6 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			own := s.Boss()
 			if own == "" {
 				_, own, _ = todoBoss(*boss)
-				own = strings.TrimPrefix(own, t3Boss)
 			}
 			switch {
 			case waiting:
@@ -777,8 +774,8 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 				return err
 			}
 			s = s.WithResult(result)
-			// Outside Claude Code and a T3 Code thread: the user ran it
-			byUser := os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == ""
+			// Outside Claude Code: the user ran it
+			byUser := os.Getenv("CLAUDECODE") == ""
 			if byUser {
 				s = s.ByUser()
 			}
@@ -895,7 +892,6 @@ standing rules (CLAUDE.md, memory). A note with --until drops itself then; one w
 			if err != nil {
 				return err
 			}
-			hintT3(cmd, *boss, s, now)
 			text := todo.NotesText(notes, now)
 			if text == "" {
 				text = "no notes"
@@ -1139,19 +1135,11 @@ func replacedWaits(s todo.Store, boss string, stderr io.Writer, id int, now time
 // over an earlier list (desktopTodo). Never for --boss: that session takes over on its own first dev todo.
 func todoStore(boss string, adopt bool, stderr io.Writer) (todo.Store, error) {
 	pane, id, err := todoBoss(boss)
-	switch {
-	case err != nil:
+	if err != nil {
 		return todo.Store{}, err
-	case pane != "":
+	}
+	if pane != "" {
 		return todo.ForPane(tmux.New(), pane)
-	case strings.HasPrefix(id, t3Boss):
-		s, err := todo.T3(strings.TrimPrefix(id, t3Boss))
-		if err != nil {
-			return s, err
-		}
-		// Only its own thread runs this: --boss names no T3 Code thread
-		dir, err := mainCheckout()
-		return s.WithDir(dir), err
 	}
 	return desktopTodo(id, adopt && boss == "", stderr)
 }
@@ -1183,16 +1171,8 @@ type unreadList struct{ error }
 
 func (e unreadList) Unwrap() error { return e.error }
 
-// t3Boss starts todoBoss's id for a T3 Code thread, before the thread's id.
-const t3Boss = "t3:"
-
-// t3Child starts the id of a thread T3 Code started for another's delegate_task: a worker, not a boss.
-const t3Child = "thread:delegated-task:"
-
-var errT3Child = errors.New("a task another T3 Code thread delegated: the to do list is its boss's")
-
 // todoBoss is the boss session whose list it is: --boss's, else the one it runs in; a pane in a tmux one, else
-// a desktop app session's id, else a T3 Code thread's id after t3Boss.
+// a desktop app session's id.
 func todoBoss(boss string) (pane, id string, err error) {
 	switch {
 	case strings.HasPrefix(boss, "local_"):
@@ -1201,25 +1181,17 @@ func todoBoss(boss string) (pane, id string, err error) {
 		pane, err := control.BossPane(tmux.New(), boss)
 		return pane, "", err
 	}
-	// First: a T3 Code started in tmux passes its pane to every thread
-	if id := os.Getenv("T3CODE_THREAD_ID"); id != "" {
-		if strings.HasPrefix(id, t3Child) {
-			return "", "", fmt.Errorf("%s is %w", id, errT3Child)
-		}
-		return "", t3Boss + id, nil
-	}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
 		return pane, "", nil
 	}
 	if id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID"); id != "" {
 		return "", id, nil
 	}
-	return "", "", errors.New("no boss session: run it in a dev boss session, a desktop app session or a T3 Code thread, or pass --boss <session|local_id>")
+	return "", "", errors.New("no boss session: run it in a dev boss session or a desktop app session, or pass --boss <session|local_id>")
 }
 
 // todoWorkers is the workers of the boss whose list it is: tmux sessions it started, or desktop app sessions it
-// spawned, not archived (none for a T3 Code thread: dev can't see its threads); records that can't be read are
-// reported on stderr.
+// spawned, not archived; records that can't be read are reported on stderr.
 func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
 	pane, id, err := todoBoss(boss)
 	switch {
@@ -1227,8 +1199,6 @@ func todoWorkers(boss string, stderr io.Writer) ([]todo.Session, error) {
 		return nil, err
 	case pane != "":
 		return todo.Workers(tmux.New(), pane)
-	case strings.HasPrefix(id, t3Boss):
-		return nil, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1284,7 +1254,7 @@ func desktopTodo(id string, adopt bool, stderr io.Writer) (todo.Store, error) {
 // the lookup can't tell is left to desktopTodo, which says why.
 func tryAdoptable(boss string, try func(todo.Store) error) error {
 	pane, id, err := todoBoss(boss)
-	if err != nil || pane != "" || boss != "" || strings.HasPrefix(id, t3Boss) {
+	if err != nil || pane != "" || boss != "" {
 		return err
 	}
 	home, err := os.UserHomeDir()

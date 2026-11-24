@@ -37,14 +37,13 @@ func TestAgentSkill(t *testing.T) {
 		{[]string{"agent", "skill"}, "dev-agents"},
 		{[]string{"agent", "skill", "dev-agents"}, "dev-agents"},
 		{[]string{"agent", "skill", "desktop-boss"}, "desktop-boss"},
-		{[]string{"agent", "skill", "t3-boss"}, "t3-boss"},
 	} {
 		out, _, err := execute(t, "", tt.args...)
 		if err != nil || !strings.HasPrefix(out, "---\nname: "+tt.name+"\n") {
 			t.Errorf("dev %q = %.40q, %v, want skill %s", tt.args, out, err, tt.name)
 		}
 	}
-	if _, _, err := execute(t, "", "agent", "skill", "boss"); err == nil || err.Error() != `unknown skill "boss", want dev-agents, desktop-boss or t3-boss` {
+	if _, _, err := execute(t, "", "agent", "skill", "boss"); err == nil || err.Error() != `unknown skill "boss", want dev-agents or desktop-boss` {
 		t.Errorf("agent skill boss = %v, want an unknown-skill error", err)
 	}
 }

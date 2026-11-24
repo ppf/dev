@@ -22,10 +22,9 @@ func todoEnv(t *testing.T) {
 	desktopHome(t)
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
 	t.Setenv("TMUX_PANE", "")
-	t.Setenv("T3CODE_THREAD_ID", "")
-	old, oldTmux, oldCheckout := viewPR, takeOverTmux, mainCheckout
+	old, oldTmux := viewPR, takeOverTmux
 	viewPR = func(string) (sidebar.PRView, error) { return sidebar.PRView{State: "OPEN"}, nil }
-	// A T3 Code boss's empty list looks for one to take over (hintT3): never on the live tmux server
+	// A desktop app boss's empty list looks for one to take over (desktopHint): never on the live tmux server
 	takeOverTmux = func() *tmux.Client {
 		return tmux.NewFake(func(args []string) (string, error) {
 			if args[0] == "display-message" {
@@ -34,8 +33,7 @@ func todoEnv(t *testing.T) {
 			return "", nil
 		})
 	}
-	mainCheckout = func() (string, error) { return "/p/none", nil }
-	t.Cleanup(func() { viewPR, takeOverTmux, mainCheckout = old, oldTmux, oldCheckout })
+	t.Cleanup(func() { viewPR, takeOverTmux = old, oldTmux })
 }
 
 func run(t *testing.T, stdin string, args ...string) string {
@@ -126,63 +124,6 @@ func TestTodoNoBoss(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "")
 	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x"); err == nil || !strings.Contains(err.Error(), "no boss session") {
 		t.Errorf("err = %v, want no boss session", err)
-	}
-}
-
-// A T3 Code thread's list is keyed by its thread id, with no desktop app record; a thread another delegated is a
-// worker: it gets no list.
-func TestTodoT3(t *testing.T) {
-	todoEnv(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	state := filepath.Join(home, "state")
-	t.Setenv("XDG_STATE_HOME", state)
-	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "")
-	// A thread the t3 CLI started is mcp:<uuid>; one from the app is a bare uuid
-	t.Setenv("T3CODE_THREAD_ID", "mcp:0c638555-1111")
-	run(t, "", "todo", "add", "--no-details", "Fix login")
-	_, stderr, err := execute(t, "", "todo", "add", "Add tests", "--on", "fix-login")
-	if err != nil || !strings.Contains(stderr, "no session fix-login") {
-		t.Errorf("add --on fix-login = %q, %v, want it kept as a name dev can't see", stderr, err)
-	}
-	run(t, "", "todo", "done", "1")
-	if got := run(t, "", "todo"); got != "1\t☑\tFix login\n2\t◌\tAdd tests\ton fix-login\n" {
-		t.Errorf("list = %q", got)
-	}
-	var l struct {
-		Items []struct {
-			Done   bool   `json:"done"`
-			Status string `json:"status"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(run(t, "", "todo", "--json")), &l); err != nil || len(l.Items) != 2 || !l.Items[0].Done || l.Items[1].Status != "waiting" {
-		t.Errorf("json = %+v, %v", l, err)
-	}
-	if _, err := os.Stat(filepath.Join(state, "dev", "todo", "t3-mcp_0c638555-1111.json")); err != nil {
-		t.Errorf("list file: %v", err)
-	}
-	t.Setenv("T3CODE_THREAD_ID", "0c638555-2222")
-	if got := run(t, "", "todo"); got != "" {
-		t.Errorf("another thread's list = %q, want its own, empty", got)
-	}
-	run(t, "", "todo", "add", "--no-details", "x")
-	if _, err := os.Stat(filepath.Join(state, "dev", "todo", "t3-0c638555-2222.json")); err != nil {
-		t.Errorf("bare uuid's list file: %v", err)
-	}
-	// A boss's own thread id on --on is its own task
-	if _, stderr, err := execute(t, "", "todo", "add", "Own", "--on", "0c638555-2222"); err != nil || !strings.Contains(stderr, "this list's own boss") {
-		t.Errorf("add --on own id = %q, %v, want --on boss", stderr, err)
-	}
-	// A T3 Code started in tmux passes its pane: the thread still decides
-	t.Setenv("TMUX_PANE", "%9")
-	t.Setenv("T3CODE_THREAD_ID", "thread:delegated-task:abc")
-	for _, args := range [][]string{{"todo"}, {"todo", "--json"}, {"todo", "add", "--no-details", "x"}, {"todo", "done", "1"}} {
-		if _, _, err := execute(t, "", args...); err == nil || !strings.Contains(err.Error(), "a task another T3 Code thread delegated") {
-			t.Errorf("child: dev %s = %v, want it refused", strings.Join(args, " "), err)
-		}
-	}
-	if got, _ := filepath.Glob(filepath.Join(state, "dev", "todo", "t3-thread*")); len(got) != 0 {
-		t.Errorf("child wrote %q", got)
 	}
 }
 

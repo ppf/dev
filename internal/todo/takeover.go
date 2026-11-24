@@ -14,18 +14,6 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 )
 
-const t3Prefix = "t3-"
-
-// T3Name is the name of T3 Code thread id's list: t3: and the first 8 characters of the id as its file names it
-// (mcp:0c63… is mcp_0c63…), so the name a take-over prints is one it takes back.
-func T3Name(id string) string {
-	id = T3ID(id)
-	return "t3:" + id[:min(len(id), 8)]
-}
-
-// T3ID is T3 Code thread id as its list's file names it.
-func T3ID(id string) string { return strings.Trim(unsafe.ReplaceAllString(id, "_"), "_") }
-
 // movedMarker is what a list taken over (TakeOver) keeps: the key and name of the list it went to, and when.
 type movedMarker struct {
 	MovedTo     string `json:"moved_to,omitempty"`
@@ -69,28 +57,20 @@ func atTime(at int64, now time.Time) string {
 	return t.Format(UntilLayout)
 }
 
-// WithDir is s writing dir, the main checkout its own T3 Code boss runs in, on each write: it names the list's project.
-func (s Store) WithDir(dir string) Store {
-	s.dir = dir
-	return s
-}
-
-// Name is the list's name for take-over: its tmux boss's name, desktop app session id or T3Name.
+// Name is the list's name for take-over: its tmux boss's name, or desktop app session id.
 func (s Store) Name() string { return cmp.Or(s.name, s.boss) }
 
 // Kinds of a list (Candidate.Kind).
 const (
 	KindTmux    = "tmux"
 	KindDesktop = "desktop"
-	KindT3      = "t3"
 )
 
-// States of a list's boss (Candidate.State): a T3 Code thread's is unknown, as dev can't see T3 Code's threads.
+// States of a list's boss (Candidate.State).
 const (
 	StateRunning = "running"
 	StateClosed  = "closed"
 	StateStopped = "stopped"
-	StateUnknown = "unknown"
 )
 
 // DesktopState is a desktop app session's folder (its originCwd) and whether its Claude runs.
@@ -145,15 +125,15 @@ func (c Candidate) Short() string {
 	return c.List
 }
 
-// ID is its boss's id: a T3 Code thread's, a desktop app session's, a tmux boss's name.
+// ID is its boss's id: a desktop app session's, a tmux boss's name.
 func (c Candidate) ID() string { return cmp.Or(c.id, c.List) }
 
 // Refusal is why a take of it is refused, nil when it is takeable.
 func (c Candidate) Refusal() error { return c.refusal }
 
 // Candidates are the lists beside own, own's among them (it may have no file yet), classified for a boss of project
-// ownProject ("" unknown) at now, newest change first: a tmux boss's on this server, a desktop app session's, a T3 Code
-// thread's. Only with anyProject are another project's, the manager's and those of no known project takeable.
+// ownProject ("" unknown) at now, newest change first: a tmux boss's on this server, a desktop app session's. Only with
+// anyProject are another project's, the manager's and those of no known project takeable.
 func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now time.Time) ([]Candidate, error) {
 	paths, err := filepath.Glob(filepath.Join(filepath.Dir(own.path), "*.json"))
 	if err != nil {
@@ -174,9 +154,6 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 		c := Candidate{store: Store{path: path}}
 		f, err := c.store.read()
 		switch {
-		case strings.HasPrefix(base, t3Prefix):
-			c.id = strings.TrimPrefix(base, t3Prefix)
-			c.Kind, c.List = KindT3, T3Name(c.id)
 		case strings.HasPrefix(base, desktopPrefix):
 			c.id = strings.TrimPrefix(base, desktopPrefix)
 			c.Kind, c.List = KindDesktop, c.id
@@ -206,7 +183,7 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 	if !slices.ContainsFunc(out, func(c Candidate) bool { return c.store.path == own.path }) {
 		c := Candidate{List: own.Name(), Kind: own.Kind(), store: own}
 		if c.Kind != KindTmux {
-			c.id = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(filepath.Base(own.path), ".json"), t3Prefix), desktopPrefix)
+			c.id = strings.TrimPrefix(strings.TrimSuffix(filepath.Base(own.path), ".json"), desktopPrefix)
 		}
 		out = append(out, c)
 	}
@@ -242,11 +219,6 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 					c.Project = looks.Project(st.Dir)
 				}
 			}
-		case KindT3:
-			c.State = StateUnknown
-			if c.store.dir != "" {
-				c.Project = looks.Project(c.store.dir)
-			}
 		}
 		c.classify(own, ownProject, stateErr, anyProject)
 	}
@@ -256,17 +228,13 @@ func Candidates(own Store, ownProject string, looks Looks, anyProject bool, now 
 
 // Kind is the kind of s's list by its file's name.
 func (s Store) Kind() string {
-	switch base := filepath.Base(s.path); {
-	case strings.HasPrefix(base, t3Prefix):
-		return KindT3
-	case strings.HasPrefix(base, desktopPrefix):
+	if strings.HasPrefix(filepath.Base(s.path), desktopPrefix) {
 		return KindDesktop
 	}
 	return KindTmux
 }
 
-// count sets c's open items, asks, notes and last change from its file f at now, and its moved marker's refusal; it keeps
-// f's dir, which names a T3 Code list's project.
+// count sets c's open items, asks, notes and last change from its file f at now, and its moved marker's refusal.
 func (c *Candidate) count(f file, now time.Time) {
 	f.Items, f.Notes = slices.Clone(f.Items), slices.Clone(f.Notes)
 	f.prune(now)
@@ -286,7 +254,6 @@ func (c *Candidate) count(f file, now time.Time) {
 		c.refusal = fmt.Errorf("%s moved to %s at %s: nothing left to take", c.List, f.MovedToName, atTime(f.MovedAt, now))
 		c.WhyNot = "moved to " + f.MovedToName
 	}
-	c.store.dir = f.Dir
 }
 
 // classify sets why c can't be taken by own's boss, of project ownProject, stateErr being why its state
@@ -492,7 +459,7 @@ func (s Store) takeOver(from Store, now time.Time) (Taken, error) {
 
 // marker is the moved marker from's list src leaves at now, pointing at s.
 func (s Store) marker(src file, now time.Time) file {
-	return file{Updated: now.Unix(), Boss: src.Boss, Dir: src.Dir, movedMarker: movedMarker{
+	return file{Updated: now.Unix(), Boss: src.Boss, movedMarker: movedMarker{
 		MovedTo: s.key(), MovedToName: s.Name(), MovedAt: now.Unix(),
 	}}
 }
@@ -513,7 +480,7 @@ func (s Store) move(from Store, src, dst file, now time.Time) error {
 		return err
 	}
 	moved := src
-	moved.Boss, moved.Dir, moved.Updated = s.boss, s.dir, now.Unix()
+	moved.Boss, moved.Updated = s.boss, now.Unix()
 	moved.takenStamp = takenStamp{TakenFrom: from.key(), TakenAt: now.Unix()}
 	moved.Ticked = slices.Concat(dst.Ticked, src.Ticked)
 	if err := s.write(moved); err != nil {
