@@ -36,6 +36,7 @@ func newStateCmd() *cobra.Command {
 			return nil
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			state := args[0]
 			pane := os.Getenv("TMUX_PANE")
 			if pane == "" && (agy || !codex && !desktop.InApp()) {
 				return nil
@@ -61,16 +62,8 @@ func newStateCmd() *cobra.Command {
 					// An agy -p another agent runs in its pane inherits the pane's TMUX_PANE, but isn't its agent
 					return nil
 				}
-				var turn bool
-				if input, turn, err = agent.AgyHook(input); err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
-					return nil
-				}
-				if !turn {
-					// A later model call or a tool call: progress, not a turn's start or end
-					if err := agent.Touch(c, pane); err != nil {
-						fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
-					}
+				var rec bool
+				if input, state, rec = agyState(cmd, c, pane, input, state); !rec {
 					return nil
 				}
 			}
@@ -78,7 +71,7 @@ func newStateCmd() *cobra.Command {
 				// A desktop app session: its hook file stands in for the pane's options
 				dir, err := desktop.HookDir()
 				if err == nil {
-					err = desktop.RecordState(dir, args[0], input, time.Now())
+					err = desktop.RecordState(dir, state, input, time.Now())
 				}
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
@@ -92,7 +85,7 @@ func newStateCmd() *cobra.Command {
 				}
 				return nil
 			}
-			state, ok, err := agent.Resolve(args[0], input)
+			state, ok, err := agent.Resolve(state, input)
 			if err != nil {
 				// A failing hook would show as an error on every Claude event; report and leave the pane alone.
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())

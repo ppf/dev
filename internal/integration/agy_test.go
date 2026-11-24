@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,21 +54,44 @@ func TestStateAgy(t *testing.T) {
 		}
 		return strings.Join(v, " ")
 	}
-	const ids = `"conversationId":"110c93f6-c88f","transcriptPath":"/brain/t.jsonl","cwd":"/w"`
+	// Its transcript: a turn's end note says its last reply
+	transcript := filepath.Join(tmp, "t.jsonl")
+	writeFile(t, transcript, `{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"say ok"}`+"\n"+`{"source":"MODEL","type":"PLANNER_RESPONSE","content":"ok"}`+"\n")
+	ids := `"conversationId":"110c93f6-c88f","transcriptPath":"` + transcript + `","cwd":"/w"`
 
 	check(t, "turn start", agy("working", `{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",`+ids+`}`), "")
-	check(t, "turn start recorded", opts(), "working agy 1 110c93f6-c88f /brain/t.jsonl")
+	check(t, "turn start recorded", opts(), "working agy 1 110c93f6-c88f "+transcript)
 	s.T("set-option", "-p", "-t", pane, "@agent_active", "1")
 	check(t, "a later model call", agy("working", `{"hookEventName":"PreInvocation","invocationNum":1,`+ids+`}`), "")
-	check(t, "a later model call counts no prompt", opts(), "working agy 1 110c93f6-c88f /brain/t.jsonl")
+	check(t, "a later model call counts no prompt", opts(), "working agy 1 110c93f6-c88f "+transcript)
 	if s.T("show-option", "-pqv", "-t", pane, "@agent_active") == "1" {
 		t.Error("❌ a later model call didn't stamp @agent_active")
 	}
 	check(t, "a tool call", agy("working", `{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},`+ids+`}`), "")
+	check(t, "a question", agy("working", `{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"questions":[`+
+		`{"is_multi_select":false,"options":["Red","Blue"],"question":"Red or blue?"}]}},`+ids+`}`), "")
+	check(t, "a question is a decision", opts()+" "+s.T("show-option", "-pqv", "-t", pane, "@agent_waiting_for")+" "+s.T("show-option", "-pqv", "-t", pane, "@agent_question"),
+		"waiting agy 1 110c93f6-c88f "+transcript+` permission_prompt {"tool":"AskUserQuestion","questions":[{"question":"Red or blue?","header":"","options":[{"label":"Red","description":""},{"label":"Blue","description":""}],"multiSelect":false}]}`)
+	check(t, "its answer", agy("working", `{"hookEventName":"PostToolUse","toolCall":{"name":"ask_question"},`+ids+`}`), "")
+	// The stub's screen shows no input box, as while another dialog is open (TestAgentStartAgy has it back)
+	check(t, "a tool call's end with no input box on screen", opts(), "waiting agy 1 110c93f6-c88f "+transcript)
 	check(t, "turn end", agy("idle", `{"hookEventName":"Stop","fullyIdle":true,"terminationReason":"NO_TOOL_CALL",`+ids+`}`), "")
-	check(t, "turn end recorded", opts(), "idle agy 1 110c93f6-c88f /brain/t.jsonl")
+	check(t, "turn end recorded", opts(), "idle agy 1 110c93f6-c88f "+transcript)
+	// A turn ended on an error: failed, not finished
+	check(t, "a failed turn's start", agy("working", `{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"go on",`+ids+`}`), "")
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"go on"}` + "\n")
+	if err := errors.Join(err, f.Close()); err != nil {
+		t.Fatal(err)
+	}
+	check(t, "its end", agy("idle", `{"hookEventName":"Stop","error":"quota exceeded","terminationReason":"ERROR",`+ids+`}`), "")
+	check(t, "a failed turn ends idle", opts(), "idle agy 2 110c93f6-c88f "+transcript)
+	check(t, "its boss note says failed", s.T("show-option", "-pqv", "-t", pane, "@dev_boss_note"), "failed: quota exceeded")
 	check(t, "malformed input", agy("working", `{`), "❌ dev state: agent: hook input: unexpected end of JSON input\n")
-	check(t, "malformed input leaves the pane alone", opts(), "idle agy 1 110c93f6-c88f /brain/t.jsonl")
+	check(t, "malformed input leaves the pane alone", opts(), "idle agy 2 110c93f6-c88f "+transcript)
 
 	// An agy -p another agent runs in its pane inherits that pane's TMUX_PANE: it isn't the pane's agent
 	s.T("set-option", "-p", "-t", boss, "@agent_state", "working")
@@ -81,14 +105,14 @@ func TestStateAgy(t *testing.T) {
 
 	// The worker's turn end queued a note for its boss, which the nested agy's hook on the boss's pane left there
 	out, _ = run(s.scriptEnv("TMUX_PANE="+boss), `{"hook_event_name":"Stop"}`, "idle")
-	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 1 worker update(s):\n- ag finished"}`+"\n")
+	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 3 worker update(s):\n- ag needs a decision: Red or blue? (Red / Blue)\n- ag finished: ok\n- ag failed: quota exceeded"}`+"\n")
 }
 
 // agyStub builds a stand-in for agy into dir: agy models lists two slugs; otherwise it logs its argv to
 // DEV_STUB_LOG, shows its trust dialog for its directory until Enter, logs "trusted <dir>", then draws its
 // idle input box and runs each line typed as a turn with dev state --agy hooks ("decline" ends its turn as a
-// declined permission prompt does: on screen, without a Stop; "ask" opens a permission prompt, which the next
-// line declines).
+// declined permission prompt does: on screen, without a Stop; "ask" opens a permission prompt, which a next line
+// of 1 approves and any other declines; "question" asks one with its hook, which the next line answers).
 func agyStub(t *testing.T, dir string) {
 	t.Helper()
 	src := t.TempDir()
@@ -117,12 +141,34 @@ func logf(s string) {
 	}
 }
 
+// transcript is its conversation's transcript, which Stop's note reads its reply from
+var transcript = filepath.Join(os.TempDir(), fmt.Sprintf("agy-stub-%d.jsonl", os.Getpid()))
+
 func hook(state, event string, num int, prompt string) {
-	in := fmt.Sprintf("{\"hookEventName\":%q,\"invocationNum\":%d,\"lastUserInput\":%q,\"conversationId\":\"c1\",\"transcriptPath\":\"/t\"}", event, num, prompt)
+	run(state, event, fmt.Sprintf("{\"hookEventName\":%q,\"invocationNum\":%d,\"lastUserInput\":%q,\"conversationId\":\"c1\",\"transcriptPath\":%q}", event, num, prompt, transcript))
+}
+
+// reply writes a turn's prompt and reply to its transcript
+func reply(prompt, text string) {
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err == nil {
+		fmt.Fprintf(f, "{\"source\":\"USER_EXPLICIT\",\"type\":\"USER_INPUT\",\"content\":%q}\n{\"source\":\"MODEL\",\"type\":\"PLANNER_RESPONSE\",\"content\":%q}\n", prompt, text)
+		f.Close()
+	}
+}
+
+// tool runs the PreToolUse or PostToolUse hook of a tool call, its toolCall JSON
+func tool(event, call string) {
+	run("working", event, fmt.Sprintf("{\"hookEventName\":%q,\"toolCall\":%s,\"conversationId\":\"c1\",\"transcriptPath\":%q}", event, call, transcript))
+}
+
+func run(state, event, in string) {
 	cmd := exec.Command(dev, "state", "--agy", state)
 	cmd.Stdin = strings.NewReader(in)
-	if out, err := cmd.Output(); err != nil || len(out) > 0 {
-		logf(fmt.Sprintf("hook %s: %v %q", event, err, out))
+	var errOut strings.Builder
+	cmd.Stderr = &errOut
+	if out, err := cmd.Output(); err != nil || len(out) > 0 || errOut.Len() > 0 {
+		logf(fmt.Sprintf("hook %s: %v %q %q", event, err, out, errOut.String()))
 	}
 }
 
@@ -145,6 +191,10 @@ func main() {
 		return
 	}
 	logf("agy " + strings.Join(os.Args[1:], " "))
+	// As agy, which draws a pasted draft in its input box: the tty's echo would print it under the footer
+	echo := exec.Command("stty", "-echo")
+	echo.Stdin = os.Stdin
+	_ = echo.Run()
 	wd, _ := os.Getwd()
 	dir, _ := filepath.EvalSymlinks(wd)
 	fmt.Print("\033[?1049h")
@@ -174,15 +224,31 @@ func main() {
 			return
 		}
 		line = strings.TrimSpace(line)
-		if line == "ask" {
-			hook("working", "PreInvocation", 0, line)
-			draw(rule + "\n> ask\n\n● Bash(echo hi)\nCommand\n" + rule + "\nRequesting permission for:\n   echo hi\nRun this command?\n> 1. Yes, run command\n  4. No, cancel\nesc to cancel\n")
+		hook("working", "PreInvocation", 0, line)
+		switch line {
+		case "ask":
+			const call = "{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"echo hi\"}}"
+			tool("PreToolUse", call)
+			draw(rule + "\n> ask\n\n● Bash(echo hi)\nCommand\n" + rule + "\nRequesting permission for:\n   echo hi\n\nRun this command?\n> 1. Yes, run command\n  4. No, cancel\n\nesc to cancel\n")
+			pick, err := in.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.TrimSpace(pick) != "1" {
+				line = "decline"
+				break
+			}
+			draw(rule + "\n> ask\n\n● Bash(echo hi)\n\n⣷  Generating...\n" + rule + "\n>\n" + rule + "\nesc to cancel\n")
+			tool("PostToolUse", call)
+		case "question":
+			const call = "{\"name\":\"ask_question\",\"args\":{\"questions\":[{\"is_multi_select\":false,\"options\":[\"(Recommended) Red\",\"Blue\"],\"question\":\"Do you prefer red or blue?\"}]}}"
+			tool("PreToolUse", call)
+			draw(rule + "\n> question\n\n? Do you prefer red or blue?\n\nQuestion\n" + rule + "\n\nQuestion 1/1: Do you prefer red or blue?\n\n> 1. (Recommended) Red\n  2. Blue\n  3. Write-in...\n\nesc to cancel\n")
 			if _, err := in.ReadString('\n'); err != nil {
 				return
 			}
-			line = "decline"
-		} else {
-			hook("working", "PreInvocation", 0, line)
+			draw(rule + "\n> question\n\n⣷  Generating...\n" + rule + "\n>\n" + rule + "\nesc to cancel\n")
+			tool("PostToolUse", call)
 		}
 		time.Sleep(300 * time.Millisecond)
 		if line == "decline" {
@@ -190,6 +256,7 @@ func main() {
 			continue
 		}
 		hook("working", "PreInvocation", 1, line)
+		reply(line, "ok")
 		draw(rule + "\n> " + line + "\n\n  ok\n\n" + box)
 		hook("idle", "Stop", 0, line)
 	}
@@ -211,7 +278,7 @@ func TestAgentStartAgy(t *testing.T) {
 	agyStub(t, stubs)
 	repo := newRepo(t, "", "")
 	// The stub runs its hooks itself; dev only looks for them before it records a new agy pane idle
-	writeFile(t, filepath.Join(repo, ".agents/hooks.json"), `{"dev": {"Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`)
+	writeFile(t, filepath.Join(repo, ".agents/hooks.json"), `{"dev": {"PreInvocation": [{"type": "command", "command": "dev state --agy working"}], "Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`)
 	git(t, repo, "add", ".agents")
 	git(t, repo, "commit", "-qm", "agy hooks")
 	git(t, repo, "push", "-q", "origin", "main")
@@ -248,17 +315,53 @@ func TestAgentStartAgy(t *testing.T) {
 	check(t, "read shows its answer", strconv.FormatBool(strings.Contains(out, "> say ok\n\n  ok")), "true")
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "decline", "--timeout", "30s")
 	check(t, "a turn ended without a Stop settles by its screen", status+" "+out+errOut, "0 idle\n")
-	devAgent(env, "", "prompt", "repo-w1", "ask")
-	waitFor(t, "its permission prompt", func() bool {
-		out, _, _ := devAgent(env, "", "read", "repo-w1")
-		return strings.Contains(out, "Run this command?")
-	})
+	note := func() string { return d.T("show-option", "-pqv", "-t", "=repo-w1:1.2", "@dev_boss_note") }
+	// A permission prompt, which no hook tells: its screen makes it a decision, approved it works on
+	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "ask", "--timeout", "30s")
+	check(t, "a permission prompt is waiting", status+" "+out+errOut, "0 waiting\n")
+	waitFor(t, "its boss note says what it asks", func() bool { return note() == "needs a decision: allow Bash: echo hi" })
 	_, errOut, status = devAgent(env, "", "prompt", "repo-w1", "yes please")
 	check(t, "a prompt into its permission prompt refused", status+" "+errOut,
-		"1 ❌ agy's screen shows no input box: a dialog may be open; read it and answer with send-keys\n")
+		"1 ❌ agent is waiting for a decision (permission_prompt): read it and answer with send-keys\n")
+	d.T("send-keys", "-t", "=repo-w1:1.2", "1", "Enter")
+	out, errOut, status = devAgent(env, "", "wait", "repo-w1", "--until", "idle", "--timeout", "30s")
+	check(t, "approved, its turn goes on to its end", status+" "+out+errOut, "0 idle\n")
+	check(t, "its turn's end replaced the note, with its reply", note(), "finished: ok")
+
+	// Declined: no hook, its screen settles it idle
+	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "ask", "--timeout", "30s")
+	check(t, "another permission prompt", status+" "+out+errOut, "0 waiting\n")
 	d.T("send-keys", "-t", "=repo-w1:1.2", "4", "Enter")
-	out, errOut, status = devAgent(env, "", "wait", "repo-w1", "--timeout", "30s")
+	out, errOut, status = devAgent(env, "", "wait", "repo-w1", "--until", "idle", "--timeout", "30s")
 	check(t, "its declined prompt settles by its screen", status+" "+out+errOut, "0 idle\n")
+
+	// A question: its hook records it, with its options for get --json
+	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "question", "--timeout", "30s")
+	check(t, "a question is waiting", status+" "+out+errOut, "0 waiting\n")
+	waitFor(t, "its boss note asks it", func() bool {
+		return note() == "needs a decision: Do you prefer red or blue? ((Recommended) Red / Blue)"
+	})
+	out, _, _ = devAgent(env, "", "get", "repo-w1", "--json")
+	var got struct {
+		State     string `json:"state"`
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Recommended bool   `json:"recommended"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got.State != "waiting" || len(got.Questions) != 1 ||
+		got.Questions[0].Question != "Do you prefer red or blue?" || len(got.Questions[0].Options) != 2 || !got.Questions[0].Options[0].Recommended {
+		t.Errorf("❌ get --json of its question: %v %s", err, out)
+	}
+	_, errOut, status = devAgent(env, "", "prompt", "repo-w1", "blue")
+	check(t, "a prompt into its question refused", status+" "+errOut,
+		"1 ❌ agent is waiting for a decision (permission_prompt): read it and answer with send-keys\n")
+	d.T("send-keys", "-t", "=repo-w1:1.2", "2", "Enter")
+	out, errOut, status = devAgent(env, "", "wait", "repo-w1", "--until", "idle", "--timeout", "30s")
+	check(t, "answered, its turn goes on to its end", status+" "+out+errOut, "0 idle\n")
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "say ok again", "--timeout", "30s")
 	check(t, "the next turn isn't taken for the declined one", status+" "+out+errOut, "0 idle\n")
 	out, _, _ = devAgent(env, "", "read", "repo-w1", "--lines", "20")

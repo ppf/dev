@@ -58,6 +58,18 @@ func TestNewPick(t *testing.T) {
 	if p = goldenPick(t, "claude-permission-write", agent.Question{Tool: "Write", File: "/tmp/proj/notes.txt"}); p.tool != "Write" || p.detail != "/tmp/proj/notes.txt" {
 		t.Errorf("write permission: %+v", p)
 	}
+	// agy's question, its title numbered: the hook's question with its write-in option
+	red := agent.Question{Tool: agent.AskUserQuestion, Questions: []agent.Ask{{Question: "Do you prefer red or blue?",
+		Options: []agent.Choice{{Label: "(Recommended) Red"}, {Label: "Blue"}}}}}
+	if p = goldenPick(t, "agy-question", red); p.cur != 0 || p.other != 2 || !p.question() {
+		t.Errorf("agy question: %+v", p)
+	}
+	// Two of them: one screen each, so answered one at a time, never sent whole
+	two := red
+	two.Questions = append(slices.Clone(red.Questions), agent.Ask{Question: "Why?", Options: []agent.Choice{{Label: "A"}, {Label: "B"}}})
+	if p = goldenPick(t, "agy-question", two); p.cur != 0 || !p.agy || p.whole() {
+		t.Errorf("agy's two questions: %+v, whole %v", p, p.whole())
+	}
 }
 
 // screens fakes a pane whose captures go through the given screens (the last one repeats), recording the keys.

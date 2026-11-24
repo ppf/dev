@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,9 +36,14 @@ type pick struct {
 	cur   int         // the tab on screen; -1 when unknown
 	other int         // the free-text option ("Type something"); -1 when none
 	asks  []agent.Ask // the hook's questions, one per tab, when it matched the dialog on screen (cur >= 0)
+	// agy: its questions come one screen each, titled "Question 1/2: …", which sendAll doesn't follow
+	agy bool
 	// The permission the dialog asks: its tool, command, file or URL, and description
 	tool, detail, about string
 }
+
+// agyNumbered is the "Question 1/2: " agy's question titles start with.
+var agyNumbered = regexp.MustCompile(`^Question \d+/\d+: `)
 
 // newPick decorates dialog d with q, the pane's question, when q is what d shows on screen.
 func newPick(d dialog, q agent.Question, screen string) pick {
@@ -45,10 +51,11 @@ func newPick(d dialog, q agent.Question, screen string) pick {
 	switch {
 	case q.Tool == agent.AskUserQuestion:
 		for i, a := range q.Questions {
-			if !sameText(a.Question, d.title) {
+			title := agyNumbered.ReplaceAllString(d.title, "")
+			if !sameText(a.Question, title) {
 				continue
 			}
-			p.cur = i
+			p.cur, p.agy = i, title != d.title
 			p.d.opts = slices.Clone(d.opts)
 			for k, c := range a.Options {
 				if k < len(p.d.opts) {
@@ -94,7 +101,7 @@ func (p *pick) question() bool {
 // whole reports a question of several tabs the board answers whole: the tabs before the open one answered,
 // every tab from it on a single choice, each picked on the board and sent in one go (sendAll).
 func (p *pick) whole() bool {
-	if !p.question() || len(p.asks) < 2 || p.cur >= len(p.asks) || p.d.multi || slices.Contains(p.answered()[:p.cur], false) {
+	if !p.question() || p.agy || len(p.asks) < 2 || p.cur >= len(p.asks) || p.d.multi || slices.Contains(p.answered()[:p.cur], false) {
 		return false
 	}
 	return !slices.ContainsFunc(p.asks[p.cur:], func(a agent.Ask) bool { return a.MultiSelect || len(a.Options) == 0 })

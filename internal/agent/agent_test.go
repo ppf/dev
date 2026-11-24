@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -169,6 +170,35 @@ func TestInterrupted(t *testing.T) {
 	}
 }
 
+func TestAgyPermission(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	for _, claim := range []string{"agy-dialog-100000000000", "agy-dialog-99"} {
+		var calls [][]string
+		c := tmux.NewFake(func(args []string) (string, error) {
+			calls = append(calls, args)
+			if args[0] == "display-message" {
+				return claim + "\n", nil
+			}
+			return "", nil
+		})
+		q, recorded, err := AgyPermission(c, "%1", "50", "7", "55", "Bash", `echo "$HOME" \ x`, "Run this command?")
+		if err != nil || recorded != (claim == "agy-dialog-100000000000") || q.Ask() != `allow Bash: echo "$HOME" \ x` {
+			t.Errorf("claim %s: AgyPermission = %+v, %v, %v", claim, q, recorded, err)
+		}
+		want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{&&:#{==:#{@agent_prompts},7},#{==:#{@agent_active},55}}}}",
+			"set-option -p -t %1 @agent_state waiting ; set-option -p -t %1 @agent_since 100 ; set-option -p -t %1 @agent_waiting_for permission_prompt ; " +
+				`set-option -p -t %1 @agent_question "{\"tool\":\"Bash\",\"command\":\"echo \\\"\$HOME\\\" \\\\ x\",\"description\":\"Run this command?\"}" ; ` +
+				"set-option -p -t %1 @agent_agy_claim agy-dialog-100000000000"}
+		if len(calls) != 2 || !slices.Equal(calls[0], want) {
+			t.Errorf("calls = %q, want first: %q", calls, want)
+		}
+	}
+	if _, _, err := AgyPermission(tmux.NewFake(func([]string) (string, error) { return "", errors.New("boom") }), "%1", "50", "7", "55", "", "ls", "?"); err == nil {
+		t.Error("a failed write: no error")
+	}
+}
+
 func TestResumeCommand(t *testing.T) {
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(transcript, nil, 0o644); err != nil {
@@ -254,26 +284,113 @@ func TestDetect(t *testing.T) {
 func TestAgyHook(t *testing.T) {
 	const ids = `"conversationId":"110c93f6-c88f","transcriptPath":"/t.jsonl","cwd":"/w"`
 	const session = `"session_id":"110c93f6-c88f","transcript_path":"/t.jsonl"`
-	for input, want := range map[string]string{
-		`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`: `{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`,
-		`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`:           `{"cwd":"/w","hook_event_name":"Stop","prompt":"say ok",` + session + `}`,
-		`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`:                          "",
-		`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`:                         "",
-		`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`:             "",
-		`{"hookEventName":"SessionStart",` + ids + `}`:                                             "",
-	} {
-		out, ok, err := AgyHook([]byte(input))
-		if err != nil || ok != (want != "") || string(out) != want {
-			t.Errorf("AgyHook(%s) = %s, %v, %v; want %s", input, out, ok, err, want)
+	const ask = `{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"questions":[{"is_multi_select":false,` +
+		`"options":["(Recommended) Red","Blue"],"question":"Do you prefer red or blue?"}]}},` + ids + `}`
+	tests := []struct {
+		input string
+		kind  AgyKind
+		want  string // its input in Claude's shape
+	}{
+		{`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`},
+		{`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"Stop","last_assistant_message":"","prompt":"say ok",` + session + `}`},
+		{ask, AgyAsk, `{"cwd":"/w","hook_event_name":"Notification","message":"Do you prefer red or blue? ((Recommended) Red / Blue)",` +
+			`"notification_type":"permission_prompt","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"quota exceeded","terminationReason":"ERROR",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"quota exceeded","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"","terminationReason":"ERROR",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"ERROR","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":{"code":429},` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"{\"code\":429}","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":null,"terminationReason":"TERMINATION_REASON_ERROR",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"ERROR","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"","terminationReason":"USER_CANCELED",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"Stop","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"PostToolUse","toolCall":{"name":"ask_question"},` + ids + `}`, AgyToolDone,
+			`{"cwd":"/w","hook_event_name":"PostToolUse","prompt":"",` + session + `}`},
+		{`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`, AgyTool, ""},
+		{`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`, AgyProgress, ""},
+		{`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`, AgyProgress, ""},
+		{`{"hookEventName":"SessionStart",` + ids + `}`, AgyProgress, ""},
+	}
+	for _, tt := range tests {
+		ev, err := AgyHook([]byte(tt.input))
+		if err != nil || ev.Kind != tt.kind || string(ev.Input) != tt.want {
+			t.Errorf("AgyHook(%s) = %v %s, %v; want %v %s", tt.input, ev.Kind, ev.Input, err, tt.kind, tt.want)
 		}
-		if ok && HookSession(out) != (Session{ID: "110c93f6-c88f", Transcript: "/t.jsonl"}) {
-			t.Errorf("AgyHook(%s): session %+v", input, HookSession(out))
+		if tt.want != "" && HookSession(ev.Input) != (Session{ID: "110c93f6-c88f", Transcript: "/t.jsonl"}) {
+			t.Errorf("AgyHook(%s): session %+v", tt.input, HookSession(ev.Input))
 		}
 	}
-	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`} {
-		if _, _, err := AgyHook([]byte(input)); err == nil {
+	ev, _ := AgyHook([]byte(ask))
+	want := Question{Tool: AskUserQuestion, Questions: []Ask{{Question: "Do you prefer red or blue?",
+		Options: []Choice{{Label: "(Recommended) Red"}, {Label: "Blue"}}}}}
+	if !reflect.DeepEqual(ev.Question, want) {
+		t.Errorf("AgyHook(ask_question).Question = %+v, want %+v", ev.Question, want)
+	}
+	ev, _ = AgyHook([]byte(`{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"questions":[` +
+		`{"is_multi_select":true,"options":["A","B"],"question":"Which?"},{"options":[],"question":"Why?"}]}}}`))
+	if got := ev.Question.Ask(); got != "Which? (A / B) +1 more" || !ev.Question.Questions[0].MultiSelect {
+		t.Errorf("AgyHook(two questions): %q, %+v", got, ev.Question)
+	}
+	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`, `{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"question":"Red?"}}}`} {
+		if _, err := AgyHook([]byte(input)); err == nil {
 			t.Errorf("AgyHook(%s): no error", input)
 		}
+	}
+}
+
+func TestAgyLastReply(t *testing.T) {
+	dir := t.TempDir()
+	write := func(lines ...string) string {
+		path := filepath.Join(dir, "transcript_full.jsonl")
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const (
+		user  = `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>\nsay ok\n</USER_REQUEST>"}`
+		call  = `{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command"}]}`
+		ran   = `{"step_index":2,"source":"MODEL","type":"GENERIC","content":"Command exited with code 0."}`
+		reply = `{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hi"}`
+	)
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"its reply after a tool call", []string{user, call, ran, reply}, "hi"},
+		{"a turn with no reply yet", []string{reply, user, call}, ""},
+		{"no turn", nil, ""},
+	}
+	for _, tt := range tests {
+		if got, err := AgyLastReply(write(tt.lines...)); err != nil || got != tt.want {
+			t.Errorf("%s: AgyLastReply = %q, %v; want %q", tt.name, got, err, tt.want)
+		}
+	}
+	if got, err := AgyLastReply(write(user, "", reply, "")); err != nil || got != "hi" {
+		t.Errorf("blank lines: AgyLastReply = %q, %v", got, err)
+	}
+	// Past its tail: the cut line is left out, and a tail without a prompt or reply is an error
+	long := `{"type":"GENERIC","content":"` + strings.Repeat("x", agyTail) + `"}`
+	if got, err := AgyLastReply(write(long, user, call, ran, reply)); err != nil || got != "hi" {
+		t.Errorf("a long transcript: AgyLastReply = %q, %v", got, err)
+	}
+	// A tail starting right on a line: that line is whole
+	exact := `{"source":"MODEL","type":"PLANNER_RESPONSE","content":"` + strings.Repeat("y", agyTail-len(`{"source":"MODEL","type":"PLANNER_RESPONSE","content":""}`)-1) + `"}`
+	if got, err := AgyLastReply(write(user, exact)); err != nil || !strings.HasPrefix(got, "yyy") {
+		t.Errorf("a tail starting on its line: AgyLastReply = %.10q, %v", got, err)
+	}
+	if _, err := AgyLastReply(write(user, long)); err == nil {
+		t.Error("a tail of one cut line: no error")
+	}
+	if _, err := AgyLastReply(write(user, "{")); err == nil {
+		t.Error("a line that isn't JSON: no error")
+	}
+	if _, err := AgyLastReply(filepath.Join(dir, "gone.jsonl")); err == nil {
+		t.Error("no transcript: no error")
 	}
 }
 

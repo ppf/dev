@@ -12,29 +12,39 @@ const agyBelowBox = 1
 // its footer under it; top and bottom are its rules. ok=false without it, or while its footer says "esc to
 // cancel": working, or a dialog drawn in its place.
 func AgyInput(plain []string) (top, bottom int, ok bool) {
-	top, bottom, ok = agyBox(plain)
+	top, bottom, ok = AgyBoxAt(plain)
 	if !ok || slices.ContainsFunc(plain[bottom+1:], func(l string) bool { return strings.HasPrefix(l, "esc to cancel") }) {
 		return 0, 0, false
 	}
 	return top, bottom, true
 }
 
-// agyBox is AgyInput whatever its footer says: also while agy works.
-func agyBox(plain []string) (top, bottom int, ok bool) {
+// AgyBoxAt is AgyInput whatever its footer says: also while agy works.
+func AgyBoxAt(plain []string) (top, bottom int, ok bool) {
 	bottom = lastRule(plain, len(plain)-1, agyBelowBox+1, isRule)
 	if bottom < 0 {
 		return 0, 0, false
 	}
-	top = lastRule(plain, bottom-1, MaxBoxLines+1, isRule)
-	if top < 0 || top == bottom-1 || !strings.HasPrefix(plain[top+1], ">") {
-		return 0, 0, false
+	// The rule over its > row: a draft may hold a rule of its own
+	for top = bottom - 2; top >= 0 && top > bottom-MaxBoxLines-2; top-- {
+		if isRule(plain[top]) && strings.HasPrefix(plain[top+1], ">") {
+			return top, bottom, true
+		}
 	}
-	return top, bottom, true
+	return 0, 0, false
+}
+
+// AgyBoxBottom reports agy's input box's bottom rule right above its footer, at the bottom of its captured screen,
+// idle or working: a draft of any height above it. A dialog draws its own footer in the box's place.
+func AgyBoxBottom(capture string) bool {
+	plain := plainScreen(capture)
+	n := len(plain)
+	return n > 1 && isRule(plain[n-2])
 }
 
 // AgyBox reports agy's input box at the bottom of its captured screen, idle or working: no dialog in its place.
 func AgyBox(capture string) bool {
-	_, _, ok := agyBox(plainScreen(capture))
+	_, _, ok := AgyBoxAt(plainScreen(capture))
 	return ok
 }
 
@@ -76,4 +86,47 @@ func AgyTrust(capture string) (dir string, yes, ok bool) {
 	}
 	ask += at
 	return strings.Join(plain[at+1:ask], ""), slices.Contains(plain[ask:], "> Yes, I trust this folder"), true
+}
+
+// agyDialogLines bounds how far above its footer agy's permission prompt may start.
+const agyDialogLines = 40
+
+// AgyPermission reads agy's permission prompt at the bottom of its captured screen: the tool it's for (the "● Bash("
+// line above it), what it asks to run (the lines under "Requesting permission for:", wrapped lines joined) and its
+// question ("Run this command?"), over numbered options, its footer "esc to cancel" in the input box's place.
+// ok=false without it: agy fires no hook for it, so only its screen tells it from an approved call.
+func AgyPermission(capture string) (tool, what, title string, ok bool) {
+	plain := plainScreen(capture)
+	if len(plain) == 0 || !strings.HasPrefix(plain[len(plain)-1], "esc to cancel") || AgyBox(capture) {
+		return "", "", "", false
+	}
+	at := -1
+	for i := len(plain) - 1; i >= 0 && i >= len(plain)-agyDialogLines; i-- {
+		if plain[i] == "Requesting permission for:" {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return "", "", "", false
+	}
+	i := at + 1
+	var asked []string
+	for ; i < len(plain) && plain[i] != ""; i++ {
+		asked = append(asked, plain[i])
+	}
+	for i < len(plain) && plain[i] == "" {
+		i++
+	}
+	if i+1 >= len(plain) || !strings.HasSuffix(plain[i], "?") || !startsNumbered(strings.TrimPrefix(plain[i+1], "> ")) {
+		return "", "", "", false
+	}
+	// Up to the prompt it answers: agy may leave many blank lines between
+	for k := at - 1; k >= 0 && k >= at-agyDialogLines && !strings.HasPrefix(plain[k], ">"); k-- {
+		if name, ok := strings.CutPrefix(plain[k], "● "); ok {
+			tool, _, _ = strings.Cut(name, "(")
+			break
+		}
+	}
+	return tool, strings.Join(asked, " "), plain[i], len(asked) > 0
 }

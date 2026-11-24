@@ -1,0 +1,45 @@
+  \x1b[38;5;75m▄\x1b[38;5;79m\x1b[48;5;75m▀\x1b[38;5;75m\x1b[49m▀\x1b[39m      \x1b[38;5;69m▀\x1b[48;5;69m▀\x1b[49m▄\x1b[39m
+
+\x1b[90m────────────────────────────────────────────────────────────\x1b[39m
+\x1b[1m\x1b[34m> say ok\x1b[0m
+
+  ok
+
+\x1b[90m────────────────────────────────────────────────────────────\x1b[39m
+\x1b[1m\x1b[34m> Run this exact shell command with your command tool and nothing else: rm -f probe-none.txt\x1b[0m
+
+\x1b[31m●\x1b[39m \x1b[1m\x1b[33mBash\x1b[0m\x1b[37m(rm -f probe-none.txt)\x1b[39m \x1b[37m(ctrl+o to expand)\x1b[39m
+
+  The command execution was denied by a pre-tool hook.
+
+\x1b[90m────────────────────────────────────────────────────────────\x1b[39m
+\x1b[1m\x1b[34m> Run that same command again now: rm -f probe-none.txt\x1b[0m
+
+\x1b[32m●\x1b[39m \x1b[1m\x1b[33mBash\x1b[0m\x1b[37m(rm -f probe-none.txt)\x1b[39m \x1b[37m(ctrl+o to expand)\x1b[39m
+
+  The command \x1b[94mrm -f probe-none.txt\x1b[39m executed successfully with exit code 0.
+
+\x1b[90m────────────────────────────────────────────────────────────\x1b[39m
+\x1b[1m\x1b[34m> Run this shell command with your command tool: echo hi\x1b[0m
+
+\x1b[31m●\x1b[39m \x1b[1m\x1b[33mBash\x1b[0m\x1b[37m(echo hi)\x1b[39m \x1b[37m(ctrl+o to expand)\x1b[39m
+
+\x1b[1m\x1b[34mCommand\x1b[0m
+\x1b[1m\x1b[34m  ⎿  \x1b[0m\x1b[37mUser declined the tool call\x1b[39m
+
+\x1b[90m────────────────────────────────────────────────────────────\x1b[39m
+\x1b[1m\x1b[34m> Use your tool for asking the user a question: ask me whether I prefer red or blue (two options). Do nothing else.\x1b[0m
+
+\x1b[1m\x1b[33m?\x1b[0m Do you prefer red or blue?
+
+\x1b[1m\x1b[33mQuestion\x1b[0m
+\x1b[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+\x1b[1m\x1b[39mQuestion 1/1: Do you prefer red or blue?\x1b[0m
+
+\x1b[94m> 1. (Recommended) Red\x1b[39m
+  2. Blue
+  3. Write-in...
+
+  \x1b[1m\x1b[94m↑/↓\x1b[0m\x1b[90m Navigate · \x1b[1m\x1b[94menter\x1b[0m\x1b[90m Select · \x1b[1m\x1b[94mesc\x1b[0m\x1b[90m Skip\x1b[39m
+\x1b[90mesc to cancel\x1b[39m                                                                                                              \x1b[32maccept-edits\x1b[2m\x1b[39m · Gemini 3.8 Flash · low

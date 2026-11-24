@@ -413,12 +413,23 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 					continue
 				}
 			}
+			if agent.AgyCommand(r.Command) {
+				// agy fires no hook for its permission prompt: the check its tool call's hook started may have missed it
+				asked, err := AgyPermission(c, clk, r.Pane, control.Status{Since: r.Since, Prompts: r.Prompts, Active: r.Active}, shot)
+				if err != nil && !strings.Contains(err.Error(), "can't find pane") {
+					// Its note may be out: the other workers still get checked
+					errs = append(errs, err)
+				}
+				if asked || err != nil {
+					continue
+				}
+			}
 			w.screen = fmt.Sprintf("%x", sha256.Sum256([]byte(screen.Snapshot(shot))))
 			w.parked = agent.ClaudeCommand(r.Command) && screen.ClaudeState(shot) == agent.Idle
 		case unix(r.Since) == 0:
 			// No stretch to time
-		case agent.Deciding(w.trusted, r.WaitingFor) && held >= StuckDecision:
-			// A dialog answered No or Esc fired no hook: it isn't unanswered
+		case agent.Deciding(w.trusted, r.WaitingFor) && (held >= StuckDecision || agent.AgyCommand(r.Command)):
+			// A dialog answered No or Esc fired no hook: it isn't unanswered (agy's checked every round, not only once stuck)
 			st, err := control.ReadChecked(c, r.Pane)
 			if err != nil && strings.Contains(err.Error(), "can't find pane") {
 				continue // closed since list-panes

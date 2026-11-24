@@ -70,8 +70,8 @@ func (d dialog) option(r int) int {
 	return r
 }
 
-// optionLine is a numbered option, maybe under the cursor (❯ Claude and Grok, › Codex).
-var optionLine = regexp.MustCompile(`^(\s*)(?:([❯›])\s*)?(\d{1,2})\.\s(.*)$`)
+// optionLine is a numbered option, maybe under the cursor (❯ Claude and Grok, › Codex, > agy).
+var optionLine = regexp.MustCompile(`^(\s*)(?:([❯›>])\s*)?(\d{1,2})\.\s(.*)$`)
 
 // parseDialog finds the dialog at the bottom of a captured screen; ok=false when there is none.
 func parseDialog(capture string) (dialog, bool) {
@@ -100,6 +100,10 @@ func parseDialog(capture string) (dialog, bool) {
 			first = i
 			continue
 		case isRule(l) && i > 0 && (optionLine.MatchString(plain[i-1]) || indent(plain[i-1]) > col):
+			continue
+		case l != "" && i > 0 && optionLine.MatchString(plain[i-1]) && digitCol(plain[i-1]) == col:
+			// An option's label wrapped flush left (agy's, in a narrow pane)
+			first = i
 			continue
 		}
 		break

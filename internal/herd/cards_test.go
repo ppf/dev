@@ -805,7 +805,7 @@ func TestSaidOnScreenCut(t *testing.T) {
 	}
 }
 
-// A Claude or Codex worker's meta row carries its model and effort, nothing when no model was passed;
+// A Claude, Codex or agy worker's meta row carries its model and effort, nothing when no model was passed;
 // a narrow card drops the branch first, then the model, never the cost.
 func TestModelOnCard(t *testing.T) {
 	claude := func(model, effort string) tile {
@@ -839,6 +839,10 @@ func TestModelOnCard(t *testing.T) {
 	cx.model, cx.effort = "", ""
 	if got := ansi.Strip(metaRow(cx, 60)); strings.Contains(got, "default") {
 		t.Errorf("codex without a model shows one: %q", got)
+	}
+	ag := tile{sess: sidebar.Session{Agent: "Agy", Branch: "w1"}, model: "gemini-3.8-flash-low", effort: "low"}
+	if got := ansi.Strip(metaRow(ag, 60)); !strings.HasSuffix(got, "gemini-3.8-flash-low·low") {
+		t.Errorf("agy: %q, want its model and effort", got)
 	}
 }
 

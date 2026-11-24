@@ -38,6 +38,11 @@ func TestParseDialogGolden(t *testing.T) {
 		{"claude-ask-review", dialog{title: "Ready to submit your answers?", what: "←☒Color☒Extras✔Submit→Reviewyouranswers●Whichcolorshouldthethemeuse?→Green●Whichextrasdoyouwant?→Tests,Lint", cursor: 0, opts: []option{{num: 1, label: "Submit answers"}, {num: 2, label: "Cancel"}}}},
 		{"claude-permission-write", dialog{title: "Do you want to create notes.txt?", what: "Createfilenotes.txt1hithere", cursor: 0, opts: []option{{num: 1, label: "Yes"},
 			{num: 2, label: "Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)"}, {num: 3, label: "No"}}}},
+		{"agy-permission", dialog{title: "Run this command?", what: "Requestingpermissionfor:echohi", cursor: 0, opts: []option{{num: 1, label: "Yes, run command"},
+			{num: 2, label: "Yes, and always allow in this conversation for commands that start with 'echo'"},
+			{num: 3, label: "Yes, and always allow for commands that start with 'echo' (Persist to settings.json)"}, {num: 4, label: "No, cancel"}}}},
+		{"agy-question", dialog{title: "Question 1/1: Do you prefer red or blue?", what: "", cursor: 0, opts: []option{{num: 1, label: "(Recommended) Red"},
+			{num: 2, label: "Blue"}, {num: 3, label: "Write-in..."}}}},
 		{"codex-trust", dialog{what: "Folderaccess/private/tmp/claude-503/-Users-storm-PhpstormProjects-ppf-dev--claude-worktrees-tile-crop-codex-grok/bff0037d-9894-44df-8196-ded6b8137fb9/scratchpad/play", title: "Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings can run code automatically, even without a model request. Continue only if you trust these files. Your trust decision will be saved.",
 			cursor: 0, opts: []option{{num: 1, label: "Trust and continue"}, {num: 2, label: "Back to Agent Command Center"}}}},
 	}
@@ -69,6 +74,15 @@ func TestParseDialogBash(t *testing.T) {
 	// The wrapped rest of a long label is its desc
 	if o := d.opts[1]; o.label != "Yes, and don't ask again for mkdir -p build/out and touch build/out/x.txt commands in" || !strings.HasPrefix(o.desc, "/private/tmp/") {
 		t.Errorf("option 2 = %+v", o)
+	}
+}
+
+// agy in a narrow pane wraps an option's label flush left
+func TestParseDialogAgyNarrow(t *testing.T) {
+	d, ok := parseDialog(golden(t, "agy-permission-narrow"))
+	if !ok || d.title != "Run this command?" || len(d.opts) != 4 || d.cursor != 0 || d.opts[3].label != "No, cancel" ||
+		d.opts[1].desc != "commands that start with 'echo'" {
+		t.Fatalf("parseDialog = %v %+v", ok, d)
 	}
 }
 

@@ -585,7 +585,7 @@ func staleNote(t tile) bool {
 	return !t.deciding && noteKind(t.note) == inbox.Decision
 }
 
-// modelText is a Claude or Codex worker's model and effort as "opus·medium", "" when no --model was passed.
+// modelText is a Claude, Codex or agy worker's model and effort as "opus·medium", "" when no --model was passed.
 func modelText(t tile) string {
 	if t.model == "" {
 		return ""

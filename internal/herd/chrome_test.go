@@ -110,6 +110,10 @@ func TestPreviewLinesGolden(t *testing.T) {
 		{"grok-draft", "Grok", "/p/t/c/-/b/scratchpad/play", "[Dashboard]"},
 		{"grok-working-draft", "Grok", "⠦ Waiting for response…", "❯ rebase onto master"},
 		{"grok-working", "Grok", "⠧ Find ppf-dev and tile-crop worktree…", "◆ Thought for 2.4s"},
+		// agy 1.5.16
+		{"agy-idle", "Agy", "The command execution was denied by a pre-tool hook.", "Antigravity CLI 1.5.16"},
+		{"agy-working", "Agy", "⣷  Generating...", "> say ok"},
+		{"agy-esc", "Agy", "⎿  Interrupted · What should Antigravity CLI do instead?", "> Count slowly from 1 to 30"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {

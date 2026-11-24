@@ -393,11 +393,11 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 	return rows[0], nil
 }
 
-// ReadChecked is ReadStatus, but a Claude pane's decision (agent.Deciding) or working state is checked
-// against its screen first, as Claude fires no hook when its dialog is answered No or Esc, or Esc ends its
-// turn. For a decision, its own input box back at the bottom (screen.ClaudeState) means no dialog is open;
-// the state it shows, idle or working, is recorded and returned. A working pane showing its turn
-// interrupted (screen.ClaudeInterrupted) is recorded idle, as is a working agy pane (screen.AgyInterrupted).
+// ReadChecked is ReadStatus, but a Claude or agy pane's decision (agent.Deciding) or working state is checked
+// against its screen first, as neither fires a hook when its permission prompt is declined or cancelled, or Esc
+// ends its turn (an agy question only after its PostToolUse). For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
+// is open; the state it shows, idle or working, is recorded and returned. A working pane showing its turn
+// interrupted (screen.ClaudeInterrupted, screen.AgyInterrupted) is recorded idle.
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	st, err := ReadStatus(c, pane)
 	if err != nil {
@@ -405,6 +405,24 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	}
 	if agent.AgyCommand(st.Command) && st.Trusted() == agent.Working {
 		return checkInterrupted(c, pane, st, screen.AgyInterrupted)
+	}
+	if agent.AgyCommand(st.Command) && agent.Deciding(st.Trusted(), st.WaitingFor) {
+		// A declined or cancelled permission prompt fires no hook; a question's answer or skip does (PostToolUse), but
+		// its hook records it before agy draws it: its screen is read only once its PostToolUse came (before agy drew
+		// its input box again)
+		asks, answered, err := agyQuestion(c, pane)
+		if err != nil || asks && answered != st.Since {
+			return st, err
+		}
+		return checkDialog(c, pane, st, func(capture string) string {
+			switch {
+			case screen.AgyIdle(capture):
+				return agent.Idle
+			case screen.AgyBox(capture):
+				return agent.Working
+			}
+			return ""
+		})
 	}
 	if !agent.ClaudeCommand(st.Command) {
 		return st, nil
@@ -416,8 +434,23 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	if st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt {
 		return st, nil
 	}
-	// Claude draws a dialog seconds before its Notification records it: a fresh decision's dialog may not be
-	// on screen yet
+	return checkDialog(c, pane, st, screen.ClaudeState)
+}
+
+// agyQuestion reports an agy question (agent.AgyHook) recorded as pane's @agent_question, and the @agent_since of
+// the decision its PostToolUse came for (agent.OptAgyAnswered).
+func agyQuestion(c *tmux.Client, pane string) (asks bool, answered string, err error) {
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptAgyAnswered+"} #{"+agent.OptQuestion+"}")
+	// Not TrimSpace: answered may be empty
+	answered, question, _ := strings.Cut(strings.TrimRight(out, "\n"), " ")
+	q, ok := agent.ParseQuestion(question)
+	return ok && q.Tool == agent.AskUserQuestion, answered, err
+}
+
+// checkDialog records pane st, waiting on a decision, as the state its screen shows (shows: "" while its dialog is
+// open) once its dialog closed without a hook. Not within dialogGrace of the decision: Claude draws a dialog
+// seconds before its Notification records it.
+func checkDialog(c *tmux.Client, pane string, st Status, shows func(capture string) string) (Status, error) {
 	sec, err := strconv.ParseInt(st.Since, 10, 64)
 	if err != nil || now().Sub(time.Unix(sec, 0)) < dialogGrace {
 		return st, nil
@@ -426,7 +459,7 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	if err != nil {
 		return st, err
 	}
-	state := screen.ClaudeState(capture)
+	state := shows(capture)
 	if state == "" {
 		return st, nil
 	}
@@ -558,7 +591,7 @@ func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err erro
 			return false, notSent{errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")}
 		}
 	}
-	if err := paste(c, clk, pane, text); err != nil {
+	if err := paste(c, clk, pane, text, agent.AgyCommand(st.Command)); err != nil {
 		return false, err
 	}
 	if st.Trusted() == agent.Working || !claude || !isCommand(text) {
@@ -659,7 +692,8 @@ func NotSent(err error) bool {
 	return errors.As(err, &n)
 }
 
-func paste(c *tmux.Client, clk Clock, pane, text string) error {
+// paste pastes text into pane and presses Enter; an agy pane's (agy) only while its input box still shows.
+func paste(c *tmux.Client, clk Clock, pane, text string, agy bool) error {
 	if strings.TrimSpace(text) == "" {
 		return notSent{errors.New("empty prompt")}
 	}
@@ -686,6 +720,17 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 		return notSent{err}
 	}
 	clk.Sleep(enterDelay)
+	if agy {
+		// agy records no hook for a permission prompt: one drawn since checkAgyBox would take the Enter as its pick.
+		// This narrows that window to the capture's; it can't close it
+		capture, err := c.Run("capture-pane", "-p", "-t", pane)
+		if err != nil {
+			return fmt.Errorf("pasted into agy's input box, Enter not pressed: %w", err)
+		}
+		if !screen.AgyBoxBottom(capture) {
+			return errors.New("pasted into agy's input box, but its box is gone (a dialog may have opened), Enter not pressed: read it and answer with send-keys, then submit or clear the draft")
+		}
+	}
 	_, err = c.Run("send-keys", "-t", pane, "Enter")
 	return err
 }
@@ -724,7 +769,7 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 	if reset && (before.Session == "" || agent.AgyCommand(before.Command)) {
 		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait")}
 	}
-	err = paste(c, clk, pane, text)
+	err = paste(c, clk, pane, text, agent.AgyCommand(before.Command))
 	if !NotSent(err) {
 		sent()
 	}
