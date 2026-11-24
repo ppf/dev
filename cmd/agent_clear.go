@@ -10,6 +10,7 @@ import (
 
 	"github.com/ppf/dev/internal/bossclear"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -49,9 +50,12 @@ only into an empty input box, and a turn ending on a permission prompt or dialog
     open ask's number under Open asks and something under Roles; a miss prompts it once with what it missed.
 It prints the handoff, proof and old transcript paths; a failure after the /clear prints them with the proof prompt
 to send by hand. dev checks form, not meaning: compare the two files (an unconfirmed fact done in other words, the
-roles) and tell the user in one line. The files stay on disk.`,
+roles) and tell the user in one line. The files stay on disk.
+dev's watch loop offers it once per idle stretch: a boss resting %s with every check above passing (no --force) is
+noted to the manager over it ("may be cleared: … clear it?"); the manager's own offer is an ask on its list for the
+user, who runs dev agent clear manager from a plain shell.`,
 			bossclear.MinContext, bossclear.Headings(bossclear.Sections), bossclear.MaxFacts, bossclear.MaxFacts,
-			bossclear.Headings(bossclear.ProofSections)),
+			bossclear.Headings(bossclear.ProofSections), inbox.Span(bossclear.IdleLimit)),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()

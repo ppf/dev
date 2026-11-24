@@ -378,6 +378,19 @@ func HandedToManager(c *tmux.Client, pane, state string) (bool, error) {
 	return h != nil && h.Handed != "" && h.Handed == w.Since, nil
 }
 
+// ManagerOver is managerOver for the boss session named boss.
+func ManagerOver(c *tmux.Client, boss string) (Boss, bool, error) {
+	return managerOver(c, Boss{Name: boss})
+}
+
+// ToManager queues n in Manager m's inbox and delivers it.
+func ToManager(c *tmux.Client, clk control.Clock, m Boss, n Note) error {
+	if _, err := m.Box.Add(n, clk.Now()); err != nil {
+		return err
+	}
+	return Deliver(c, clk, m)
+}
+
 // managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.
 func managerOver(c *tmux.Client, b Boss) (Boss, bool, error) {
 	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))

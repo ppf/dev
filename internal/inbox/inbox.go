@@ -49,6 +49,8 @@ const (
 	AskAnswered = "ask answered"
 	// ToDo is an item on the boss's own list that may be out of date, or ticked by itself (todo.Nudge, todo.Ticked)
 	ToDo = "to do"
+	// ClearIt is to the manager: a boss of its rested long enough to be cleared (bossclear.Offer)
+	ClearIt = "may be cleared"
 )
 
 // workerless reports a kind of note about no worker of the boss's: its line has no worker, its key no dedupe.
