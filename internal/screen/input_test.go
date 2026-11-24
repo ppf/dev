@@ -29,6 +29,8 @@ func TestInputBox(t *testing.T) {
 		"blank":            {rule + "❯\u00a0\n" + rule, Input{}},
 		"multi-line draft": {rule + "❯\u00a0fix\nthe login\n" + rule, Input{Text: "fix\nthe login"}},
 		"typed then dim":   {rule + "❯ ru\x1b[2mn it\x1b[0m\n" + rule, Input{Text: "ru"}},
+		// A long suggestion wraps onto the row under its prompt row: still Claude Code's, never typed
+		"wrapped suggestion": {rule + "❯ \x1b[2mrun the full suite\x1b[0m\n  \x1b[2mand report\x1b[0m\n" + rule, Input{Text: "run the full suite\n  and report", Suggestion: true}},
 	} {
 		if got, ok := InputBox(tt.screen); !ok || got != tt.want {
 			t.Errorf("%s: %+v %v, want %+v", name, got, ok, tt.want)

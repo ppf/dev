@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/inbox"
 )
 
 // dev todo asking marks the ask whose question the manager has up: --all --json carries "asking" on it until the
@@ -98,5 +100,19 @@ func TestTodoAsking(t *testing.T) {
 	must([]string{"TMUX_PANE=" + manager}, string(in), "state", "working")
 	if got := asking(); len(got) != 0 {
 		t.Errorf("❌ asking after the pick: %v, want none", got)
+	}
+
+	// With the manager's inbox off it still shows; answered on a board meanwhile, it goes, and isn't asked again
+	s.T("set-option", "-t", "=manager:", inbox.OptOff, "off")
+	must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?")
+	if got := asking(); len(got) != 1 || got[0] != 1 {
+		t.Errorf("❌ asking with the inbox off: %v, want [1]", got)
+	}
+	must([]string{"TMUX_PANE=", "CLAUDECODE=1"}, "", "todo", "answer", "--from-board", "--question", "Filter row?", "boss-a", "1", "A: chips")
+	if got := asking(); len(got) != 0 {
+		t.Errorf("❌ asking after a board's answer: %v, want none", got)
+	}
+	if _, stderr, err := dev(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"); err == nil || !strings.Contains(stderr, "boss-a #1 is closed already") {
+		t.Errorf("❌ asking an answered item: %v %q", err, stderr)
 	}
 }

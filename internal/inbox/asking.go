@@ -1,10 +1,10 @@
 package inbox
 
 import (
-	"errors"
 	"strings"
 	"time"
 
+	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -38,19 +38,18 @@ func (b Box) Asking(now time.Time) (*Asking, error) {
 	return s.Asking, nil
 }
 
-// ManagerAsking is the question the live Manager has up at now (Box.Asking), nil with no Manager session or its inbox off.
+// ManagerAsking is the question the live Manager has up at now (Box.Asking), its inbox on or off: nil with no tmux
+// server, no Manager session or no agent in it.
 func ManagerAsking(c *tmux.Client, now time.Time) (*Asking, error) {
-	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(Manager)); err != nil {
-		if strings.Contains(err.Error(), "can't find session") {
-			return nil, nil
-		}
+	a, err := control.Resolve(c, Manager)
+	switch {
+	case control.NoAgent(err), tmux.IsNoServer(err), err != nil && strings.Contains(err.Error(), "no session"):
+		return nil, nil
+	case err != nil:
 		return nil, err
 	}
-	m, err := Recipient(c, Manager)
-	if errors.Is(err, ErrInboxOff) || errors.Is(err, ErrNotBoss) {
-		return nil, nil
-	}
-	if err != nil {
+	m, ok, err := Coordinator(c, a.Pane)
+	if !ok || err != nil {
 		return nil, err
 	}
 	return m.Box.Asking(now)

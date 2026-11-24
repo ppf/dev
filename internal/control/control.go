@@ -42,7 +42,7 @@ type Agent struct {
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
 	// Queued marks a working Claude holding a prompt it reads at its turn's next step (screen.ClaudeQueued).
 	Queued bool `json:"queued,omitempty"`
-	// Input is a Claude pane's input box (dev agent get): text the user typed, or Claude Code's own dim suggestion
+	// Input is a Claude pane's input box (dev agent get): text the user typed, Claude Code's own dim text, or empty
 	Input   *screen.Input `json:"input,omitempty"`
 	Project string        `json:"project"`
 	Branch  string        `json:"branch"`
@@ -770,7 +770,9 @@ func markSuggestion(c *tmux.Client, pane string, lines []string) error {
 		return err
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
-		if text, ok := screen.PromptRow(lines[i]); ok && strings.TrimSpace(text) == in.Text {
+		// Its prompt row: a long suggestion wraps onto the rows under it
+		first, _, _ := strings.Cut(in.Text, "\n")
+		if text, ok := screen.PromptRow(lines[i]); ok && strings.TrimSpace(text) == first {
 			lines[i] += suggestionMark
 			return nil
 		}

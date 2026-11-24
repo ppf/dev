@@ -802,10 +802,10 @@ func (b Box) DropPrompt() error {
 	})
 }
 
-// ForgetPrompt drops the user's latest prompt (Arrived) and pick (Picked), for a new conversation.
+// ForgetPrompt drops the user's latest prompt (Arrived), pick (Picked) and the question up (SetAsking), for a new conversation.
 func (b Box) ForgetPrompt() error {
 	return b.update(func(s *state) error {
-		s.Prompt, s.Pick = nil, nil
+		s.Prompt, s.Pick, s.Asking = nil, nil, nil
 		return nil
 	})
 }

@@ -188,6 +188,7 @@ func TestReadSuggestion(t *testing.T) {
 	}{
 		{"❯ \x1b[2mrun it\x1b[0m", "❯ run it  [suggestion]"},
 		{"❯ run it", "❯ run it"},
+		{"❯ \x1b[2mrun the full suite\x1b[0m\n  \x1b[2mand report\x1b[0m", "❯ run the full suite  [suggestion]"},
 	} {
 		c := tmux.NewFake(func(args []string) (string, error) {
 			screen := "output\n" + rule + "\n" + tt.row + "\n" + rule + "\n"

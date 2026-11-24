@@ -5,16 +5,16 @@ import (
 	"strings"
 )
 
-// Input is what Claude's input box holds: Text, and Suggestion when all of it is Claude Code's own dim text (a prompt
-// suggestion or a placeholder, never the user's typing).
+// Input is what Claude's input box holds: Text ("" for an empty box), and Suggestion when all of it is Claude Code's
+// own dim text (a prompt suggestion, a placeholder or a hint, never the user's typing).
 type Input struct {
 	Text       string `json:"text"`
 	Suggestion bool   `json:"suggestion"`
 }
 
 // InputBox reads Claude's input box in capture (capture-pane -p -e): the last prompt row between two horizontal
-// rules and any draft lines under it. Typed text (outside dim runs) is the Text; a box holding only dim text has that
-// as Text, a Suggestion. ok=false when it finds no box.
+// rules and the rows under it. Typed text (outside dim runs) is the Text; a box holding only dim text has that as
+// Text, a Suggestion. ok=false with no box, or no prompt row in it (a dialog in its place).
 func InputBox(capture string) (in Input, ok bool) {
 	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
 	for i := len(lines) - 1; i > 0; i-- {
@@ -34,14 +34,15 @@ func InputBox(capture string) (in Input, ok bool) {
 			if typed == nil || all == nil {
 				return Input{}, false
 			}
-			text := []string{strings.TrimSpace(typed[1])}
+			// Its rows under the prompt row too: a long draft or suggestion wraps
+			text, shown := []string{typed[1]}, []string{all[1]}
 			for _, l := range lines[j+2 : i] {
-				text = append(text, strings.TrimRight(plainLine(l), " "))
+				text, shown = append(text, undimmed(l)), append(shown, plainLine(l))
 			}
-			if t := strings.TrimSpace(strings.Join(text, "\n")); t != "" {
+			if t := box(text); t != "" {
 				return Input{Text: t}, true
 			}
-			if dim := strings.TrimSpace(all[1]); dim != "" {
+			if dim := box(shown); dim != "" {
 				return Input{Text: dim, Suggestion: true}, true
 			}
 			return Input{}, true
@@ -49,6 +50,14 @@ func InputBox(capture string) (in Input, ok bool) {
 		return Input{}, false
 	}
 	return Input{}, false
+}
+
+// box is rows as an input box's text: each without trailing spaces, blank rows at its ends dropped.
+func box(rows []string) string {
+	for i, r := range rows {
+		rows[i] = strings.TrimRight(r, " ")
+	}
+	return strings.TrimSpace(strings.Join(rows, "\n"))
 }
 
 // PromptRow is the text after a plain line's Claude input prompt (promptRow); ok=false for no prompt row.

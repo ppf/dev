@@ -191,7 +191,7 @@ type Shown struct {
 	WaitsOn *WaitsOn `json:"waits_on,omitempty"`
 	Obvious string   `json:"obvious,omitempty"`
 	Decided *Decided `json:"decided,omitempty"`
-	// Asking: the manager has this ask's question up in its dialog now (dev todo asking), set by dev todo --all
+	// Asking: the manager has this ask's question up in its dialog now (dev todo asking), set by every --all read (boards, dev serve)
 	Asking bool `json:"asking,omitempty"`
 	Placement
 }
