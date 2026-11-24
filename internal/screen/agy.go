@@ -34,12 +34,12 @@ func AgyBoxAt(plain []string) (top, bottom int, ok bool) {
 	return 0, 0, false
 }
 
-// AgyDialog reports a dialog agy draws in its input box's place: its footer "esc to cancel" with no box rule right
-// above it (working, the rule sits there). A draft of any height doesn't count.
-func AgyDialog(capture string) bool {
+// AgyBoxBottom reports agy's input box's bottom rule right above its footer, at the bottom of its captured screen,
+// idle or working: a draft of any height above it. A dialog draws its own footer in the box's place.
+func AgyBoxBottom(capture string) bool {
 	plain := plainScreen(capture)
 	n := len(plain)
-	return n > 1 && strings.HasPrefix(plain[n-1], "esc to cancel") && !isRule(plain[n-2])
+	return n > 1 && isRule(plain[n-2])
 }
 
 // AgyBox reports agy's input box at the bottom of its captured screen, idle or working: no dialog in its place.

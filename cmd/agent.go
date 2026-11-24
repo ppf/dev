@@ -266,12 +266,12 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 				if queued {
 					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
 				}
-				return errors.Join(g.typed(err), g.done(!control.NotSent(err) && !control.NotSubmitted(err), time.Now()))
+				return errors.Join(g.typed(err), g.done(!control.NotSent(err), time.Now()))
 			}
 			// Recorded once typed: the wait may run long or be cut off
 			var gerr error
 			st, err := control.PromptWaitSent(c, control.RealClock, a.Pane, text, stall, timeout, func() { gerr = g.done(true, time.Now()) })
-			if control.NotSent(err) || control.NotSubmitted(err) {
+			if control.NotSent(err) {
 				gerr = g.done(false, time.Now())
 			}
 			if err != nil || gerr != nil {
@@ -587,6 +587,9 @@ func agyStateHooks(raw []byte) ([]string, error) {
 	var groups map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &groups); err != nil {
 		return nil, err
+	}
+	if groups == nil {
+		return nil, errors.New("null, not an object")
 	}
 	var events []string
 	for _, rawGroup := range groups {

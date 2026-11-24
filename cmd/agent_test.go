@@ -182,8 +182,10 @@ func TestAgyStateHooks(t *testing.T) {
 			t.Errorf("%s: agyStateHooks = %q, %v; want %q", tt.name, got, err, tt.want)
 		}
 	}
-	if _, err := agyStateHooks([]byte(`{"dev": `)); err == nil {
-		t.Error("a file that isn't JSON: no error")
+	for _, file := range []string{`{"dev": `, `null`} {
+		if _, err := agyStateHooks([]byte(file)); err == nil {
+			t.Errorf("%s: no error", file)
+		}
 	}
 	dir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())

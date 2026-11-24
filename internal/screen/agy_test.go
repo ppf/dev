@@ -44,8 +44,8 @@ func TestAgyScreensGolden(t *testing.T) {
 			if dir, yes, ok := AgyTrust(capture); dir != tt.trusts || yes != (tt.trusts != "") || ok != (tt.trusts != "") {
 				t.Errorf("AgyTrust = %q, %v, %v; want %q", dir, yes, ok, tt.trusts)
 			}
-			if got, want := AgyDialog(capture), tt.file == "agy-permission" || tt.file == "agy-permission-narrow" || tt.file == "agy-question"; got != want {
-				t.Errorf("AgyDialog = %v, want %v", got, want)
+			if got, want := AgyBoxBottom(capture), tt.idle || tt.file == "agy-working"; got != want {
+				t.Errorf("AgyBoxBottom = %v, want %v", got, want)
 			}
 			want := ""
 			if tt.file == "agy-permission" || tt.file == "agy-permission-narrow" {
@@ -122,8 +122,11 @@ func TestAgyBoxDraftRule(t *testing.T) {
 	for range 30 {
 		long = append(long, "  "+strings.Repeat("word ", 10))
 	}
-	if AgyDialog(strings.Join(append(long, rule, "esc to cancel     auto · Gemini 3.8 Flash · low"), "\n")) {
-		t.Error("AgyDialog(a long draft) = true")
+	if !AgyBoxBottom(strings.Join(append(long, rule, "esc to cancel     auto · Gemini 3.8 Flash · low"), "\n")) {
+		t.Error("AgyBoxBottom(a long draft) = false")
+	}
+	if AgyBoxBottom("$ \n") {
+		t.Error("AgyBoxBottom(a shell) = true")
 	}
 }
 

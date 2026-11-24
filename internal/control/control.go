@@ -686,17 +686,6 @@ type notSent struct{ error }
 
 func (e notSent) Unwrap() error { return e.error }
 
-// notSubmitted is an error after the text reached the input box, before its Enter.
-type notSubmitted struct{ error }
-
-func (e notSubmitted) Unwrap() error { return e.error }
-
-// NotSubmitted reports whether err, from Prompt or PromptWait, came after the text was typed but before its Enter.
-func NotSubmitted(err error) bool {
-	var n notSubmitted
-	return errors.As(err, &n)
-}
-
 // NotSent reports whether err, from Prompt or PromptWait, came before the text reached the pane: nothing was typed.
 func NotSent(err error) bool {
 	var n notSent
@@ -736,10 +725,10 @@ func paste(c *tmux.Client, clk Clock, pane, text string, agy bool) error {
 		// This narrows that window to the capture's; it can't close it
 		capture, err := c.Run("capture-pane", "-p", "-t", pane)
 		if err != nil {
-			return notSubmitted{fmt.Errorf("pasted into agy's input box, Enter not pressed: %w", err)}
+			return fmt.Errorf("pasted into agy's input box, Enter not pressed: %w", err)
 		}
-		if screen.AgyDialog(capture) {
-			return notSubmitted{errors.New("pasted into agy's input box, but a dialog opened, Enter not pressed: read it and answer with send-keys, then submit or clear the draft")}
+		if !screen.AgyBoxBottom(capture) {
+			return errors.New("pasted into agy's input box, but its box is gone (a dialog may have opened), Enter not pressed: read it and answer with send-keys, then submit or clear the draft")
 		}
 	}
 	_, err = c.Run("send-keys", "-t", pane, "Enter")
@@ -781,7 +770,7 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait")}
 	}
 	err = paste(c, clk, pane, text, agent.AgyCommand(before.Command))
-	if !NotSent(err) && !NotSubmitted(err) {
+	if !NotSent(err) {
 		sent()
 	}
 	if err != nil {
