@@ -315,14 +315,9 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 	if ok && n.Kind == Decision && w.Herd == "" && w.Outside == "" {
 		n.Handed, handErr = handOver(c, clk, b, w, n)
 	}
-	if ok && n.Kind == Decision && !n.Handed && handErr == nil {
-		// Its boss's: an earlier hand-over's mark, maybe of the same second (@agent_since), no longer holds
-		handErr = b.Box.update(func(s *state) error {
-			if h := s.Workers[w.Session]; h != nil {
-				h.Handed = ""
-			}
-			return nil
-		})
+	if ok && n.Kind != Decision {
+		// The worker moved on: its hand-over mark goes, or a decision of the same second (@agent_since) would match it
+		handErr = b.Box.unhand(w.Session)
 	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		err = deliverNote(c, clk, b, w, n, e.Name)

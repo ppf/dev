@@ -775,6 +775,20 @@ func (p *Prompt) is(q Prompt) bool {
 	return now == q
 }
 
+// unhand drops worker's hand-over mark (handOver), writing only when it has one.
+func (b Box) unhand(worker string) error {
+	s, err := b.locked()
+	if h := s.Workers[worker]; err != nil || h == nil || h.Handed == "" {
+		return err
+	}
+	return b.update(func(s *state) error {
+		if h := s.Workers[worker]; h != nil {
+			h.Handed = ""
+		}
+		return nil
+	})
+}
+
 // DropPrompt drops the user's latest prompt (Arrived), keeping their latest pick for an item's relay (ClaimPick).
 func (b Box) DropPrompt() error {
 	return b.update(func(s *state) error {
