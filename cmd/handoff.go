@@ -65,7 +65,11 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 	if kind != inbox.KindWork {
 		return g, nil
 	}
-	p, err := self.Box.UserPrompt()
+	// The latest pick, typed messages since or not; no pick yet: the latest typed message, which handOnPick refuses
+	p, err := self.Box.LatestPick()
+	if err == nil && p == nil {
+		p, err = self.Box.UserPrompt()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +82,7 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 	if p.Spent {
 		return nil, errors.New("--kind work: the user's latest pick was used already: ask them again")
 	}
-	if err := self.Box.Claim(*p); err != nil {
+	if err := self.Box.ClaimPick(*p, -1); err != nil {
 		return nil, fmt.Errorf("--kind work: %w", err)
 	}
 	g.pick = p
@@ -91,8 +95,9 @@ func inManager(c *tmux.Client, pane string) bool {
 	return err != nil || strings.TrimSpace(name) == inbox.Manager
 }
 
-// handOnPick refuses p, the user's latest prompt to the manager, unless it is a pick of inbox.HandItOn on one question
-// whose first line starts "Hand on to <boss>" and that holds the first line of text, the brief, as a line of its own.
+// handOnPick refuses p, the user's latest pick in the manager (else their typed message), unless it is a pick of
+// inbox.HandItOn on one question whose first line starts "Hand on to <boss>" and that holds the first line of text, the
+// brief, as a line of its own.
 func handOnPick(p *inbox.Prompt, boss, text string) error {
 	asked := strings.ToLower(p.Question)
 	line := strings.ToLower(inbox.FirstLine(text))

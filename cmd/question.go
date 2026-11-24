@@ -23,7 +23,7 @@ func newQuestionCmd() *cobra.Command {
 (AskUserQuestion's questions, or a permission's tool with its command, file or URL) on the pane (@agent_question),
 so dev boss's picker and inbox decision notes can show it; in a desktop app session, in its hook file for dev
 desktop board (an AskUserQuestion also as a decision). In the manager's pane a hand-on question (a "Hand it on"
-option) drops the user's latest pick, so a dismissed one leaves none to hand on with. It never decides: nothing goes to stdout, where Claude reads a decision.`,
+option) drops the user's latest prompt and hand-on pick (an item's pick stays), so a dismissed one leaves none to hand on with. It never decides: nothing goes to stdout, where Claude reads a decision.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			pane := os.Getenv("TMUX_PANE")

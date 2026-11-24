@@ -835,10 +835,14 @@ func (b Box) unhand(worker string) error {
 	})
 }
 
-// DropPrompt drops the user's latest prompt (Arrived), keeping their latest pick for an item's relay (ClaimPick).
+// DropPrompt drops the user's latest prompt (Arrived) and a pick on a hand-on question, keeping an item's pick for
+// its relay (ClaimPick).
 func (b Box) DropPrompt() error {
 	return b.update(func(s *state) error {
 		s.Prompt = nil
+		if s.Pick != nil && strings.HasPrefix(strings.ToLower(FirstLine(s.Pick.Question)), "hand on to ") {
+			s.Pick = nil
+		}
 		return nil
 	})
 }

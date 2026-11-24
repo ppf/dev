@@ -193,8 +193,8 @@ func recordHandOn(c *tmux.Client, picks []agent.Pick, now time.Time) error {
 	return s.Add(Handoff{Kind: outcome, At: now.Unix(), Line: FirstLine(picks[0].Question)})
 }
 
-// AskingHandOn drops the user's latest prompt when the manager in pane opens a hand-on question q: dismissed, it
-// leaves no earlier pick to hand on with; an item's pick not yet relayed stays (Box.DropPrompt).
+// AskingHandOn drops the user's latest prompt and hand-on pick when the manager in pane opens a hand-on question q:
+// dismissed, it leaves no earlier pick to hand on with; an item's pick not yet relayed stays (Box.DropPrompt).
 func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 	handOn := func(a agent.Ask) bool {
 		var labels []string
