@@ -267,9 +267,9 @@ func (s Store) NeedDetails() Store {
 // ErrNoDetails is NeedDetails' refusal.
 var ErrNoDetails = errors.New("an item the user does needs --details (what it is and why, where it stands, what done looks like), or --no-details when it needs none")
 
-// checkDetails is ErrNoDetails for it, as stored, when s NeedDetails and the user does it (no --on, no session) without any.
+// checkDetails is ErrNoDetails for it, as stored, when s NeedDetails and the user does it (no --on, no session, no ask) without any.
 func (s Store) checkDetails(it Item) error {
-	if s.details && !it.Quiet && it.On == "" && it.Session == nil && it.Details == "" {
+	if s.details && !it.Quiet && it.On == "" && it.Session == nil && it.Details == "" && len(it.Options) == 0 {
 		return ErrNoDetails
 	}
 	return nil
@@ -1448,7 +1448,7 @@ func (l List) lines(limit int, now time.Time) string {
 		}
 	}
 	if len(flagged) > 0 {
-		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):")
+		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):")
 		for _, it := range flagged {
 			write(it)
 		}
@@ -1486,7 +1486,7 @@ func detailsLine(items string) string {
 func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
 
 // whoLine asks a boss to say who does each item, as the reminders end.
-const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user)."
+const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user, with --details when it has none)."
 
 // Reminder is the items ticked by themselves (tickedText), then the open items for a boss reading worker notes at now,
 // numbered, with a line asking it to tick what the notes closed; "" when none ticked and none is open.

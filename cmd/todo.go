@@ -195,8 +195,11 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
 				return err
 			}
-			if noDetails && it.Details != "" {
+			switch {
+			case noDetails && it.Details != "":
 				return errors.New("--details or --no-details, not both")
+			case noDetails && waiting:
+				return errors.New("--no-details is for an item the user does: a waiting item gets --details")
 			}
 			stderr := cmd.ErrOrStderr()
 			// A desktop app boss's list has no name: its own is its session id

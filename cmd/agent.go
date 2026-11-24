@@ -320,7 +320,8 @@ func newAgentSendKeysCmd() *cobra.Command {
 		Long: `Press keys in the agent's pane: ` + strings.Join(control.KeyNames(), ", ") + `, or one character.
 Esc to a working Claude returns once its screen shows the turn interrupted (up to 3s), recording it idle:
 Claude fires no hook for that. A worker's decision dev handed to the manager (its note ends "leave it to the
-manager") takes keys only from the manager's coordinator pane until it is answered, while the manager runs.`,
+manager") takes a Claude's keys only from the manager's coordinator pane until it is answered, while the manager runs;
+the user's own, outside Claude Code, still pass.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			c := tmux.New()

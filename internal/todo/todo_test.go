@@ -542,7 +542,7 @@ func TestMarkGone(t *testing.T) {
 	if got := []bool{l.Items[0].Gone, l.Items[1].Gone, l.Items[2].Gone, l.Items[3].Gone}; !slices.Equal(got, []bool{false, false, true, false}) {
 		t.Errorf("gone = %v, want only the open item on old", got)
 	}
-	if got := l.Reminder(nil, time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola) (no details)\n2. b (on live)\n") {
+	if got := l.Reminder(nil, time.Now()); !strings.Contains(got, "(dev todo add --replaces <n>, with --details when it is the user's and has none):\n3. c (on old, session gone)\nThe rest:\n1. a (on Ola) (no details)\n2. b (on live)\n") {
 		t.Errorf("Reminder = %q", got)
 	}
 }

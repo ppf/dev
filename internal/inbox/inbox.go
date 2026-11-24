@@ -741,7 +741,7 @@ func (b Box) claim(p Prompt, latest func(*state) *Prompt, since string) error {
 		case !q.is(p):
 			return errors.New(since)
 		case q.Spent:
-			return errors.New("the user's latest pick answered an item already: ask them this one")
+			return errors.New("the user's latest pick was used already: ask them this one")
 		}
 		s.spend(p, true)
 		return nil

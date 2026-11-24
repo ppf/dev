@@ -10,10 +10,18 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// gateSendKeys refuses keys to a, a worker whose decision went to the manager (inbox.HandedToManager), from any pane
-// but the manager's coordinator, until it is answered.
+// gateSendKeys refuses keys to a, a worker whose decision went to the manager (inbox.HandedToManager), from a Claude
+// in any pane but the manager's coordinator, until it is answered; the user in a shell is let through.
 func gateSendKeys(c *tmux.Client, a control.Agent) error {
-	handed, err := inbox.HandedToManager(c, a.Pane, a.State)
+	if os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == "" {
+		return nil
+	}
+	// A dialog closed without a hook (declined, Esc) holds no decision
+	st, err := control.ReadChecked(c, a.Pane)
+	if err != nil {
+		return err
+	}
+	handed, err := inbox.HandedToManager(c, a.Pane, st.Trusted())
 	if err != nil || !handed {
 		return err
 	}

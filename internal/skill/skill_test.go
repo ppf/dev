@@ -180,7 +180,7 @@ func TestAskRules(t *testing.T) {
 		"a message the user typed here answers no item (dev refuses it): ask that item as a question",
 		"their latest pick counts also with typed messages after it (relay it, don't ask again)",
 		"don't relay it or `send-keys` (dev refuses your keys to that worker until it is answered)",
-		"(dev refuses any other sender's keys to it until it is answered)",
+		"(dev refuses any other Claude's keys to it until it is answered)",
 		"1500 characters per message (longer: write it to a file and send its path)",
 		"`dev todo add` refuses an item the user does (no `--on` or `--on me`, no `--waiting-for`) without `--details`, unless `--no-details`",
 		"`--replaces` keeps the old item's details, so it refuses only when there were none",

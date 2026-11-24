@@ -168,7 +168,7 @@ func TestPickedClaim(t *testing.T) {
 	if err := b.Claim(*pick); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "answered an item already") {
+	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("second Claim: %v, want refused", err)
 	}
 	if err := b.Arrived("merge it", at.Add(time.Minute)); err != nil {
@@ -216,7 +216,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Arrived("and rebase", at.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "answered an item already") {
+	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("second ClaimPick: %v, want refused", err)
 	}
 	if err := b.Unclaim(p); err != nil {
@@ -238,7 +238,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Arrived("ok", at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(*latest); err == nil || !strings.Contains(err.Error(), "answered an item already") {
+	if err := b.ClaimPick(*latest); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("ClaimPick of a pick Claim spent: %v, want refused", err)
 	}
 

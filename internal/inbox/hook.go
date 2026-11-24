@@ -348,15 +348,15 @@ func HandedToManager(c *tmux.Client, pane, state string) (bool, error) {
 	if !ok || err != nil || !agent.Deciding(state, w.WaitingFor) {
 		return false, err
 	}
+	if _, live, err := managerOver(c, b); !live || err != nil {
+		return false, err
+	}
 	s, err := b.Box.locked()
 	if err != nil {
 		return false, err
 	}
-	if h := s.Workers[w.Session]; h == nil || h.Handed == "" || h.Handed != w.Since {
-		return false, nil
-	}
-	_, live, err := managerOver(c, b)
-	return live, err
+	h := s.Workers[w.Session]
+	return h != nil && h.Handed != "" && h.Handed == w.Since, nil
 }
 
 // managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.

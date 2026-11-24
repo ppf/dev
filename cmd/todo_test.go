@@ -389,7 +389,7 @@ func TestTodoOnBossWaitingFor(t *testing.T) {
 		"--waiting-for|w":              "--waiting-for w: a session you started: --on W",
 		"--waiting-for| ":              "--waiting-for: no person",
 	} {
-		if _, _, err := execute(t, "", append([]string{"todo", "add", "--no-details", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
+		if _, _, err := execute(t, "", append([]string{"todo", "add", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)
 		}
 	}
@@ -879,6 +879,13 @@ func TestTodoNoDetailsWarning(t *testing.T) {
 	}
 	if _, _, err := execute(t, "", "todo", "add", "Both", "--details", "x", "--no-details"); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Errorf("--details and --no-details: %v, want refused", err)
+	}
+	if _, _, err := execute(t, "", "todo", "add", "Reply from Ola", "--waiting-for", "Ola", "--no-details"); err == nil || !strings.Contains(err.Error(), "a waiting item gets --details") {
+		t.Errorf("--no-details --waiting-for: %v, want refused", err)
+	}
+	// An ask without details only warns, also when add --replaces changes it
+	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "7", "--link", "https://example.com/pr/1"); err != nil || !strings.Contains(errOut, warn) {
+		t.Errorf("add --replaces of a bare ask: err %v, stderr %q, want the warning", err, errOut)
 	}
 
 	todoEnv(t)

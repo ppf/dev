@@ -106,6 +106,11 @@ func TestWorkerDecisionToManager(t *testing.T) {
 	if out, err := sendKeys(manager); err != nil {
 		t.Errorf("❌ send-keys from the manager: %v %q", err, out)
 	}
+	user := exec.Command(devBin, "agent", "send-keys", "app-w", "1")
+	user.Env = s.scriptEnv("TMUX_PANE="+app, "CLAUDECODE=")
+	if out, err := user.CombinedOutput(); err != nil {
+		t.Errorf("❌ send-keys from the user's shell: %v %q", err, out)
+	}
 	state(w, "working", `{"hook_event_name":"UserPromptSubmit"}`)
 	if out, err := sendKeys(app); err != nil {
 		t.Errorf("❌ send-keys from the boss once answered: %v %q", err, out)

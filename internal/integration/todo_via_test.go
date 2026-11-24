@@ -149,7 +149,7 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		!strings.Contains(out, `- you answered #2 \"Rebase #150?\" via manager (\"boss-a #2: Rebase #150? picked Rebase\"): Rebase`) {
 		t.Errorf("❌ boss-a's note quoting the pick: %q %v %s", out, err, stderr)
 	}
-	if _, stderr, err := answer("2", "Rebase", "Rebase #150?"); err == nil || !strings.Contains(stderr, "the user's latest pick answered an item already") {
+	if _, stderr, err := answer("2", "Rebase", "Rebase #150?"); err == nil || !strings.Contains(stderr, "the user's latest pick was used already") {
 		t.Errorf("❌ a spent pick: %v %q", err, stderr)
 	}
 

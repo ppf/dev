@@ -54,7 +54,7 @@ func handoffTmux(t *testing.T, name, todoHerd, handoff string) *tmux.Client {
 }
 
 // who is the line the reminders end with, asking who does each item.
-const who = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user)."
+const who = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user, with --details when it has none)."
 
 // nodet is the line the reminders add when an item has no details.
 const nodet = "\nAn item marked (no details) gets them: dev todo add --replaces <n> --details '<what it is and why, where it stands, what done looks like>' (an ask: dev todo ask --replaces <n> --details '…')."

@@ -209,7 +209,7 @@ func TestReminderFlagged(t *testing.T) {
 		{ID: 3, Text: "Rework rounding", On: "fix", Gone: true},
 	}}
 	got := l.Reminder(nil, now)
-	want := "[dev todo] Your open to do list:\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):" +
+	want := "[dev todo] Your open to do list:\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):" +
 		"\n2. PR #412 open (on reviewers) ⚠ PR #412 approved 2h ago\n3. Rework rounding (on fix, session gone)\nThe rest:\n1. Review the copy\n"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("Reminder =\n%s\nwant it to start\n%s", got, want)
