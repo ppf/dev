@@ -76,7 +76,7 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for one added --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
@@ -240,12 +240,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				it.Until = t.Unix()
 			}
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
-			need := func(t todo.Store) todo.Store {
-				if noDetails {
-					return t
-				}
-				return t.NeedDetails()
-			}
+			it.NoDetails = noDetails
+			need := todo.Store.NeedDetails
 			if err := tryAdoptable(*boss, func(t todo.Store) error {
 				t = need(t)
 				if cmd.Flags().Changed("replaces") {
@@ -293,7 +289,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --details, --part-of not given, and its doing line unless --on changes")
-	cmd.Flags().BoolVar(&noDetails, "no-details", false, "an item the user does that needs no details: without it, one with none (none given, none kept by --replaces) is refused")
+	cmd.Flags().BoolVar(&noDetails, "no-details", false, "an item the user does that needs no details, kept on it (never marked or counted as missing them) until it gets --details: without it, one with none (none given, none kept by --replaces) is refused")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
 	return cmd

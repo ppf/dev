@@ -896,13 +896,14 @@ func TestTodoNoDetailsWarning(t *testing.T) {
 	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "1", "Documented, retitled"); err != nil || strings.Contains(errOut, warn) {
 		t.Errorf("replace of a user item with details: err %v, stderr %q", err, errOut)
 	}
-	for _, args := range [][]string{{"--replaces", "2", "Bare, retitled"}, {"--replaces", "3", "--on", "me"}} {
+	// Bare keeps its --no-details (stored); the boss's own item given back to the user without details is refused
+	for _, args := range [][]string{{"--replaces", "3", "--on", "me"}} {
 		if _, _, err := execute(t, "", append([]string{"todo", "add"}, args...)...); err == nil || !strings.Contains(err.Error(), "needs --details") {
 			t.Errorf("add %v, a user item left without details: %v, want refused", args, err)
 		}
 	}
 	if out := run(t, "", "todo", "--json"); !strings.Contains(out, `"Documented, retitled"`) || !strings.Contains(out, `"what and why"`) ||
-		!strings.Contains(out, `"Bare"`) || strings.Count(out, `"on": "boss"`) != 1 {
+		strings.Count(out, `"on": "boss"`) != 1 {
 		t.Errorf("after the refused replaces: %s, want details kept and the refused ones unchanged", out)
 	}
 	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "2", "Bare, retitled", "--no-details"); err != nil || strings.Contains(errOut, warn) {

@@ -212,7 +212,7 @@ func TestAgentClear(t *testing.T) {
 
 	t.Run("handoff missing twice, from the user's shell: not cleared", func(t *testing.T) {
 		web, webDir := boss("boss-web")
-		todo(web, "add", "Bare item", "--no-details")
+		todo(web, "add", "Bare item", "--waiting-for", "anna")
 		write(webDir, "save.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
 		write(webDir, "fix.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
 		shell := slices.DeleteFunc(slices.Clone(env), func(v string) bool { return strings.HasPrefix(v, "CLAUDECODE=") })

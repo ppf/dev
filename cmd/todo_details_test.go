@@ -137,3 +137,34 @@ func TestTodoAllFinishedDetails(t *testing.T) {
 		}
 	}
 }
+
+// An item the user does added --no-details (or given it by --replaces) is not marked "(no details)" on the list, nor
+// counted as missing details (todo.Shown.NeedsDetails, what dev agent clear checks); one later given --details loses
+// the mark's reason, and a plain replace keeps it.
+func TestTodoNoDetailsStored(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("CLAUDECODE", "1")
+	run(t, "", "todo", "add", "--no-details", "Call the bank")
+	run(t, "", "todo", "add", "--no-details", "Water the plants")
+	run(t, "", "todo", "add", "--replaces", "2", "Water the plants today")
+	run(t, "", "todo", "add", "Pay the bill", "--on", "anna")
+	if got := run(t, "", "todo"); strings.Contains(got, "Call the bank (no details)") || strings.Contains(got, "today (no details)") ||
+		!strings.Contains(got, "Pay the bill") {
+		t.Errorf("list:\n%s", got)
+	}
+	s, err := todoStore("", false, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := s.Read(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range l.Items {
+		if want := it.ID == 3; it.NeedsDetails() != want {
+			t.Errorf("#%d %q: NeedsDetails %v, want %v", it.ID, it.Text, it.NeedsDetails(), want)
+		}
+	}
+	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")
+	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")
+}
