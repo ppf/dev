@@ -6,7 +6,8 @@ function node() {
   const n = { children: [], dataset: {}, style: { setProperty(k, v) { this[k] = v; } }, hidden: false, inert: false, scrollTop: 0, className: '', textContent: '',
     classList: { set: new Set(), toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); }, contains(c) { return this.set.has(c); } },
     attrs: {}, setAttribute(k, v) { n.attrs[k] = v; }, getAttribute() { return null; }, on: {}, addEventListener(k, f) { n.on[k] = f; }, focus() {},
-    contains() { return false; }, append(...k) { n.children.push(...k); }, replaceChildren(...k) { n.children = k; },
+    contains() { return false; }, append(...k) { for (const c of k) if (typeof c === 'object') c.parent = n; n.children.push(...k); },
+    remove() { if (n.parent) n.parent.children = n.parent.children.filter(c => c !== n); }, replaceChildren(...k) { n.children = k; },
     querySelectorAll() { return []; }, querySelector() { return null; } };
   return n;
 }
@@ -25,7 +26,7 @@ const ctx = {
   pc, console, Date, JSON, Math, Number, String, Object, Array, Set, Map, Promise, RegExp, Error, AbortController,
   setTimeout, clearTimeout, setInterval: () => 0,
   document: { visibilityState: 'visible', activeElement: null, documentElement: node(), getElementById: id => els[id] ||= node(),
-    createElement: tag => Object.assign(node(), { tag }), addEventListener(k, f) { (ctx.docOn[k] ||= []).push(f); }, querySelectorAll: () => [], querySelector: () => null, body: node() },
+    createElement: tag => Object.assign(node(), { tag }), addEventListener(k, f) { (ctx.docOn[k] ||= []).push(f); }, querySelectorAll: sel => sel.startsWith('body > ') ? ctx.document.body.children.filter(c => ['refuse', 'toast'].includes(c.className)) : [], querySelector: () => null, body: node() },
   window: { addEventListener() {}, scrollTo() {} }, innerWidth: 1280, innerHeight: 800,
   location: { hash: '#/', reloads: 0, reload() { this.reloads++; } },
   matchMedia: () => media,
@@ -626,6 +627,9 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   await past('RELEASE_MS');
   check('… and the board redraws after its click', doneA() !== link && walk(els.view, n => n.attrs?.href === '#/item/boss-a/31').length === 1);
 
+  // The foot's callouts and toasts leave after FLASH_MS: wait it out, so the timer fires in the test, not after it
+  await past('FLASH_MS');
+  check('a callout and a toast leave the foot after FLASH_MS', !ctx.document.body.children.some(c => c.className === 'refuse' || c.className === 'toast'));
   lists = null;
   process.exit(0);
 })().catch(e => { console.log('threw: ' + e.stack); process.exit(0); });
