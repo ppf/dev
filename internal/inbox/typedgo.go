@@ -48,7 +48,7 @@ func (e entry) pick() bool {
 // message reports e something said to the session: a prompt from anyone, a hook's text, a pick or a user line dev
 // doesn't know (refused); not a tool result or a prompt's companion row (an image, a skill's text).
 func (e entry) message() bool {
-	if e.IsSidechain {
+	if e.Type != "user" || e.IsSidechain {
 		return false
 	}
 	if e.Origin != nil || e.HookText || e.pick() {
@@ -132,22 +132,23 @@ func LatestGo(path, words string) (Go, error) {
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
-		switch {
-		case bytes.Contains(line, []byte(`"type":"user"`)):
+		// A last line without its newline is still being written
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return Go{}, fmt.Errorf("--go: reading the manager's transcript: %w%s", err, askAgain)
+		}
+		if bytes.Contains(line, []byte(`"type":"user"`)) {
 			var e entry
 			if uerr := json.Unmarshal(line, &e); uerr != nil {
 				broken = uerr
 			} else if e.message() {
 				last, asked, broken = e, false, nil
 			}
-		case bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)) && asks(line):
+		}
+		if bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)) && asks(line) {
 			asked = true
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return Go{}, fmt.Errorf("--go: reading the manager's transcript: %w%s", err, askAgain)
 		}
 	}
 	if broken != nil {
@@ -180,6 +181,8 @@ func LatestGo(path, words string) (Go, error) {
 		why = "the latest message here is one dev typed, not the user's"
 	case strings.Trim(typed, "\x00 \t\n") == "":
 		why = "the user's latest message is pasted text, not typed"
+	case strings.HasSuffix(strings.TrimRight(typed, "\x00 \t\n"), "?"):
+		why = "the user's latest message is a question, not a go"
 	case !holds(fold(typed), fold(words)):
 		why = fmt.Sprintf("%q is not in the user's latest message", words)
 	default:

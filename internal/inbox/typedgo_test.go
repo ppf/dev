@@ -27,6 +27,8 @@ const (
 	lineBroken    = `{"type":"user","uuid":"b1","origin":"human","message":{"content":"Tak"}}`
 	lineAsk       = `{"type":"assistant","uuid":"a2","timestamp":"2026-11-24T10:02:00.000Z","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{}}]}}`
 	lineGrep      = `{"type":"assistant","uuid":"a3","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"grep -n \"name\":\"AskUserQuestion\" x"}}]}}`
+	lineNested    = `{"type":"assistant","uuid":"a4","message":{"content":[{"type":"tool_use","name":"mcp","input":{"filter":{"type":"user"}}}]}}`
+	lineQuestion  = `{"type":"user","uuid":"q2","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Tak czy nie, ruszamy?"}}`
 	lineSplit     = `{"type":"user","uuid":"w1","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Ta[Image #1]k"}}`
 	lineSide      = `{"type":"user","uuid":"x1","timestamp":"2026-11-24T10:02:00.000Z","isSidechain":true,"origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Tak ruszaj"}}`
 )
@@ -70,6 +72,8 @@ func TestLatestGo(t *testing.T) {
 		{name: "an unreadable line before the go", words: "Tak", lines: []string{lineBroken, lineTyped}, uuid: "u1"},
 		{name: "a tool's text naming AskUserQuestion", words: "Tak", lines: []string{lineTyped, lineGrep}, uuid: "u1"},
 		{name: "words across an image", words: "Tak", lines: []string{lineSplit}, want: `"Tak" is not in the user's latest message`},
+		{name: "a tool's input holding a user type", words: "Tak", lines: []string{lineTyped, lineNested}, uuid: "u1"},
+		{name: "a question", words: "Tak", lines: []string{lineQuestion}, want: "is a question, not a go"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, err := LatestGo(transcript(t, tc.lines...), tc.words)
@@ -80,6 +84,13 @@ func TestLatestGo(t *testing.T) {
 				t.Errorf("❌ LatestGo = %+v, %v; want %q", g, err, tc.want)
 			}
 		})
+	}
+	partial := filepath.Join(t.TempDir(), "partial.jsonl")
+	if err := os.WriteFile(partial, []byte(lineTyped+"\n"+`{"type":"user","origin":{"ki`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := LatestGo(partial, "Tak"); err != nil || g.UUID != "u1" {
+		t.Errorf("❌ a last line still being written: %+v, %v", g, err)
 	}
 	if _, err := LatestGo("", "Tak"); err == nil || !strings.Contains(err.Error(), "transcript is unknown") {
 		t.Errorf("❌ no transcript: %v", err)

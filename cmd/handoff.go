@@ -57,7 +57,7 @@ func gateHandOn(c *tmux.Client, kind, words, boss, text string) (*handOn, error)
 	case !manager:
 		return nil, errors.New("--kind is the manager's: only in its coordinator pane")
 	case kind == "":
-		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
+		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick or their typed go (--go)", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
 	case !slices.Contains(inbox.Kinds, kind):
 		return nil, fmt.Errorf("--kind %s: one of %s", kind, strings.Join(inbox.Kinds, ", "))
 	}
@@ -138,7 +138,7 @@ func handOnPick(p *inbox.Prompt, boss, text string) error {
 	line := strings.ToLower(inbox.FirstLine(text))
 	switch {
 	case !p.Pick:
-		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q)", inbox.HandItOn, inbox.DropIt)
+		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q), or, on their typed go, add --go '<their words>'", inbox.HandItOn, inbox.DropIt)
 	case p.HandOnMixed:
 		return errors.New("--kind work: the user's dialog held the hand-on question beside others: a hand-on question stays alone in its dialog: ask it again on its own")
 	case p.Question == "":
