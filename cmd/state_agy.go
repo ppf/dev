@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -125,6 +126,7 @@ func newAgyDialogCmd() *cobra.Command {
 				return fmt.Errorf("%s %s: %w", time.Now().Format(time.DateTime), pane, err)
 			}
 			recorded := false
+			var told error
 			for start := clk.Now(); !recorded && clk.Now().Sub(start) < agyDialogWindow; clk.Sleep(agyDialogPoll) {
 				st, err := control.ReadStatus(c, pane)
 				if err != nil {
@@ -138,19 +140,24 @@ func newAgyDialogCmd() *cobra.Command {
 				if err == nil {
 					recorded, err = inbox.AgyPermission(c, clk, pane, st, capture)
 				}
-				if err != nil {
+				if err != nil && !recorded {
 					return logged(err)
 				}
+				// Recorded, its note or notification failed: still watched
+				told = err
 			}
 			// Its screen settles it (control.ReadChecked): approved, agy runs the command before any hook fires
 			for start := clk.Now(); recorded && clk.Now().Sub(start) < agyDialogWatch; clk.Sleep(agyDialogCheck) {
 				st, err := control.ReadChecked(c, pane)
 				if err != nil {
-					return logged(err)
+					return logged(errors.Join(told, err))
 				}
 				if !agent.Deciding(st.Trusted(), st.WaitingFor) {
-					return nil
+					break
 				}
+			}
+			if told != nil {
+				return logged(told)
 			}
 			return nil
 		},
