@@ -361,6 +361,13 @@ func ReopenNeed(boss string, id int, text string) (string, error) {
 	return strings.TrimSpace(out + " " + warning), err
 }
 
+// OverruleNeed answers the user's ask id of boss's list, decided for them, with option in its place, as dev todo overrule
+// does, only while it still reads text.
+func OverruleNeed(boss string, id int, text, option string) (string, error) {
+	out, warning, err := runTodo(answerTimeout, "overrule", "--from-board", "--question="+text, "--", boss, strconv.Itoa(id), option)
+	return strings.TrimSpace(out + " " + warning), err
+}
+
 // DoingNeed marks the user's own item id of boss's list in progress with doing, or ends it (stop), as dev todo doing
 // does, only while it still reads text and its doing line and start are as seen (JSON, todo.Seen).
 func DoingNeed(boss string, id int, text, seen, doing string, stop bool) (string, error) {

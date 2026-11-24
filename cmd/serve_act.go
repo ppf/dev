@@ -96,6 +96,22 @@ func pageReopen(stderr io.Writer) func(boss string, id int, text string) error {
 	}
 }
 
+// pageOverrule is dev todo overrule --question from the phone page: its boss must run, to be told.
+func pageOverrule(stderr io.Writer) func(boss string, id int, text, option string) error {
+	return func(boss string, id int, text, option string) error {
+		c := tmux.New()
+		if !running(c, boss) {
+			return serve.Refused{Code: http.StatusNotFound, Err: fmt.Errorf("%s isn't running: its decisions can't be overruled", boss)}
+		}
+		_, err := overruleItem(c, stderr, boss, id, text, option, todo.ViaPage)
+		if errors.As(err, new(notTold)) {
+			log.Printf("dev serve: %v", err)
+			return serve.Refused{Code: http.StatusInternalServerError, Err: err}
+		}
+		return refused(err)
+	}
+}
+
 // running is whether boss's session is on c's server.
 func running(c *tmux.Client, boss string) bool {
 	_, err := c.Run("has-session", "-t", tmux.SessionTarget(boss))

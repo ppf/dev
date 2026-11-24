@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
 
@@ -63,11 +64,16 @@ type noReopenList struct{ error }
 
 func (e noReopenList) Unwrap() error { return e.error }
 
-// reopenItem reopens the user's ticked item id of boss name's list, a closed boss's too, while it reads text.
+// reopenItem reopens the user's ticked item id of boss name's list, a closed boss's too, while it reads text; a queued
+// settled note of it goes.
 func reopenItem(name string, id int, text string, warn io.Writer) (todo.Item, error) {
 	s, _, err := listStoreOf(name, false, true, warn)
 	if err != nil {
 		return todo.Item{}, noReopenList{err}
 	}
-	return s.Reopen(id, text, time.Now())
+	it, err := s.Reopen(id, text, time.Now())
+	if err == nil || errors.As(err, new(todo.StillDone)) {
+		withdrawSettled(tmux.New(), warn, name, id, text)
+	}
+	return it, err
 }

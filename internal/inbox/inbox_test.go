@@ -911,3 +911,31 @@ func TestObserveUnsentQuestion(t *testing.T) {
 		t.Errorf("under a health note = %q", got)
 	}
 }
+
+// Reopened, an item's newest queued settled note goes; the user's own answer to it and other items' stay.
+func TestWithdrawSettled(t *testing.T) {
+	b := testBox(t)
+	// An older note with the same number and text is an earlier item's (numbers restart): only the newest goes
+	older := AnswerSettled(4, "Re-run CI?", "Retry")
+	settled := AnswerSettled(4, "Re-run CI?", "Re-run")
+	keep := []Note{older, Answer(4, "Re-run CI?", "Look first"), AnswerSettled(4, "Other?", "Yes"), AnswerSettled(5, "Re-run CI?", "Re-run")}
+	for _, n := range []Note{older, settled, keep[1], keep[2], keep[3]} {
+		if _, err := b.Add(n, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.WithdrawSettled(4, "Re-run CI?"); err != nil {
+		t.Fatal(err)
+	}
+	bt, _ := b.Take()
+	if !slices.Equal(bt.Notes, keep) {
+		t.Errorf("left = %+v, want %+v", bt.Notes, keep)
+	}
+	n := AnswerOverruled(4, "Re-run CI?", "Look first", "Re-run", "manager")
+	if want := `#4 "Re-run CI?" overruled by the user (the manager had settled it with Re-run): Look first`; n.Text != want || n.Key != "answer 4" {
+		t.Errorf("overruled = %+v, want %q", n, want)
+	}
+	if n := AnswerOverruled(4, "Q?", "B", "A", "boss"); !strings.Contains(n.Text, "(you had decided A): B") {
+		t.Errorf("overruled a boss's own = %q", n.Text)
+	}
+}

@@ -99,6 +99,10 @@ func TestBoardGolden(t *testing.T) {
 	if err := s.WithResult("Sent "+home+"/notes.md to the team channel 12:40").Done([]int{8}, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	// Decided for the user: its why leaves the Mac scrubbed too
+	if _, err := s.Decide(todo.Item{Text: "Re-run CI?", Options: []string{"Re-run (Recommended)", "Look first"}}, "flaky, see "+home+"/ci.log", now); err != nil {
+		t.Fatal(err)
+	}
 	b, err := todo.ForPane(c, tmux.SessionTarget("boss-b"))
 	if err != nil {
 		t.Fatal(err)

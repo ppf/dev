@@ -45,7 +45,8 @@ const (
 
 // answeredHint ends a batch holding an answer.
 const answeredHint = `(a "you answered" note is the user's own answer to that item on your list, or, "settled by the manager", your ` +
-	`recommended option the manager took for an ask you marked obvious, which the user may overrule: act on it. dev ticked the item ` +
+	`recommended option the manager took for an ask you marked obvious, which the user may overrule, or, "overruled by the user", ` +
+	`the user's own answer in place of one decided for them, so undo what that one started, if anything: act on it. dev ticked the item ` +
 	`already, so don't tick it. It never answers a permission prompt or dialog)`
 
 // toDoHint ends a batch holding a to do note.
@@ -402,8 +403,60 @@ var ErrNotBoss = errors.New("is not a boss session (dev boss)")
 // AnswerSettled is Answer settled by the Manager with the boss's recommended option, the ask marked obvious.
 func AnswerSettled(id int, text, answer string) Note {
 	n := Answer(id, text, answer)
-	n.Text = fmt.Sprintf(`#%d "%s" settled by the %s with your recommended option: %s`, id, text, Manager, answer)
+	n.Text = settledPrefix(id, text) + answer
 	return n
+}
+
+// settledPrefix starts AnswerSettled's text for item id, text.
+func settledPrefix(id int, text string) string {
+	return fmt.Sprintf(`#%d "%s" settled by the %s with your recommended option: `, id, text, Manager)
+}
+
+// AnswerOverruled is Answer the user gave in place of was, which by (todo.DecidedManager, or todo.DecidedBoss: the boss
+// itself) decided for them.
+func AnswerOverruled(id int, text, answer, was, by string) Note {
+	n := Answer(id, text, answer)
+	who := "the " + Manager + " had settled it with"
+	if by == todo.DecidedBoss {
+		who = "you had decided"
+	}
+	n.Text = fmt.Sprintf(`#%d "%s" overruled by the user (%s %s): %s`, id, text, who, was, answer)
+	return n
+}
+
+// WithdrawSettled drops the newest queued AnswerSettled note of item id, text, as the user reopened it: none queued is
+// no error.
+func (b Box) WithdrawSettled(id int, text string) error {
+	return b.update(func(s *state) error {
+		s.withdrawSettled(id, text)
+		return nil
+	})
+}
+
+// withdrawSettled drops the newest queued AnswerSettled note of item id, text: an older one with both (numbers restart)
+// is another item's.
+func (s *state) withdrawSettled(id int, text string) {
+	for i := len(s.Notes) - 1; i >= 0; i-- {
+		if q := s.Notes[i]; q.Kind == Answered && strings.HasPrefix(q.Text, settledPrefix(id, text)) {
+			s.Notes = slices.Delete(s.Notes, i, i+1)
+			return
+		}
+	}
+}
+
+// SendOverruled is Send of n, the user's overrule of item id, text, queued in the same write that withdraws the
+// newest AnswerSettled note of it still queued: the boss never gets the settle without the overrule.
+func (b Boss) SendOverruled(c *tmux.Client, clk control.Clock, n Note, id int, text string) (queued bool, err error) {
+	if err := b.Box.update(func(s *state) error {
+		s.withdrawSettled(id, text)
+		s.add(n)
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	// A failed lookup keeps its note, and isn't this send's failure: Watch and the hooks report it
+	_ = b.Box.WithdrawTicked(listItem(c, clk.Now()))
+	return true, deliver(c, clk, b)
 }
 
 // AnswerPage is Answer given on the phone page (dev serve).

@@ -37,6 +37,9 @@ type Config struct {
 	Doing func(boss string, id int, text string, seen todo.Seen, doing string, stop bool) error
 	// Reopen puts the user's item id, ticked in the last day, back on boss's list while it still reads text.
 	Reopen func(boss string, id int, text string) error
+	// Overrule answers the user's ask id, decided for them in the last day, with option, one of those it was picked
+	// over, while it still reads text, and tells its boss.
+	Overrule func(boss string, id int, text, option string) error
 	// Guard wraps every /v1 call but health and pair: Auth.Session, or SameOrigin on a loopback bind. Required.
 	Guard func(http.Handler) http.Handler
 	// Pair answers POST /v1/pair, which needs no X-Dev-Page (the code guards it): Auth.Pair. Required.
@@ -58,8 +61,9 @@ func Handler(cfg Config) http.Handler {
 	mux.Handle("POST /v1/start", cfg.Guard(fromPage(http.HandlerFunc(cfg.start))))
 	mux.Handle("POST /v1/doing", cfg.Guard(fromPage(http.HandlerFunc(cfg.doing))))
 	mux.Handle("POST /v1/reopen", cfg.Guard(fromPage(http.HandlerFunc(cfg.reopen))))
+	mux.Handle("POST /v1/overrule", cfg.Guard(fromPage(http.HandlerFunc(cfg.overrule))))
 	mux.Handle("POST /v1/pair", cfg.Pair)
-	for _, route := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/doing", "/v1/reopen", "/v1/pair"} { // else "GET /" answers the page's 404
+	for _, route := range []string{"/v1/answer", "/v1/done", "/v1/start", "/v1/doing", "/v1/reopen", "/v1/overrule", "/v1/pair"} { // else "GET /" answers the page's 404
 		mux.HandleFunc("GET "+route, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Allow", http.MethodPost)
 			writeError(w, http.StatusMethodNotAllowed, "POST only")

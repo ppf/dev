@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// dev todo show draws a boss's ask with its options and answers it by number; it refuses an item that reads
-// otherwise. The view runs in a pane as it does in its popup (the guard set), as a detached server has no client to
+// dev todo show draws a boss's ask with its options and answers it by number, and opens it answered as Done; it refuses
+// an item that reads otherwise or isn't there. The view runs in a pane as it does in its popup (the guard set), as a detached server has no client to
 // pop up on.
 func TestTodoShow(t *testing.T) {
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(t.TempDir(), "state"))
@@ -21,7 +21,7 @@ func TestTodoShow(t *testing.T) {
 	if _, err := dev(user, "todo", "show", "--question", "Another?", "boss-a", "1"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), `is "Merge #148?" now, not "Another?"`) {
 		t.Errorf("❌ show with a changed question: %v, want refused", err)
 	}
-	if _, err := dev(user, "todo", "show", "boss-a", "2"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "no open item #2") {
+	if _, err := dev(user, "todo", "show", "boss-a", "2"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "has no item #2, open or ticked in the last day") {
 		t.Errorf("❌ show of no item: %v, want refused", err)
 	}
 
@@ -41,19 +41,23 @@ func TestTodoShow(t *testing.T) {
 		out, _ := dev(user, "todo", "--all", "--json")
 		return strings.Contains(out, `"answer": "Wait"`)
 	})
-	if _, err := dev(user, "todo", "show", "boss-a", "1"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "no open item #1") {
-		t.Errorf("❌ show of an answered item: %v, want refused", err)
-	}
+	// Answered, it opens as Done, to reopen
+	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_SHOW_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "show", "boss-a", "1")
+	done := s.T("display", "-t", "=boss-a:3", "-p", "#{pane_id}")
+	waitFor(t, "the answered item drawn", func() bool {
+		out := s.T("capture-pane", "-p", "-t", done)
+		return strings.Contains(out, "a #1 · Done") && strings.Contains(out, "r  Reopen")
+	})
 	if _, err := dev(user, "todo", "show", "nobody", "1"); err == nil || !strings.Contains(string(err.(*exec.ExitError).Stderr), "nobody has no to do list") {
 		t.Errorf("❌ show of no list: %v, want refused", err)
 	}
 
 	// In its popup, an error before the view starts stays on screen until a key
-	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_SHOW_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "show", "boss-a", "1")
-	failed := s.T("display", "-t", "=boss-a:3", "-p", "#{pane_id}")
+	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_SHOW_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "show", "boss-a", "9")
+	failed := s.T("display", "-t", "=boss-a:4", "-p", "#{pane_id}")
 	waitFor(t, "the error kept", func() bool {
 		out := s.T("capture-pane", "-p", "-t", failed)
-		return strings.Contains(out, "no open item #1") && strings.Contains(out, "Press enter to close")
+		return strings.Contains(out, "has no item #9") && strings.Contains(out, "Press enter to close")
 	})
 }
 

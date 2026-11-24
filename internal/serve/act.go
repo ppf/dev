@@ -36,6 +36,20 @@ type doneReq struct {
 	Text string `json:"text"`
 }
 
+type overruleReq struct {
+	Boss   string `json:"boss"`
+	ID     int    `json:"id"`
+	Text   string `json:"text"`
+	Option string `json:"option"`
+}
+
+func (req *overruleReq) check() string {
+	if strings.TrimSpace(req.Option) == "" {
+		return "no option: send the one to overrule with"
+	}
+	return item(req.Boss, req.ID, req.Text)
+}
+
 type doingReq struct {
 	Boss string `json:"boss"`
 	ID   int    `json:"id"`
@@ -91,6 +105,14 @@ func (cfg Config) reopen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	act(w, cfg.Reopen(req.Boss, req.ID, req.Text))
+}
+
+func (cfg Config) overrule(w http.ResponseWriter, r *http.Request) {
+	var req overruleReq
+	if !decode(w, r, &req, req.check) {
+		return
+	}
+	act(w, cfg.Overrule(req.Boss, req.ID, req.Text, req.Option))
 }
 
 func (cfg Config) doing(w http.ResponseWriter, r *http.Request) {

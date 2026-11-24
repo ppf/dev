@@ -31,6 +31,7 @@ import (
 	"github.com/ppf/dev/internal/serve/web"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 func newServeCmd() *cobra.Command {
@@ -326,6 +327,7 @@ func serveConfig(stderr io.Writer, dir string, loopback bool) serve.Config {
 		Start:       pageStart(stderr),
 		Doing:       pageDoing(stderr),
 		Reopen:      pageReopen(stderr),
+		Overrule:    pageOverrule(stderr),
 		Guard:       guard,
 		Pair:        http.HandlerFunc(auth.Pair),
 		Page:        web.Handler(),
@@ -362,6 +364,7 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 				if it.Context != nil {
 					it.Context = scrubAll(it.Context)
 				}
+				it.Decided = scrubWhy(it.Decided, scrub)
 			}
 			for j := range lists[i].Finished {
 				f := &lists[i].Finished[j]
@@ -369,10 +372,21 @@ func boardLists(c *tmux.Client, stderr io.Writer, now func() time.Time) func() (
 				if f.Context != nil {
 					f.Context = scrubAll(f.Context)
 				}
+				f.Decided = scrubWhy(f.Decided, scrub)
 			}
 		}
 		return json.Marshal(lists)
 	}
+}
+
+// scrubWhy is d with its why scrubbed, a copy; nil for none.
+func scrubWhy(d *todo.Decided, scrub func(string) string) *todo.Decided {
+	if d == nil {
+		return nil
+	}
+	c := *d
+	c.Why = scrub(c.Why)
+	return &c
 }
 
 // unrepeated drops a line written again within a minute: an open page's stream reads the board every second.

@@ -45,6 +45,10 @@ func actHandler(calls *[]call, err error) http.Handler {
 			*calls = append(*calls, call{boss, id, text, "reopen"})
 			return err
 		},
+		Overrule: func(boss string, id int, text, option string) error {
+			*calls = append(*calls, call{boss, id, text, "overrule " + option})
+			return err
+		},
 		Guard: noGuard,
 		Pair:  http.NotFoundHandler(),
 	})
@@ -87,8 +91,12 @@ func TestActOK(t *testing.T) {
 	if w := post(h, "/v1/reopen", `{"boss":"boss-a","id":5,"text":"Read again"}`, true); w.Code != http.StatusOK {
 		t.Errorf("reopen = %d %s", w.Code, w.Body)
 	}
+	if w := post(h, "/v1/overrule", `{"boss":"boss-a","id":6,"text":"Re-run?","option":"Look first"}`, true); w.Code != http.StatusOK {
+		t.Errorf("overrule = %d %s", w.Code, w.Body)
+	}
 	want := []call{{"boss-a", 1, "Merge?", "Merge"}, {"boss-a", 1, "Merge?", "after the API one"}, {"boss-a", 2, "Read", ""}, {"boss-a", 3, "Write the notes", "start"},
-		{"boss-a", 4, "Send the cert", "doing mailing ops"}, {"boss-a", 4, "Send the cert", "doing stop after mailing ops"}, {"boss-a", 5, "Read again", "reopen"}}
+		{"boss-a", 4, "Send the cert", "doing mailing ops"}, {"boss-a", 4, "Send the cert", "doing stop after mailing ops"}, {"boss-a", 5, "Read again", "reopen"},
+		{"boss-a", 6, "Re-run?", "overrule Look first"}}
 	if !slices.Equal(calls, want) {
 		t.Errorf("calls = %+v, want %+v", calls, want)
 	}
@@ -113,6 +121,8 @@ func TestActRefused(t *testing.T) {
 		{"desktop boss, doing", "/v1/doing", `{"boss":"local_1","id":1,"text":"T"}`, true, http.StatusBadRequest},
 		{"no header, reopen", "/v1/reopen", `{"boss":"b","id":1,"text":"T"}`, false, http.StatusForbidden},
 		{"no text, reopen", "/v1/reopen", `{"boss":"b","id":1}`, true, http.StatusBadRequest},
+		{"no header, overrule", "/v1/overrule", `{"boss":"b","id":1,"text":"T","option":"B"}`, false, http.StatusForbidden},
+		{"no option, overrule", "/v1/overrule", `{"boss":"b","id":1,"text":"T"}`, true, http.StatusBadRequest},
 		{"no JSON", "/v1/answer", `option=A`, true, http.StatusBadRequest},
 		{"no question", "/v1/answer", `{"boss":"b","id":1,"option":"A"}`, true, http.StatusBadRequest},
 		{"option and text", "/v1/answer", `{"boss":"b","id":1,"question":"Q","option":"A","text":"B"}`, true, http.StatusBadRequest},

@@ -953,3 +953,28 @@ func TestTickDoesNotStack(t *testing.T) {
 		t.Error("❌ a tick started no read")
 	}
 }
+
+// A Done card decided for the user says who decided on its fifth line, gold, no taller; the user's own answer and a
+// plain tick carry no label, and a ticked ask's title isn't bold.
+func TestDecidedLabel(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	options := []string{"Re-run (Recommended)", "Look first"}
+	ask := todo.Shown{ID: 34, Text: "CI on #301 failed on the known flaky TestServeAutostart: re-run the job?", Options: options, Done: true, Answer: "Re-run",
+		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}
+	for _, by := range []string{todo.DecidedManager, todo.DecidedBoss} {
+		it := ask
+		it.Decided = &todo.Decided{By: by, Pick: options[0], Over: options[1:]}
+		lines := cardLines(card{boss: "boss-dev", it: it, done: true}, false, cardW, now)
+		if len(lines) != cardH || lines[4] != sidebar.Gold+"decided for you: "+by+reset {
+			t.Errorf("❌ %s: %q", by, lines)
+		}
+		if strings.Contains(lines[1], bold) {
+			t.Errorf("❌ a ticked ask's title is bold: %q", lines[1])
+		}
+	}
+	for _, it := range []todo.Shown{ask, {ID: 15, Text: "Re-review", Done: true}} {
+		if l := cardLines(card{boss: "boss-dev", it: it, done: true}, false, cardW, now); ansi.Strip(l[4]) != "" {
+			t.Errorf("❌ #%d has a label: %q", it.ID, l[4])
+		}
+	}
+}

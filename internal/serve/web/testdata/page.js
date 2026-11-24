@@ -575,9 +575,28 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   s = await sheetOf([{ boss: 'boss-vitay', items: [], finished: [mailed, asked] }], "item('boss-vitay', 21, " + (at - 60) + ')');
   check('Done: your ask shows your answer and offers Reopen', /You answeredAfter #285/.test(s.map(textOf).join('')) && reopenBtns(s).length === 1);
   const settled = { id: 34, text: 'Re-run CI on #301?', assignee: { kind: 'you' }, answer: 'Re-run', done_at: at, done_by: 'manager',
-    decided: { by: 'manager', pick: 'Re-run (Recommended)', over: ['Look first'], why: 'known flake', at } };
+    options: ['Re-run (Recommended)', 'Look first | a worker reads the log'],
+    decided: { by: 'manager', pick: 'Re-run (Recommended)', over: ['Look first | a worker reads the log'], why: 'known flake', at } };
   s = await sheetOf([{ boss: 'boss-a', items: [], finished: [settled] }], "item('boss-a', 34, " + at + ')');
-  check('Done: an ask decided for you says who, not "You answered"', /Decided for you: managerRe-run/.test(s.map(textOf).join('')) && !/You answered/.test(s.map(textOf).join('')));
+  const dec = cls(/^live decided$/)(s)[0], overs = cls(/^opt$/)(s);
+  check('Done: an ask decided for you: who and when, the pick over the others and why, not "You answered": ' + textOf(dec || {}),
+    /^Decided for you(\w+ )?\d\d:\d\d · by managerPickedRe-run ★ recommendedOverLook firstWhyThe boss marked it obvious: known flake$/.test(textOf(dec || {})) && !/You answered/.test(s.map(textOf).join('')));
+  check('Done: each other option an Overrule, in Reopen\'s place', overs.length === 1 && textOf(overs[0]) === 'Look firsta worker reads the log' && !reopenBtns(s).length
+    && /Overrule with/.test(s.map(textOf).join('')) && /One tap: reopens #34 with this pick and tells boss-a\./.test(s.map(textOf).join('')));
+  posts.length = 0;
+  overs[0].on.click({ currentTarget: {} });
+  await settle();
+  check('Overrule sends the option as stored: ' + JSON.stringify(posts), posts.length === 1 && posts[0][0] === '/v1/overrule'
+    && posts[0][1] === JSON.stringify({ boss: 'boss-a', id: 34, text: 'Re-run CI on #301?', option: 'Look first | a worker reads the log' }));
+  const card34 = run("doneRow(findDone('boss-a', 34, " + at + '))');
+  check('Done card: "decided for you: manager" on a line of its own', /has-dec/.test(card34.className) && cls(/^tag wait dec$/)([card34]).map(textOf).join() === 'decided for you: manager');
+  const old = { ...settled, done_at: at - 86400 };
+  s = await sheetOf([{ boss: 'boss-a', items: [], finished: [old] }], "item('boss-a', 34, " + (at - 86400) + ')');
+  check('Done: past a day no Overrule, Reopen as before', !cls(/^opt$/)(s).length && reopenBtns(s).length === 1);
+  s = await sheetOf([{ boss: 'boss-a', closed: true, items: [], finished: [settled] }], "item('boss-a', 34, " + at + ')');
+  check('Done: a closed boss\'s: no Overrule (no one to tell)', !cls(/^opt$/)(s).length && /Decided for you/.test(s.map(textOf).join('')));
+  const own = { ...asked, id: 22 };
+  check('Done card: your own pick has no label', !cls(/dec/)([run("doneRow({ list: { boss: 'boss-a', items: [] }, it: " + JSON.stringify(own) + ' })')]).length);
   const t2 = at - 7200;
   s = await sheetOf([{ boss: 'boss-a', items: [{ id: 9, text: 'Just ticked', done: true, assignee: { kind: 'you' } }],
     finished: [{ id: 5, text: 'Newer five', assignee: { kind: 'you' }, done_at: at }, { id: 5, text: 'Older five', assignee: { kind: 'you' }, done_at: t2 }] }], "item('boss-a', 5, " + t2 + ')');
