@@ -82,7 +82,7 @@ func TestTodoDesktopStatus(t *testing.T) {
 	run(t, "", "todo", "add", "Run", "--on", "Busy")
 	run(t, "", "todo", "add", "Pick", "--on", "Asks")
 	run(t, "", "todo", "add", "Staging", "--on", "Marek")
-	run(t, "", "todo", "add", "Answer Vince")
+	run(t, "", "todo", "add", "--no-details", "Answer Vince")
 	run(t, "", "todo", "add", "Broken", "--on", "local_broken")
 	run(t, "", "todo", "add", "Parked", "--on", todo.Boss)
 	if err := os.Remove(filepath.Join(org, "local_w.json")); err != nil {

@@ -40,7 +40,7 @@ func TestTodoBoard(t *testing.T) {
 	}
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	dev(boss, "todo", "ask", "Merge #148?", "--option", "Merge | ships today (Recommended)", "--option", "Wait")
-	dev(boss, "todo", "add", "Restart the server")
+	dev(boss, "todo", "add", "--no-details", "Restart the server")
 	dev(boss, "todo", "add", "Review of the coupon change", "--on", "Carl")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	// Another boss's list: not on boss-a's board
@@ -53,7 +53,7 @@ func TestTodoBoard(t *testing.T) {
 	if out, err := regB.CombinedOutput(); err != nil {
 		t.Fatalf("❌ register boss-b: %v %s", err, out)
 	}
-	dev([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "add", "Only on boss-b")
+	dev([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "add", "--no-details", "Only on boss-b")
 
 	refuse := exec.Command(devBin, "todo", "board", "--", "nobody")
 	refuse.Env = s.scriptEnv(user...)

@@ -66,10 +66,10 @@ func TestTodoDoing(t *testing.T) {
 	pane, log := open("boss-a")
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
-	must(boss, "todo", "add", "Send the cert")
+	must(boss, "todo", "add", "--no-details", "Send the cert")
 	must(boss, "todo", "add", "Install the cert", "--on", "boss", "--part-of", "1")
-	must(boss, "todo", "add", "Write the notes")
-	must(boss, "todo", "add", "Book the room")
+	must(boss, "todo", "add", "--no-details", "Write the notes")
+	must(boss, "todo", "add", "--no-details", "Book the room")
 
 	if _, stderr, err := dev(boss, "todo", "doing", "boss-a", "1", "--question", "Send the cert"); err == nil || !strings.Contains(stderr, "refused in a Claude Code session") {
 		t.Errorf("❌ doing in a Claude session: %v %s", err, stderr)

@@ -14,7 +14,8 @@ import (
 )
 
 // A worker's permission prompt under a boss the live manager started goes to the manager, which asks the user and
-// answers the worker; the boss's note says to leave it. With the manager's inbox off, a boss the user opened, or a
+// answers the worker; the boss's note says to leave it, and dev agent send-keys takes keys to it only from the manager
+// until it is answered or the manager is gone. With the manager's inbox off, a boss the user opened, or a
 // boss under another boss, the boss relays it as before.
 func TestWorkerDecisionToManager(t *testing.T) {
 	tmp := t.TempDir()
@@ -88,6 +89,30 @@ func TestWorkerDecisionToManager(t *testing.T) {
 		"unanswered; ask the user, then send-keys only their pick to app-w yourself (its boss leaves it to you)")
 	check(t, "nothing new for the boss", take(app), "")
 
+	// Keys to the handed decision: only from the manager's pane until it is answered
+	sendKeys := func(from string) (string, error) {
+		t.Helper()
+		cmd := exec.Command(devBin, "agent", "send-keys", "app-w", "1")
+		cmd.Env = s.scriptEnv("TMUX_PANE="+from, "CLAUDECODE=1")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	const leave = "app-w's decision went to the manager, which asks the user and sends their pick: leave it to the manager until it is answered"
+	for _, from := range []string{app, ""} {
+		if out, err := sendKeys(from); err == nil || !strings.Contains(out, leave) {
+			t.Errorf("❌ send-keys from %q to a decision handed to the manager: %v %q, want refused", from, err, out)
+		}
+	}
+	if out, err := sendKeys(manager); err != nil {
+		t.Errorf("❌ send-keys from the manager: %v %q", err, out)
+	}
+	state(w, "working", `{"hook_event_name":"UserPromptSubmit"}`)
+	if out, err := sendKeys(app); err != nil {
+		t.Errorf("❌ send-keys from the boss once answered: %v %q", err, out)
+	}
+	take(app)
+	take(manager)
+
 	// A worker started outside tmux, or one that is itself a boss: not handed over
 	s.T("set-option", "-t", "=app-w:", "@dev_started_outside", "1")
 	decide()
@@ -116,7 +141,15 @@ func TestWorkerDecisionToManager(t *testing.T) {
 	check(t, "under another boss: the boss relays it", take(app), plain)
 
 	s.T("set-option", "-t", "=boss-app:", "@dev_started_by", "manager")
+	decide()
+	take(app)
+	if out, err := sendKeys(app); err == nil {
+		t.Errorf("❌ send-keys from the boss to a handed decision: %q, want refused", out)
+	}
 	s.T("kill-session", "-t", "=manager:")
+	if out, err := sendKeys(app); err != nil {
+		t.Errorf("❌ send-keys from the boss once the manager is gone: %v %q", err, out)
+	}
 	decide()
 	check(t, "manager gone: the boss relays it", take(app), plain)
 }

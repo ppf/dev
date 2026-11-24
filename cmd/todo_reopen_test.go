@@ -41,7 +41,7 @@ func TestTodoReopen(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
 	t.Setenv("CLAUDECODE", "1")
-	run(t, "", "todo", "add", "mine")
+	run(t, "", "todo", "add", "--no-details", "mine")
 	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
 	run(t, "", "todo", "done", "1", "2")
 	// A board's button runs it inside a Claude Code session
@@ -60,7 +60,7 @@ func TestTodoReopen(t *testing.T) {
 	t.Setenv("CLAUDECODE", "1")
 	run(t, "", "todo", "done", "1")
 	run(t, "", "todo", "clear")
-	run(t, "", "todo", "add", "new")
+	run(t, "", "todo", "add", "--no-details", "new")
 	t.Setenv("CLAUDECODE", "")
 	if out := run(t, "", "todo", "reopen", "local_boss", "1", "--question", "mine"); out != "#1 reopened as #2: #1 is another item now\n" {
 		t.Errorf("reopen over a taken number = %q", out)

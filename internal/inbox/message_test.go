@@ -73,9 +73,9 @@ func TestMessageRefusals(t *testing.T) {
 		{"control characters", func() error { _, err := s.Post("boss-a", "boss-b", "hi\x1b[2J", false, now); return err }, "message has control characters"},
 		{"empty", func() error { _, err := s.Post("boss-a", "boss-b", " \n", false, now); return err }, "empty message"},
 		{"too long", func() error {
-			_, err := s.Post("boss-a", "boss-b", strings.Repeat("x", maxMessage+1), false, now)
+			_, err := s.Post("boss-a", "boss-b", strings.Repeat("x", 1501), false, now)
 			return err
-		}, "message too long (1001 characters, at most 1000)"},
+		}, "message too long (1501 characters, at most 1500)"},
 	} {
 		if err := tt.err(); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
@@ -84,6 +84,16 @@ func TestMessageRefusals(t *testing.T) {
 	ts, _ := s.Threads("", now)
 	if len(ts) != 2 || ts[0].ID != "m2" || ts[0].State != ThreadOpen || ts[1].State != ThreadFYI {
 		t.Errorf("refusals stored something: %+v", ts)
+	}
+}
+
+// A design-length message of 1500 characters goes through whole, as the recipient's note.
+func TestMessageCap(t *testing.T) {
+	s := messages(t)
+	text := strings.Repeat("ł", 1500)
+	msg, err := s.Post("boss-a", "boss-b", text, false, time.Unix(1_700_000_000, 0))
+	if err != nil || msg.Text != text || !strings.HasSuffix(msg.Line(), ": "+text) {
+		t.Errorf("Post of 1500 characters: %v, text kept %v", err, msg.Text == text)
 	}
 }
 

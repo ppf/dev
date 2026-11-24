@@ -83,7 +83,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 		return strings.Count(string(data), "you answered #")
 	}
 
-	must(boss, "", "todo", "add", "Keep me") // never ticked: item numbers don't restart
+	must(boss, "", "todo", "add", "--no-details", "Keep me") // never ticked: item numbers don't restart
 	must(boss, "", "todo", "ask", "Filter row?", "--option", "A: chips", "--option", "B: label + filter row (Recommended)")
 	if got := take(); !strings.Contains(got, "- boss-a waits on you: #2 Filter row?") {
 		t.Fatalf("❌ the manager's batch lacks the ask:\n%s", got)

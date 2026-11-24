@@ -165,7 +165,7 @@ func TestResumeAhead(t *testing.T) {
 				case strings.Contains(f, "@dev_resume_at"):
 					return tmux.FormatRow(tt.at, tt.prompts, "4", tt.session, "s1"), nil
 				case strings.Contains(f, "@dev_started_by"):
-					return tmux.FormatRow(tt.startedBy, "boss-app", "", "", "", "1"), nil
+					return tmux.FormatRow(tt.startedBy, "boss-app", "", "", "", "", "1"), nil
 				}
 				return tmux.FormatRow("$1", "1700000000", "boss-hq", "1", tt.off, "/tmp/tmux-1/default"), nil
 			})

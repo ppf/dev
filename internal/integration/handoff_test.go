@@ -116,7 +116,7 @@ func TestManagerHandOnGate(t *testing.T) {
 	refused("work on a typed message after the pick", "a typed message, not a pick", "agent", "prompt", "boss-a", "--kind", "work", brief)
 	ask(question, "Hand it on")
 	// A message refused after the gate gives the pick back
-	refused("work as a too-long message", "too long", "agent", "message", "boss-a", "--kind", "work", brief+strings.Repeat("x", 1001))
+	refused("work as a too-long message", "too long", "agent", "message", "boss-a", "--kind", "work", brief+strings.Repeat("x", 1501))
 	if out, stderr, err := dev(manager, "", "agent", "message", "boss-a", "--kind", "work", brief); err != nil {
 		t.Fatalf("❌ work as a message on the pick: %q %v %s", out, err, stderr)
 	}

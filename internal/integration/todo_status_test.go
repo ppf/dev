@@ -63,7 +63,7 @@ func TestTodoStatus(t *testing.T) {
 	worker("w-question", "idle", false, "asks: red or blue?")
 
 	env := []string{"TMUX_PANE=" + boss, "CLAUDECODE=1"}
-	dev(env, "todo", "add", "mine")
+	dev(env, "todo", "add", "--no-details", "mine")
 	_, errOut := dev(env, "todo", "add", "--on", "boss-a", "the boss's own")
 	if !strings.Contains(errOut, "this list's own boss, so your own task, as --on boss") {
 		t.Errorf("❌ --on boss-a stderr = %q", errOut)

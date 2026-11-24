@@ -61,7 +61,7 @@ esac`, "gh")
 	dev("todo", "add", "Second review of #415", "--on", "Ana", "--link", url("415"), "--done-on", "approved")
 	dev("todo", "add", "Deploy the cache fix after #418 merges", "--on", "Tomas", "--link", url("418"))
 	dev("todo", "add", "Rework export rounding", "--on", "fix")
-	dev("todo", "add", "Attach the signed DPA to the vendor ticket")
+	dev("todo", "add", "--no-details", "Attach the signed DPA to the vendor ticket")
 
 	start := time.Now()
 	watch := func(after time.Duration) string {

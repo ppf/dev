@@ -56,7 +56,7 @@ func TestTodo(t *testing.T) {
 	}{
 		{"", []string{"todo", "set", "Answer Vince", "Connect VPN"}, "to do 2\n"},
 		{"", []string{"todo", "add", "Staging access", "--on", "Marek"}, "added 3 · to do 3, 1 on others\n"},
-		{"", []string{"todo", "add", "Merge PR #87", "--link", "https://github.com/o/r/pull/87"}, "added 4 · to do 4, 1 on others\n"},
+		{"", []string{"todo", "add", "--no-details", "Merge PR #87", "--link", "https://github.com/o/r/pull/87"}, "added 4 · to do 4, 1 on others\n"},
 		{"", []string{"todo", "done", "2", "2"}, "done 2 2 · to do 3, 1 on others\n"},
 		{"", []string{"todo"}, "1\t☐\tAnswer Vince\n2\t☑\tConnect VPN\n4\t☐\tMerge PR #87\thttps://github.com/o/r/pull/87\n3\t◌\tStaging access\ton Marek\n"},
 	} {
@@ -106,7 +106,7 @@ func TestTodoSetStdin(t *testing.T) {
 func TestTodoBossFlag(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_w")
-	if _, _, err := execute(t, "", "todo", "add", "x"); err == nil || !strings.Contains(err.Error(), "local_w is a worker") {
+	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x"); err == nil || !strings.Contains(err.Error(), "local_w is a worker") {
 		t.Errorf("err = %v, want local_w refused as a worker", err)
 	}
 	run(t, "", "todo", "--boss", "local_boss", "set", "x")
@@ -123,7 +123,7 @@ func TestTodoBossFlag(t *testing.T) {
 func TestTodoNoBoss(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "")
-	if _, _, err := execute(t, "", "todo", "add", "x"); err == nil || !strings.Contains(err.Error(), "no boss session") {
+	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x"); err == nil || !strings.Contains(err.Error(), "no boss session") {
 		t.Errorf("err = %v, want no boss session", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestTodoT3(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "")
 	// A thread the t3 CLI started is mcp:<uuid>; one from the app is a bare uuid
 	t.Setenv("T3CODE_THREAD_ID", "mcp:0c638555-1111")
-	run(t, "", "todo", "add", "Fix login")
+	run(t, "", "todo", "add", "--no-details", "Fix login")
 	_, stderr, err := execute(t, "", "todo", "add", "Add tests", "--on", "fix-login")
 	if err != nil || !strings.Contains(stderr, "no session fix-login") {
 		t.Errorf("add --on fix-login = %q, %v, want it kept as a name dev can't see", stderr, err)
@@ -164,7 +164,7 @@ func TestTodoT3(t *testing.T) {
 	if got := run(t, "", "todo"); got != "" {
 		t.Errorf("another thread's list = %q, want its own, empty", got)
 	}
-	run(t, "", "todo", "add", "x")
+	run(t, "", "todo", "add", "--no-details", "x")
 	if _, err := os.Stat(filepath.Join(state, "dev", "todo", "t3-0c638555-2222.json")); err != nil {
 		t.Errorf("bare uuid's list file: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestTodoT3(t *testing.T) {
 	// A T3 Code started in tmux passes its pane: the thread still decides
 	t.Setenv("TMUX_PANE", "%9")
 	t.Setenv("T3CODE_THREAD_ID", "thread:delegated-task:abc")
-	for _, args := range [][]string{{"todo"}, {"todo", "--json"}, {"todo", "add", "x"}, {"todo", "done", "1"}} {
+	for _, args := range [][]string{{"todo"}, {"todo", "--json"}, {"todo", "add", "--no-details", "x"}, {"todo", "done", "1"}} {
 		if _, _, err := execute(t, "", args...); err == nil || !strings.Contains(err.Error(), "a task another T3 Code thread delegated") {
 			t.Errorf("child: dev %s = %v, want it refused", strings.Join(args, " "), err)
 		}
@@ -189,7 +189,7 @@ func TestTodoT3(t *testing.T) {
 func TestTodoErrors(t *testing.T) {
 	todoEnv(t)
 	run(t, "", "todo", "set", "a")
-	for _, args := range [][]string{{"todo", "done", "2"}, {"todo", "done", "x"}, {"todo", "add", " "}, {"todo", "set"}, {"todo", "set", "a", " "}, {"todo", "add", "\n\x1b"}} {
+	for _, args := range [][]string{{"todo", "done", "2"}, {"todo", "done", "x"}, {"todo", "add", "--no-details", " "}, {"todo", "set"}, {"todo", "set", "a", " "}, {"todo", "add", "\n\x1b"}} {
 		if _, _, err := execute(t, "", args...); err == nil {
 			t.Errorf("dev %s: want an error", strings.Join(args, " "))
 		}
@@ -203,7 +203,7 @@ func TestTodoErrors(t *testing.T) {
 func TestTodoUntilReplaces(t *testing.T) {
 	todoEnv(t)
 	run(t, "", "todo", "set", "a", "b")
-	if got := run(t, "", "todo", "add", "Meeting", "--until", "2099-01-02 10:00"); got != "added 3 · to do 3\n" {
+	if got := run(t, "", "todo", "add", "--no-details", "Meeting", "--until", "2099-01-02 10:00"); got != "added 3 · to do 3\n" {
 		t.Errorf("add --until = %q", got)
 	}
 	if got := run(t, "", "todo", "add", "b2", "--replaces", "2", "--on", "Marek"); got != "replaced 2 · to do 3, 1 on others\n" {
@@ -215,12 +215,12 @@ func TestTodoUntilReplaces(t *testing.T) {
 	if got := run(t, "", "todo", "--json"); !strings.Contains(got, `"until": `+jsonInt(time.Date(2099, 1, 2, 10, 0, 0, 0, time.Local).Unix())) {
 		t.Errorf("json = %s, want until", got)
 	}
-	for _, args := range [][]string{{"todo", "add", "x", "--until", "yesterday"}, {"todo", "add", "x", "--until", "2000-01-01"}, {"todo", "add", "x", "--replaces", "9"}} {
+	for _, args := range [][]string{{"todo", "add", "--no-details", "x", "--until", "yesterday"}, {"todo", "add", "x", "--until", "2000-01-01"}, {"todo", "add", "x", "--replaces", "9"}} {
 		if _, _, err := execute(t, "", args...); err == nil {
 			t.Errorf("dev %s: want an error", strings.Join(args, " "))
 		}
 	}
-	if got := run(t, "", "todo", "add", "c"); got != "added 4 · to do 4, 1 on others\n" {
+	if got := run(t, "", "todo", "add", "--no-details", "c"); got != "added 4 · to do 4, 1 on others\n" {
 		t.Errorf("refused adds changed the list: %q", got)
 	}
 }
@@ -323,7 +323,7 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 		t.Error("add --waiting-for me: not refused")
 	}
 	// Refused by the list it would take over: nothing taken over
-	if _, _, err := execute(t, "", "todo", "add", "x", "--part-of", "9"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
+	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x", "--part-of", "9"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
 		t.Errorf("add --part-of 9: %v, want refused by local_old's list", err)
 	}
 	if _, _, err := execute(t, "", "todo", "add", "--replaces", "9", "--on", "me"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
@@ -333,7 +333,7 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 		t.Errorf("local_old after a refused add: %q, want it not taken over", got)
 	}
 	// One its trial accepts is written once, on the list taken over
-	run(t, "", "todo", "add", "new")
+	run(t, "", "todo", "add", "--no-details", "new")
 	if got := run(t, "", "todo"); got != "1\t☐\told open item\n2\t☐\tnew\n" {
 		t.Errorf("first dev todo: %q, want local_old's list and the new item once", got)
 	}
@@ -386,7 +386,7 @@ func TestTodoOnBossWaitingFor(t *testing.T) {
 		"--waiting-for|w":              "--waiting-for w: a session you started: --on W",
 		"--waiting-for| ":              "--waiting-for: no person",
 	} {
-		if _, _, err := execute(t, "", append([]string{"todo", "add", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
+		if _, _, err := execute(t, "", append([]string{"todo", "add", "--no-details", "x"}, strings.Split(args, "|")...)...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", args, err, want)
 		}
 	}
@@ -456,7 +456,7 @@ func TestTodoOnWorker(t *testing.T) {
 	}
 	run(t, "", "todo", "add", "Handed over", "--on", "Ola")
 	run(t, "", "todo", "add", "Handed over", "--replaces", "4", "--on", "local_w")
-	if got := run(t, "", "todo", "add", "Back to me", "--replaces", "3", "--on", "ME"); got != "replaced 3 · to do 4, 3 on others\n" {
+	if got := run(t, "", "todo", "add", "Back to me", "--replaces", "3", "--on", "ME", "--details", "Ola handed it back"); got != "replaced 3 · to do 4, 3 on others\n" {
 		t.Errorf("--on me: %q", got)
 	}
 	got := run(t, "", "todo", "--json")
@@ -563,12 +563,12 @@ func TestTodoAskContext(t *testing.T) {
 	if got := run(t, "", "todo"); got != want {
 		t.Errorf("rows = %q, want %q", got, want)
 	}
-	run(t, "", "todo", "add", "--replaces", "1", "Merge #148 now?")
+	run(t, "", "todo", "add", "--no-details", "--replaces", "1", "Merge #148 now?")
 	if got := run(t, "", "todo"); !strings.HasSuffix(got, "    - CI green\n    - ~/memo.md\n") {
 		t.Errorf("after --replaces without --context: %q", got)
 	}
-	run(t, "", "todo", "add", "--replaces", "1", "--context", "review in")
-	run(t, "", "todo", "add", "Ship", "--context", "CI green")
+	run(t, "", "todo", "add", "--no-details", "--replaces", "1", "--context", "review in")
+	run(t, "", "todo", "add", "--no-details", "Ship", "--context", "CI green")
 	if got := run(t, "", "todo"); !strings.HasSuffix(got, "2\t☐\tShip\n    - CI green\n") {
 		t.Errorf("a plain item's context: %q", got)
 	}
@@ -594,8 +594,8 @@ func TestTodoAskContext(t *testing.T) {
 		{[]string{"todo", "ask", "Ok?", "--option", strings.Repeat("x", 31)}, "put the rest after ' | '"},
 		{[]string{"todo", "ask", "Ok?", "--option", "a", "--context", " "}, "--context line 1 is empty"},
 		{[]string{"todo", "ask", "Ok?", "--option", " | detail"}, "option 1 is empty"},
-		{[]string{"todo", "add", "--replaces", "1", strings.Repeat("x", 101)}, "question is 101 characters"},
-		{[]string{"todo", "add", "x", "--context", " "}, "--context line 1 is empty"},
+		{[]string{"todo", "add", "--no-details", "--replaces", "1", strings.Repeat("x", 101)}, "question is 101 characters"},
+		{[]string{"todo", "add", "--no-details", "x", "--context", " "}, "--context line 1 is empty"},
 	} {
 		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
@@ -699,13 +699,13 @@ func TestTodoDoneOn(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
 	url := "https://github.com/acme/orbit/pull/415"
-	for _, args := range [][]string{{"todo", "add", "x", "--done-on", "merged"}, {"todo", "add", "x", "--link", url, "--done-on", "deployed"}} {
+	for _, args := range [][]string{{"todo", "add", "--no-details", "x", "--done-on", "merged"}, {"todo", "add", "x", "--link", url, "--done-on", "deployed"}} {
 		if _, _, err := execute(t, "", args...); err == nil {
 			t.Errorf("dev %s: want an error", strings.Join(args, " "))
 		}
 	}
 	run(t, "", "todo", "add", "Second review of #415", "--on", "Ana", "--link", url, "--done-on", "approved")
-	run(t, "", "todo", "add", "Keep")
+	run(t, "", "todo", "add", "--no-details", "Keep")
 	if got := run(t, "", "todo"); got != "2\t☐\tKeep\n1\t◌\tSecond review of #415\ton Ana\t"+url+"\tdone on approved\n" {
 		t.Errorf("list = %q", got)
 	}
@@ -803,8 +803,8 @@ func TestTodoQuiet(t *testing.T) {
 	todoEnv(t)
 	run(t, "", "todo", "add", "t", "--quiet")
 	run(t, "", "todo", "ask", "t?", "--option", "a", "--option", "b", "--quiet")
-	run(t, "", "todo", "add", "real")
-	run(t, "", "todo", "add", "--replaces", "1", "t2")
+	run(t, "", "todo", "add", "--no-details", "real")
+	run(t, "", "todo", "add", "--no-details", "--replaces", "1", "t2")
 	var l struct {
 		Items []struct {
 			Quiet bool `json:"quiet"`
@@ -818,11 +818,11 @@ func TestTodoQuiet(t *testing.T) {
 // Over 120 characters add warns on stderr and still adds; at 120, or with --replaces alone, it stays quiet.
 func TestTodoAddLongHint(t *testing.T) {
 	todoEnv(t)
-	_, errOut, err := execute(t, "", "todo", "add", strings.Repeat("x", 121))
+	_, errOut, err := execute(t, "", "todo", "add", "--no-details", strings.Repeat("x", 121))
 	if err != nil || !strings.Contains(errOut, "long item (121 characters)") {
 		t.Errorf("121: err %v, stderr %q", err, errOut)
 	}
-	if _, errOut, err = execute(t, "", "todo", "add", strings.Repeat("é", 120)); err != nil || strings.Contains(errOut, "long item") {
+	if _, errOut, err = execute(t, "", "todo", "add", "--no-details", strings.Repeat("é", 120)); err != nil || strings.Contains(errOut, "long item") {
 		t.Errorf("120: err %v, stderr %q", err, errOut)
 	}
 	if _, errOut, err = execute(t, "", "todo", "add", "--replaces", "1", "--on", "Marek"); err != nil || strings.Contains(errOut, "long item") {
@@ -833,39 +833,70 @@ func TestTodoAddLongHint(t *testing.T) {
 	}
 }
 
-// add and ask without --details warn on stderr and still add; a worker's item, --quiet, and a replace of an item that
-// has details stay quiet; an ask whose last --context is a file still warns.
+// add of an item the user does without --details is refused, unless --no-details, writing nothing; --replaces keeps
+// the old item's details, refused only when it had none. A waiting item and ask without --details warn on stderr and
+// still add; a worker's item, --quiet, and a replace of an item that has details stay quiet; an ask whose last
+// --context is a file still warns.
 func TestTodoNoDetailsWarning(t *testing.T) {
 	todoEnv(t)
 	const warn = "no details: add them with --details"
+	const (
+		quiet = iota
+		warns
+		refused
+	)
 	for _, tt := range []struct {
 		name string
 		args []string
-		want bool
+		want int
 	}{
-		{"add", []string{"add", "Mail Vince"}, true},
-		{"add waiting", []string{"add", "Reply from Ola", "--waiting-for", "Ola"}, true},
-		{"add --on me", []string{"add", "Mine", "--on", "me"}, true},
-		{"add with details", []string{"add", "Documented", "--details", "what and why"}, false},
-		{"add on worker", []string{"add", "W's", "--on", "w"}, false},
-		{"add on boss", []string{"add", "Own", "--on", "boss"}, false},
-		{"add quiet", []string{"add", "Test", "--quiet"}, false},
-		{"ask", []string{"ask", "Merge?", "--option", "a", "--option", "b"}, true},
-		{"ask with file context", []string{"ask", "Ship?", "--option", "a", "--option", "b", "--context", "/tmp/draft.md"}, true},
-		{"ask with details", []string{"ask", "Pick?", "--option", "a", "--option", "b", "--details", "why"}, false},
-		{"ask quiet", []string{"ask", "T?", "--option", "a", "--option", "b", "--quiet"}, false},
+		{"add", []string{"add", "Mail Vince"}, refused},
+		{"add --on me", []string{"add", "Mine", "--on", "me"}, refused},
+		{"add --no-details", []string{"add", "Water the plants", "--no-details"}, quiet},
+		{"add waiting", []string{"add", "Reply from Ola", "--waiting-for", "Ola"}, warns},
+		{"add with details", []string{"add", "Documented", "--details", "what and why"}, quiet},
+		{"add on worker", []string{"add", "W's", "--on", "w"}, quiet},
+		{"add on boss", []string{"add", "Own", "--on", "boss"}, quiet},
+		{"add quiet", []string{"add", "Test", "--quiet"}, quiet},
+		{"ask", []string{"ask", "Merge?", "--option", "a", "--option", "b"}, warns},
+		{"ask with file context", []string{"ask", "Ship?", "--option", "a", "--option", "b", "--context", "/tmp/draft.md"}, warns},
+		{"ask with details", []string{"ask", "Pick?", "--option", "a", "--option", "b", "--details", "why"}, quiet},
+		{"ask quiet", []string{"ask", "T?", "--option", "a", "--option", "b", "--quiet"}, quiet},
 	} {
-		if _, errOut, err := execute(t, "", append([]string{"todo"}, tt.args...)...); err != nil || strings.Contains(errOut, warn) != tt.want {
-			t.Errorf("%s: err %v, stderr %q, want warning %v", tt.name, err, errOut, tt.want)
+		_, errOut, err := execute(t, "", append([]string{"todo"}, tt.args...)...)
+		switch {
+		case tt.want == refused && (err == nil || !strings.Contains(err.Error(), "needs --details") || !strings.Contains(err.Error(), "--no-details")):
+			t.Errorf("%s: err %v, want refused", tt.name, err)
+		case tt.want != refused && (err != nil || strings.Contains(errOut, warn) != (tt.want == warns)):
+			t.Errorf("%s: err %v, stderr %q, want warning %v", tt.name, err, errOut, tt.want == warns)
 		}
 	}
-	if got := strings.Count(run(t, "", "todo", "--json"), `"text"`); got != 11 {
-		t.Errorf("%d items added, want 11", got)
+	if got := strings.Count(run(t, "", "todo", "--json"), `"text"`); got != 10 {
+		t.Errorf("%d items added, want 10", got)
+	}
+	if _, _, err := execute(t, "", "todo", "add", "Both", "--details", "x", "--no-details"); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Errorf("--details and --no-details: %v, want refused", err)
 	}
 
 	todoEnv(t)
 	run(t, "", "todo", "add", "Documented", "--details", "what and why")
-	run(t, "", "todo", "add", "Bare")
+	run(t, "", "todo", "add", "Bare", "--no-details")
+	run(t, "", "todo", "add", "Rework", "--on", "boss")
+	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "1", "Documented, retitled"); err != nil || strings.Contains(errOut, warn) {
+		t.Errorf("replace of a user item with details: err %v, stderr %q", err, errOut)
+	}
+	for _, args := range [][]string{{"--replaces", "2", "Bare, retitled"}, {"--replaces", "3", "--on", "me"}} {
+		if _, _, err := execute(t, "", append([]string{"todo", "add"}, args...)...); err == nil || !strings.Contains(err.Error(), "needs --details") {
+			t.Errorf("add %v, a user item left without details: %v, want refused", args, err)
+		}
+	}
+	if out := run(t, "", "todo", "--json"); !strings.Contains(out, `"Documented, retitled"`) || !strings.Contains(out, `"what and why"`) ||
+		!strings.Contains(out, `"Bare"`) || strings.Count(out, `"on": "boss"`) != 1 {
+		t.Errorf("after the refused replaces: %s, want details kept and the refused ones unchanged", out)
+	}
+	if _, _, err := execute(t, "", "todo", "add", "--replaces", "2", "Bare, retitled", "--no-details"); err != nil {
+		t.Errorf("replace with --no-details: %v", err)
+	}
 	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "1", "--on", "Marek"); err != nil || strings.Contains(errOut, warn) {
 		t.Errorf("replace of an item with details: err %v, stderr %q", err, errOut)
 	}

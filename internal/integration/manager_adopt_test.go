@@ -72,7 +72,7 @@ func TestManagerAdoptClose(t *testing.T) {
 	app := session("boss-app", "", true)
 	session("boss-web", "boss-hq", true)
 	session("boss-old", "boss-gone", true)
-	ok(app, "todo", "add", "Before")
+	ok(app, "todo", "add", "--no-details", "Before")
 	box, found, err := inbox.Here(d.tmux, manager)
 	if !found || err != nil {
 		t.Fatalf("❌ no manager inbox: %v", err)
@@ -105,7 +105,7 @@ func TestManagerAdoptClose(t *testing.T) {
 		t.Errorf("❌ manager's --mine:\n%s", mine)
 	}
 
-	ok(app, "todo", "add", "Pick a name")
+	ok(app, "todo", "add", "--no-details", "Pick a name")
 	if got := take(); !strings.Contains(got, "boss-app waits on you: #2 Pick a name") || strings.Contains(got, "Before") {
 		t.Errorf("❌ manager's batch:\n%s", got)
 	}

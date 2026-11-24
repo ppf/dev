@@ -341,6 +341,24 @@ func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (
 	}), Deliver(c, clk, m))
 }
 
+// HandedToManager reports the decision worker pane shows, in trusted state, as one handOver gave the live Manager:
+// its pick is the Manager's to send until the worker moves on (a new @agent_since).
+func HandedToManager(c *tmux.Client, pane, state string) (bool, error) {
+	b, w, ok, err := BossOf(c, pane)
+	if !ok || err != nil || !agent.Deciding(state, w.WaitingFor) {
+		return false, err
+	}
+	s, err := b.Box.locked()
+	if err != nil {
+		return false, err
+	}
+	if h := s.Workers[w.Session]; h == nil || h.Handed == "" || h.Handed != w.Since {
+		return false, nil
+	}
+	_, live, err := managerOver(c, b)
+	return live, err
+}
+
 // managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.
 func managerOver(c *tmux.Client, b Boss) (Boss, bool, error) {
 	m, _, ok, err := BossOf(c, tmux.SessionTarget(b.Name))

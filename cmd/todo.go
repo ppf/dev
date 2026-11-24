@@ -163,6 +163,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	var it todo.Item
 	var until, person string
 	var replaces int
+	var noDetails bool
 	cmd := &cobra.Command{
 		Use:   "add <item>",
 		Short: "Add an item (or put it in place of an open one, --replaces, which may leave out its text); prints its number",
@@ -193,6 +194,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			}
 			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
 				return err
+			}
+			if noDetails && it.Details != "" {
+				return errors.New("--details or --no-details, not both")
 			}
 			stderr := cmd.ErrOrStderr()
 			// A desktop app boss's list has no name: its own is its session id
@@ -235,7 +239,14 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				it.Until = t.Unix()
 			}
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
+			need := func(t todo.Store) todo.Store {
+				if noDetails {
+					return t
+				}
+				return t.NeedDetails()
+			}
 			if err := tryAdoptable(*boss, func(t todo.Store) error {
+				t = need(t)
 				if cmd.Flags().Changed("replaces") {
 					return t.Replace(replaces, it, now)
 				}
@@ -247,12 +258,15 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if s, err = todoStore(*boss, true, stderr); err != nil {
 				return err
 			}
+			s = need(s)
 			if cmd.Flags().Changed("replaces") {
 				if err := s.Replace(replaces, it, now); err != nil {
 					return err
 				}
 				warnLong(cmd.ErrOrStderr(), it.Text)
-				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
+				if !noDetails {
+					warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
+				}
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
@@ -264,7 +278,9 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			warnLong(cmd.ErrOrStderr(), it.Text)
-			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
+			if !noDetails {
+				warnNoDetails(s, cmd.ErrOrStderr(), id, now)
+			}
 			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
@@ -280,6 +296,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
 	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --details, --part-of not given, and its doing line unless --on changes")
+	cmd.Flags().BoolVar(&noDetails, "no-details", false, "an item the user does that needs no details: without it, one with none (none given, none kept by --replaces) is refused")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
 	return cmd
@@ -439,7 +456,7 @@ on the list ticked at once with its recommended option, decided for the user by 
 	return cmd
 }
 
-const detailsHelp = "its longer text: what it is and why, where it stands, what done looks like (for a waiting item also who, what was asked, when, where; expected on every item but a worker's or --quiet: without, a warning); its steps, what's out of scope; for a message to send (mail, chat, comment), its state on the first line (\"Draft ready, not sent\" or \"Sent <when> to <whom>, <where>\"), then the draft; at most 4000 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
+const detailsHelp = "its longer text: what it is and why, where it stands, what done looks like (for a waiting item also who, what was asked, when, where; expected on every item but a worker's or --quiet: add refuses one the user does without, unless --no-details, else a warning); its steps, what's out of scope; for a message to send (mail, chat, comment), its state on the first line (\"Draft ready, not sent\" or \"Sent <when> to <whom>, <where>\"), then the draft; at most 4000 characters, a blank line between paragraphs, \"- \" lines for a list; - reads it from stdin (with --replaces, replaces its details)"
 
 const maxDetailsBytes = 64 << 10
 
@@ -486,7 +503,8 @@ still reads that text (item numbers restart once a list empties). --via manager 
 told it, only from their pick in the manager's AskUserQuestion: only in the manager's coordinator pane, for an item
 older than that pick, once; its one question must start "<project> #<n>: " and contain --question, the answer must be
 the option picked (or what they typed under Other), and the note quotes it: "you answered #<n> \"<question>\" via
-manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask the item as a question instead. An
+manager (\"<pick>\"): <answer>". The pick is the user's latest one, typed messages after it or not; a typed message
+is never the answer: ask the item as a question instead. An
 item the user answered meanwhile elsewhere sends nothing, saying who answered what where: an error only for another
 answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").
 --recommended --via manager is the manager settling an ask its boss marked obvious (dev todo ask --obvious) with its
@@ -546,7 +564,7 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 			if said != nil {
 				// A pick answers one item, also with two answers relayed at once
 				claim = func() (string, func() error, error) {
-					if err := manager.Box.Claim(*said); err != nil {
+					if err := manager.Box.ClaimPick(*said); err != nil {
 						return "", nil, fmt.Errorf("--via manager: %w", err)
 					}
 					return said.Answer, func() error { return manager.Box.Unclaim(*said) }, nil
@@ -593,8 +611,8 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 	return cmd
 }
 
-// managerPrompt is the manager and the user's latest prompt to it (a pick or a typed message), for an answer relayed
-// from its coordinator pane.
+// managerPrompt is the manager and the user's latest pick in it, typed messages since or not, else their latest
+// prompt to it (a typed message), for an answer relayed from its coordinator pane.
 func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	notHere := errors.New("--via manager runs only in the manager's coordinator pane")
 	pane := os.Getenv("TMUX_PANE")
@@ -614,12 +632,18 @@ func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 		return self, nil, err
 	case p == nil:
 		return self, nil, errors.New("--via manager: the user hasn't prompted the manager yet")
+	case p.Pick:
+		return self, p, nil
 	}
-	return self, p, nil
+	pick, err := self.Box.LatestPick()
+	if err != nil || pick == nil {
+		return self, p, err
+	}
+	return self, pick, nil
 }
 
-// pickFor refuses the user's latest words to the manager unless they are a pick of one question asking item id of
-// boss, question, that didn't leave it open: a typed message can't be tied to an item.
+// pickFor refuses the user's latest pick to the manager (managerPrompt) unless it is one question asking item id of
+// boss, question, that didn't leave it open; a typed message, when they picked nothing, can't be tied to an item.
 func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
 	asked := strings.ToLower(pick.Question)
 	item := fmt.Sprintf(" #%d: ", id)

@@ -364,7 +364,7 @@ func TestWorkerHookBossAsksUp(t *testing.T) {
 				}
 				if strings.Contains(args[len(args)-1], "@dev_started_by") {
 					// The worker pane %5: boss-x, a boss (@dev_herd) the manager started
-					return tmux.FormatRow("manager", "boss-x", "", "", "", "1"), nil
+					return tmux.FormatRow("manager", "boss-x", "", "", "", "", "1"), nil
 				}
 				return tmux.FormatRow("$1", "1700000000", "manager", "1", "", "/tmp/tmux-1/default"), nil
 			})

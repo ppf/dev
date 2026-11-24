@@ -37,7 +37,7 @@ func TestServeBoard(t *testing.T) {
 	}
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	dev(boss, "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait")
-	dev(boss, "todo", "add", "Read the plan")
+	dev(boss, "todo", "add", "--no-details", "Read the plan")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 
 	url := startServe(t, s, user...)

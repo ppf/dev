@@ -206,7 +206,7 @@ func TestHerdReplyBlur(t *testing.T) {
 // for hours) the row wears the item's own age at its right edge.
 func TestHerdNeedsStaleAge(t *testing.T) {
 	d, _, coord, previews := herdServer(t, "")
-	cmd := exec.Command(devBin, "todo", "add", "Call Vince")
+	cmd := exec.Command(devBin, "todo", "add", "--no-details", "Call Vince")
 	cmd.Env = d.scriptEnv("TMUX_PANE=" + coord)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("❌ todo add: %v %s", err, out)

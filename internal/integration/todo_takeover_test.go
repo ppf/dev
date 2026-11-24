@@ -50,7 +50,7 @@ func TestTodoTakeOver(t *testing.T) {
 	s.T("new-session", "-d", "-s", "w-takeover", "sleep", "600")
 	s.T("set-option", "-t", "=w-takeover:", "@dev_started_by", "boss-dev")
 	for _, args := range [][]string{
-		{"todo", "add", "Review the contract"},
+		{"todo", "add", "--no-details", "Review the contract"},
 		{"todo", "add", "Build take-over", "--on", "w-takeover"},
 		{"todo", "note", "risk", "flaky CI"},
 	} {
@@ -95,7 +95,7 @@ func TestTodoTakeOver(t *testing.T) {
 	if err != nil || out != "" || stderr != "" {
 		t.Errorf("❌ reopened boss's list: %v %q %q, want empty", err, out, stderr)
 	}
-	if out, stderr, err := dev(boss, "todo", "add", "Fresh start"); err != nil || out != "added 1 · to do 1\n" {
+	if out, stderr, err := dev(boss, "todo", "add", "--no-details", "Fresh start"); err != nil || out != "added 1 · to do 1\n" {
 		t.Errorf("❌ reopened boss's add: %v %q %s", err, out, stderr)
 	}
 	if out, _, _ := devIn(start, boss, "state", "idle"); strings.Contains(out, "waits") {
