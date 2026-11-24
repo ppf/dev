@@ -274,9 +274,13 @@ func TestAgentStartAgy(t *testing.T) {
 	check(t, "every hook ran clean and printed nothing", strconv.FormatBool(strings.Contains("\n"+log(), "\nhook ")), "false")
 
 	// A session running another agent is refused
-	d.T("new-session", "-d", "-s", "cx", sleeper(t, "codex"))
-	waitFor(t, "codex running", func() bool { return d.T("display", "-t", "=cx:", "-p", "#{pane_current_command}") == "codex" })
+	if err := os.Rename(sleeper(t, "codex"), filepath.Join(stubs, "codex")); err != nil {
+		t.Fatal(err)
+	}
 	cxEnv := append(d.scriptEnv(writeProjects(t, [2]string{"cx", tempDir(t)})), "TMUX_PANE="+boss)
+	if _, errOut, status := devAgent(cxEnv, "", "start", "cx", "--agent", "codex", "--timeout", "30s"); status != "0" {
+		t.Fatalf("start codex: exit %s: %s", status, errOut)
+	}
 	out, errOut, status = devAgent(cxEnv, "", "start", "cx", "--agent", "agy", "--timeout", "30s")
 	check(t, "a session running Codex", out+status+" "+errOut, "1 ❌ session cx already runs Codex, not agy\n")
 
