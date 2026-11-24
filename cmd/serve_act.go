@@ -44,7 +44,7 @@ func pageAnswer(boss string, id int, question, answer string) error {
 // pageDone is dev todo done --text from the phone page.
 func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 	return func(boss string, id int, text string) error {
-		s, _, err := listStore(boss, true, stderr)
+		s, closed, err := listStore(boss, true, stderr)
 		switch {
 		case err != nil && !errors.As(err, new(unreadList)) && !running(tmux.New(), boss):
 			// A closed boss's list leaves once its last item is ticked: that and an unknown boss look the same
@@ -53,7 +53,16 @@ func pageDone(stderr io.Writer) func(boss string, id int, text string) error {
 		case err != nil:
 			return err
 		}
-		return refused(s.DoneText(id, text, time.Now()))
+		now := time.Now()
+		ticked, err := openItems(s, []int{id}, now)
+		if err != nil {
+			return err
+		}
+		if err := s.DoneText(id, text, now); err != nil {
+			return refused(err)
+		}
+		tellTicked(tmux.New(), boss, closed, ticked, wherePage, stderr)
+		return nil
 	}
 }
 

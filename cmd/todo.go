@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -738,7 +739,7 @@ func aliasTaken(cmd *cobra.Command, c *tmux.Client, boss string) (bool, error) {
 const leaveOpen = "Leave it open"
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
-	var text, result string
+	var text, result, where string
 	cmd := &cobra.Command{
 		Use:   "done <n>...",
 		Short: "Tick items by number: they show ticked for a few seconds, then leave",
@@ -766,16 +767,29 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 					return err
 				}
 			}
-			s, _, err := listStore(*boss, true, cmd.ErrOrStderr())
+			switch where {
+			case "", sidebar.WhereBoard, sidebar.WhereSidebar:
+			default:
+				return fmt.Errorf("--where %q: not a place the user ticks from", where)
+			}
+			s, closed, err := listStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 			s = s.WithResult(result)
 			// Outside Claude Code and a T3 Code thread: the user ran it
-			if os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == "" {
+			byUser := os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == ""
+			if byUser {
 				s = s.ByUser()
 			}
 			now := time.Now()
+			// The user's tick (--where is a board's or the sidebar's) tells the list's owner; the owner's own tells no one
+			var ticked []todo.Shown
+			if byUser || where != "" {
+				if ticked, err = openItems(s, ids, now); err != nil {
+					return err
+				}
+			}
 			if text != "" {
 				err = s.DoneText(ids[0], text, now)
 			} else {
@@ -784,11 +798,14 @@ func newTodoDoneCmd(boss *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			tellTicked(tmux.New(), cmp.Or(*boss, s.Boss()), closed, ticked, cmp.Or(where, whereShell), cmd.ErrOrStderr())
 			return printCount(cmd.OutOrStdout(), s, "done "+strings.Join(args, " ")+" · ", now)
 		},
 	}
 	cmd.Flags().StringVar(&text, "text", "", "the item's text: refuse when item n reads otherwise or is on someone else (a board's tick)")
 	cmd.Flags().StringVar(&result, "result", "", "what was done, one line of at most 300 characters, kept on the ticked item: what, to whom, when, the id or link that proves it")
+	cmd.Flags().StringVar(&where, "where", "", "the board or the sidebar running it for the user (their tick's note says so)")
+	_ = cmd.Flags().MarkHidden("where")
 	return cmd
 }
 

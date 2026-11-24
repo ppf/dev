@@ -383,10 +383,18 @@ func DoingNeed(boss string, id int, text, seen, doing string, stop bool) (string
 	return strings.TrimSpace(out + " " + warning), err
 }
 
-// TickNeed ticks item id of boss's list, as dev todo done does, only while it still reads text.
-func TickNeed(boss string, id int, text string) (string, error) {
-	out, warning, err := runTodo(answerTimeout, "done", "--text="+text, "--boss", boss, strconv.Itoa(id))
-	return strings.TrimSpace(out + " " + warning), err
+// Where a tick ran from, as the boss's note names it (dev todo done --where).
+const (
+	WhereBoard   = "the board"
+	WhereSidebar = "the sidebar"
+)
+
+// TickNeed is a tick of item id of boss's list from where, as dev todo done does, only while it still reads text.
+func TickNeed(where string) func(boss string, id int, text string) (string, error) {
+	return func(boss string, id int, text string) (string, error) {
+		out, warning, err := runTodo(answerTimeout, "done", "--where="+where, "--text="+text, "--boss", boss, strconv.Itoa(id))
+		return strings.TrimSpace(out + " " + warning), err
+	}
 }
 
 func needsTick() tea.Cmd {

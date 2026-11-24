@@ -73,8 +73,8 @@ esac`, "gh")
 	if !strings.Contains(out, "1\t◌\tPR #412 open, CI pending\ton reviewers\t"+url+"\t⚠ PR #412 merged") {
 		t.Errorf("❌ check of the closed list:\n%s", out)
 	}
-	out = dev([]string{"TMUX_PANE="}, "todo", "done", "--boss", "boss-orbit", "--text", "Ask Mara for the API key", "2")
-	check(t, "done on the closed list", out, "done 2 · to do 1, 1 on others\n")
+	out = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "todo", "done", "--boss", "boss-orbit", "--text", "Ask Mara for the API key", "2")
+	check(t, "done on the closed list", out, "⚠ dev todo: #2 ticked, no one told: no session manager\ndone 2 · to do 1, 1 on others\n") // its tick note has no manager to go to
 	fails := func(argv ...string) {
 		t.Helper()
 		cmd := exec.Command(devBin, argv...)

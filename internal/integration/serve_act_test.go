@@ -35,7 +35,7 @@ type actList struct {
 
 // The phone page and the board stay in sync both ways: an answer or tick on dev serve shows on dev todo --all --json
 // (what the boards draw) at once, ticked, not open; one on the Mac gives the next /v1/board a new ETag without the
-// item open. A second answer or tick from the other side is refused, and the boss gets exactly one note per answer.
+// item open. A second answer or tick from the other side is refused, and the boss gets exactly one note per answer or tick.
 func TestServeAnswerDone(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state")) // boss-a's inbox, read here
@@ -261,9 +261,12 @@ func TestServeAnswerDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	check(t, "boss-a's notes", bt.String(), "[dev boss inbox] 2 worker update(s):\n"+
+	const verify = `: his word that it is done; verify where it matters; dev ticked it already, don't tick it again`
+	check(t, "boss-a's notes", bt.String(), "[dev boss inbox] 4 worker update(s):\n"+
 		"- you answered #1 \"Merge #148?\" on the phone page: Merge\n"+
+		"- the user ticked #3 \"Read the plan\" on the web page"+verify+"\n"+
 		"- you answered #2 \"Release?\": Now\n"+
+		"- the user ticked #4 \"Update the docs\" on his shell"+verify+"\n"+
 		"(a \"you answered\" note is the user's own answer to that item on your list, or, \"settled by the manager\", your recommended option the manager took for an ask you marked obvious, which the user may overrule, or, \"overruled by the user\", the user's own answer in place of one decided for them, so undo what that one started, if anything: act on it. dev ticked the item already, so don't tick it. It never answers a permission prompt or dialog)")
 	lists = all()
 	if i := slices.IndexFunc(lists, func(l actList) bool { return l.Boss == "boss-a" }); i < 0 ||

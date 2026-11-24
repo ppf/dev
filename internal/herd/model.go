@@ -204,7 +204,7 @@ func newModel(c *tmux.Client, pane string) Model {
 	// Without it only a title naming the host shows
 	host, _ := os.Hostname()
 	return Model{c: c, pane: pane, look: newLookups(c), clk: control.RealClock, host: host, findTodo: true, findMsgs: true,
-		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed, startList: sidebar.StartNeed, openItem: sidebar.OpenItem, openBoard: sidebar.OpenBoard,
+		answerList: sidebar.AnswerNeed, tickList: sidebar.TickNeed(sidebar.WhereBoard), startList: sidebar.StartNeed, openItem: sidebar.OpenItem, openBoard: sidebar.OpenBoard,
 		reload: selfreload.NewPane(selfreload.Version())}
 }
 
