@@ -46,18 +46,19 @@ func AgyInterrupted(capture string) bool {
 	return false
 }
 
-// AgyTrust reports agy's trust dialog for directory dir, with its cursor on "Yes, I trust this folder": Enter
-// confirms it. The path under "Accessing workspace:" may wrap over several lines.
-func AgyTrust(capture, dir string) bool {
+// AgyTrust reads agy's trust dialog: the folder it asks about (the path under "Accessing workspace:", maybe
+// wrapped over several lines) and whether its cursor is on "Yes, I trust this folder", which Enter confirms.
+// ok=false without the dialog.
+func AgyTrust(capture string) (dir string, yes, ok bool) {
 	plain := plainScreen(capture)
 	at := slices.Index(plain, "Accessing workspace:")
 	if at < 0 {
-		return false
+		return "", false, false
 	}
 	ask := slices.Index(plain[at:], "Do you trust the contents of this project?")
 	if ask < 0 {
-		return false
+		return "", false, false
 	}
 	ask += at
-	return strings.Join(plain[at+1:ask], "") == dir && slices.Contains(plain[ask:], "> Yes, I trust this folder")
+	return strings.Join(plain[at+1:ask], ""), slices.Contains(plain[ask:], "> Yes, I trust this folder"), true
 }

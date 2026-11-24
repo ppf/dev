@@ -238,6 +238,7 @@ func TestDetect(t *testing.T) {
 		{"agy without hook", []Pane{{Window: 1, ID: "%6", Command: "agy"}}, "%0", "%6", "Agy", ""},
 		{"claude beats earlier agy", []Pane{{Window: 1, ID: "%6", Command: "agy"}, claude}, "%0", "%2", "Claude", Waiting},
 		{"agy beats earlier codex", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%6", Command: "agy"}}, "%0", "%6", "Agy", ""},
+		{"grok beats earlier agy", []Pane{{Window: 1, ID: "%6", Command: "agy"}, {Window: 1, ID: "%5", Command: "grok"}}, "%0", "%5", "Grok", ""},
 		{"agyx is not agy", []Pane{{Window: 1, ID: "%6", Command: "agyx"}}, "%0", "", "", ""},
 	}
 	for _, tt := range tests {
@@ -257,7 +258,6 @@ func TestAgyHook(t *testing.T) {
 		`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`: `{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`,
 		`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`:           `{"cwd":"/w","hook_event_name":"Stop","prompt":"say ok",` + session + `}`,
 		`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`:                          "",
-		`{"hookEventName":"PreInvocation",` + ids + `}`:                                            "",
 		`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`:                         "",
 		`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`:             "",
 		`{"hookEventName":"SessionStart",` + ids + `}`:                                             "",
@@ -270,8 +270,10 @@ func TestAgyHook(t *testing.T) {
 			t.Errorf("AgyHook(%s): session %+v", input, HookSession(out))
 		}
 	}
-	if _, _, err := AgyHook([]byte("{")); err == nil {
-		t.Error("AgyHook of malformed input: no error")
+	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`} {
+		if _, _, err := AgyHook([]byte(input)); err == nil {
+			t.Errorf("AgyHook(%s): no error", input)
+		}
 	}
 }
 

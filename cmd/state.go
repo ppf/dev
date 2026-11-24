@@ -41,12 +41,26 @@ func newStateCmd() *cobra.Command {
 				return nil
 			}
 			input, err := io.ReadAll(cmd.InOrStdin())
+			if err != nil && agy {
+				// agy's hooks report an error only on stderr, never through the exit status: how agy takes one is unknown
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+				return nil
+			}
 			if err != nil {
 				return err
 			}
 			c := tmux.New()
 			if agy {
 				// agy reads a hook's stdout as its decision ({} on PreToolUse denies the tool call): nothing goes there
+				command, err := c.Run("display-message", "-p", "-t", pane, "#{pane_current_command}")
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if !agent.AgyCommand(strings.TrimSpace(command)) {
+					// An agy -p another agent runs in its pane inherits the pane's TMUX_PANE, but isn't its agent
+					return nil
+				}
 				var turn bool
 				if input, turn, err = agent.AgyHook(input); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
@@ -119,7 +133,7 @@ func newStateCmd() *cobra.Command {
 					return nil
 				}
 			}
-			// Not Codex's or Grok's: a restore would resume it with claude --resume (it saves only a Claude pane's)
+			// Codex's and Grok's hooks carry no conversation dev records; agy's is recorded, never resumed
 			var session agent.Session
 			if claude || agy {
 				session = agent.HookSession(input)
@@ -169,6 +183,10 @@ func newStateCmd() *cobra.Command {
 				// The notes are already out of the inbox: print them even if Record failed. Claude reads a
 				// hook's stdout as JSON, so nothing else may go there
 				fmt.Fprintln(cmd.OutOrStdout(), out)
+			}
+			if recErr != nil && agy {
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+recErr.Error())
+				return nil
 			}
 			if recErr != nil {
 				return recErr

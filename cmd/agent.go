@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -437,11 +438,12 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 					return err
 				}
 			}
-			// agy's trust dialog is confirmed only in a worktree this start makes
+			// A new agy session: its --model checked, and whether this start makes its worktree, where alone dev
+			// confirms agy's trust dialog
 			made := false
 			if missing != nil && agentCmd == agent.Agy {
 				if start.Model != "" {
-					if err := checkAgyModel(start.Model); err != nil {
+					if err := checkAgyModel(start.Model, timeout); err != nil {
 						return err
 					}
 				}
@@ -467,7 +469,8 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			if missing == nil && cmd.Flags().Changed("agent") && !strings.EqualFold(a.Label, agentCmd) {
 				return fmt.Errorf("session %s already runs %s, not %s", session, a.Label, agentCmd)
 			}
-			if missing != nil && agentCmd == agent.Agy {
+			// Also a reused agy session that got no state yet: its start left a screen to the user
+			if a.Label == "Agy" && a.State == "" {
 				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, timeout)
 				if err != nil {
 					return err
@@ -491,10 +494,12 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 	return cmd
 }
 
-// checkAgyModel refuses a --model that agy models doesn't list: agy would start on its stored model instead,
-// saying so only on its screen.
-func checkAgyModel(model string) error {
-	out, err := exec.Command(agent.Agy, "models").Output()
+// checkAgyModel refuses a --model that agy models doesn't list within timeout: agy would start on its stored
+// model instead, saying so only on its screen.
+func checkAgyModel(model string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, agent.Agy, "models").Output()
 	if e, ok := errors.AsType[*exec.ExitError](err); ok && len(e.Stderr) > 0 {
 		return fmt.Errorf("checking --model: agy models: %s", strings.TrimSpace(string(e.Stderr)))
 	}
@@ -502,6 +507,9 @@ func checkAgyModel(model string) error {
 		return fmt.Errorf("checking --model: agy models: %w", err)
 	}
 	models := agent.AgyModels(string(out))
+	if models == nil {
+		return fmt.Errorf("checking --model: agy models listed no model: %q", strings.TrimSpace(string(out)))
+	}
 	if !slices.Contains(models, model) {
 		return fmt.Errorf("unknown --model %q for agy, want one agy models lists: %s", model, strings.Join(models, ", "))
 	}

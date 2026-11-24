@@ -69,14 +69,17 @@ func TestStateAgy(t *testing.T) {
 	check(t, "malformed input", agy("working", `{`), "❌ dev state: agent: hook input: unexpected end of JSON input\n")
 	check(t, "malformed input leaves the pane alone", opts(), "idle agy 1 110c93f6-c88f /brain/t.jsonl")
 
+	// An agy -p another agent runs in its pane inherits that pane's TMUX_PANE: it isn't the pane's agent
+	s.T("set-option", "-p", "-t", boss, "@agent_state", "working")
+	out, errOut := run(s.scriptEnv("TMUX_PANE="+boss), `{"hookEventName":"Stop",`+ids+`}`, "--agy", "idle")
+	check(t, "a nested agy's hook", out+errOut+s.T("show-option", "-pqv", "-t", boss, "@agent_state"), "working")
+
 	// Outside tmux, also in a desktop app session's environment: nothing, and nothing on stdout
-	out, errOut := run(append(s.tmux.Env(), "CLAUDE_CODE_ENTRYPOINT=claude-desktop", "CLAUDE_CODE_HOST_SESSION_ID=x"),
+	out, errOut = run(append(s.tmux.Env(), "CLAUDE_CODE_ENTRYPOINT=claude-desktop", "CLAUDE_CODE_HOST_SESSION_ID=x"),
 		`{"hookEventName":"Stop",`+ids+`}`, "--agy", "idle")
 	check(t, "outside tmux", out+errOut, "")
 
-	// The worker's turn end queued a note for its boss; an agy hook on the boss's pane leaves it there, printing nothing
-	out, errOut = run(s.scriptEnv("TMUX_PANE="+boss), `{"hookEventName":"Stop",`+ids+`}`, "--agy", "idle")
-	check(t, "a boss's agy hook prints no notes", out+errOut, "")
+	// The worker's turn end queued a note for its boss, which the nested agy's hook on the boss's pane left there
 	out, _ = run(s.scriptEnv("TMUX_PANE="+boss), `{"hook_event_name":"Stop"}`, "idle")
 	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 1 worker update(s):\n- ag finished"}`+"\n")
 }
@@ -210,6 +213,9 @@ func TestAgentStartAgy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, ".claude/worktrees/w-bad")); err == nil {
 		t.Error("❌ the refused start made its worktree")
 	}
+	if _, err := d.Try("has-session", "-t", "=repo-w-bad:"); err == nil {
+		t.Error("❌ the refused start opened its session")
+	}
 
 	out, errOut, status = devAgent(env, "", "start", "repo", "w1", "--agent", "agy", "--model", "gemini-3.8-flash-low", "--effort", "high", "--json", "--timeout", "30s")
 	var a map[string]string
@@ -227,13 +233,21 @@ func TestAgentStartAgy(t *testing.T) {
 	check(t, "read shows its answer", strconv.FormatBool(strings.Contains(out, "> say ok\n\n  ok")), "true")
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "decline", "--timeout", "30s")
 	check(t, "a turn ended without a Stop settles by its screen", status+" "+out+errOut, "0 idle\n")
+	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "say ok again", "--timeout", "30s")
+	check(t, "the next turn isn't taken for the declined one", status+" "+out+errOut, "0 idle\n")
+	out, _, _ = devAgent(env, "", "read", "repo-w1", "--lines", "20")
+	check(t, "read shows the next answer", strconv.FormatBool(strings.Contains(out, "> say ok again\n\n  ok")), "true")
+	out, errOut, status = devAgent(env, "", "start", "repo", "w1", "--agent", "agy", "--json", "--timeout", "30s")
+	check(t, "a reused agy session", status+" "+strconv.FormatBool(strings.Contains(out, `"state": "idle"`))+" "+errOut, "0 true ")
+	check(t, "its trust dialog confirmed once", strconv.Itoa(strings.Count(log(), "trusted "+wt+"\n")), "1")
 	_, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "/clear")
 	check(t, "/clear --wait refused", status+" "+errOut,
 		"1 ❌ --wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait\n")
 	out, errOut, status = devAgent(env, "", "close", "repo-w1")
 	check(t, "close", status+" "+out+errOut, "0 Closed repo-w1, removed worktree "+wt+" and branch w1\n")
+	check(t, "every hook ran clean and printed nothing", strconv.FormatBool(strings.Contains("\n"+log(), "\nhook ")), "false")
 
-	// A session running another agent is refused, before agy models is asked
+	// A session running another agent is refused
 	d.T("new-session", "-d", "-s", "cx", sleeper(t, "codex"))
 	waitFor(t, "codex running", func() bool { return d.T("display", "-t", "=cx:", "-p", "#{pane_current_command}") == "codex" })
 	cxEnv := append(d.scriptEnv(writeProjects(t, [2]string{"cx", tempDir(t)})), "TMUX_PANE="+boss)
@@ -256,4 +270,9 @@ func TestAgentStartAgy(t *testing.T) {
 		check(t, "its trust dialog left for the user in "+dir, strconv.FormatBool(strings.HasPrefix(errOut, "⚠ agy asks whether to trust "+dir+", a folder this start didn't make")), "true")
 		check(t, "not confirmed in "+dir, strconv.FormatBool(strings.Contains(log(), "trusted "+dir+"\n")), "false")
 	}
+	// Once the user answered it, the start run again records it idle
+	d.T("send-keys", "-t", "=repo:1.2", "Enter")
+	waitFor(t, "trusted by the user", func() bool { return strings.Contains(log(), "trusted "+repo+"\n") })
+	out, errOut, status = devAgent(env, "", "start", "repo", "--agent", "agy", "--json", "--timeout", "30s")
+	check(t, "the start run again", status+" "+strconv.FormatBool(strings.Contains(out, `"state": "idle"`))+" "+errOut, "0 true ")
 }

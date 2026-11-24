@@ -38,7 +38,7 @@ var (
 type Agent struct {
 	Session string `json:"session"`
 	Pane    string `json:"pane"`
-	Label   string `json:"agent"` // "Claude", "Codex" or "Grok"
+	Label   string `json:"agent"` // "Claude", "Codex", "Grok" or "Agy"
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
 	// Queued marks a working Claude holding a prompt it reads at its turn's next step (screen.ClaudeQueued).
 	Queued bool `json:"queued,omitempty"`
@@ -473,7 +473,7 @@ var RealClock = Clock{Now: time.Now, Sleep: time.Sleep}
 const pollInterval = 200 * time.Millisecond
 
 // Wait polls pane until done reports true for its status, or timeout passes (ErrTimeout). A pane
-// without a trusted state (Codex or Grok without its hooks) fails at once.
+// without a trusted state (Codex or Grok without its hooks, agy before its start saw its input box) fails at once.
 func Wait(c *tmux.Client, clk Clock, pane string, timeout time.Duration, done func(Status) bool) (Status, error) {
 	st, err := ReadChecked(c, pane)
 	if err != nil {

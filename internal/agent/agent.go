@@ -95,7 +95,10 @@ func AgyHook(input []byte) (out []byte, ok bool, err error) {
 	}
 	event := e.Event
 	switch {
-	case e.Event == "PreInvocation" && e.Invocation != nil && *e.Invocation == 0:
+	case e.Event == "PreInvocation" && e.Invocation == nil:
+		// Else no turn would ever start, and prompt --wait would stall without a word
+		return nil, false, errors.New("agent: agy PreInvocation without invocationNum")
+	case e.Event == "PreInvocation" && *e.Invocation == 0:
 		event = "UserPromptSubmit"
 	case e.Event != "Stop":
 		return nil, false, nil
