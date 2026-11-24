@@ -250,6 +250,36 @@ func TestAgentClose(t *testing.T) {
 		t.Error("❌ session remote still there")
 	}
 
+	// A RESULT.md git ignores isn't archived: refused until results/<session>/ holds the same text
+	writeFile(t, filepath.Join(root, ".git", "info", "exclude"), "RESULT.md\n")
+	lost := worker("lost", true, "idle", idle)
+	writeFile(t, filepath.Join(lost, "RESULT.md"), "# lost")
+	lostDir := filepath.Join(d.tmp, "state", "dev", "results", "lost")
+	out, err = devCmd(coord, "", "agent", "close", "lost")
+	if err == nil || !strings.Contains(out, "holds a RESULT.md that git ignores and "+lostDir+" lacks: save it there first") {
+		t.Errorf("❌ close with an unsaved ignored RESULT.md = %v, %q; want it refused", err, out)
+	}
+	if _, err := d.Try("has-session", "-t", "=lost:"); err != nil {
+		t.Error("❌ refused close of lost killed it")
+	}
+	writeFile(t, filepath.Join(lostDir, "RESULT.md"), "# older")
+	if out, err := devCmd(coord, "", "agent", "close", "lost"); err == nil || !strings.Contains(out, "lacks: save it there first") {
+		t.Errorf("❌ close with a different saved RESULT.md = %v, %q; want it refused", err, out)
+	}
+	writeFile(t, filepath.Join(lostDir, "RESULT.md"), "# lost")
+	if out, err := devCmd(coord, "", "agent", "close", "lost"); err != nil {
+		t.Errorf("❌ close with RESULT.md saved: %v\n%s", err, out)
+	}
+
+	// A committed RESULT.md is in git: no refusal
+	kept := worker("kept", true, "idle", idle)
+	writeFile(t, filepath.Join(kept, "RESULT.md"), "# kept")
+	git(t, kept, "add", "-f", "RESULT.md")
+	git(t, kept, "commit", "-qm", "result")
+	git(t, kept, "push", "-q", "origin", "kept:main")
+	if out, err := devCmd(coord, "", "agent", "close", "kept"); err != nil {
+		t.Errorf("❌ close with a committed RESULT.md: %v\n%s", err, out)
+	}
 	// No origin remote: delivered once its commits are in the main checkout's branch, which is kept
 	git(t, root, "remote", "remove", "origin")
 	local := filepath.Join(root, ".claude", "worktrees", "local")

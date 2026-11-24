@@ -100,7 +100,7 @@ func TestTodoAsking(t *testing.T) {
 		t.Errorf("❌ asking after the refusal: %v, want none", got)
 	}
 	s.T("set-option", "-t", "=boss-a:", "-u", inbox.OptOff)
-	check(t, "asking", must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"), "boss-a #1: asked in manager now\n")
+	check(t, "asking", must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"), "boss-a #1: asked in manager now, question prefix \"a #1: \"\n")
 	if got := asking(); len(got) != 1 || got[0] != 1 {
 		t.Errorf("❌ asking after the mark: %v, want [1]", got)
 	}
@@ -163,7 +163,7 @@ func TestTodoAsking(t *testing.T) {
 		t.Errorf("❌ asking after refusals: %v, want none", got)
 	}
 	check(t, "asking two", must(inManager, "", "todo", "asking", "boss-a", "3", "boss-a", "4", "--question", "Ship?", "--question", "Tag?"),
-		"boss-a #3: asked in manager now\nboss-a #4: asked in manager now\n")
+		"boss-a #3: asked in manager now, question prefix \"a #3: \"\nboss-a #4: asked in manager now, question prefix \"a #4: \"\n")
 	if got := asking(); !slices.Equal(slices.Sorted(slices.Values(got)), []int{3, 4}) {
 		t.Errorf("❌ asking after a mark of two: %v, want #3 and #4", got)
 	}

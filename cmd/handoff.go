@@ -77,16 +77,28 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 		return nil, fmt.Errorf("--kind work: the user hasn't picked %q here yet: ask them first", inbox.HandItOn)
 	}
 	if err := handOnPick(p, boss, text); err != nil {
-		return nil, err
+		return nil, g.refused(p, err)
 	}
 	if p.Spent {
 		return nil, errors.New("--kind work: the user's latest pick was used already: ask them again")
 	}
 	if err := self.Box.ClaimPick(*p, -1); err != nil {
-		return nil, fmt.Errorf("--kind work: %w", err)
+		return nil, g.refused(p, fmt.Errorf("--kind work: %w", err))
 	}
 	g.pick = p
 	return g, nil
+}
+
+// refused is err, a refusal of a send on pick p; the user's click on "Hand it on" refused is recorded as Refused.
+func (g *handOn) refused(p *inbox.Prompt, err error) error {
+	if p.Spent || !p.Pick || !inbox.IsPicked(p.Answer, inbox.HandItOn) {
+		return err
+	}
+	g.h.Kind, g.h.At = inbox.Refused, time.Now().Unix()
+	if addErr := g.store.Add(g.h); addErr != nil {
+		return fmt.Errorf("%w (not recorded in dev agent handoffs: %v)", err, addErr)
+	}
+	return err
 }
 
 // inManager reports whether pane is in the manager's session, also when tmux can't tell.
@@ -160,7 +172,8 @@ func newAgentHandoffsCmd() *cobra.Command {
 		Short: "List what the manager sent its bosses by --kind, ungated ones first, with the trial's counts",
 		Long: `List what the manager sent its bosses with dev agent prompt/message/reply --kind, ungated kinds (question, pick, own)
 first so a mislabel shows, then work (each on the user's "Hand it on" pick), then hand-on questions that sent nothing
-(dropped: "Drop it" picked; corrected: typed under Other or another option picked); newest first in each. The first line counts them. A
+(dropped: "Drop it" picked; corrected: typed under Other or another option picked), then the user's "Hand it on" clicks the gate
+refused (refused); newest first in each. The first line counts them. A
 dismissed question is not seen. --json prints [{kind, at, boss?, line}], at in unix seconds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

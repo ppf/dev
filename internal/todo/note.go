@@ -60,12 +60,19 @@ func (n Note) Check() error {
 	return nil
 }
 
-// AddNote stores n and returns its id (1, 2…, shown as n1), never one used before; a state note replaces the list's
-// earlier one. Over MaxNotes, an over-long text or why, a said note without Until or Item, or an Item that isn't an
-// open item is an error. The list's Updated stays.
+// AddNote is AddNoteDropping without the dropped note.
 func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
+	id, _, err = s.AddNoteDropping(n, now)
+	return id, err
+}
+
+// AddNoteDropping stores n and returns its id (1, 2…, shown as n1), never one used before; a state note replaces the
+// list's earlier one. At MaxNotes the oldest note whose item is done goes, else the oldest not a state note: returned
+// as dropped, nil for none. An over-long text or why, a said note without Until or Item, or an Item that isn't an
+// open item is an error. The list's Updated stays.
+func (s Store) AddNoteDropping(n Note, now time.Time) (id int, dropped *Note, err error) {
 	if err := n.Check(); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	err = s.locked(func() error {
 		f, err := s.read()
@@ -85,17 +92,36 @@ func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 		if n.Kind == NoteState {
 			notes = slices.DeleteFunc(slices.Clone(notes), func(o Note) bool { return o.Kind == NoteState })
 		}
-		switch {
-		case len(notes) >= MaxNotes:
-			return fmt.Errorf("%d notes already, at most %d: drop one first (dev todo note drop <n>)", len(notes), MaxNotes)
-		case n.Item != 0 && !f.hasOpen(n.Item):
+		if n.Item != 0 && !f.hasOpen(n.Item) {
 			return fmt.Errorf("no open item %d", n.Item)
+		}
+		if len(notes) >= MaxNotes {
+			i := oldest(notes, func(o Note) bool { return o.ItemDone && o.Kind != NoteState })
+			if i < 0 {
+				i = oldest(notes, func(o Note) bool { return o.Kind != NoteState })
+			}
+			d := notes[i]
+			dropped, notes = &d, slices.Delete(slices.Clone(notes), i, i+1)
 		}
 		f.Notes, f.NextNote = append(notes, n), n.ID+1
 		id = n.ID
 		return s.write(f)
 	})
-	return id, err
+	if err != nil {
+		dropped = nil
+	}
+	return id, dropped, err
+}
+
+// oldest is the index of the earliest Added among the notes keep accepts, -1 for none.
+func oldest(notes []Note, keep func(Note) bool) int {
+	best := -1
+	for i, n := range notes {
+		if keep(n) && (best < 0 || n.Added < notes[best].Added) {
+			best = i
+		}
+	}
+	return best
 }
 
 // DropNote removes note id; one that isn't there is an error. The list's Updated stays.

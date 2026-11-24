@@ -269,6 +269,15 @@ func Untracked(wt string) ([]string, error) {
 	return nulList(gitOutput(wt, "ls-files", "-z", "--others", "--exclude-standard"))
 }
 
+func Ignored(wt, path string) (bool, error) {
+	err := exec.Command("git", "-C", wt, "check-ignore", "-q", "--", path).Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // nulList splits git's NUL-separated output into its paths.
 func nulList(out string, err error) ([]string, error) {
 	if err != nil {
