@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -254,26 +255,87 @@ func TestDetect(t *testing.T) {
 func TestAgyHook(t *testing.T) {
 	const ids = `"conversationId":"110c93f6-c88f","transcriptPath":"/t.jsonl","cwd":"/w"`
 	const session = `"session_id":"110c93f6-c88f","transcript_path":"/t.jsonl"`
-	for input, want := range map[string]string{
-		`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`: `{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`,
-		`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`:           `{"cwd":"/w","hook_event_name":"Stop","prompt":"say ok",` + session + `}`,
-		`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`:                          "",
-		`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`:                         "",
-		`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`:             "",
-		`{"hookEventName":"SessionStart",` + ids + `}`:                                             "",
-	} {
-		out, ok, err := AgyHook([]byte(input))
-		if err != nil || ok != (want != "") || string(out) != want {
-			t.Errorf("AgyHook(%s) = %s, %v, %v; want %s", input, out, ok, err, want)
+	const ask = `{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"questions":[{"is_multi_select":false,` +
+		`"options":["(Recommended) Red","Blue"],"question":"Do you prefer red or blue?"}]}},` + ids + `}`
+	tests := []struct {
+		input string
+		kind  AgyKind
+		want  string // its input in Claude's shape
+	}{
+		{`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`},
+		{`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"Stop","last_assistant_message":"","prompt":"say ok",` + session + `}`},
+		{ask, AgyAsk, `{"cwd":"/w","hook_event_name":"Notification","message":"Do you prefer red or blue? ((Recommended) Red / Blue)",` +
+			`"notification_type":"permission_prompt","prompt":"",` + session + `}`},
+		{`{"hookEventName":"PostToolUse","toolCall":{"name":"ask_question"},` + ids + `}`, AgyToolDone,
+			`{"cwd":"/w","hook_event_name":"PostToolUse","prompt":"",` + session + `}`},
+		{`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`, AgyTool, ""},
+		{`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`, AgyProgress, ""},
+		{`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`, AgyProgress, ""},
+		{`{"hookEventName":"SessionStart",` + ids + `}`, AgyProgress, ""},
+	}
+	for _, tt := range tests {
+		ev, err := AgyHook([]byte(tt.input))
+		if err != nil || ev.Kind != tt.kind || string(ev.Input) != tt.want {
+			t.Errorf("AgyHook(%s) = %v %s, %v; want %v %s", tt.input, ev.Kind, ev.Input, err, tt.kind, tt.want)
 		}
-		if ok && HookSession(out) != (Session{ID: "110c93f6-c88f", Transcript: "/t.jsonl"}) {
-			t.Errorf("AgyHook(%s): session %+v", input, HookSession(out))
+		if tt.want != "" && HookSession(ev.Input) != (Session{ID: "110c93f6-c88f", Transcript: "/t.jsonl"}) {
+			t.Errorf("AgyHook(%s): session %+v", tt.input, HookSession(ev.Input))
 		}
 	}
+	ev, _ := AgyHook([]byte(ask))
+	want := Question{Tool: AskUserQuestion, Questions: []Ask{{Question: "Do you prefer red or blue?",
+		Options: []Choice{{Label: "(Recommended) Red"}, {Label: "Blue"}}}}}
+	if !reflect.DeepEqual(ev.Question, want) {
+		t.Errorf("AgyHook(ask_question).Question = %+v, want %+v", ev.Question, want)
+	}
+	ev, _ = AgyHook([]byte(`{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"questions":[` +
+		`{"is_multi_select":true,"options":["A","B"],"question":"Which?"},{"options":[],"question":"Why?"}]}}}`))
+	if got := ev.Question.Ask(); got != "Which? (A / B) +1 more" || !ev.Question.Questions[0].MultiSelect {
+		t.Errorf("AgyHook(two questions): %q, %+v", got, ev.Question)
+	}
 	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`} {
-		if _, _, err := AgyHook([]byte(input)); err == nil {
+		if _, err := AgyHook([]byte(input)); err == nil {
 			t.Errorf("AgyHook(%s): no error", input)
 		}
+	}
+}
+
+func TestAgyLastReply(t *testing.T) {
+	dir := t.TempDir()
+	write := func(lines ...string) string {
+		path := filepath.Join(dir, "transcript_full.jsonl")
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const (
+		user  = `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>\nsay ok\n</USER_REQUEST>"}`
+		call  = `{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command"}]}`
+		ran   = `{"step_index":2,"source":"MODEL","type":"GENERIC","content":"Command exited with code 0."}`
+		reply = `{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hi"}`
+	)
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"its reply after a tool call", []string{user, call, ran, reply}, "hi"},
+		{"a turn with no reply yet", []string{reply, user, call}, ""},
+		{"no turn", nil, ""},
+	}
+	for _, tt := range tests {
+		if got, err := AgyLastReply(write(tt.lines...)); err != nil || got != tt.want {
+			t.Errorf("%s: AgyLastReply = %q, %v; want %q", tt.name, got, err, tt.want)
+		}
+	}
+	if _, err := AgyLastReply(write(user, "{")); err == nil {
+		t.Error("a line that isn't JSON: no error")
+	}
+	if _, err := AgyLastReply(filepath.Join(dir, "gone.jsonl")); err == nil {
+		t.Error("no transcript: no error")
 	}
 }
 

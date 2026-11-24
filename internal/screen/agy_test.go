@@ -1,6 +1,7 @@
 package screen
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,7 @@ func TestAgyScreensGolden(t *testing.T) {
 		{"agy-esc", true, true, ""},
 		{"agy-declined", true, true, ""},
 		{"agy-permission", false, false, ""},
+		{"agy-permission-narrow", false, false, ""}, // in a 58-column pane, its tool line far above
 		{"agy-question", false, false, ""},
 	}
 	for _, tt := range tests {
@@ -41,6 +43,15 @@ func TestAgyScreensGolden(t *testing.T) {
 			}
 			if dir, yes, ok := AgyTrust(capture); dir != tt.trusts || yes != (tt.trusts != "") || ok != (tt.trusts != "") {
 				t.Errorf("AgyTrust = %q, %v, %v; want %q", dir, yes, ok, tt.trusts)
+			}
+			want := ""
+			if tt.file == "agy-permission" || tt.file == "agy-permission-narrow" {
+				want = "Bash|echo hi|Run this command?|true"
+			}
+			if tool, what, title, ok := AgyPermission(capture); ok || want != "" {
+				if got := strings.Join([]string{tool, what, title, strconv.FormatBool(ok)}, "|"); got != want {
+					t.Errorf("AgyPermission = %s, want %s", got, want)
+				}
 			}
 		})
 	}
@@ -88,6 +99,36 @@ func TestAgyInterrupted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := AgyInterrupted(tt.capture); got != tt.want {
 				t.Errorf("AgyInterrupted = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgyPermission(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	prompt := func(asked ...string) []string {
+		return append(append([]string{"● Bash(go test ./...) (ctrl+o to expand)", "", "Command", rule, "", "Requesting permission for:"}, asked...),
+			"", "Run this command?", "> 1. Yes, run command", "  4. No, cancel", "", "  ↑/↓ Navigate", "esc to cancel     auto · Gemini 3.8 Flash · low")
+	}
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"a command", prompt("   go test ./..."), "Bash|go test ./...|Run this command?|true"},
+		{"a wrapped command", prompt("   go test ./internal/screen/ ./internal/control/", "   ./internal/agent/"),
+			"Bash|go test ./internal/screen/ ./internal/control/ ./internal/agent/|Run this command?|true"},
+		{"no tool line", prompt("   ls")[2:], "|ls|Run this command?|true"},
+		// Its text in a reply (a worker reading these fixtures), above an input box
+		{"quoted in a reply", append(prompt("   ls")[:10], rule, ">", rule, "? for shortcuts"), "|||false"},
+		{"no options under it", append(prompt("   ls")[:8], "esc to cancel"), "|||false"},
+		{"another footer", append(prompt("   ls")[:11], "? for shortcuts"), "|||false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool, what, title, ok := AgyPermission(strings.Join(tt.lines, "\n") + "\n\n")
+			if got := strings.Join([]string{tool, what, title, strconv.FormatBool(ok)}, "|"); got != tt.want {
+				t.Errorf("AgyPermission = %s, want %s", got, tt.want)
 			}
 		})
 	}

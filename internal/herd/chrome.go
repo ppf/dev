@@ -24,6 +24,8 @@ func previewLines(capture string, t tile) []string {
 		return squeezeBlank(cropCodexInput(lines))
 	case "Grok":
 		return squeezeBlank(cropGrokInput(lines))
+	case "Agy":
+		return squeezeBlank(cropAgyInput(lines))
 	}
 	return lines
 }
@@ -136,6 +138,17 @@ func cropGrokInput(lines []string) []string {
 				return cutAt(lines, plain, i)
 			}
 		}
+	}
+	return cutAt(lines, plain, top)
+}
+
+// cropAgyInput drops agy's input box (screen.AgyBoxAt: a > prompt row between two ─ rules) and its footer from the
+// bottom of its captured screen, idle or working. A screen without it (a dialog in its place) is returned unchanged.
+func cropAgyInput(lines []string) []string {
+	plain := screen.Plain(lines)
+	top, _, ok := screen.AgyBoxAt(plain)
+	if !ok {
+		return lines
 	}
 	return cutAt(lines, plain, top)
 }

@@ -413,6 +413,19 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 					continue
 				}
 			}
+			if agent.AgyCommand(r.Command) {
+				// agy fires no hook for its permission prompt: the check its tool call's hook started may have missed it
+				asked, err := AgyPermission(c, clk, r.Pane, control.Status{Since: r.Since, Prompts: r.Prompts}, shot)
+				if err != nil && strings.Contains(err.Error(), "can't find pane") {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if asked != nil {
+					continue
+				}
+			}
 			w.screen = fmt.Sprintf("%x", sha256.Sum256([]byte(screen.Snapshot(shot))))
 			w.parked = agent.ClaudeCommand(r.Command) && screen.ClaudeState(shot) == agent.Idle
 		case unix(r.Since) == 0:

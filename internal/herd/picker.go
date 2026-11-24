@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,13 +40,16 @@ type pick struct {
 	tool, detail, about string
 }
 
+// agyNumbered is the "Question 1/2: " agy's question titles start with.
+var agyNumbered = regexp.MustCompile(`^Question \d+/\d+: `)
+
 // newPick decorates dialog d with q, the pane's question, when q is what d shows on screen.
 func newPick(d dialog, q agent.Question, screen string) pick {
 	p := pick{d: d, cur: -1, other: -1}
 	switch {
 	case q.Tool == agent.AskUserQuestion:
 		for i, a := range q.Questions {
-			if !sameText(a.Question, d.title) {
+			if !sameText(a.Question, agyNumbered.ReplaceAllString(d.title, "")) {
 				continue
 			}
 			p.cur = i

@@ -218,6 +218,8 @@ func TestAskRules(t *testing.T) {
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",
 		// Codex workers take --model and --effort; grok doesn't
 		"with `--agent grok` it always fails", "`--agent codex --model <slug> --effort <effort>`, the slug one `codex debug models` lists",
+		// An agy worker's decisions, relayed with the keys its lists take
+		"agy's lists take the option's digit alone", "`esc` cancels a permission prompt or skips a question",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

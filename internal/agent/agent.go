@@ -77,11 +77,41 @@ func GrokSkip(input []byte) bool {
 	return e.Event == "Stop" && e.Reason != "end_turn"
 }
 
-// AgyHook is an agy hook's input (camelCase fields, its own events) in the shape of Claude's that the state
-// recorder, notifications and boss notes read: a turn starts at its first model call (PreInvocation with
-// invocationNum 0), recorded as a UserPromptSubmit with its prompt, and ends at Stop; the conversation is the
-// session. ok=false for agy's other events (a later model call, a tool call). Malformed input is an error.
-func AgyHook(input []byte) (out []byte, ok bool, err error) {
+// AgyKind is what an agy hook event is to the pane's state (AgyHook).
+type AgyKind int
+
+const (
+	// AgyProgress is a later model call or a tool call's end while no decision waits: activity only.
+	AgyProgress AgyKind = iota
+	// AgyTurn is a turn's start (its first model call, PreInvocation with invocationNum 0) or end (Stop).
+	AgyTurn
+	// AgyTool is a tool call about to run, other than a question: agy may draw a permission prompt for it, which
+	// no hook tells from an auto-approved call.
+	AgyTool
+	// AgyToolDone is a tool call's end (PostToolUse): a question answered, or a permission prompt approved.
+	AgyToolDone
+	// AgyAsk is a question (PreToolUse of ask_question): Question holds it.
+	AgyAsk
+)
+
+// AgyQuestionTool is agy's question tool.
+const AgyQuestionTool = "ask_question"
+
+// AgyEvent is an agy hook event: its kind and, except for AgyProgress and AgyTool, its input in the shape of
+// Claude's that the state recorder, notifications and boss notes read.
+type AgyEvent struct {
+	Kind     AgyKind
+	Input    []byte
+	Question Question
+	// ReplyErr is why a Stop's input has no last reply (AgyLastReply): it is still recorded
+	ReplyErr error
+}
+
+// AgyHook reads an agy hook's input (camelCase fields, its own events): a turn starts at its first model call
+// (PreInvocation with invocationNum 0), recorded as a UserPromptSubmit with its prompt, and ends at Stop; a
+// question (PreToolUse of ask_question) is a permission_prompt Notification asking it, as Claude's questions are;
+// the conversation is the session. Malformed input is an error.
+func AgyHook(input []byte) (AgyEvent, error) {
 	var e struct {
 		Event        string `json:"hookEventName"`
 		Invocation   *int   `json:"invocationNum"`
@@ -89,23 +119,52 @@ func AgyHook(input []byte) (out []byte, ok bool, err error) {
 		Conversation string `json:"conversationId"`
 		Transcript   string `json:"transcriptPath"`
 		Cwd          string `json:"cwd"`
+		Tool         struct {
+			Name string `json:"name"`
+			Args struct {
+				Questions []struct {
+					Question string   `json:"question"`
+					Options  []string `json:"options"`
+					Multi    bool     `json:"is_multi_select"`
+				} `json:"questions"`
+			} `json:"args"`
+		} `json:"toolCall"`
 	}
 	if err := json.Unmarshal(input, &e); err != nil {
-		return nil, false, fmt.Errorf("agent: hook input: %w", err)
+		return AgyEvent{}, fmt.Errorf("agent: hook input: %w", err)
 	}
-	event := e.Event
+	ev := AgyEvent{Kind: AgyTurn}
+	fields := map[string]string{"hook_event_name": e.Event, "prompt": e.Prompt}
 	switch {
 	case e.Event == "PreInvocation" && e.Invocation == nil:
 		// Else no turn would ever start, and prompt --wait would stall without a word
-		return nil, false, errors.New("agent: agy PreInvocation without invocationNum")
+		return AgyEvent{}, errors.New("agent: agy PreInvocation without invocationNum")
 	case e.Event == "PreInvocation" && *e.Invocation == 0:
-		event = "UserPromptSubmit"
-	case e.Event != "Stop":
-		return nil, false, nil
+		fields["hook_event_name"] = "UserPromptSubmit"
+	case e.Event == "Stop":
+		// agy's Stop carries no reply: its transcript has it, written before the hook runs
+		fields["last_assistant_message"], ev.ReplyErr = AgyLastReply(e.Transcript)
+	case e.Event == "PreToolUse" && e.Tool.Name == AgyQuestionTool:
+		ev.Kind, ev.Question = AgyAsk, Question{Tool: AskUserQuestion}
+		for _, q := range e.Tool.Args.Questions {
+			a := Ask{Question: cut(q.Question), MultiSelect: q.Multi}
+			for _, o := range q.Options {
+				a.Options = append(a.Options, Choice{Label: cut(o)})
+			}
+			ev.Question.Questions = append(ev.Question.Questions, a)
+		}
+		fields["hook_event_name"], fields["notification_type"], fields["message"] = "Notification", PermissionPrompt, ev.Question.Ask()
+	case e.Event == "PreToolUse":
+		return AgyEvent{Kind: AgyTool}, nil
+	case e.Event == "PostToolUse":
+		ev.Kind = AgyToolDone
+	default:
+		return AgyEvent{Kind: AgyProgress}, nil
 	}
-	out, err = json.Marshal(map[string]string{"hook_event_name": event, "prompt": e.Prompt, "session_id": e.Conversation,
-		"transcript_path": e.Transcript, "cwd": e.Cwd})
-	return out, true, err
+	fields["session_id"], fields["transcript_path"], fields["cwd"] = e.Conversation, e.Transcript, e.Cwd
+	var err error
+	ev.Input, err = json.Marshal(fields)
+	return ev, err
 }
 
 // resumers are the background task types whose end resumes Claude on its own. Left out: Claude's own
@@ -394,6 +453,74 @@ func DialogGone(c *tmux.Client, pane, state, since string) error {
 func Interrupted(c *tmux.Client, pane, since, prompts string) error {
 	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
 	return settle(c, pane, cond, Idle)
+}
+
+// AgyLastReply is the last reply of the turn agy's transcript (transcript_full.jsonl, path) ends on: its last model
+// response with text after the last user input; "" when it has none. Only the transcript's last agyTail bytes are read.
+func AgyLastReply(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("agent: agy transcript: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("agent: agy transcript: %w", err)
+	}
+	from := max(0, info.Size()-agyTail)
+	data := make([]byte, info.Size()-from)
+	if _, err := f.ReadAt(data, from); err != nil {
+		return "", fmt.Errorf("agent: agy transcript: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if from > 0 {
+		// Its first line is cut
+		lines = lines[1:]
+	}
+	for i := len(lines) - 1; i >= 0 && lines[i] != ""; i-- {
+		var step struct {
+			Source  string `json:"source"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal([]byte(lines[i]), &step) != nil {
+			return "", fmt.Errorf("agent: agy transcript %s: a line isn't JSON", path)
+		}
+		switch {
+		case step.Type == "USER_INPUT":
+			return "", nil
+		case step.Source == "MODEL" && step.Type == "PLANNER_RESPONSE" && step.Content != "":
+			return step.Content, nil
+		}
+	}
+	return "", nil
+}
+
+// agyTail is how much of an agy transcript's end AgyLastReply reads.
+const agyTail = 1 << 20
+
+// AgyPermission records a working agy pane as waiting on the permission prompt its screen shows (agy fires no
+// hook for one; screen.AgyPermission reads its tool, what it asks to run and its title) and q, that question, unless
+// a hook moved it since: since and prompts are the @agent_since and @agent_prompts read with the working state.
+// recorded reports the pane now waits on it.
+func AgyPermission(c *tmux.Client, pane, since, prompts, tool, what, title string) (q Question, recorded bool, err error) {
+	q = Question{Tool: cmp.Or(tool, "command"), Command: cut(what), Description: cut(title)}
+	stamp := strconv.FormatInt(now().Unix(), 10)
+	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
+	set := strings.Join([]string{
+		"set-option -p -t " + pane + " @agent_state " + Waiting,
+		"set-option -p -t " + pane + " @agent_since " + stamp,
+		"set-option -p -t " + pane + " @agent_waiting_for " + PermissionPrompt,
+	}, " ; ")
+	if _, err := c.Run("if-shell", "-F", "-t", pane, cond, set); err != nil {
+		return q, false, err
+	}
+	// The question apart: its JSON would need quoting in if-shell's command
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{@agent_state} #{@agent_since}")
+	if err != nil || strings.TrimSpace(out) != Waiting+" "+stamp {
+		return q, false, err
+	}
+	return q, true, RecordQuestion(c, pane, q)
 }
 
 // settle records state on pane, unsetting @agent_question, when the format cond holds: the check and the

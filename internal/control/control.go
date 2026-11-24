@@ -393,11 +393,11 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 	return rows[0], nil
 }
 
-// ReadChecked is ReadStatus, but a Claude pane's decision (agent.Deciding) or working state is checked
-// against its screen first, as Claude fires no hook when its dialog is answered No or Esc, or Esc ends its
-// turn. For a decision, its own input box back at the bottom (screen.ClaudeState) means no dialog is open;
-// the state it shows, idle or working, is recorded and returned. A working pane showing its turn
-// interrupted (screen.ClaudeInterrupted) is recorded idle, as is a working agy pane (screen.AgyInterrupted).
+// ReadChecked is ReadStatus, but a Claude or agy pane's decision (agent.Deciding) or working state is checked
+// against its screen first, as neither fires a hook when its dialog is answered No or Esc, or Esc ends its
+// turn. For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
+// is open; the state it shows, idle or working, is recorded and returned. A working pane showing its turn
+// interrupted (screen.ClaudeInterrupted, screen.AgyInterrupted) is recorded idle.
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	st, err := ReadStatus(c, pane)
 	if err != nil {
@@ -405,6 +405,22 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	}
 	if agent.AgyCommand(st.Command) && st.Trusted() == agent.Working {
 		return checkInterrupted(c, pane, st, screen.AgyInterrupted)
+	}
+	if agent.AgyCommand(st.Command) && agent.Deciding(st.Trusted(), st.WaitingFor) {
+		// A declined or cancelled permission prompt fires no hook; a question's answer or skip does (PostToolUse),
+		// and its hook records it before agy draws it
+		if asks, err := agyAsks(c, pane); asks || err != nil {
+			return st, err
+		}
+		return checkDialog(c, pane, st, func(capture string) string {
+			switch {
+			case screen.AgyIdle(capture):
+				return agent.Idle
+			case screen.AgyBox(capture):
+				return agent.Working
+			}
+			return ""
+		})
 	}
 	if !agent.ClaudeCommand(st.Command) {
 		return st, nil
@@ -416,8 +432,20 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	if st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt {
 		return st, nil
 	}
-	// Claude draws a dialog seconds before its Notification records it: a fresh decision's dialog may not be
-	// on screen yet
+	return checkDialog(c, pane, st, screen.ClaudeState)
+}
+
+// agyAsks reports an agy question (agent.AgyHook) recorded as pane's @agent_question.
+func agyAsks(c *tmux.Client, pane string) (bool, error) {
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptQuestion+"}")
+	q, ok := agent.ParseQuestion(strings.TrimSpace(out))
+	return ok && q.Tool == agent.AskUserQuestion, err
+}
+
+// checkDialog records pane st, waiting on a decision, as the state its screen shows (shows: "" while its dialog is
+// open) once its dialog closed without a hook. Not within dialogGrace of the decision: Claude draws a dialog
+// seconds before its Notification records it.
+func checkDialog(c *tmux.Client, pane string, st Status, shows func(capture string) string) (Status, error) {
 	sec, err := strconv.ParseInt(st.Since, 10, 64)
 	if err != nil || now().Sub(time.Unix(sec, 0)) < dialogGrace {
 		return st, nil
@@ -426,7 +454,7 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	if err != nil {
 		return st, err
 	}
-	state := screen.ClaudeState(capture)
+	state := shows(capture)
 	if state == "" {
 		return st, nil
 	}
