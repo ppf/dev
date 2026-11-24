@@ -77,6 +77,15 @@ func TestParseDialogBash(t *testing.T) {
 	}
 }
 
+// agy in a narrow pane wraps an option's label flush left
+func TestParseDialogAgyNarrow(t *testing.T) {
+	d, ok := parseDialog(golden(t, "agy-permission-narrow"))
+	if !ok || d.title != "Run this command?" || len(d.opts) != 4 || d.cursor != 0 || d.opts[3].label != "No, cancel" ||
+		d.opts[1].desc != "commands that start with 'echo'" {
+		t.Fatalf("parseDialog = %v %+v", ok, d)
+	}
+}
+
 func TestParseDialogNone(t *testing.T) {
 	for _, capture := range []string{
 		golden(t, "claude-trust"), // unnumbered

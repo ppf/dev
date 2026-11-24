@@ -408,10 +408,10 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	}
 	if agent.AgyCommand(st.Command) && agent.Deciding(st.Trusted(), st.WaitingFor) {
 		// A declined or cancelled permission prompt fires no hook; a question's answer or skip does (PostToolUse), but
-		// its hook records it before agy draws it: its screen is read only once a hook ran since (an answer's
-		// PostToolUse that came before agy drew its input box again)
-		asks, err := agyAsks(c, pane)
-		if err != nil || asks && !hookSince(st) {
+		// its hook records it before agy draws it: its screen is read only once its PostToolUse came (before agy drew
+		// its input box again)
+		asks, answered, err := agyQuestion(c, pane)
+		if err != nil || asks && answered != st.Since {
 			return st, err
 		}
 		return checkDialog(c, pane, st, func(capture string) string {
@@ -437,18 +437,14 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	return checkDialog(c, pane, st, screen.ClaudeState)
 }
 
-// hookSince reports a hook ran after st's decision was recorded: its @agent_active after its @agent_since.
-func hookSince(st Status) bool {
-	active, err := strconv.ParseInt(st.Active, 10, 64)
-	since, serr := strconv.ParseInt(st.Since, 10, 64)
-	return err == nil && serr == nil && active > since
-}
-
-// agyAsks reports an agy question (agent.AgyHook) recorded as pane's @agent_question.
-func agyAsks(c *tmux.Client, pane string) (bool, error) {
-	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptQuestion+"}")
-	q, ok := agent.ParseQuestion(strings.TrimSpace(out))
-	return ok && q.Tool == agent.AskUserQuestion, err
+// agyQuestion reports an agy question (agent.AgyHook) recorded as pane's @agent_question, and the @agent_since of
+// the decision its PostToolUse came for (agent.OptAgyAnswered).
+func agyQuestion(c *tmux.Client, pane string) (asks bool, answered string, err error) {
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptAgyAnswered+"} #{"+agent.OptQuestion+"}")
+	// Not TrimSpace: answered may be empty
+	answered, question, _ := strings.Cut(strings.TrimRight(out, "\n"), " ")
+	q, ok := agent.ParseQuestion(question)
+	return ok && q.Tool == agent.AskUserQuestion, answered, err
 }
 
 // checkDialog records pane st, waiting on a decision, as the state its screen shows (shows: "" while its dialog is

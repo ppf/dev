@@ -428,8 +428,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			w.parked = agent.ClaudeCommand(r.Command) && screen.ClaudeState(shot) == agent.Idle
 		case unix(r.Since) == 0:
 			// No stretch to time
-		case agent.Deciding(w.trusted, r.WaitingFor) && held >= StuckDecision:
-			// A dialog answered No or Esc fired no hook: it isn't unanswered
+		case agent.Deciding(w.trusted, r.WaitingFor) && (held >= StuckDecision || agent.AgyCommand(r.Command)):
+			// A dialog answered No or Esc fired no hook: it isn't unanswered (agy's checked every round, not only once stuck)
 			st, err := control.ReadChecked(c, r.Pane)
 			if err != nil && strings.Contains(err.Error(), "can't find pane") {
 				continue // closed since list-panes

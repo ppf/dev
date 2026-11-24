@@ -824,30 +824,30 @@ func TestReadCheckedAgy(t *testing.T) {
 	stale := Status{Command: "agy", State: "waiting", StateCmd: "agy", Prompts: "2", WaitingFor: "permission_prompt", Since: "50"}
 	fresh := stale
 	fresh.Since = strconv.FormatInt(time.Now().Unix(), 10)
-	answered := stale
-	answered.Active = "60"
 	settle := "if-shell -F -t %1 #{&&:#{==:#{@agent_state},waiting},#{==:#{@agent_since},50}} set-option -p -t %1 @agent_state "
 	tests := []struct {
 		name     string
 		st       Status
 		question string
+		answered string // @agent_agy_answered
 		screen   string
 		settled  string // the state recorded, "" for none
 	}{
-		{"declined: idle", stale, permission, "agy-declined", "idle"},
-		{"approved, no hook yet: working", stale, permission, "agy-working", "working"},
-		{"still open", stale, permission, "agy-permission", ""},
-		{"just recorded", fresh, permission, "agy-idle", ""},
-		{"a question: left to its hook", stale, question, "agy-idle", ""},
-		{"a question answered, its PostToolUse before agy's input box came back: working", answered, question, "agy-working", "working"},
+		{"declined: idle", stale, permission, "", "agy-declined", "idle"},
+		{"approved, no hook yet: working", stale, permission, "", "agy-working", "working"},
+		{"still open", stale, permission, "", "agy-permission", ""},
+		{"just recorded", fresh, permission, "", "agy-idle", ""},
+		{"a question: left to its hook", stale, question, "", "agy-idle", ""},
+		{"an earlier question's answer", stale, question, "40", "agy-idle", ""},
+		{"a question answered, its PostToolUse before agy's input box came back: working", stale, question, "50", "agy-working", "working"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var cmds []string
 			c := tmux.NewFake(func(args []string) (string, error) {
 				switch {
-				case args[0] == "display-message" && args[len(args)-1] == "#{@agent_question}":
-					return tt.question + "\n", nil
+				case args[0] == "display-message" && args[len(args)-1] == "#{@agent_agy_answered} #{@agent_question}":
+					return tt.answered + " " + tt.question + "\n", nil
 				case args[0] == "display-message":
 					st := tt.st
 					return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since, st.Session, st.Active), nil

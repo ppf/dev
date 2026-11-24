@@ -47,6 +47,10 @@ func agyState(cmd *cobra.Command, c *tmux.Client, pane string, input []byte, sta
 				// Its question answered or its permission prompt approved: the turn goes on
 				return ev.Input, agent.Working, true
 			}
+			if err == nil {
+				// Not drawn again yet: control.ReadChecked settles it from its screen
+				_, err = c.Run("set-option", "-p", "-t", pane, agent.OptAgyAnswered, st.Since)
+			}
 		}
 		if err != nil {
 			fail(err)

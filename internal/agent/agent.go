@@ -542,6 +542,10 @@ func AgyPermission(c *tmux.Client, pane, since, prompts, active, tool, what, tit
 	return q, err == nil && strings.TrimSpace(out) == mark, err
 }
 
+// OptAgyAnswered is the pane option holding the @agent_since of the agy question whose PostToolUse came before agy
+// drew its input box again: its screen settles it.
+const OptAgyAnswered = "@agent_agy_answered"
+
 // optClaim is the pane option naming the last AgyPermission write.
 const optClaim = "@agent_agy_claim"
 

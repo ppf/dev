@@ -101,6 +101,10 @@ func parseDialog(capture string) (dialog, bool) {
 			continue
 		case isRule(l) && i > 0 && (optionLine.MatchString(plain[i-1]) || indent(plain[i-1]) > col):
 			continue
+		case l != "" && i > 0 && optionLine.MatchString(plain[i-1]) && digitCol(plain[i-1]) == col:
+			// An option's label wrapped flush left (agy's, in a narrow pane)
+			first = i
+			continue
 		}
 		break
 	}

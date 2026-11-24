@@ -64,6 +64,12 @@ func TestNewPick(t *testing.T) {
 	if p = goldenPick(t, "agy-question", red); p.cur != 0 || p.other != 2 || !p.question() {
 		t.Errorf("agy question: %+v", p)
 	}
+	// Two of them: one screen each, so answered one at a time, never sent whole
+	two := red
+	two.Questions = append(slices.Clone(red.Questions), agent.Ask{Question: "Why?", Options: []agent.Choice{{Label: "A"}, {Label: "B"}}})
+	if p = goldenPick(t, "agy-question", two); p.cur != 0 || !p.agy || p.whole() {
+		t.Errorf("agy's two questions: %+v, whole %v", p, p.whole())
+	}
 }
 
 // screens fakes a pane whose captures go through the given screens (the last one repeats), recording the keys.
