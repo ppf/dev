@@ -448,13 +448,49 @@ func ClaudeArgv(session string, worker bool, args ...string) []string {
 // Efforts are the levels claude's --effort takes.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-// OptModel and OptEffort are the session options holding the Start of a session's Claude.
+// CodexEfforts are the reasoning levels in codex's model catalog (codex debug models); each model takes some.
+var CodexEfforts = []string{"low", "medium", "high", "xhigh", "max", "ultra"}
+
+// CodexModels reads codex debug models' catalog: each model's slug and the reasoning levels it takes.
+func CodexModels(catalog []byte) (map[string][]string, error) {
+	var c struct {
+		Models []struct {
+			Slug   string `json:"slug"`
+			Levels []struct {
+				Effort string `json:"effort"`
+			} `json:"supported_reasoning_levels"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(catalog, &c); err != nil {
+		return nil, fmt.Errorf("agent: codex model catalog: %w", err)
+	}
+	if len(c.Models) == 0 {
+		return nil, errors.New("agent: codex model catalog lists no models")
+	}
+	models := make(map[string][]string, len(c.Models))
+	for _, m := range c.Models {
+		if m.Slug == "" {
+			return nil, errors.New("agent: codex model catalog has a model without a slug")
+		}
+		efforts := []string{}
+		for _, l := range m.Levels {
+			if l.Effort == "" {
+				return nil, fmt.Errorf("agent: codex model catalog: %s has a reasoning level without an effort", m.Slug)
+			}
+			efforts = append(efforts, l.Effort)
+		}
+		models[m.Slug] = efforts
+	}
+	return models, nil
+}
+
+// OptModel and OptEffort are the session options holding the Start of a session's Claude or Codex.
 const (
 	OptModel  = "@dev_model"
 	OptEffort = "@dev_effort"
 )
 
-// Start is the --model and --effort a session's Claude was started with (dev agent start, dev boss); an empty
+// Start is the --model and --effort a session's Claude (or Codex) was started with (dev agent start, dev boss); an empty
 // field leaves that one to the user's settings.
 type Start struct{ Model, Effort string }
 
@@ -467,6 +503,19 @@ func (s Start) Args(resumed bool) []string {
 	}
 	if s.Effort != "" {
 		args = append(args, "--effort", s.Effort)
+	}
+	return args
+}
+
+// CodexArgs are codex's args for s: -m, and model_reasoning_effort as a config override (codex has no flag
+// for it; a value that isn't TOML is taken as a string).
+func (s Start) CodexArgs() []string {
+	var args []string
+	if s.Model != "" {
+		args = append(args, "-m", s.Model)
+	}
+	if s.Effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+s.Effort)
 	}
 	return args
 }

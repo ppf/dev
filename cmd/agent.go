@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -360,12 +361,12 @@ func addStartFlags(cmd *cobra.Command, start *agent.Start, who string) {
 	cmd.Flags().StringVar(&start.Effort, "effort", "", "effort a new "+who+" starts with: "+strings.Join(agent.Efforts, ", ")+"; default: the user's settings")
 }
 
-// checkStart refuses a --effort claude doesn't know and a --model that is empty, has whitespace or a control
-// character, starts with "-" (claude would take it for a flag) or ends in ";" (tmux's command separator): it is
+// checkStart refuses a --effort not in efforts and a --model that is empty, has whitespace or a control
+// character, starts with "-" (the agent would take it for a flag) or ends in ";" (tmux's command separator): it is
 // typed into a shell and kept in tmux options and the tab-separated resurrect state.
-func checkStart(cmd *cobra.Command, start agent.Start) error {
-	if cmd.Flags().Changed("effort") && !slices.Contains(agent.Efforts, start.Effort) {
-		return fmt.Errorf("unknown --effort %q, want %s", start.Effort, strings.Join(agent.Efforts, ", "))
+func checkStart(cmd *cobra.Command, start agent.Start, efforts []string) error {
+	if cmd.Flags().Changed("effort") && !slices.Contains(efforts, start.Effort) {
+		return fmt.Errorf("unknown --effort %q, want %s", start.Effort, strings.Join(efforts, ", "))
 	}
 	blank := func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
 	if m := start.Model; cmd.Flags().Changed("model") && (m == "" || strings.ContainsFunc(m, blank) || strings.HasPrefix(m, "-") || strings.HasSuffix(m, ";")) {
@@ -390,8 +391,11 @@ screen (a login, a dialog) to the user, saying so on stderr. An existing session
 agent than an explicit --agent is an error. A new session started from a tmux pane, or with --boss, is that
 session's worker.
 --model and --effort start a new session's Claude (or agy) with them (list --json and get --json show them, and
-Claude keeps them when dev restarts it); agy's --model must be one agy models lists. With an existing session
-they are an error unless they equal what it was started with, and with --agent codex or grok always.
+a Claude keeps them when dev restarts it); agy's --model must be one agy models lists. With an existing session
+they are an error unless they equal what it was started with, and with --agent grok always. With --agent codex
+they start codex with -m and -c model_reasoning_effort= (efforts: ` + strings.Join(agent.CodexEfforts, ", ") + `);
+--model must be one codex debug models lists, and --effort one that model takes (a new Codex session's --effort
+needs --model).
 --from <worker> hands a worker's half-done branch to a fresh Claude: refused unless this session (or
 --boss's) started the worker, it is idle (or waiting only because it sat idle) and no other session has a pane
 in its worktree. Its session is closed without dev agent close's delivered and changes checks, its worktree,
@@ -410,11 +414,15 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			if !slices.Contains([]string{agent.Claude, agent.Codex, agent.Grok, agent.Agy}, agentCmd) {
 				return fmt.Errorf("unknown --agent %q, want claude, codex, grok or agy", agentCmd)
 			}
-			if err := checkStart(cmd, start); err != nil {
+			efforts := agent.Efforts
+			if agentCmd == agent.Codex {
+				efforts = agent.CodexEfforts
+			}
+			if err := checkStart(cmd, start, efforts); err != nil {
 				return err
 			}
-			if start != (agent.Start{}) && agentCmd != agent.Claude && agentCmd != agent.Agy {
-				return fmt.Errorf("--model and --effort only apply to Claude and agy, not --agent %s", agentCmd)
+			if start != (agent.Start{}) && agentCmd != agent.Claude && agentCmd != agent.Codex && agentCmd != agent.Agy {
+				return fmt.Errorf("--model and --effort only apply to Claude, Codex and agy, not --agent %s", agentCmd)
 			}
 			if from != "" {
 				if agentCmd != agent.Claude {
@@ -435,6 +443,13 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			// Before openProject, which would fetch for the worktree first
 			if missing == nil {
 				if err := start.CheckExisting(c, session); err != nil {
+					return err
+				}
+			} else if agentCmd == agent.Codex && start.Effort != "" && start.Model == "" {
+				// The default model is codex's to pick, and the levels differ per model
+				return errors.New("--effort for --agent codex needs --model: each model takes its own efforts")
+			} else if agentCmd == agent.Codex && start.Model != "" {
+				if err := checkCodexStart(start, timeout); err != nil {
 					return err
 				}
 			}
@@ -557,6 +572,39 @@ func worktreeMissing(cmd *cobra.Command, project, wt string) (bool, error) {
 		return true, nil
 	}
 	return false, err
+}
+
+// checkCodexStart refuses a --model codex's model catalog doesn't list, and a --effort that model doesn't take:
+// codex would start anyway, on an unlisted model with only a warning on its screen, on an effort the model
+// doesn't take silently on another model or effort.
+func checkCodexStart(start agent.Start, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, agent.Codex, "debug", "models").Output()
+	if ctx.Err() != nil {
+		return fmt.Errorf("checking --model and --effort: codex debug models didn't answer within %s", timeout)
+	}
+	if e, ok := errors.AsType[*exec.ExitError](err); ok && len(e.Stderr) > 0 {
+		return fmt.Errorf("checking --model and --effort: codex debug models: %s", strings.TrimSpace(string(e.Stderr)))
+	}
+	if err != nil {
+		return fmt.Errorf("checking --model and --effort: codex debug models: %w", err)
+	}
+	models, err := agent.CodexModels(out)
+	if err != nil {
+		return err
+	}
+	efforts, ok := models[start.Model]
+	if !ok {
+		return fmt.Errorf("unknown --model %q for codex, want one codex debug models lists: %s", start.Model, strings.Join(slices.Sorted(maps.Keys(models)), ", "))
+	}
+	if start.Effort != "" && len(efforts) == 0 {
+		return fmt.Errorf("--model %s takes no --effort", start.Model)
+	}
+	if start.Effort != "" && !slices.Contains(efforts, start.Effort) {
+		return fmt.Errorf("--model %s doesn't take --effort %s, want %s", start.Model, start.Effort, strings.Join(efforts, ", "))
+	}
+	return nil
 }
 
 // startFrom is dev agent start --from: worker from's session closed by the coordinator in this (or boss's) pane,

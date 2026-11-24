@@ -47,7 +47,7 @@ agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is o
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := checkStart(cmd, start); err != nil {
+			if err := checkStart(cmd, start, agent.Efforts); err != nil {
 				return err
 			}
 			c := tmux.New()

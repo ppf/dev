@@ -585,10 +585,9 @@ func staleNote(t tile) bool {
 	return !t.deciding && noteKind(t.note) == inbox.Decision
 }
 
-// modelText is a Claude worker's model and effort as "opus·medium", "" when no --model was passed and for Codex
-// and Grok, which take no flags.
+// modelText is a Claude or Codex worker's model and effort as "opus·medium", "" when no --model was passed.
 func modelText(t tile) string {
-	if t.sess.Agent != "Claude" || t.model == "" {
+	if t.model == "" {
 		return ""
 	}
 	return strings.Join(slices.DeleteFunc([]string{t.model, t.effort}, func(s string) bool { return s == "" }), "·")

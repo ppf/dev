@@ -805,8 +805,8 @@ func TestSaidOnScreenCut(t *testing.T) {
 	}
 }
 
-// A Claude worker's meta row carries its model and effort, nothing when no model was passed nor for Codex and
-// Grok; a narrow card drops the branch first, then the model, never the cost.
+// A Claude or Codex worker's meta row carries its model and effort, nothing when no model was passed;
+// a narrow card drops the branch first, then the model, never the cost.
 func TestModelOnCard(t *testing.T) {
 	claude := func(model, effort string) tile {
 		return tile{sess: sidebar.Session{Agent: "Claude", Branch: "feature/long-branch-name", Cost: "$4.10"}, context: "62", model: model, effort: effort}
@@ -831,10 +831,14 @@ func TestModelOnCard(t *testing.T) {
 			t.Errorf("%s: %d wide, want %d", tt.name, w, tt.w-1)
 		}
 	}
-	cx := claude("opus", "medium")
+	cx := claude("gpt-6-luna", "high")
 	cx.sess.Agent = "Codex"
-	if got := ansi.Strip(metaRow(cx, 60)); strings.Contains(got, "opus") || strings.Contains(got, "default") {
-		t.Errorf("codex shows a model: %q", got)
+	if got := ansi.Strip(metaRow(cx, 60)); !strings.Contains(got, "gpt-6-luna·high") {
+		t.Errorf("codex started with a model doesn't show it: %q", got)
+	}
+	cx.model, cx.effort = "", ""
+	if got := ansi.Strip(metaRow(cx, 60)); strings.Contains(got, "default") {
+		t.Errorf("codex without a model shows one: %q", got)
 	}
 }
 

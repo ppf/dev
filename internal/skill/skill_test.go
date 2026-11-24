@@ -216,6 +216,8 @@ func TestAskRules(t *testing.T) {
 		"- **Mark the call's items asked, right before the dialog:** one `dev todo asking <boss> <n> [<boss> <n>]... --question \"<item text>\" [--question \"<item text>\"]...` naming every item the call asks",
 		// Claude Code's dim suggestion is never the user's draft
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",
+		// Codex workers take --model and --effort; grok doesn't
+		"with `--agent grok` it always fails", "`--agent codex --model <slug> --effort <effort>`, the slug one `codex debug models` lists",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

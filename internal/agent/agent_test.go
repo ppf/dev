@@ -664,3 +664,25 @@ func TestStartCheckExisting(t *testing.T) {
 		t.Errorf("no flags: %v", err)
 	}
 }
+
+func TestCodexModels(t *testing.T) {
+	got, err := CodexModels([]byte(`{"models":[{"slug":"gpt-a","visibility":"list","supported_reasoning_levels":[{"effort":"low","description":"x"},{"effort":"ultra"}]},{"slug":"gpt-b","supported_reasoning_levels":[]}]}`))
+	if err != nil || !slices.Equal(got["gpt-a"], []string{"low", "ultra"}) || len(got) != 2 || len(got["gpt-b"]) != 0 {
+		t.Errorf("CodexModels = %q, %v; want gpt-a with low and ultra, gpt-b with none", got, err)
+	}
+	if _, err := CodexModels([]byte("not json")); err == nil {
+		t.Error("CodexModels(not json): want an error")
+	}
+}
+
+func TestCodexModelsRefusesAnUnreadableCatalog(t *testing.T) {
+	for catalog, want := range map[string]string{
+		`{"models":[]}`:                 "agent: codex model catalog lists no models",
+		`{"models":[{"name":"gpt-a"}]}`: "agent: codex model catalog has a model without a slug",
+		`{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"level":"low"}]}]}`: "agent: codex model catalog: gpt-a has a reasoning level without an effort",
+	} {
+		if _, err := CodexModels([]byte(catalog)); err == nil || err.Error() != want {
+			t.Errorf("CodexModels(%s) = %v, want %q", catalog, err, want)
+		}
+	}
+}

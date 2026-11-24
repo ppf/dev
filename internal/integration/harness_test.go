@@ -199,6 +199,35 @@ func sleeper(t *testing.T, name string) string {
 	return filepath.Join(dir, name)
 }
 
+// codexStub is a codex that prints a two-model catalog for codex debug models and otherwise sleeps, as sleeper.
+func codexStub(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "main.go"), `package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	if strings.Join(os.Args[1:], " ") == "debug models" {
+		fmt.Println(`+"`"+`{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"effort":"low"},{"effort":"ultra"}]},{"slug":"gpt-b","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]}]}`+"`"+`)
+		return
+	}
+	time.Sleep(time.Hour)
+}
+`)
+	build := exec.Command("go", "build", "-o", "codex", "main.go")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build codex stub: %v\n%s", err, out)
+	}
+	return filepath.Join(dir, "codex")
+}
+
 // check reports a mismatch and lets the test go on, like the bash tests' check().
 func check(t *testing.T, name, got, want string) {
 	t.Helper()
