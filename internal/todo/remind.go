@@ -27,15 +27,20 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 		}
 		return withTicked(ticked, "[dev todo] Your open to do list:"+items+tickLine+whoLine+detailsLine(items)), shown
 	}
-	// New or changed: a re-check item's line changes with its age, so it counts only when new
-	changed := 0
+	// New or changed: a re-check item's line changes with its age, so it counts only when new. One kept as "" was open
+	// past the start list's "+N more": not shown yet
+	changed, unshown := 0, 0
 	open := map[int]bool{}
 	for _, it := range l.Items {
 		if it.Done {
 			continue
 		}
 		open[it.ID] = true
-		if _, was := seen[it.ID]; it.Flagged() && !was || !it.Flagged() && shown[it.ID] != "" {
+		prev, was := seen[it.ID]
+		switch {
+		case was && prev == "":
+			unshown++
+		case it.Flagged() && !was || !it.Flagged() && shown[it.ID] != "":
 			changed++
 		}
 	}
@@ -56,6 +61,9 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 		count = "none"
 	}
 	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s new or changed since the last one", len(open), count)
+	if unshown > 0 {
+		head += fmt.Sprintf(", %d not in your start list", unshown)
+	}
 	if len(left) > 0 {
 		head += ", " + strings.Join(left, ", ") + " left it"
 	}
@@ -85,16 +93,16 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 	return text, err
 }
 
-// StartRemind is l's start reminder (startReminder), its open items kept for the next Remind in conversation; the
-// text holds even with err, the shown file not written.
+// StartRemind is l's start reminder (startReminder), what it names kept for the next Remind in conversation; the text
+// holds even with err, the shown file not written.
 func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
 	err = s.locked(func() error {
 		text = l.startReminder(kept, age, ticked, now)
-		// Past startShown too: its "+N more" line named them, dev todo lists them
-		shown := map[int]string{}
+		// One past startShown is kept as "": the next Remind lists it as not in the start list, not as changed
+		_, shown := l.linesSince(startShown, nil, now)
 		for _, it := range l.Items {
-			if !it.Done {
-				shown[it.ID] = it.seenAs(now)
+			if _, ok := shown[it.ID]; !ok && !it.Done {
+				shown[it.ID] = ""
 			}
 		}
 		return s.keepShown(conversation, shown)
@@ -103,7 +111,13 @@ func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conve
 }
 
 // ForgetShown drops what the boss last got of its list, as a compaction may have dropped it: the next Remind is the full list.
-func (s Store) ForgetShown() error { return s.locked(s.forgetShown) }
+func (s Store) ForgetShown() error {
+	// None kept: no lock file for a list that may not exist
+	if _, err := os.Stat(s.shownPath()); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return s.locked(s.forgetShown)
+}
 
 // forgetShown is ForgetShown under the list's lock, held by its caller.
 func (s Store) forgetShown() error { return ignoreMissing(os.Remove(s.shownPath())) }

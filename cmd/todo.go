@@ -933,12 +933,17 @@ func printBossList(out io.Writer, bl bossList, now time.Time) {
 		fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
 	}
 	for _, it := range bl.Items {
-		if bl.Closed && todo.OnBoss(it.On, it.Session) {
-			// No one is on a closed boss's own item: it's To do, as its column says
-			it.Doing = nil
-		}
-		printItem(out, bl.Boss+"\t", it, now)
+		printItem(out, bl.Boss+"\t", ofClosed(it, bl.Closed), now)
 	}
+}
+
+// ofClosed is it as printed on a list whose boss is closed or not: no one is on a closed boss's own item, it's To do,
+// as its column says.
+func ofClosed(it todo.Shown, closed bool) todo.Shown {
+	if closed && todo.OnBoss(it.On, it.Session) {
+		it.Doing = nil
+	}
+	return it
 }
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's

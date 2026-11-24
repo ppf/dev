@@ -73,7 +73,7 @@ func TestRemindChangesOnly(t *testing.T) {
 	}
 }
 
-// The start list names at most startShown items, then "+N more": the next reminder counts none of them as new.
+// The start list names at most startShown items, then "+N more": the next reminder lists those as not in it, once.
 func TestStartRemindKeepsShown(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
@@ -86,9 +86,12 @@ func TestStartRemindKeepsShown(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Remind(read(t, s, now), nil, "c1", now)
-	want := "[dev todo] Your open to do list: 22 open, none new or changed since the last one (dev todo lists them)."
+	want := "[dev todo] Your open to do list: 22 open, none new or changed since the last one, 2 not in your start list; the others as before (dev todo lists them):\n21. t21\n22. t22\n"
 	if err != nil || !strings.HasPrefix(got, want) {
 		t.Errorf("after start = %q, %v; want %q", got, err, want)
+	}
+	if got, _ := s.Remind(read(t, s, now), nil, "c1", now); !strings.HasPrefix(got, "[dev todo] Your open to do list: 22 open, none new or changed since the last one (dev todo lists them).") {
+		t.Errorf("next = %q, want them told once", got)
 	}
 }
 
