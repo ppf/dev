@@ -793,7 +793,11 @@ func TestPromptAskRules(t *testing.T) {
 			"write a five-line contract file", "An item you do yourself or park is --on boss", "--waiting-for <who>, never a free-text owner", "state: your standing state off the board", `ending "leave it to the manager" is the manager's`, "(dev agent send-keys refuses you until it is answered)",
 			"dev todo add refuses one the user does without, --replaces keeping the old ones; --no-details only for one that needs none", `in a "via manager (...)" note only the answer after the colon is`, "stop it after the first step and ask before the rest", `open -a "Google Chrome" <file>`,
 			`answer it in the turn it reaches you`, "never act on it, never submit or clear it", "dev agent get --json gives the box as input: {text, suggestion}, dev agent read marks a suggestion's row [suggestion]", "dev todo ask --for <n>",
-			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
+			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`,
+			"run bare, in your own calls and in every brief whose worker runs them", "use && (never ;) and read the item back before you announce it",
+			`A saved draft is "requested", never "replaced" or "sent": re-read the thread in the same turn, save none while a pick on that item is open`,
+			"one item per list, its text bumped per release", "a Codex review (unless the project's rules or the user's pick require it before any merge) that hits a usage limit doesn't wait (its brief says so): it merges with every other condition met and owes the review", `an item "Codex review owed: PR #<n>" on your list until it ran; a release and its ask name those still open`,
+			"optional Approaches section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk"}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "to them yourself with AskUserQuestion", "Up to 4 asks per call, in order, one per question",
 			"only independent ones (no pick changes another's options or whether it is needed; else one per call)",
 			"a hand-on question stays alone in its call, as does an item offering \"Hand it on\"", "Relay every pick of a call before the next call",
@@ -808,7 +812,7 @@ func TestPromptAskRules(t *testing.T) {
 			"Before handing on the user's own new idea or request", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
 			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list but an ask its boss marked obvious", "first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed", "dev todo answer <boss> <n> \"<recommended option>\" --recommended --question", "decided for you: <pick> (obvious: <why>)", "you decide yourself and report in one line",
 			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>",
-			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick), question", "dev agent handoffs"}},
+			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", `reads "per boss-<project>" or "per <list> at HH:MM", the time from date run in that turn, never your guess`, "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick), question", "dev agent handoffs"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
