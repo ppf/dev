@@ -24,6 +24,8 @@ func TestHandOnOutcome(t *testing.T) {
 		{[]agent.Pick{{Question: "Hand on?", Answer: "only the release builds", Labels: gate}}, Corrected},
 		{[]agent.Pick{{Question: "dev #7: Merge?", Answer: "Wait", Labels: []string{"Merge", "Wait"}}}, ""},
 		{[]agent.Pick{{Question: "Hand on?", Answer: DropIt, Labels: gate}, {Question: "B?", Answer: "y"}}, ""},
+		// Among others it sends nothing whatever was picked: asked again alone, recorded then
+		{[]agent.Pick{{Question: "a #1: B?", Answer: "y"}, {Question: "Hand on to boss-a?\n\nCache.", Answer: DropIt, Labels: gate}}, ""},
 	} {
 		if got := handOnOutcome(tt.picks); got != tt.want {
 			t.Errorf("%+v: %q, want %q", tt.picks, got, tt.want)
@@ -81,6 +83,30 @@ func TestPickedTyped(t *testing.T) {
 		}
 		if p, err := b.UserPrompt(); err != nil || p == nil || p.Typed != tt.want {
 			t.Errorf("%q of %q: %+v, %v; want typed %v", tt.answer, tt.labels, p, err, tt.want)
+		}
+	}
+}
+
+// The manager's hand-on question offers "Hand it on" or, in a dialog of several, starts "Hand on to boss-".
+func TestIsHandOn(t *testing.T) {
+	gate, item := []string{HandItOn, DropIt}, []string{"Merge", "Wait"}
+	for _, tt := range []struct {
+		q      string
+		labels []string
+		want   bool
+	}{
+		{"Hand on to boss-a?\n\nCache.", item, true},
+		{"hand on to boss-a: cache it?", nil, true},
+		{"Send boss-api the fix for PR #148: cache CI?", gate, true},
+		{"Hand on to dev: cache it?", []string{HandItOn, "Revise"}, true},
+		// An item's ask offering it counts too: the safe side
+		{"a #1: Ship X?", []string{HandItOn, "Keep it"}, true},
+		{"Hand on to docs #2: Publish?", item, false},
+		{"a #1: Hand on to boss-b?", item, false},
+		{"Should we hand on to boss-a?", item, false},
+	} {
+		if got := isHandOn(tt.q, tt.labels); got != tt.want {
+			t.Errorf("isHandOn(%q, %q) = %v, want %v", tt.q, tt.labels, got, tt.want)
 		}
 	}
 }

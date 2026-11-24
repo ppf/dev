@@ -415,8 +415,8 @@ type state struct {
 	Prompt *Prompt `json:"prompt,omitempty"`
 	// Pick is the user's latest pick (Picked), kept through the typed prompts after it
 	Pick *Prompt `json:"pick,omitempty"`
-	// Asking is the item whose question the coordinator has up in its dialog (SetAsking), until its pick
-	Asking *Asking `json:"asking,omitempty"`
+	// Asking is the items whose questions the coordinator has up in its dialog (SetAsking), until its pick
+	Asking []Asking `json:"asking_items,omitempty"`
 }
 
 // Prompt is a prompt the coordinator got at At (unix seconds).
@@ -424,13 +424,31 @@ type Prompt struct {
 	Text string `json:"text"`
 	At   int64  `json:"at"`
 	// Pick: the user's AskUserQuestion pick (Picked), good for one relayed answer; Spent once one was (Claim).
-	// Question and Answer are its one question and answer, empty for a pick of several.
+	// Question and Answer are its one question and answer, empty for a pick of several (Asks, each spent on its own).
 	Pick     bool   `json:"pick,omitempty"`
 	Question string `json:"question,omitempty"`
 	Answer   string `json:"answer,omitempty"`
 	// Typed: Answer was typed under Other, not one of the question's options
 	Typed bool `json:"typed,omitempty"`
 	Spent bool `json:"spent,omitempty"`
+	// Asks: a pick of several questions, each good for one relayed answer; HandOnMixed: one of them is a hand-on question
+	Asks        []Asked `json:"asks,omitempty"`
+	HandOnMixed bool    `json:"hand_on_mixed,omitempty"`
+}
+
+// Asked is one question of a pick of several (Prompt.Asks), with the user's answer ("" for none: never relayed).
+type Asked struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer,omitempty"`
+	Typed    bool   `json:"typed,omitempty"`
+	Spent    bool   `json:"spent,omitempty"`
+}
+
+// Ask is question i of p, a pick of several (Asks), as a pick of that one question: to read; claim p with i.
+func (p Prompt) Ask(i int) Prompt {
+	q := p.Asks[i]
+	return Prompt{Text: clip(agent.Pick{Question: FirstLine(q.Question), Answer: q.Answer}.String()), At: p.At, Pick: true,
+		Question: q.Question, Answer: q.Answer, Typed: q.Typed, Spent: q.Spent}
 }
 
 // flight is a batch sent over Claude's messaging socket at At (unix seconds).
@@ -515,6 +533,7 @@ func (b Box) read() (state, error) {
 	// A file from before Pick: its latest prompt, a pick, is the latest pick too
 	if s.Pick == nil && s.Prompt != nil && s.Prompt.Pick {
 		pick := *s.Prompt
+		pick.Asks = slices.Clone(s.Prompt.Asks)
 		s.Pick = &pick
 	}
 	return s, nil
@@ -721,8 +740,15 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 		p.Question, p.Answer = picks[0].Question, picks[0].Answer
 		p.Typed = picks[0].Typed()
 	}
+	if len(picks) > 1 {
+		for _, k := range picks {
+			p.Asks = append(p.Asks, Asked{Question: k.Question, Answer: k.Answer, Typed: k.Typed()})
+			p.HandOnMixed = p.HandOnMixed || isHandOn(k.Question, k.Labels)
+		}
+	}
 	return b.update(func(s *state) error {
 		pick := *p
+		pick.Asks = slices.Clone(p.Asks)
 		// Its dialog answered: no question is up any more
 		s.Prompt, s.Pick, s.Asking = p, &pick, nil
 		return nil
@@ -731,53 +757,68 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 
 // Claim spends p, the pick an answer is relayed from: refused once spent or when the user said something since.
 func (b Box) Claim(p Prompt) error {
-	return b.claim(p, func(s *state) *Prompt { return s.Prompt }, "the user said something since: look again")
+	return b.claim(p, -1, func(s *state) *Prompt { return s.Prompt }, "the user said something since: look again")
 }
 
-// ClaimPick is Claim for p, the user's latest pick (LatestPick): typed prompts since don't refuse it, a pick since does.
-func (b Box) ClaimPick(p Prompt) error {
-	return b.claim(p, func(s *state) *Prompt { return s.Pick }, "the user picked something since: look again")
+// ClaimPick is Claim for p, the user's latest pick (LatestPick), or for its question i of several (Asks; -1 for
+// a pick of one): typed prompts since don't refuse it, a pick since does.
+func (b Box) ClaimPick(p Prompt, i int) error {
+	return b.claim(p, i, func(s *state) *Prompt { return s.Pick }, "the user picked something since: look again")
 }
 
-// claim spends p, refused unless it is latest(s), unspent.
-func (b Box) claim(p Prompt, latest func(*state) *Prompt, since string) error {
+// claim spends p, or its question i (-1: the whole pick), refused unless p is latest(s) and that is unspent.
+func (b Box) claim(p Prompt, i int, latest func(*state) *Prompt, since string) error {
 	return b.update(func(s *state) error {
 		switch q := latest(s); {
 		case !q.is(p):
 			return errors.New(since)
-		case q.Spent:
+		case !q.has(i) && i < 0:
+			return errors.New("the user's pick was of several questions: ask one on its own")
+		case !q.has(i):
+			return fmt.Errorf("the user's pick has no question %d: look again", i+1)
+		case i >= 0 && q.Asks[i].Spent:
+			return errors.New("the user's pick on this question was used already: ask them this one")
+		case i < 0 && q.Spent:
 			return errors.New("the user's latest pick was used already: ask them this one")
 		}
-		s.spend(p, true)
+		s.spend(p, i, true)
 		return nil
 	})
 }
 
-// Unclaim gives back p, claimed for an answer that was refused, wherever it is still the latest prompt or pick.
-func (b Box) Unclaim(p Prompt) error {
+// Unclaim gives back p, or its question i (-1: the whole pick), claimed for an answer that was refused, wherever it
+// is still the latest prompt or pick.
+func (b Box) Unclaim(p Prompt, i int) error {
 	return b.update(func(s *state) error {
-		s.spend(p, false)
+		s.spend(p, i, false)
 		return nil
 	})
 }
 
-// spend marks p spent or not in both places it is kept: one pick is good for one answer.
-func (s *state) spend(p Prompt, spent bool) {
+// spend marks p, or its question i (-1: the whole pick), spent or not in both places it is kept: one pick, or one
+// question of a pick of several, is good for one answer.
+func (s *state) spend(p Prompt, i int, spent bool) {
 	for _, q := range []*Prompt{s.Prompt, s.Pick} {
-		if q.is(p) {
+		switch {
+		case !q.is(p) || !q.has(i):
+		case i < 0:
 			q.Spent = spent
+		default:
+			q.Asks[i].Spent = spent
 		}
 	}
 }
 
-// is reports p the same prompt as q, spent or not.
+// is reports p the same prompt as q, spent or not, its questions too.
 func (p *Prompt) is(q Prompt) bool {
-	if p == nil {
-		return false
-	}
-	now := *p
-	now.Spent = q.Spent
-	return now == q
+	same := func(a, b Asked) bool { return a.Question == b.Question && a.Answer == b.Answer && a.Typed == b.Typed }
+	return p != nil && p.Text == q.Text && p.At == q.At && p.Pick == q.Pick && p.Question == q.Question &&
+		p.Answer == q.Answer && p.Typed == q.Typed && p.HandOnMixed == q.HandOnMixed && slices.EqualFunc(p.Asks, q.Asks, same)
+}
+
+// has reports i one of p's questions (Asks), or -1 for a pick that has none.
+func (p *Prompt) has(i int) bool {
+	return i < len(p.Asks) && (i < 0) == (len(p.Asks) == 0)
 }
 
 // unhand drops worker's hand-over mark (handOver), writing only when it has one.

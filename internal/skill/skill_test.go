@@ -173,8 +173,12 @@ func TestAskRules(t *testing.T) {
 		"A brief you hand a boss carries the boss line",
 		"Relayed worker permission prompts and dialogs (a worker's own AskUserQuestion dialog too) go through your AskUserQuestion",
 		// The manager puts asks to the user itself; the shared boss rule stays dev todo ask
-		"Unlike a boss (this overrides \"Never wait on a decision\" above), you put what waits on the user to them yourself, one by one with AskUserQuestion",
-		"**One question per call, in order.** Re-check its item right before each with `dev todo show --print <boss> <n> --question \"<item text>\"`",
+		"Unlike a boss (this overrides \"Never wait on a decision\" above), you put what waits on the user to them yourself with AskUserQuestion",
+		"**Up to 4 asks per call, in order, one per question,** only independent ones: no pick changes another's options or whether it is needed (else one per call)",
+		"A hand-on question stays alone in its call, as does an item offering \"Hand it on\": dev relays nothing from a call mixing one with other questions.",
+		"Re-check each item right before each call with `dev todo show --print <boss> <n> --question \"<item text>\"`",
+		"**Relay every pick of a call before the next call** (a new call's picks replace any not relayed)",
+		"left unanswered in a call of several, or \"Leave it open\": the item stays open",
 		"name the item's number, mark and who it waits on as dev had them when the note went (`boss-<project> waits on you: #<n> ☐ on you: …`)",
 		"only the items changed since you last got it, under a count line",
 		"the full list again after a compaction and at least once an hour (a rewind or a reused item number",
@@ -187,7 +191,7 @@ func TestAskRules(t *testing.T) {
 		"1500 characters per message (longer: write it to a file and send its path)",
 		"`dev todo add` refuses an item the user does (no `--on` or `--on me`, no `--waiting-for`) without `--details`, unless `--no-details`",
 		"`--replaces` keeps the old item's details, so it refuses only when there were none",
-		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
+		"**Each question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
 		"**Assess the user's ideas before handing them on.**", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
@@ -208,7 +212,7 @@ func TestAskRules(t *testing.T) {
 		// The clear's own prompts are dev's fixed text, not the manager's sends
 		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
 		"- **dev offers it:** once per idle stretch", "Run it then, in the background", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
-		"- **Mark it asked, right before the dialog:** `dev todo asking <boss> <n> --question \"<item text>\"`",
+		"- **Mark the call's items asked, right before the dialog:** one `dev todo asking <boss> <n> [<boss> <n>]... --question \"<item text>\" [--question \"<item text>\"]...` naming every item the call asks",
 		// Claude Code's dim suggestion is never the user's draft
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",
 	} {

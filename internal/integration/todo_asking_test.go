@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -130,5 +131,36 @@ func TestTodoAsking(t *testing.T) {
 	}
 	if _, stderr, err := dev(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"); err == nil || !strings.Contains(stderr, "boss-a #1 is closed already") {
 		t.Errorf("❌ asking an answered item: %v %q", err, stderr)
+	}
+
+	// A dialog of several: one asking names each of its items, a --question each in order; one refused marks none
+	must(boss, "", "todo", "ask", "Ship?", "--option", "Ship (Recommended)", "--option", "Wait", "--details", "why")
+	must(boss, "", "todo", "ask", "Tag?", "--option", "Tag (Recommended)", "--option", "Wait", "--details", "why")
+	for _, tt := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"boss-a", "3", "boss-a", "4", "--question", "Ship?"}, "one --question with the ask's text per <boss> <n>, in order: 1 for 2"},
+		{[]string{"boss-a", "3", "boss-a"}, "1 to 4 pairs of <boss> <n>"},
+		{[]string{"boss-a", "3", "--question", ""}, "one is empty"},
+		{[]string{"boss-a", "3", "boss-a", "2", "--question", "Ship?", "--question", "Book a room"}, "boss-a #2 is no ask"},
+		{[]string{"boss-a", "3", "boss-a", "3", "--question", "Ship?", "--question", "Ship?"}, "boss-a #3 is named twice"},
+	} {
+		if _, stderr, err := dev(inManager, "", append([]string{"todo", "asking"}, tt.argv...)...); err == nil || !strings.Contains(stderr, tt.want) {
+			t.Errorf("❌ asking %v: %v %q, want %q", tt.argv, err, stderr, tt.want)
+		}
+	}
+	if got := asking(); len(got) != 0 {
+		t.Errorf("❌ asking after refusals: %v, want none", got)
+	}
+	check(t, "asking two", must(inManager, "", "todo", "asking", "boss-a", "3", "boss-a", "4", "--question", "Ship?", "--question", "Tag?"),
+		"boss-a #3: asked in manager now\nboss-a #4: asked in manager now\n")
+	if got := asking(); !slices.Equal(slices.Sorted(slices.Values(got)), []int{3, 4}) {
+		t.Errorf("❌ asking after a mark of two: %v, want #3 and #4", got)
+	}
+	// The next dialog's mark replaces both
+	must(inManager, "", "todo", "asking", "boss-a", "4", "--question", "Tag?")
+	if got := asking(); len(got) != 1 || got[0] != 4 {
+		t.Errorf("❌ asking after the next dialog's mark: %v, want [4]", got)
 	}
 }
