@@ -798,7 +798,7 @@ func TestPromptAskRules(t *testing.T) {
 			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
 			"The question starts \"<project> #<n>: \" and holds the item text word for word", "each option's detail (after \" | \") in its description", `the item's context as "- " lines`,
 			"Plain to do items (not asks) aren't questions", "only the user's own pick (typed under Other too) answers it", "a message they typed here answers no item",
-			"their latest pick also with typed messages after it (relay it, don't ask again)", "dev refuses any other Claude's keys until it is answered",
+			"their latest pick also with typed messages after it (relay it, don't ask again; words that withdraw or change it need a fresh pick)", "dev refuses any other Claude's keys until it is answered",
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",

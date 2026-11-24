@@ -132,7 +132,7 @@ func warnNoDetails(s todo.Store, stderr io.Writer, id int, noDetails bool, now t
 	}
 	for _, it := range l.Items {
 		// --no-details: an item the user does needs none
-		if it.ID == id && it.NeedsDetails() && !(noDetails && it.On == "") {
+		if it.ID == id && it.NeedsDetails() && !(noDetails && it.On == "" && len(it.Options) == 0) {
 			fmt.Fprintln(stderr, "⚠ no details: add them with --details (what it is and why, where it stands, what done looks like; for a waiting item who, what was asked, when and where)")
 		}
 	}

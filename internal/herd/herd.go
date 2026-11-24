@@ -221,7 +221,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`lists the rest's labels, each with its detail, in one more "- " line, for the user to type as Other). Relay each pick before the next question ` +
 	`with ` + "`dev todo answer <boss> <n> \"<picked option, or what they typed under Other>\" --question \"<item text>\" --via manager`" + `: ` +
 	`dev takes only your AskUserQuestion pick (one question, naming that item, the option picked) as their answer, once, ` +
-	`their latest pick also with typed messages after it (relay it, don't ask again); a message they typed here answers no item: ask that item as a question. A skipped or dismissed question, or "Leave it open", leaves the item open: don't ask it again this turn; ` +
+	`their latest pick also with typed messages after it (relay it, don't ask again; words that withdraw or change it need a fresh pick); a message they typed here answers no item: ask that item as a question. A skipped or dismissed question, or "Leave it open", leaves the item open: don't ask it again this turn; ` +
 	`the user can answer it from the sidebar's TO DO, the desktop board or ` + "`dev todo answer <boss> <n> <option>`" + ` ` +
 	`in their shell. Plain to do items (not asks) aren't questions: name them in the roll-up. Your own decision the user ` +
 	`skips goes on your list with dev todo ask and options, never as chat text ending a turn. A boss's permission prompt ` +
