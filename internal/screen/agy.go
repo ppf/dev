@@ -12,8 +12,17 @@ const agyBelowBox = 1
 // its footer under it; top and bottom are its rules. ok=false without it, or while its footer says "esc to
 // cancel": working, or a dialog drawn in its place.
 func AgyInput(plain []string) (top, bottom int, ok bool) {
+	top, bottom, ok = agyBox(plain)
+	if !ok || slices.ContainsFunc(plain[bottom+1:], func(l string) bool { return strings.HasPrefix(l, "esc to cancel") }) {
+		return 0, 0, false
+	}
+	return top, bottom, true
+}
+
+// agyBox is AgyInput whatever its footer says: also while agy works.
+func agyBox(plain []string) (top, bottom int, ok bool) {
 	bottom = lastRule(plain, len(plain)-1, agyBelowBox+1, isRule)
-	if bottom < 0 || slices.ContainsFunc(plain[bottom+1:], func(l string) bool { return strings.HasPrefix(l, "esc to cancel") }) {
+	if bottom < 0 {
 		return 0, 0, false
 	}
 	top = lastRule(plain, bottom-1, MaxBoxLines+1, isRule)
@@ -21,6 +30,12 @@ func AgyInput(plain []string) (top, bottom int, ok bool) {
 		return 0, 0, false
 	}
 	return top, bottom, true
+}
+
+// AgyBox reports agy's input box at the bottom of its captured screen, idle or working: no dialog in its place.
+func AgyBox(capture string) bool {
+	_, _, ok := agyBox(plainScreen(capture))
+	return ok
 }
 
 // AgyIdle reports agy's input box at the bottom of its captured screen, idle: not working, no dialog open.

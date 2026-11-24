@@ -87,7 +87,8 @@ func TestStateAgy(t *testing.T) {
 // agyStub builds a stand-in for agy into dir: agy models lists two slugs; otherwise it logs its argv to
 // DEV_STUB_LOG, shows its trust dialog for its directory until Enter, logs "trusted <dir>", then draws its
 // idle input box and runs each line typed as a turn with dev state --agy hooks ("decline" ends its turn as a
-// declined permission prompt does: on screen, without a Stop).
+// declined permission prompt does: on screen, without a Stop; "ask" opens a permission prompt, which the next
+// line declines).
 func agyStub(t *testing.T, dir string) {
 	t.Helper()
 	src := t.TempDir()
@@ -173,7 +174,16 @@ func main() {
 			return
 		}
 		line = strings.TrimSpace(line)
-		hook("working", "PreInvocation", 0, line)
+		if line == "ask" {
+			hook("working", "PreInvocation", 0, line)
+			draw(rule + "\n> ask\n\n● Bash(echo hi)\nCommand\n" + rule + "\nRequesting permission for:\n   echo hi\nRun this command?\n> 1. Yes, run command\n  4. No, cancel\nesc to cancel\n")
+			if _, err := in.ReadString('\n'); err != nil {
+				return
+			}
+			line = "decline"
+		} else {
+			hook("working", "PreInvocation", 0, line)
+		}
 		time.Sleep(300 * time.Millisecond)
 		if line == "decline" {
 			draw(rule + "\n> decline\n\n● Bash(echo hi)\n  ⎿  User declined the tool call\n\n  ⎿  Interrupted · What should Antigravity CLI do instead?\n" + box)
@@ -200,6 +210,11 @@ func TestAgentStartAgy(t *testing.T) {
 	stubs := filepath.SplitList(d.path)[0]
 	agyStub(t, stubs)
 	repo := newRepo(t, "", "")
+	// The stub runs its hooks itself; dev only looks for them before it records a new agy pane idle
+	writeFile(t, filepath.Join(repo, ".agents/hooks.json"), `{"dev": {"Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`)
+	git(t, repo, "add", ".agents")
+	git(t, repo, "commit", "-qm", "agy hooks")
+	git(t, repo, "push", "-q", "origin", "main")
 	boss := d.T("display", "-t", "=boot:", "-p", "#{pane_id}")
 	env := append(d.scriptEnv(append(gitEnv, writeProjects(t, [2]string{"repo", repo}))...), "TMUX_PANE="+boss)
 	log := func() string {
@@ -233,6 +248,17 @@ func TestAgentStartAgy(t *testing.T) {
 	check(t, "read shows its answer", strconv.FormatBool(strings.Contains(out, "> say ok\n\n  ok")), "true")
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "decline", "--timeout", "30s")
 	check(t, "a turn ended without a Stop settles by its screen", status+" "+out+errOut, "0 idle\n")
+	devAgent(env, "", "prompt", "repo-w1", "ask")
+	waitFor(t, "its permission prompt", func() bool {
+		out, _, _ := devAgent(env, "", "read", "repo-w1")
+		return strings.Contains(out, "Run this command?")
+	})
+	_, errOut, status = devAgent(env, "", "prompt", "repo-w1", "yes please")
+	check(t, "a prompt into its permission prompt refused", status+" "+errOut,
+		"1 ❌ agy's screen shows no input box: a dialog may be open; read it and answer with send-keys\n")
+	d.T("send-keys", "-t", "=repo-w1:1.2", "4", "Enter")
+	out, errOut, status = devAgent(env, "", "wait", "repo-w1", "--timeout", "30s")
+	check(t, "its declined prompt settles by its screen", status+" "+out+errOut, "0 idle\n")
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "say ok again", "--timeout", "30s")
 	check(t, "the next turn isn't taken for the declined one", status+" "+out+errOut, "0 idle\n")
 	out, _, _ = devAgent(env, "", "read", "repo-w1", "--lines", "20")

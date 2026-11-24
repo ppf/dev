@@ -471,7 +471,7 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			}
 			// Also a reused agy session that got no state yet: its start left a screen to the user
 			if a.Label == "Agy" && a.State == "" {
-				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, timeout)
+				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, agyHooked(a.Path), timeout)
 				if err != nil {
 					return err
 				}
@@ -514,6 +514,20 @@ func checkAgyModel(model string, timeout time.Duration) error {
 		return fmt.Errorf("unknown --model %q for agy, want one agy models lists: %s", model, strings.Join(models, ", "))
 	}
 	return nil
+}
+
+// agyHooked reports a dev state --agy hook in agy's global hooks file or the workspace's at dir: dev only reads them.
+func agyHooked(dir string) bool {
+	files := []string{filepath.Join(dir, ".agents", "hooks.json")}
+	if home, err := os.UserHomeDir(); err == nil {
+		files = append(files, filepath.Join(home, ".gemini", "config", "hooks.json"))
+	}
+	for _, f := range files {
+		if raw, err := os.ReadFile(f); err == nil && strings.Contains(string(raw), "state --agy") {
+			return true
+		}
+	}
+	return false
 }
 
 // worktreeMissing reports that project's worktree wt isn't on disk, so the start that follows makes it; false

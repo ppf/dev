@@ -33,6 +33,9 @@ func TestAgyScreensGolden(t *testing.T) {
 			if got := AgyIdle(capture); got != tt.idle {
 				t.Errorf("AgyIdle = %v, want %v", got, tt.idle)
 			}
+			if got, want := AgyBox(capture), tt.idle || tt.file == "agy-working"; got != want {
+				t.Errorf("AgyBox = %v, want %v", got, want)
+			}
 			if got := AgyInterrupted(capture); got != tt.interrupted {
 				t.Errorf("AgyInterrupted = %v, want %v", got, tt.interrupted)
 			}

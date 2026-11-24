@@ -17,22 +17,24 @@ func TestAgyReady(t *testing.T) {
 		return "Accessing workspace:\n\n" + asked + "\n\nDo you trust the contents of this project?\n\n" + cursor + "\n  No, exit\n"
 	}
 	tests := []struct {
-		name    string
-		trust   bool
-		screens []string // capture-pane's replies in turn, the last one repeated
-		enters  int
-		left    string // the start of AgyReady's note; "" when it recorded the pane idle
+		name     string
+		trust    bool
+		unhooked bool
+		screens  []string // capture-pane's replies in turn, the last one repeated
+		enters   int
+		left     string // the start of AgyReady's note; "" when it recorded the pane idle
 	}{
-		{"idle at once", false, []string{idle}, 0, ""},
-		{"its trust dialog confirmed", true, []string{trust(dir, "> Yes, I trust this folder"), trust(dir, "> Yes, I trust this folder"), idle}, 1, ""},
-		{"a folder this start didn't make", false, []string{trust(dir, "> Yes, I trust this folder")}, 0,
+		{"idle at once", false, false, []string{idle}, 0, ""},
+		{"without its hooks", false, true, []string{idle}, 0, "agy runs no dev state --agy hook"},
+		{"its trust dialog confirmed", true, false, []string{trust(dir, "> Yes, I trust this folder"), trust(dir, "> Yes, I trust this folder"), idle}, 1, ""},
+		{"a folder this start didn't make", false, false, []string{trust(dir, "> Yes, I trust this folder")}, 0,
 			"agy asks whether to trust " + dir + ", a folder this start didn't make: left for the user; once it's answered, run this start again"},
-		{"another folder", true, []string{trust("/src/app", "> Yes, I trust this folder")}, 0,
+		{"another folder", true, false, []string{trust("/src/app", "> Yes, I trust this folder")}, 0,
 			"agy asks whether to trust /src/app, not its pane's " + dir + ", after 5s: left for the user"},
-		{"its folder once redrawn", true, []string{trust("/src/app/.clau", "> Yes, I trust this folder"), trust(dir, "> Yes, I trust this folder"), idle}, 1, ""},
-		{"cursor on No", true, []string{trust(dir, "  Yes, I trust this folder")}, 0,
+		{"its folder once redrawn", true, false, []string{trust("/src/app/.clau", "> Yes, I trust this folder"), trust(dir, "> Yes, I trust this folder"), idle}, 1, ""},
+		{"cursor on No", true, false, []string{trust(dir, "  Yes, I trust this folder")}, 0,
 			"agy asks whether to trust " + dir + ", its cursor not on Yes, after 5s: left for the user"},
-		{"a login screen", true, []string{"Sign in to continue\n"}, 0, "agy shows no input box after 5s: left as it is; once it's answered"},
+		{"a login screen", true, false, []string{"Sign in to continue\n"}, 0, "agy shows no input box after 5s: left as it is; once it's answered"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,7 +54,7 @@ func TestAgyReady(t *testing.T) {
 				}
 				return "", nil
 			})
-			left, err := AgyReady(c, fakeClock(), "%1", tt.trust, 5*time.Second)
+			left, err := AgyReady(c, fakeClock(), "%1", tt.trust, !tt.unhooked, 5*time.Second)
 			if err != nil || !strings.HasPrefix(left, tt.left) || (tt.left == "") != (left == "") {
 				t.Errorf("AgyReady = %q, %v; want it to start %q", left, err, tt.left)
 			}

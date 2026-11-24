@@ -543,6 +543,9 @@ func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err erro
 	if err := st.checkPromptable(); err != nil {
 		return false, notSent{err}
 	}
+	if err := checkAgyBox(c, pane, st); err != nil {
+		return false, notSent{err}
+	}
 	claude := agent.ClaudeCommand(st.Command)
 	queued = st.Trusted() == agent.Working && claude
 	if queued && claude {
@@ -577,6 +580,22 @@ const (
 	// locally (/effort): a command that starts a turn (a skill's) shows working by then.
 	localGrace = time.Second
 )
+
+// checkAgyBox refuses an agy pane whose screen shows no input box: agy records no hook for its permission prompts
+// and questions, and a paste and its Enter would pick an answer.
+func checkAgyBox(c *tmux.Client, pane string, st Status) error {
+	if !agent.AgyCommand(st.Command) {
+		return nil
+	}
+	capture, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil {
+		return err
+	}
+	if !screen.AgyBox(capture) {
+		return errors.New("agy's screen shows no input box: a dialog may be open; read it and answer with send-keys")
+	}
+	return nil
+}
 
 // squash is s without whitespace, so a command wrapped in the input box still matches.
 func squash(s string) string {
@@ -694,6 +713,9 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 		return before, notSent{fmt.Errorf("agent is %s: wait for it first", st)}
 	}
 	if err := before.checkPromptable(); err != nil {
+		return before, notSent{err}
+	}
+	if err := checkAgyBox(c, pane, before); err != nil {
 		return before, notSent{err}
 	}
 	// Claude Code's aliases of /clear too
