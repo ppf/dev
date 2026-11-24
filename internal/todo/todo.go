@@ -372,10 +372,6 @@ func (s Store) take(from Store) (taken bool, err error) {
 		if f, err := from.read(); err != nil || f.MovedTo != "" {
 			return err
 		}
-		// What its boss last got goes first: a failure moves nothing. The next reminder is the full list
-		if err := from.forgetShown(); err != nil {
-			return err
-		}
 		taken = true
 		if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
 			return err
@@ -1443,9 +1439,13 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 }
 
 // seenAs is how a boss's list keeps the item it named: its line and revision (Added), so a replace or reopen that
-// leaves the line as it was still counts.
+// leaves the line as it was still counts; for an item to re-check, whose line changes with its age, that it is one.
 func (it Shown) seenAs(now time.Time) string {
-	return it.line(now) + "\x00" + strconv.FormatInt(it.Added, 10)
+	line := it.line(now)
+	if it.Flagged() {
+		line = "re-check"
+	}
+	return line + "\x00" + strconv.FormatInt(it.Added, 10)
 }
 
 // line is the open item as a boss's list names it: number, text, who does it and the rest it needs to know at now.

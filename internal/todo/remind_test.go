@@ -10,7 +10,7 @@ import (
 )
 
 // After the full list, a boss's reminder lists only the items changed since, under a count line; items to re-check
-// always show, aside from the count; an item that left is named once; ForgetShown (a compaction) or another
+// always show, counted when newly to re-check; an item that left is named once; ForgetShown (a compaction) or another
 // conversation brings the full list back.
 func TestRemindChangesOnly(t *testing.T) {
 	s := store(t)
@@ -56,7 +56,7 @@ func TestRemindChangesOnly(t *testing.T) {
 	}
 	l := read(t, s, now)
 	l.Items[0].Gone, l.Items[0].On, l.Items[0].Session = true, "w", &Session{ID: "w", Name: "w"}
-	want = "[dev todo] Your open to do list: 3 open, none new or changed since the last one; the others as before (dev todo lists them):\n" +
+	want = "[dev todo] Your open to do list: 3 open, 1 new or changed since the last one; the others as before (dev todo lists them):\n" +
 		"Re-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):\n1. a (on w, session gone)\nTick"
 	if got, _ := s.Remind(l, nil, "c1", now); !strings.HasPrefix(got, want) {
 		t.Errorf("flagged = %q, want prefix %q", got, want)
@@ -171,5 +171,32 @@ func TestRemindReplacedSameLine(t *testing.T) {
 	}
 	if got, _ := s.Remind(read(t, s, later), nil, "c1", later); !strings.Contains(got, "1 new or changed since the last one; the others as before (dev todo lists them):\n1. a\n") {
 		t.Errorf("replaced = %q, want it listed", got)
+	}
+}
+
+// "Left it" names neither one the start list never showed nor one the ticked lines name; an empty start keeps nothing.
+func TestRemindLeftAndEmptyStart(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.StartRemind(read(t, s, now), false, "now", nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= startShown+1; i++ {
+		if _, err := s.Add(Item{Text: "t" + strconv.Itoa(i), Details: "d"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := s.Remind(read(t, s, now), nil, "c1", now); !strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. t1\n") {
+		t.Errorf("after an empty start = %q, want the full list", got)
+	}
+	if _, err := s.StartRemind(read(t, s, now), false, "now", nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{1, 2, startShown + 1}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Remind(read(t, s, now.Add(time.Minute)), []Ticked{{ID: 2, Text: "t2"}}, "c1", now)
+	if !strings.Contains(got, "#1 left it") || strings.Contains(got, "#2,") || strings.Contains(got, "#21") {
+		t.Errorf("left = %q, want #1 alone", got)
 	}
 }

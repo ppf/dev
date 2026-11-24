@@ -27,8 +27,7 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 		}
 		return withTicked(ticked, "[dev todo] Your open to do list:"+items+tickLine+whoLine+detailsLine(items)), shown
 	}
-	// New or changed: a re-check item's line changes with its age, so it counts only when new. One kept as "" was open
-	// past the start list's "+N more": not shown yet
+	// New or changed (seenAs); one kept as "" was open past the start list's "+N more": not shown yet
 	changed, unshown := 0, 0
 	open := map[int]bool{}
 	for _, it := range l.Items {
@@ -36,17 +35,21 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 			continue
 		}
 		open[it.ID] = true
-		prev, was := seen[it.ID]
-		switch {
+		switch prev, was := seen[it.ID]; {
 		case was && prev == "":
 			unshown++
-		case it.Flagged() && !was || !it.Flagged() && shown[it.ID] != "":
+		case prev != it.seenAs(now):
 			changed++
 		}
 	}
+	// Not one never shown (past the start list), nor one the ticked lines name
+	told := map[int]bool{}
+	for _, t := range ticked {
+		told[t.ID] = true
+	}
 	var left []string
 	for _, id := range slices.Sorted(maps.Keys(seen)) {
-		if !open[id] {
+		if !open[id] && seen[id] != "" && !told[id] {
 			left = append(left, "#"+strconv.Itoa(id))
 		}
 	}
@@ -98,6 +101,10 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
 	err = s.locked(func() error {
 		text = l.startReminder(kept, age, ticked, now)
+		if text == "" {
+			// Nothing shown: the first reminder is the full list
+			return s.forgetShown()
+		}
 		// One past startShown is kept as "": the next Remind lists it as not in the start list, not as changed
 		_, shown := l.linesSince(startShown, nil, now)
 		for _, it := range l.Items {

@@ -379,10 +379,6 @@ func (s Store) TakeOver(from Store, now time.Time) (t Taken, err error) {
 		return t, Refused{fmt.Errorf("%s is this boss's own list", s.Name())}
 	}
 	err = lockedPair(s, from, func() error {
-		// Both lists' items move: their bosses' next reminders are the full lists. First, so a failure moves nothing
-		if err := errors.Join(from.forgetShown(), s.forgetShown()); err != nil {
-			return err
-		}
 		var err error
 		t, err = s.takeOver(from, now)
 		return err

@@ -142,8 +142,8 @@ func openList(c *tmux.Client, pane, conversation string) (string, error) {
 		return "", errors.Join(gone, err)
 	}
 	if gone != nil {
-		// Its gone items unmarked: the full list, what the boss last got kept as it was
-		return l.Reminder(ticked, now), gone
+		// Its gone items unmarked: the full list, and the next one too
+		return l.Reminder(ticked, now), errors.Join(gone, s.ForgetShown())
 	}
 	return s.Remind(l, ticked, conversation, now)
 }
@@ -449,7 +449,7 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
 	// The state outside the clip: it never cuts the options
-	text = fmt.Sprintf("#%d %s", id, state) + clean(text)
+	text = fmt.Sprintf("#%d %s", id, clean(state)) + clean(text)
 	// Each its own: an item given back with the same text is news again
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
 	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
@@ -486,7 +486,7 @@ func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, it todo.Item, an
 	num, text := fmt.Sprintf("#%d ", it.ID), clean(answer.Text)
 	if strings.HasPrefix(text, num) {
 		// The state outside the clip
-		text = num + it.State() + ": " + strings.TrimPrefix(text, num)
+		text = num + clean(it.State()) + ": " + strings.TrimPrefix(text, num)
 	} else {
 		noState = fmt.Errorf("the note doesn't start with %q", num)
 	}
