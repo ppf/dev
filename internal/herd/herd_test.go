@@ -785,7 +785,7 @@ func TestPromptAskRules(t *testing.T) {
 		name, prompt string
 		want         []string
 	}{
-		{"coordinatorPrompt", coordinatorPrompt, []string{"probe it yourself with bounded retries", "File a run's outward asks",
+		{"coordinatorPrompt", coordinatorPrompt, []string{"An easy decision is yours", "Decided myself: <pick> over <other>; tell me to overrule", "start without a further ask unless their cost or scope changed since the pick", "probe it yourself with bounded retries", "File a run's outward asks",
 			"never ask your own decisions with AskUserQuestion or only as chat text",
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
@@ -800,8 +800,8 @@ func TestPromptAskRules(t *testing.T) {
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
-			"Before handing on the user's own new idea or request", "With real cons or a conflict on the lists",
-			"one AskUserQuestion of your own", "skipped, it isn't handed on", "a one-line why",
+			"Before handing on the user's own new idea or request", "Hand it on at once, with the assessment and its cons in", "Ask first only when it conflicts with something the user decided",
+			"one AskUserQuestion of your own", "skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
 			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>"}},
 	} {
 		for _, want := range tt.want {
