@@ -362,7 +362,7 @@ func TestLatestPick(t *testing.T) {
 	// A hand-on question drops the latest prompt, not an item's pick waiting for its relay
 	b = testBox(t)
 	p = picked(b)
-	if err := b.DropPrompt(); err != nil {
+	if err := b.DropPrompt(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p, -1) != nil {
@@ -372,7 +372,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Picked([]agent.Pick{{Question: "\n  Hand  on to boss-a?\n\nCache the CI builds.", Answer: "Hand it on"}}, at); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.DropPrompt(); err != nil {
+	if err := b.DropPrompt(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if p, err := b.LatestPick(); p != nil || err != nil {
@@ -382,7 +382,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Picked([]agent.Pick{{Question: "Hand on to plain?\n\nCache the CI builds.", Answer: "Hand it on"}}, at); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.DropPrompt(); err != nil {
+	if err := b.DropPrompt(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if p, err := b.LatestPick(); p != nil || err != nil {

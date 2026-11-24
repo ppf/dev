@@ -418,6 +418,10 @@ type state struct {
 	Pick *Prompt `json:"pick,omitempty"`
 	// Asking is the items whose questions the coordinator has up in its dialog (SetAsking), until its pick
 	Asking []Asking `json:"asking_items,omitempty"`
+	// GoSpent is the transcript entry of the user's typed go a send used (ClaimGo); HandOnAt when the last hand-on
+	// question opened (DropPrompt), unix milliseconds: a go before it passes no more
+	GoSpent  string `json:"go_spent,omitempty"`
+	HandOnAt int64  `json:"hand_on_at,omitempty"`
 }
 
 // Prompt is a prompt the coordinator got at At (unix seconds).
@@ -822,6 +826,30 @@ func (p *Prompt) has(i int) bool {
 	return i < len(p.Asks) && (i < 0) == (len(p.Asks) == 0)
 }
 
+// ClaimGo spends g, the user's typed go: refused once spent or when a hand-on question opened after it.
+func (b Box) ClaimGo(g Go) error {
+	return b.update(func(s *state) error {
+		switch {
+		case s.GoSpent == g.UUID:
+			return errors.New("--go: the user's latest message was used for a send already" + askAgain)
+		case g.At.UnixMilli() <= s.HandOnAt:
+			return errors.New("--go: a hand-on question was asked after the user's latest message: hand on with its pick")
+		}
+		s.GoSpent = g.UUID
+		return nil
+	})
+}
+
+// UnclaimGo gives back g, claimed for a send that didn't reach the boss.
+func (b Box) UnclaimGo(g Go) error {
+	return b.update(func(s *state) error {
+		if s.GoSpent == g.UUID {
+			s.GoSpent = ""
+		}
+		return nil
+	})
+}
+
 // unhand drops worker's hand-over mark (handOver), writing only when it has one.
 func (b Box) unhand(worker string) error {
 	s, err := b.locked()
@@ -836,11 +864,11 @@ func (b Box) unhand(worker string) error {
 	})
 }
 
-// DropPrompt drops the user's latest prompt (Arrived) and a pick on a hand-on question, keeping an item's pick for
-// its relay (ClaimPick).
-func (b Box) DropPrompt() error {
+// DropPrompt drops the user's latest prompt (Arrived), a pick on a hand-on question and a typed go from before now,
+// keeping an item's pick for its relay (ClaimPick).
+func (b Box) DropPrompt(now time.Time) error {
 	return b.update(func(s *state) error {
-		s.Prompt = nil
+		s.Prompt, s.HandOnAt = nil, now.UnixMilli()
 		if s.Pick != nil && strings.HasPrefix(strings.ToLower(FirstLine(s.Pick.Question)), "hand on to ") {
 			s.Pick = nil
 		}
