@@ -114,9 +114,9 @@ func TestAgentControl(t *testing.T) {
 			"2 working: still at it after 500ms; wait again or read it\n|")
 		out, _, status = devAgent(env, "", "wait", "w1", "--timeout", "30s")
 		check(t, "wait settled", status+" "+out, "0 idle\n")
-		out, errOut, status = devAgent(env, "", "prompt", "w1", "--wait", "--timeout", "500ms", "slow")
+		out, errOut, status = devAgent(env, "", "prompt", "w1", "--wait", "--stall", "300ms", "--timeout", "1s", "slow")
 		check(t, "prompt --wait timeout: neutral line, exit 2", status+" "+out+"|"+errOut,
-			"2 working: still at it after 500ms; wait again or read it\n|")
+			"2 working: still at it after 1s; wait again or read it\n|")
 		out, _, status = devAgent(env, "", "wait", "w1", "--timeout", "30s")
 		check(t, "wait settled again", status+" "+out, "0 idle\n")
 	})
