@@ -92,6 +92,14 @@ func TestManagerHandOnGate(t *testing.T) {
 	if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["boss-a"]}, `{"hook_event_name":"Stop"}`, "state", "idle"); err != nil {
 		t.Fatal(err, stderr)
 	}
+	// A new hand-on question drops the pick: dismissed, it leaves none
+	opened, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": map[string]any{
+		"questions": []map[string]any{{"question": question, "options": []map[string]string{{"label": "Hand it on (Recommended)"}, {"label": "Drop it"}}}}}})
+	if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, string(opened), "question"); err != nil {
+		t.Fatal(err, stderr)
+	}
+	refused("work after a new hand-on question, dismissed", `hasn't picked "Hand it on" here yet`, "agent", "prompt", "boss-a", "--kind", "work", brief)
+	ask(question, "Hand it on")
 	if out, stderr, err := work(); err != nil {
 		t.Fatalf("❌ work on the pick: %q %v %s", out, err, stderr)
 	}

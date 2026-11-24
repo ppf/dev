@@ -644,6 +644,11 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 // instead. No count (or session) within stall is ErrStalled; no settled state within timeout is ErrTimeout.
 // Another slash command Claude runs itself counts no prompt: its screen (command.step) says when it ran.
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
+	return PromptWaitSent(c, clk, pane, text, stall, timeout, func() {})
+}
+
+// PromptWaitSent is PromptWait calling sent once the text reached the pane, before it waits.
+func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration, sent func()) (Status, error) {
 	before, err := ReadChecked(c, pane)
 	if err != nil {
 		return before, notSent{err}
@@ -663,7 +668,11 @@ func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout tim
 	if reset && before.Session == "" {
 		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")}
 	}
-	if err := paste(c, clk, pane, text); err != nil {
+	err = paste(c, clk, pane, text)
+	if !NotSent(err) {
+		sent()
+	}
+	if err != nil {
 		return before, err
 	}
 	var cmd *command

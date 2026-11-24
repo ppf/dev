@@ -256,7 +256,11 @@ func TestPromptWait(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &promptRig{statuses: tt.statuses}
-			st, err := PromptWait(r.client(), fakeClock(), "%1", "line one\nline two;", 5*time.Second, time.Minute)
+			called := false
+			st, err := PromptWaitSent(r.client(), fakeClock(), "%1", "line one\nline two;", 5*time.Second, time.Minute, func() { called = true })
+			if called != tt.sent {
+				t.Errorf("sent called = %v, want %v", called, tt.sent)
+			}
 			switch {
 			case tt.err != nil && !errors.Is(err, tt.err), tt.errText != "" && (err == nil || err.Error() != tt.errText):
 				t.Errorf("err = %v, want %v%s", err, tt.err, tt.errText)

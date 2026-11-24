@@ -231,7 +231,7 @@ read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: 
 agent's new conversation started (its hook recorded a new session).
 
 From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
-latest prompt there being a pick of "Hand it on" on one question whose first line names the target and that holds
+latest prompt there being a pick of "Hand it on" on one question whose first line starts "Hand on to <target>" and that holds
 the brief's first line as a line of its own, once per pick.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -257,12 +257,16 @@ the brief's first line as a line of its own, once per pick.`,
 				if queued {
 					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
 				}
-				return errors.Join(err, g.done(!control.NotSent(err), time.Now()))
+				return errors.Join(g.typed(err), g.done(!control.NotSent(err), time.Now()))
 			}
-			st, err := control.PromptWait(c, control.RealClock, a.Pane, text, stall, timeout)
-			gerr := g.done(!control.NotSent(err), time.Now())
+			// Recorded once typed: the wait may run long or be cut off
+			var gerr error
+			st, err := control.PromptWaitSent(c, control.RealClock, a.Pane, text, stall, timeout, func() { gerr = g.done(true, time.Now()) })
+			if control.NotSent(err) {
+				gerr = g.done(false, time.Now())
+			}
 			if err != nil || gerr != nil {
-				return errors.Join(err, gerr)
+				return errors.Join(g.typed(err), gerr)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), st.Trusted())
 			return nil

@@ -29,6 +29,7 @@ func TestHandOnPick(t *testing.T) {
 		{"brief inside a longer line", pick("Hand on to boss-dev?\n\nDo not cache the CI builds.", "Hand it on"), "the user's pick was for"},
 		{"another brief", pick("Hand on to boss-dev?\n\nRename the repo.", "Hand it on"), "the user's pick was for"},
 		{"another boss", pick("Hand on to boss-api?\n\nCache the CI builds.", "Hand it on"), "not boss-dev"},
+		{"a second boss after the first", pick("Hand on to boss-api? This overlaps with boss-dev.\n\nCache the CI builds.", "Hand it on"), "not boss-dev"},
 		{"a boss whose name holds this one", pick("Hand on to boss-devops?\n\nCache the CI builds.", "Hand it on"), "not boss-dev"},
 		{"an item's pick", pick("dev #7: Merge #148?", "Merge"), "answered \"Merge\""},
 	} {
