@@ -92,7 +92,8 @@ func TestManagerHandOnGate(t *testing.T) {
 	if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["boss-a"]}, `{"hook_event_name":"Stop"}`, "state", "idle"); err != nil {
 		t.Fatal(err, stderr)
 	}
-	// A new hand-on question drops the pick: dismissed, it leaves none
+	// A new hand-on question drops the pick, typed messages after it or not: dismissed, it leaves none
+	typed("one more thing")
 	opened, _ := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": map[string]any{
 		"questions": []map[string]any{{"question": question, "options": []map[string]string{{"label": "Hand it on (Recommended)"}, {"label": "Drop it"}}}}}})
 	if _, stderr, err := dev([]string{"TMUX_PANE=" + pane["manager"]}, string(opened), "question"); err != nil {
@@ -110,10 +111,15 @@ func TestManagerHandOnGate(t *testing.T) {
 	if _, stderr, err := work(); err == nil || !strings.Contains(stderr, "pick was used already") {
 		t.Errorf("❌ work twice on one pick: %v %q", err, stderr)
 	}
-	// Only the latest prompt counts: words typed after the pick
+	// The latest pick counts with typed messages and screenshots after it, once
 	ask(question, "Hand it on")
-	typed("wait, not yet")
-	refused("work on a typed message after the pick", "a typed message, not a pick", "agent", "prompt", "boss-a", "--kind", "work", brief)
+	typed("also the nightly builds")
+	typed("[Image #1]")
+	if out, stderr, err := work(); err != nil {
+		t.Fatalf("❌ work on the pick with typed messages after it: %q %v %s", out, err, stderr)
+	}
+	typed("and the docs build")
+	refused("work twice on a pick with typed messages after it", "pick was used already", "agent", "prompt", "boss-a", "--kind", "work", brief)
 	ask(question, "Hand it on")
 	// A message refused after the gate gives the pick back
 	refused("work as a too-long message", "too long", "agent", "message", "boss-a", "--kind", "work", brief+strings.Repeat("x", 1501))
@@ -151,12 +157,12 @@ func TestManagerHandOnGate(t *testing.T) {
 
 	out, stderr, err = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "", "agent", "handoffs")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if err != nil || len(lines) != 8 || lines[0] != "gated 2 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1" ||
+	if err != nil || len(lines) != 9 || lines[0] != "gated 3 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1" ||
 		!strings.HasSuffix(lines[1], " own boss-b: Yes, rebase it") || !strings.HasSuffix(lines[2], " question plain: status?") ||
 		!strings.HasSuffix(lines[3], " question boss-b: Is #150 merged?") || !strings.HasSuffix(lines[4], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[5], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[6], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
-		!strings.HasSuffix(lines[7], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
+		!strings.HasSuffix(lines[5], " work boss-a: Cache the CI builds.") || !strings.HasSuffix(lines[6], " work boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[7], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
+		!strings.HasSuffix(lines[8], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
 		t.Errorf("❌ dev agent handoffs = %q, %v %s", out, err, stderr)
 	}
 }

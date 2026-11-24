@@ -368,6 +368,16 @@ func TestLatestPick(t *testing.T) {
 	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p, -1) != nil {
 		t.Errorf("after DropPrompt: latest %+v, %v; want none, the pick still claimable", latest, err)
 	}
+	// ... and drops a pick on an earlier hand-on question
+	if err := b.Picked([]agent.Pick{{Question: "\n  Hand  on to boss-a?\n\nCache the CI builds.", Answer: "Hand it on"}}, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DropPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.LatestPick(); p != nil || err != nil {
+		t.Errorf("hand-on pick after DropPrompt = %+v, %v; want none", p, err)
+	}
 
 	// A file from before the pick slot: its latest prompt, a pick, is claimed as the latest pick
 	b = testBox(t)

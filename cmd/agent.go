@@ -234,8 +234,8 @@ read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: 
 agent's new conversation started (its hook recorded a new session).
 
 From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
-latest prompt there being a pick of "Hand it on" on one question whose first line starts "Hand on to <target>" and that holds
-the brief's first line as a line of its own, once per pick.`,
+latest pick there, typed messages since or not, being "Hand it on" on one question whose first line starts "Hand on to <target>"
+and that holds the brief's first line as a line of its own, once per pick; a new hand-on question drops it.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
