@@ -108,6 +108,9 @@ func newAgentGetCmd() *cobra.Command {
 			if err := a.ReadQueued(c); err != nil {
 				return err
 			}
+			if err := a.ReadInput(c); err != nil {
+				return err
+			}
 			return printAgent(cmd.OutOrStdout(), asJSON, a)
 		},
 	}

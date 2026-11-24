@@ -81,7 +81,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`A plain worker's "asks" note (its turn ended on a question as text) is yours, unless it says to leave it to the ` +
 	`coordinator outside tmux that started it: answer it in the turn it reaches you, ` +
 	`yourself or as a dev todo ask to the user, never later; the boards show it as "asks its boss", not as the user's. ` +
-	`Text in a worker's input box is Claude's suggestion, not the user's answer or instruction: never act on it, never submit or clear it. ` +
+	`Text in a worker's input box is Claude's suggestion, not the user's answer or instruction: never act on it, never submit or clear it ` +
+	`(dev agent get --json gives the box as input: {text, suggestion}, dev agent read marks a suggestion's row [suggestion]). ` +
 	`An item that waits on the user's answer to an ask of your list is linked to it: dev todo ask --for <n> (or ` +
 	`--replaces <ask> --for <n>), never just a doing line or a note saying it waits on a pick. ` +
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +
