@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/desktop"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -20,7 +22,8 @@ func newQuestionCmd() *cobra.Command {
 		Long: `Claude hook for PermissionRequest and PreToolUse (matcher AskUserQuestion): records what the dialog asks
 (AskUserQuestion's questions, or a permission's tool with its command, file or URL) on the pane (@agent_question),
 so dev boss's picker and inbox decision notes can show it; in a desktop app session, in its hook file for dev
-desktop board (an AskUserQuestion also as a decision). It never decides: nothing goes to stdout, where Claude reads a decision.`,
+desktop board (an AskUserQuestion also as a decision). In the manager's pane a hand-on question (a "Hand it on"
+option) drops the user's latest pick, so a dismissed one leaves none to hand on with. It never decides: nothing goes to stdout, where Claude reads a decision.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			pane := os.Getenv("TMUX_PANE")
@@ -48,7 +51,7 @@ desktop board (an AskUserQuestion also as a decision). It never decides: nothing
 			c := tmux.New()
 			nested, err := agent.Nested(c, pane, os.Getenv("CLAUDE_PID"))
 			if err == nil && !nested {
-				err = agent.RecordQuestion(c, pane, q)
+				err = errors.Join(agent.RecordQuestion(c, pane, q), inbox.AskingHandOn(c, pane, q))
 			}
 			if err != nil {
 				// A failing hook would show as an error on every dialog

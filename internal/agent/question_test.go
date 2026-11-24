@@ -142,7 +142,7 @@ func TestHookPick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Pick{{"Which color?", "purple"}, {"Which extras?", "Tests, ci"}}
+	want := []Pick{{"Which color?", "purple", []string{"Red", "Blue"}}, {"Which extras?", "Tests, ci", []string{"Tests", "Docs"}}}
 	if got := HookPick(input); !reflect.DeepEqual(got, want) || got[0].String() != "Which color? picked purple" {
 		t.Errorf("golden: %+v, want %+v", got, want)
 	}

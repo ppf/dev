@@ -256,7 +256,11 @@ func TestPromptWait(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &promptRig{statuses: tt.statuses}
-			st, err := PromptWait(r.client(), fakeClock(), "%1", "line one\nline two;", 5*time.Second, time.Minute)
+			called := false
+			st, err := PromptWaitSent(r.client(), fakeClock(), "%1", "line one\nline two;", 5*time.Second, time.Minute, func() { called = true })
+			if called != tt.sent {
+				t.Errorf("sent called = %v, want %v", called, tt.sent)
+			}
 			switch {
 			case tt.err != nil && !errors.Is(err, tt.err), tt.errText != "" && (err == nil || err.Error() != tt.errText):
 				t.Errorf("err = %v, want %v%s", err, tt.err, tt.errText)
@@ -265,6 +269,10 @@ func TestPromptWait(t *testing.T) {
 			}
 			if sent := r.pasted != ""; sent != tt.sent {
 				t.Fatalf("sent = %v, want %v", sent, tt.sent)
+			}
+			// Only a refusal before the paste says nothing was typed
+			if err != nil && NotSent(err) == tt.sent {
+				t.Errorf("NotSent(%v) = %v, want %v", err, NotSent(err), !tt.sent)
 			}
 			if !tt.sent {
 				return
@@ -313,6 +321,9 @@ func TestPromptWaitClear(t *testing.T) {
 			if sent := r.pasted != ""; sent != tt.sent {
 				t.Errorf("sent = %v, want %v", sent, tt.sent)
 			}
+			if err != nil && NotSent(err) == tt.sent {
+				t.Errorf("NotSent(%v) = %v, want %v", err, NotSent(err), !tt.sent)
+			}
 		})
 	}
 }
@@ -328,18 +339,18 @@ func TestPrompt(t *testing.T) {
 		t.Errorf("Prompt(idle) = %v, %v; want sent, not queued", queued, err)
 	}
 	r = &promptRig{statuses: []Status{status("working", "1")}, screen: dialogScreen}
-	if _, err := Prompt(r.client(), fakeClock(), "%1", "next"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", "next"); !NotSent(err) || r.pasted != "" {
 		t.Errorf("Prompt(busy, dialog drawn) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 	r = &promptRig{statuses: []Status{waitingFor("elicitation_dialog", "1")}}
-	if _, err := Prompt(r.client(), fakeClock(), "%1", "2"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", "2"); !NotSent(err) || r.pasted != "" {
 		t.Errorf("Prompt(dialog) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 	// A failed paste deletes the buffer and never presses Enter
 	r = &promptRig{statuses: []Status{status("idle", "1")}, pasteErr: errors.New("no pane")}
 	_, err := Prompt(r.client(), fakeClock(), "%1", "x")
 	buffer := "dev-agent-" + strconv.Itoa(os.Getpid())
-	if want := []string{"paste-buffer -p -d -b " + buffer + " -t %1", "delete-buffer -b " + buffer}; err == nil || !slices.Equal(r.cmds, want) {
+	if want := []string{"paste-buffer -p -d -b " + buffer + " -t %1", "delete-buffer -b " + buffer}; !NotSent(err) || !slices.Equal(r.cmds, want) {
 		t.Errorf("Prompt(paste fails) = %v, cmds %q; want error, %q", err, r.cmds, want)
 	}
 }
@@ -488,7 +499,7 @@ func TestPromptDecisionGone(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &promptRig{statuses: tt.statuses, screen: tt.screen}
 			_, err := Prompt(r.client(), fakeClock(), "%1", "do X instead")
-			if sent := r.pasted != ""; sent != tt.sent || sent != (err == nil) {
+			if sent := r.pasted != ""; sent != tt.sent || sent != (err == nil) || err != nil && !NotSent(err) {
 				t.Errorf("Prompt = %v, pasted %q; want sent %v", err, r.pasted, tt.sent)
 			}
 			var settled []string
@@ -515,7 +526,7 @@ func TestPromptDecisionGone(t *testing.T) {
 
 func TestPromptEmpty(t *testing.T) {
 	r := &promptRig{statuses: []Status{status("idle", "1")}}
-	if _, err := Prompt(r.client(), fakeClock(), "%1", " \n"); err == nil || r.pasted != "" {
+	if _, err := Prompt(r.client(), fakeClock(), "%1", " \n"); !NotSent(err) || r.pasted != "" {
 		t.Errorf("Prompt(blank) = %v, pasted %q; want error, nothing sent", err, r.pasted)
 	}
 }

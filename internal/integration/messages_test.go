@@ -80,7 +80,7 @@ func TestBossMessages(t *testing.T) {
 		return strings.Contains(logOf(inbox.Manager), "- message m1 from boss-a: Is 0.57.0 out?\n")
 	})
 
-	out, err = dev(pane[inbox.Manager], "agent", "reply", "m1", "Not yet", "--done")
+	out, err = dev(pane[inbox.Manager], "agent", "reply", "m1", "Not yet", "--done", "--kind", "question")
 	check(t, "reply sent", out, "m2 sent to boss-a\n")
 	if err != nil {
 		t.Fatal(err)

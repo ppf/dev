@@ -422,7 +422,9 @@ type Prompt struct {
 	Pick     bool   `json:"pick,omitempty"`
 	Question string `json:"question,omitempty"`
 	Answer   string `json:"answer,omitempty"`
-	Spent    bool   `json:"spent,omitempty"`
+	// Typed: Answer was typed under Other, not one of the question's options
+	Typed bool `json:"typed,omitempty"`
+	Spent bool `json:"spent,omitempty"`
 }
 
 // flight is a batch sent over Claude's messaging socket at At (unix seconds).
@@ -706,6 +708,7 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 	p := &Prompt{Text: clip(strings.Join(words, "; ")), At: now.Unix(), Pick: true}
 	if len(picks) == 1 {
 		p.Question, p.Answer = picks[0].Question, picks[0].Answer
+		p.Typed = picks[0].Typed()
 	}
 	return b.update(func(s *state) error {
 		s.Prompt = p
