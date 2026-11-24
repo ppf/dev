@@ -3,10 +3,12 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
@@ -22,14 +24,25 @@ func bossTmux(t *testing.T, todoHerd string) *tmux.Client {
 // namedTmux is bossTmux with the boss session called name.
 func namedTmux(t *testing.T, name, todoHerd string) *tmux.Client {
 	t.Helper()
+	return handoffTmux(t, name, todoHerd, "")
+}
+
+// handoffTmux is namedTmux with handoff in the coordinator pane's OptHandoff.
+func handoffTmux(t *testing.T, name, todoHerd, handoff string) *tmux.Client {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	return tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
 			return tmux.FormatRow(name, "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
-			if args[len(args)-1] == "#{@dev_boss_pane}" {
+			switch args[len(args)-1] {
+			case "#{@dev_boss_pane}":
 				return map[string]string{"%1": "coordinator\n", "%2": "previews\n"}[args[3]], nil
+			case "#{" + OptHandoff + "}":
+				return handoff + "\n", nil
+			case "#{" + agent.OptEndedSession + "}":
+				return "s0\n", nil
 			}
 			if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
 				return tmux.FormatRow("$1", "1700000000", name, "1", "", "/tmp/tmux-1/default"), nil
@@ -160,6 +173,97 @@ func TestBossHookListError(t *testing.T) {
 	out, busy, err := BossHook(c, "%1", []byte(`{"hook_event_name":"Stop"}`), noHint)
 	if !errors.Is(err, todo.ErrNotBoss) || !busy || !strings.Contains(out, `"reason":"[dev boss inbox] 1 worker update(s):\n- w finished: w finished"}`) {
 		t.Errorf("BossHook = %q, busy %v, %v; want the notes, busy, and the list's error", out, busy, err)
+	}
+}
+
+// deadPID is a pid no process has: a dev agent clear killed before it unset OptHandoff.
+const deadPID = "99999999"
+
+// soon is a time a running dev agent clear holds until.
+var soon = time.Now().Add(time.Hour)
+
+// A boss /clear'ed by a running dev agent clear (OptHandoff set for the conversation that ended, s0) gets its
+// handoff's path after its list; a start, resume or compaction doesn't, nor a clear without one, a leftover of a
+// killed run or one set for another conversation.
+func TestBossHookHandoff(t *testing.T) {
+	const path = "/s/dev/handoff/boss/2026-11-24 120000.md"
+	line := "Your handoff from before this /clear: " + path + ". Read it before acting; dev agent clear asks you for a proof of it next."
+	running := ClearValue("s0", path, soon)
+	for _, tt := range []struct {
+		source, handoff string
+		want            bool
+	}{
+		{"clear", running, true},
+		{"clear", "", false},
+		{"clear", deadPID + " " + strconv.FormatInt(soon.Unix(), 10) + " s0 " + path, false},
+		{"clear", ClearValue("s0", path, time.Now().Add(-time.Minute)), false},
+		{"clear", ClearValue("s7", path, soon), false},
+		{"startup", running, false},
+		{"resume", running, false},
+		{"compact", running, false},
+	} {
+		c := handoffTmux(t, "boss", "1", tt.handoff)
+		s, err := todo.ForPane(c, "%1")
+		if err == nil {
+			err = s.Set([]string{"a"}, time.Now())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"`+tt.source+`"}`), noHint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Out struct {
+				Context string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		if out != "" {
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("out %q: %v", out, err)
+			}
+		}
+		if has := strings.HasSuffix(got.Out.Context, "\n"+line); has != tt.want {
+			t.Errorf("%s with handoff %q: context = %q, want the handoff line %v", tt.source, tt.handoff, got.Out.Context, tt.want)
+		}
+	}
+	if _, _, err := BossHook(handoffTmux(t, "boss", "1", path), "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint); err == nil {
+		t.Error("a malformed handoff option passed")
+	}
+}
+
+// While a dev agent clear runs, a boss's Stop or prompt hands over no note: they stay in its inbox; a leftover of a
+// killed run holds nothing.
+func TestBossHookClearHold(t *testing.T) {
+	note := Note{Worker: "w", Kind: Finished, Text: "w finished", Key: "k"}
+	for _, tt := range []struct {
+		handoff string
+		held    bool
+	}{
+		{ClearValue("s0", "/h.md", soon), true},
+		{deadPID + " " + strconv.FormatInt(soon.Unix(), 10) + " s0 /h.md", false},
+		{ClearValue("s0", "/h.md", time.Now().Add(-time.Minute)), false},
+	} {
+		c := handoffTmux(t, "boss", "1", tt.handoff)
+		b, ok, err := Self(c, "%1")
+		if !ok || err != nil {
+			t.Fatalf("Self = %v, %v", ok, err)
+		}
+		if _, err := b.Box.Add(note, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		out, busy, err := BossHook(c, "%1", []byte(`{"hook_event_name":"Stop"}`), noHint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending, err := b.Box.Pending()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gave := out != "" || busy; gave == tt.held || pending != tt.held {
+			t.Errorf("handoff %q: out %q, busy %v, pending %v; want held %v", tt.handoff, out, busy, pending, tt.held)
+		}
 	}
 }
 

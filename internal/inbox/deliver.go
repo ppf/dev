@@ -239,6 +239,9 @@ func deliver(c *tmux.Client, clk control.Clock, b Boss) error {
 	if held, err := resumeAhead(c, a.Pane, clk.Now()); held || err != nil {
 		return err
 	}
+	if _, _, held, err := clearing(c, a.Pane); held || err != nil {
+		return err
+	}
 	ready := func() (bool, error) {
 		st, err := control.ReadChecked(c, a.Pane)
 		if err != nil {
@@ -309,6 +312,11 @@ type resumeView struct {
 
 // resumeGrace is how long past its resume time a boss's inbox waits on in resumeAhead for its boss's Watch round.
 const resumeGrace = time.Minute
+
+// ResumeAhead is resumeAhead, for dev agent clear.
+func ResumeAhead(c *tmux.Client, pane string, now time.Time) (bool, error) {
+	return resumeAhead(c, pane, now)
+}
 
 // resumeAhead reports pane's resume still to come: due after now (resumeGrace past it), nobody prompted it since,
 // it runs the same conversation (else resume drops it once due) and a boss with its inbox on is there to resume it.

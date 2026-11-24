@@ -52,7 +52,7 @@ Run "dev agent skill [dev-agents|desktop-boss|t3-boss]" for a coordinator skill.
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(), newAgentWaitUntilCmd(),
 		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd(), newAgentMessageCmd(), newAgentReplyCmd(),
-		newAgentMessagesCmd(), newAgentHandoffsCmd())
+		newAgentMessagesCmd(), newAgentHandoffsCmd(), newAgentClearCmd())
 	return cmd
 }
 
