@@ -257,6 +257,18 @@ func TestLatestPick(t *testing.T) {
 	if p, err := b.LatestPick(); p != nil || err != nil {
 		t.Errorf("LatestPick after ForgetPrompt = %+v, %v", p, err)
 	}
+
+	// A file from before the pick slot: its latest prompt, a pick, is claimed as the latest pick
+	b = testBox(t)
+	if err := os.MkdirAll(filepath.Dir(b.path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b.path, []byte(`{"notes":[],"last":{},"prompt":{"text":"x","at":1700000000,"pick":true,"question":"boss-a #1: Merge?","answer":"Merge"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.LatestPick(); err != nil || p == nil || b.ClaimPick(*p) != nil {
+		t.Errorf("LatestPick of an older file = %+v, %v; want it claimable", p, err)
+	}
 }
 
 // The user's latest prompt is kept for an answer the manager relays; a batch or ResumePrompt dev sent isn't one.

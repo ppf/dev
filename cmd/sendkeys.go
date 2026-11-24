@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
@@ -17,7 +18,12 @@ func gateSendKeys(c *tmux.Client, a control.Agent) error {
 		return err
 	}
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
-		if self, ok, err := inbox.Coordinator(c, pane); err == nil && ok && self.Name == inbox.Manager {
+		self, ok, err := inbox.Coordinator(c, pane)
+		switch {
+		// A pane this tmux server can't find (TMUX_PANE from another server) is no manager's
+		case err != nil && !strings.Contains(err.Error(), "can't find pane"):
+			return fmt.Errorf("%s's decision went to the manager; checking for the manager's pane: %w", a.Session, err)
+		case err == nil && ok && self.Name == inbox.Manager:
 			return nil
 		}
 	}

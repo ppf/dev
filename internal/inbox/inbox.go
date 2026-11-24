@@ -508,6 +508,11 @@ func (b Box) read() (state, error) {
 	if s.Workers == nil {
 		s.Workers = map[string]*health{}
 	}
+	// A file from before Pick: its latest prompt, a pick, is the latest pick too
+	if s.Pick == nil && s.Prompt != nil && s.Prompt.Pick {
+		pick := *s.Prompt
+		s.Pick = &pick
+	}
 	return s, nil
 }
 
@@ -699,7 +704,7 @@ func (b Box) Arrived(prompt string, now time.Time) error {
 	})
 }
 
-// Picked keeps picks, the user's in the coordinator's AskUserQuestion (agent.HookPick), as their latest prompt.
+// Picked keeps picks, the user's in the coordinator's AskUserQuestion (agent.HookPick), as their latest prompt and pick.
 func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 	var words []string
 	for _, p := range picks {
@@ -743,7 +748,7 @@ func (b Box) claim(p Prompt, latest func(*state) *Prompt, since string) error {
 	})
 }
 
-// Unclaim gives back p, claimed for an answer that was refused, unless the user said or picked something since.
+// Unclaim gives back p, claimed for an answer that was refused, wherever it is still the latest prompt or pick.
 func (b Box) Unclaim(p Prompt) error {
 	return b.update(func(s *state) error {
 		s.spend(p, false)

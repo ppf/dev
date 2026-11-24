@@ -329,6 +329,9 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	if _, _, err := execute(t, "", "todo", "add", "--replaces", "9", "--on", "me"); err == nil || !strings.Contains(err.Error(), "no open item 9") {
 		t.Errorf("add --replaces 9: %v, want refused by local_old's list", err)
 	}
+	if _, _, err := execute(t, "", "todo", "add", "bare"); err == nil || !strings.Contains(err.Error(), "needs --details") {
+		t.Errorf("add without details: %v, want refused", err)
+	}
 	if got := run(t, "", "todo", "--boss", "local_old"); got != "1\t☐\told open item\n" {
 		t.Errorf("local_old after a refused add: %q, want it not taken over", got)
 	}
@@ -894,8 +897,8 @@ func TestTodoNoDetailsWarning(t *testing.T) {
 		!strings.Contains(out, `"Bare"`) || strings.Count(out, `"on": "boss"`) != 1 {
 		t.Errorf("after the refused replaces: %s, want details kept and the refused ones unchanged", out)
 	}
-	if _, _, err := execute(t, "", "todo", "add", "--replaces", "2", "Bare, retitled", "--no-details"); err != nil {
-		t.Errorf("replace with --no-details: %v", err)
+	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "2", "Bare, retitled", "--no-details"); err != nil || strings.Contains(errOut, warn) {
+		t.Errorf("replace with --no-details: err %v, stderr %q", err, errOut)
 	}
 	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "1", "--on", "Marek"); err != nil || strings.Contains(errOut, warn) {
 		t.Errorf("replace of an item with details: err %v, stderr %q", err, errOut)

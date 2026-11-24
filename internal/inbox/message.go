@@ -51,7 +51,7 @@ const answeredHint = `(a "you answered" note is the user's own answer to that it
 
 // toDoHint ends a batch holding a to do note.
 const toDoHint = `(a "to do" note is an item on your list that may be out of date: check it at its source, then tick it ` +
-	`(dev todo done <n>), replace it with what's true now, or confirm it holds (dev todo add --replaces <n>). One ticked by ` +
+	`(dev todo done <n>), replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none). One ticked by ` +
 	`itself is done: add what comes next, if anything)`
 
 // messageHint ends a batch holding a message.

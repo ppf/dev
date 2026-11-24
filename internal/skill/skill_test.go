@@ -182,7 +182,7 @@ func TestAskRules(t *testing.T) {
 		"don't relay it or `send-keys` (dev refuses your keys to that worker until it is answered)",
 		"(dev refuses any other sender's keys to it until it is answered)",
 		"1500 characters per message (longer: write it to a file and send its path)",
-		"`dev todo add` refuses an item the user does (no `--on`, no `--waiting-for`) without `--details`, unless `--no-details`",
+		"`dev todo add` refuses an item the user does (no `--on` or `--on me`, no `--waiting-for`) without `--details`, unless `--no-details`",
 		"`--replaces` keeps the old item's details, so it refuses only when there were none",
 		"**The question** starts `<project> #<n>: ` and holds the item text word for word",
 		"each option's detail (after ` | `) in its `description`",

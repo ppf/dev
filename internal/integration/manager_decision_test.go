@@ -117,16 +117,28 @@ func TestWorkerDecisionToManager(t *testing.T) {
 	s.T("set-option", "-t", "=app-w:", "@dev_started_outside", "1")
 	decide()
 	check(t, "outside: left to its coordinator", take(app), plain+"; started by a coordinator outside tmux: leave it to that coordinator")
+	if out, err := sendKeys(app); err != nil {
+		t.Errorf("❌ send-keys from the boss to a decision not handed over (outside): %v %q", err, out)
+	}
 	s.T("set-option", "-u", "-t", "=app-w:", "@dev_started_outside")
 	s.T("set-option", "-t", "=app-w:", "@dev_herd", "1")
 	decide()
 	check(t, "a boss below: its own decision goes up as before", take(app), plain)
+	if out, err := sendKeys(app); err != nil {
+		t.Errorf("❌ send-keys from the boss to a decision not handed over (a boss below): %v %q", err, out)
+	}
 	s.T("set-option", "-u", "-t", "=app-w:", "@dev_herd")
 	check(t, "nothing for the manager", take(manager), "")
 
 	s.T("set-option", "-t", "=manager:", inbox.OptOff, "off")
 	decide()
 	check(t, "manager's inbox off: the boss relays it", take(app), plain)
+	s.T("set-option", "-u", "-t", "=manager:", inbox.OptOff)
+	// A later decision dev didn't hand over: the earlier hand-over doesn't hold it
+	if out, err := sendKeys(app); err != nil {
+		t.Errorf("❌ send-keys from the boss to a later decision not handed over: %v %q", err, out)
+	}
+	s.T("set-option", "-t", "=manager:", inbox.OptOff, "off")
 	s.T("set-option", "-u", "-t", "=manager:", inbox.OptOff)
 	check(t, "nothing for the manager", take(manager), "")
 
