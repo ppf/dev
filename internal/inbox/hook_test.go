@@ -22,14 +22,23 @@ func bossTmux(t *testing.T, todoHerd string) *tmux.Client {
 // namedTmux is bossTmux with the boss session called name.
 func namedTmux(t *testing.T, name, todoHerd string) *tmux.Client {
 	t.Helper()
+	return handoffTmux(t, name, todoHerd, "")
+}
+
+// handoffTmux is namedTmux with handoff in the coordinator pane's OptHandoff.
+func handoffTmux(t *testing.T, name, todoHerd, handoff string) *tmux.Client {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	return tmux.NewFake(func(args []string) (string, error) {
 		switch args[0] {
 		case "list-panes":
 			return tmux.FormatRow(name, "1", "%1", "/p/boss", "t", "claude", "idle", "claude", "", "", "", "$1", "", "1", "", "", "", "", "", "", "", "", "", "", ""), nil
 		case "display-message":
-			if args[len(args)-1] == "#{@dev_boss_pane}" {
+			switch args[len(args)-1] {
+			case "#{@dev_boss_pane}":
 				return map[string]string{"%1": "coordinator\n", "%2": "previews\n"}[args[3]], nil
+			case "#{" + OptHandoff + "}":
+				return handoff + "\n", nil
 			}
 			if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
 				return tmux.FormatRow("$1", "1700000000", name, "1", "", "/tmp/tmux-1/default"), nil
@@ -160,6 +169,49 @@ func TestBossHookListError(t *testing.T) {
 	out, busy, err := BossHook(c, "%1", []byte(`{"hook_event_name":"Stop"}`), noHint)
 	if !errors.Is(err, todo.ErrNotBoss) || !busy || !strings.Contains(out, `"reason":"[dev boss inbox] 1 worker update(s):\n- w finished: w finished"}`) {
 		t.Errorf("BossHook = %q, busy %v, %v; want the notes, busy, and the list's error", out, busy, err)
+	}
+}
+
+// A boss /clear'ed by dev agent clear (OptHandoff set) gets its handoff's path after its list; a start, resume or
+// compaction doesn't, nor a clear without one.
+func TestBossHookHandoff(t *testing.T) {
+	const path = "/s/dev/handoff/boss/2026-11-24-120000.md"
+	line := "Your handoff from before this /clear: " + path + ". Read it before acting; dev agent clear asks you for a proof of it next."
+	for _, tt := range []struct {
+		source, handoff string
+		want            bool
+	}{
+		{"clear", path, true},
+		{"clear", "", false},
+		{"startup", path, false},
+		{"resume", path, false},
+		{"compact", path, false},
+	} {
+		c := handoffTmux(t, "boss", "1", tt.handoff)
+		s, err := todo.ForPane(c, "%1")
+		if err == nil {
+			err = s.Set([]string{"a"}, time.Now())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"`+tt.source+`"}`), noHint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Out struct {
+				Context string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		if out != "" {
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("out %q: %v", out, err)
+			}
+		}
+		if has := strings.HasSuffix(got.Out.Context, "\n"+line); has != tt.want {
+			t.Errorf("%s with handoff %q: context = %q, want the handoff line %v", tt.source, tt.handoff, got.Out.Context, tt.want)
+		}
 	}
 }
 

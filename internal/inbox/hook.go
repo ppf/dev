@@ -155,8 +155,25 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if source == "clear" {
+		path, err := c.Run("display-message", "-p", "-t", pane, "#{"+OptHandoff+"}")
+		if err != nil {
+			return "", err
+		}
+		if path = strings.TrimSpace(path); path != "" {
+			listHint := hint
+			hint = func(s todo.Store) string {
+				return strings.TrimSpace(listHint(s) + "\nYour handoff from before this /clear: " + path +
+					". Read it before acting; dev agent clear asks you for a proof of it next.")
+			}
+		}
+	}
 	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
 }
+
+// OptHandoff is the pane option holding the handoff file dev agent clear had a boss write, which its start hook
+// after the /clear names.
+const OptHandoff = "@dev_handoff"
 
 // Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo
 // take-over), "" for none; it checks s and reports its own failures.
