@@ -383,6 +383,10 @@ func (s Store) take(from Store) (taken bool, err error) {
 		if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
 			return err
 		}
+		// What its boss last got: the next reminder is the full list
+		if err := from.forgetShown(); err != nil {
+			return err
+		}
 		return os.Rename(from.path, s.path)
 	})
 	return taken, err

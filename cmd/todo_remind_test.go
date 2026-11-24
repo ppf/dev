@@ -29,11 +29,11 @@ func TestStateSideSessionsTodoChanges(t *testing.T) {
 	if got := context(); !strings.Contains(got, "1. Merge PR #9 (no details)\n2. Ship v1") {
 		t.Errorf("first = %q, want the full list", got)
 	}
-	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "2 open, none changed since the last one") {
+	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "2 open, none new or changed since the last one") {
 		t.Errorf("second = %q, want the count line, no items", got)
 	}
 	run(t, "", "todo", "add", "Tag v1")
-	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "3 open, 1 changed since the last one; the others as before (dev todo lists them):\n3. Tag v1") {
+	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "3 open, 1 new or changed since the last one; the others as before (dev todo lists them):\n3. Tag v1") {
 		t.Errorf("after an add = %q, want only the new item", got)
 	}
 	// Another conversation (a restored boss): the full list

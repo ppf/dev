@@ -183,6 +183,11 @@ func (l List) ItemState(id int) (state string, ok bool) {
 	return "", false
 }
 
+// State is the stored item's Shown.State.
+func (it Item) State() string {
+	return Shown{On: it.On, Session: it.Session, Done: it.Done != 0, Answer: it.Answer}.State()
+}
+
 // State is the item's Box and who it waits on, as a note about it names them: "☐ on you", "☐ boss's own",
 // "◌ on fix-ci", "☑ answered", "☑ done".
 func (it Shown) State() string {

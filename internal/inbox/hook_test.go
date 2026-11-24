@@ -512,7 +512,7 @@ func TestStartContextShown(t *testing.T) {
 	if _, err := StartContext(s, none, noHint, "clear", "c1", now); err != nil {
 		t.Fatal(err)
 	}
-	if got := remind(); !strings.Contains(got, "1 open, none changed") {
+	if got := remind(); !strings.Contains(got, "1 open, none new or changed") {
 		t.Errorf("after a start = %q, want the count line", got)
 	}
 	if _, err := StartContext(s, none, noHint, "compact", "c1", now); err != nil {

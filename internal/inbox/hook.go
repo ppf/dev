@@ -147,7 +147,7 @@ func openList(c *tmux.Client, pane, conversation string) (string, error) {
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
-func startList(c *tmux.Client, pane, source, conversation string, hint Hint) (string, error) {
+func startList(c *tmux.Client, pane, source, session string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
 	role, err := c.Run("display-message", "-p", "-t", pane, "#{@dev_boss_pane}")
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
@@ -179,7 +179,7 @@ func startList(c *tmux.Client, pane, source, conversation string, hint Hint) (st
 			}
 		}
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, conversation, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, session, time.Now())
 }
 
 // Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo
@@ -470,16 +470,21 @@ func itemState(c *tmux.Client, pane string, id int, now time.Time) (string, erro
 	return state + ": ", nil
 }
 
-// AnsweredUp tells the boss above, as WaitsOn, that the user answered ask id of the boss session pane is in, answer
-// being the note that boss got: an AskAnswered note, its state after its number, so the boss above drops its question for it.
-func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, id int, answer Note) (queued bool, noState, err error) {
+// AnsweredUp tells the boss above, as WaitsOn, that the user answered ask it of the boss session pane is in, answer
+// being the note that boss got: an AskAnswered note, its state after its number, so the boss above drops its question
+// for it; noState says why that state isn't there.
+func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, it todo.Item, answer Note) (queued bool, noState, err error) {
 	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil || w.Herd == "" {
 		return false, nil, err
 	}
-	num := fmt.Sprintf("#%d ", id)
-	state, noState := itemState(c, pane, id, clk.Now())
-	text := strings.Replace(answer.Text, num, num+state, 1)
+	// The answered item itself: a list set since may give its number to another
+	num, text := fmt.Sprintf("#%d ", it.ID), answer.Text
+	if strings.HasPrefix(text, num) {
+		text = num + it.State() + ": " + strings.TrimPrefix(text, num)
+	} else {
+		noState = fmt.Errorf("the note doesn't start with %q", num)
+	}
 	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
 	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(text), Key: key})
 	return queued, noState, err

@@ -55,7 +55,7 @@ func tellAbove(c *tmux.Client, pane string, it todo.Item, note inbox.Note, warn 
 	if it.Quiet {
 		return
 	}
-	queued, noState, err := inbox.AnsweredUp(c, control.RealClock, pane, it.ID, note)
+	queued, noState, err := inbox.AnsweredUp(c, control.RealClock, pane, it, note)
 	if noState != nil {
 		warn("the boss above's note lacks the item's state: " + noState.Error())
 	}

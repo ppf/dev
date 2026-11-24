@@ -22,33 +22,41 @@ const tickLine = "\nTick what these notes closed (dev todo done <n>); an item th
 func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (string, map[int]string) {
 	items, shown := l.linesSince(0, seen, now)
 	open, _ := l.Open()
-	if open == 0 || seen == nil && items == "" {
-		return tickedText(ticked), shown
-	}
 	if seen == nil {
+		if items == "" {
+			return tickedText(ticked), shown
+		}
 		return withTicked(ticked, "[dev todo] Your open to do list:"+items+tickLine+whoLine+detailsLine(items)), shown
 	}
-	changed := len(shown)
+	// New or changed: a re-check item's line changes with its age, so it counts only when new
+	changed := 0
 	isOpen := map[int]bool{}
 	for _, it := range l.Items {
-		if !it.Done {
-			isOpen[it.ID] = true
-			if it.Flagged() {
-				changed--
-			}
+		if it.Done {
+			continue
+		}
+		isOpen[it.ID] = true
+		if _, was := seen[it.ID]; it.Flagged() && !was || !it.Flagged() && shown[it.ID] != "" {
+			changed++
 		}
 	}
-	count := strconv.Itoa(changed)
-	if changed == 0 {
-		count = "none"
-	}
-	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s changed since the last one", open, count)
 	var left []string
 	for _, id := range slices.Sorted(maps.Keys(seen)) {
 		if !isOpen[id] {
 			left = append(left, "#"+strconv.Itoa(id))
 		}
 	}
+	if open == 0 {
+		if len(left) == 0 {
+			return tickedText(ticked), shown
+		}
+		return withTicked(ticked, "[dev todo] Your open to do list is empty now: "+strings.Join(left, ", ")+" left it."), shown
+	}
+	count := strconv.Itoa(changed)
+	if changed == 0 {
+		count = "none"
+	}
+	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s new or changed since the last one", open, count)
 	if len(left) > 0 {
 		head += ", " + strings.Join(left, ", ") + " left it"
 	}
@@ -60,29 +68,49 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 
 // Remind is l's reminder for its boss reading worker notes at now in conversation (its Claude session id): the full
 // list (Reminder) when none is kept for that conversation (StartRemind or an earlier Remind in it; ForgetShown drops it),
-// else only the items changed since under a count line. What it names is kept for the next one. The text holds even
-// with err: the shown file not read (it is then the full list) or not written.
-func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Time) (string, error) {
-	seen, readErr := s.readShown(conversation)
-	text, shown := l.reminder(ticked, seen, now)
-	// An open item not named again is as the boss last got it
-	for _, it := range l.Items {
-		if line, ok := seen[it.ID]; ok && !it.Done && shown[it.ID] == "" {
-			shown[it.ID] = line
+// else only the items new or changed since under a count line. What it names is kept for the next one. The text holds
+// even with err: the shown file not read (it is then the full list) or not written (it is then dropped).
+func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
+	err = s.locked(func() error {
+		seen, readErr := s.readShown(conversation)
+		var shown map[int]string
+		text, shown = l.reminder(ticked, seen, now)
+		// An open item not named again is as the boss last got it
+		for _, it := range l.Items {
+			if line, ok := seen[it.ID]; ok && !it.Done && shown[it.ID] == "" {
+				shown[it.ID] = line
+			}
 		}
-	}
-	return text, errors.Join(readErr, s.writeShown(conversation, shown))
+		return errors.Join(readErr, s.keepShown(conversation, shown))
+	})
+	return text, err
 }
 
 // StartRemind is l's StartReminder, what it names kept for the next Remind in conversation; the text holds even with
 // err, the shown file not written.
-func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (string, error) {
-	text, shown := l.startReminder(kept, age, ticked, now)
-	return text, s.writeShown(conversation, shown)
+func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
+	err = s.locked(func() error {
+		var shown map[int]string
+		text, shown = l.startReminder(kept, age, ticked, now)
+		return s.keepShown(conversation, shown)
+	})
+	return text, err
 }
 
 // ForgetShown drops what the boss last got of its list, as a compaction may have dropped it: the next Remind is the full list.
-func (s Store) ForgetShown() error { return ignoreMissing(os.Remove(s.shownPath())) }
+func (s Store) ForgetShown() error { return s.locked(s.forgetShown) }
+
+// forgetShown is ForgetShown under the list's lock, held by its caller.
+func (s Store) forgetShown() error { return ignoreMissing(os.Remove(s.shownPath())) }
+
+// keepShown writes shown as what the boss last got in conversation; one not written drops the earlier, which no longer
+// says what the boss got.
+func (s Store) keepShown(conversation string, shown map[int]string) error {
+	if err := s.writeShown(conversation, shown); err != nil {
+		return errors.Join(err, s.forgetShown())
+	}
+	return nil
+}
 
 // shownPath is the file of the list's lines its boss last got: beside the lists, not among them.
 func (s Store) shownPath() string {
