@@ -1,0 +1,140 @@
+package screen
+
+import (
+	"regexp"
+	"strings"
+)
+
+// Input is what Claude's input box holds: Text ("" for an empty box), and Suggestion when all of it is Claude Code's
+// own dim text (a prompt suggestion, a placeholder or a hint, never the user's typing).
+type Input struct {
+	Text       string `json:"text"`
+	Suggestion bool   `json:"suggestion"`
+}
+
+// InputBox reads Claude's input box in capture (capture-pane -p -e): the last prompt row between two horizontal
+// rules and the rows under it. Typed text (outside dim runs) is the Text; a box holding only dim text has that as
+// Text, a Suggestion. ok=false with no box, or no prompt row in it (a dialog in its place).
+func InputBox(capture string) (in Input, ok bool) {
+	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
+	for i := len(lines) - 1; i > 0; i-- {
+		if !edge(lines[i]) {
+			continue
+		}
+		// lines[i] is the box's bottom rule: find its top rule
+		for j := i - 1; j >= 0; j-- {
+			if !edge(lines[j]) && !IsTopRule(strings.TrimSpace(plainLine(lines[j]))) {
+				continue
+			}
+			if j+1 >= i {
+				return Input{}, false
+			}
+			typed := promptRow.FindStringSubmatch(undimmed(lines[j+1]))
+			all := promptRow.FindStringSubmatch(plainLine(lines[j+1]))
+			if typed == nil || all == nil {
+				return Input{}, false
+			}
+			// Its rows under the prompt row too: a long draft or suggestion wraps. Their dim text is a suggestion's only
+			// when one starts on the prompt row; else it counts as the user's (a pasted text's chip may be drawn dim)
+			wraps := strings.TrimSpace(typed[1]) == "" && strings.TrimSpace(all[1]) != ""
+			text, shown := []string{typed[1]}, []string{all[1]}
+			for _, l := range lines[j+2 : i] {
+				row := plainLine(l)
+				if wraps {
+					row = undimmed(l)
+				}
+				text, shown = append(text, row), append(shown, plainLine(l))
+			}
+			if t := box(text); t != "" {
+				return Input{Text: t}, true
+			}
+			dim := box(shown)
+			// A pasted text's or image's chip is the user's draft, drawn dim or not
+			chip := strings.HasPrefix(dim, "[Pasted text") || strings.HasPrefix(dim, "[Image")
+			return Input{Text: dim, Suggestion: dim != "" && !chip}, true
+		}
+		return Input{}, false
+	}
+	return Input{}, false
+}
+
+// box is rows as an input box's text: each without trailing spaces, blank rows at its ends dropped.
+func box(rows []string) string {
+	for i, r := range rows {
+		rows[i] = strings.TrimRight(r, " ")
+	}
+	return strings.TrimSpace(strings.Join(rows, "\n"))
+}
+
+// PromptRow is the text after a plain line's Claude input prompt (promptRow); ok=false for no prompt row.
+func PromptRow(line string) (text string, ok bool) {
+	m := promptRow.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// promptRow is Claude's input row: "❯" (or ">" in older versions) and a space or no-break space.
+var promptRow = regexp.MustCompile(`^[│|]?\s*[❯>][ \x{00a0}]?(.*)$`)
+
+// sgr is one ANSI SGR escape.
+var sgr = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
+
+// edge: a line that is only box-drawing horizontals (Claude's input box edges), at least MinRule wide.
+func edge(line string) bool {
+	p := strings.TrimSpace(plainLine(line))
+	return len([]rune(p)) >= MinRule && strings.Trim(p, "─━╌╍┄┅╭╮╰╯") == ""
+}
+
+// Strip is line without its escape sequences.
+func Strip(line string) string { return plainLine(line) }
+
+// plainLine drops all escape sequences.
+func plainLine(line string) string {
+	return ansiAll.ReplaceAllString(line, "")
+}
+
+var ansiAll = regexp.MustCompile(`\x1b(\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\))`)
+
+// undimmed is line's text outside dim (SGR 2) runs, without escapes.
+func undimmed(line string) string {
+	line = ansiAll.ReplaceAllStringFunc(line, func(e string) string {
+		if sgr.MatchString(e) {
+			return e
+		}
+		return ""
+	})
+	var b strings.Builder
+	dim := false
+	for len(line) > 0 {
+		loc := sgr.FindStringSubmatchIndex(line)
+		if loc == nil {
+			if !dim {
+				b.WriteString(line)
+			}
+			break
+		}
+		if !dim {
+			b.WriteString(line[:loc[0]])
+		}
+		params := strings.Split(line[loc[2]:loc[3]], ";")
+		for i := 0; i < len(params); i++ {
+			switch params[i] {
+			case "2":
+				dim = true
+			case "", "0", "22":
+				dim = false
+			case "38", "48", "58":
+				// Extended colours: their operands (5;n or 2;r;g;b) aren't attributes
+				if i+1 < len(params) && params[i+1] == "5" {
+					i += 2
+				} else if i+1 < len(params) && params[i+1] == "2" {
+					i += 4
+				}
+			}
+		}
+		line = line[loc[1]:]
+	}
+	return b.String()
+}

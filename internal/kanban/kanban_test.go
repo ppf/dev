@@ -978,3 +978,18 @@ func TestDecidedLabel(t *testing.T) {
 		}
 	}
 }
+
+// An open ask whose question the manager has up says so on its fifth line, gold, where what is done on it goes.
+func TestAskingLine(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	it := todo.Shown{ID: 7, Text: "Merge #148?", Options: []string{"Merge", "Wait"}, Asking: true, Status: sidebar.StatusDecide,
+		Placement: todo.Placement{Column: sidebar.ColumnTodo, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}
+	lines := cardLines(card{boss: "boss-dev", it: it}, false, cardW, now)
+	if len(lines) != cardH || lines[4] != sidebar.Gold+"▸ asked in manager now"+reset {
+		t.Errorf("asking card = %q, want its fifth line", lines)
+	}
+	it.Asking = false
+	if lines := cardLines(card{boss: "boss-dev", it: it}, false, cardW, now); strings.Contains(lines[4], "manager") {
+		t.Errorf("not asking: %q", lines[4])
+	}
+}

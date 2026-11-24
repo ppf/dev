@@ -76,10 +76,10 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for the user's own item marked --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for the user's own item marked --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, asking: the manager has its question up now (dev todo asking), finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
+	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoAskingCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
 	return cmd
 }
 
@@ -963,7 +963,30 @@ func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, f
 	if asJSON {
 		setStatuses(c, lists, now, withNow, stderr)
 	}
+	markAsking(c, lists, now, stderr)
 	return lists, nil
+}
+
+// markAsking marks the open ask whose question the manager has up now (inbox.ManagerAsking), still reading what it
+// asked; a failure is only reported, the lists hold without it.
+func markAsking(c *tmux.Client, lists []bossList, now time.Time, stderr io.Writer) {
+	a, err := inbox.ManagerAsking(c, now)
+	if err != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: the manager's question not read: "+err.Error())
+	}
+	if a == nil {
+		return
+	}
+	for _, bl := range lists {
+		if bl.Boss != a.Boss {
+			continue
+		}
+		for i, it := range bl.Items {
+			if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 && !bl.Closed {
+				bl.Items[i].Asking = true
+			}
+		}
+	}
 }
 
 // waitsOnYou tells the boss above the list's boss (a boss under a boss) that item id waits on the user; a failure

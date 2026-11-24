@@ -108,6 +108,9 @@ func newAgentGetCmd() *cobra.Command {
 			if err := a.ReadQueued(c); err != nil {
 				return err
 			}
+			if err := a.ReadInput(c); err != nil {
+				return err
+			}
 			return printAgent(cmd.OutOrStdout(), asJSON, a)
 		},
 	}
@@ -160,7 +163,7 @@ func newAgentReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			text, err := control.Read(c, a.Pane, lines)
+			text, err := control.Read(c, a.Pane, lines, a.Label == "Claude")
 			if err != nil {
 				return err
 			}

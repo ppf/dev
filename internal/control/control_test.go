@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/ppf/dev/internal/spent"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -160,20 +162,49 @@ func TestResolve(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
-	var got []string
+	var calls [][]string
 	c := tmux.NewFake(func(args []string) (string, error) {
-		got = args
+		calls = append(calls, args)
 		return "one\ntwo  \n\nthree\n\n   \n\n", nil
 	})
-	out, err := Read(c, "%1", 2)
+	out, err := Read(c, "%1", 2, false)
 	if err != nil || out != "\nthree\n" {
 		t.Errorf("Read = %q, %v; want %q", out, err, "\nthree\n")
 	}
-	if want := []string{"capture-pane", "-p", "-J", "-S", "-2", "-t", "%1"}; !slices.Equal(got, want) {
-		t.Errorf("args = %q, want %q", got, want)
+	if want := []string{"capture-pane", "-p", "-J", "-S", "-2", "-t", "%1"}; len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("args = %q, want only %q", calls, want)
 	}
-	if _, err := Read(c, "%1", 0); err == nil {
+	if _, err := Read(c, "%1", 0, false); err == nil {
 		t.Error("Read with 0 lines: want error")
+	}
+}
+
+// Read marks the input row Claude Code's dim suggestion fills, which plain text can't tell from typing; typed text
+// stays unmarked.
+func TestReadSuggestion(t *testing.T) {
+	const rule = "────────────────────────────────────────"
+	for _, tt := range []struct {
+		row, want string
+	}{
+		{"❯ \x1b[2mrun it\x1b[0m", "❯ run it  [suggestion]"},
+		{"❯ run it", "❯ run it"},
+		{"❯ \x1b[2mrun the full suite\x1b[0m\n  \x1b[2mand report\x1b[0m", "❯ run the full suite  [suggestion]"},
+	} {
+		c := tmux.NewFake(func(args []string) (string, error) {
+			screen := "output\n" + rule + "\n" + tt.row + "\n" + rule + "\n"
+			if !slices.Contains(args, "-e") {
+				screen = ansi.Strip(screen)
+			}
+			return screen, nil
+		})
+		out, err := Read(c, "%1", 10, true)
+		if err != nil || !strings.Contains(out, "\n"+tt.want+"\n") {
+			t.Errorf("%q: Read = %q, %v; want a line %q", tt.row, out, err, tt.want)
+		}
+		// Not a Claude pane: its screen as it is
+		if out, err := Read(c, "%1", 10, false); err != nil || strings.Contains(out, "[suggestion]") {
+			t.Errorf("%q: Read of another agent = %q, %v; want no mark", tt.row, out, err)
+		}
 	}
 }
 

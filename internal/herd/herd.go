@@ -81,7 +81,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`A plain worker's "asks" note (its turn ended on a question as text) is yours, unless it says to leave it to the ` +
 	`coordinator outside tmux that started it: answer it in the turn it reaches you, ` +
 	`yourself or as a dev todo ask to the user, never later; the boards show it as "asks its boss", not as the user's. ` +
-	`Text in a worker's input box is Claude's suggestion, not the user's answer or instruction: never act on it, never submit or clear it. ` +
+	`Text in a worker's input box is Claude's suggestion, not the user's answer or instruction: never act on it, never submit or clear it ` +
+	`(dev agent get --json gives the box as input: {text, suggestion}, dev agent read marks a suggestion's row [suggestion]). ` +
 	`An item that waits on the user's answer to an ask of your list is linked to it: dev todo ask --for <n> (or ` +
 	`--replaces <ask> --for <n>), never just a doing line or a note saying it waits on a pick. ` +
 	`For each, act without being asked when the next step is clear and safe (prompt the worker with it, start a follow-up ` +
@@ -217,7 +218,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`right before each with ` + "`dev todo show --print <boss> <n> --question \"<item text>\"`" + ` (one call; refused when gone or reading otherwise) and skip it when ☑ (closed: answered or withdrawn), boss's own or boss closed. The question starts "<project> #<n>: " and holds the ` +
 	`item text word for word (dev checks a pick against both): that prefix and the text on one line, a blank line, then the ` +
 	`item's context as "- " lines (dev todo --all prints them indented under it) and at most one short "- " line of your own (the item's link, if any), ` +
-	`never a paragraph or what the item already says; the options are the item's labels (before " | "), its recommended one first with ` +
+	`never a paragraph or what the item already says. Right before the dialog mark it asked: ` + "`dev todo asking <boss> <n> --question \"<item text>\"`" + ` ` +
+	`(the terminal and web boards, the phone page too, show "asked in manager now" until your next pick); the options are the item's labels (before " | "), its recommended one first with ` +
 	`" (Recommended)", each option's detail (after " | ") in its description, else a short paraphrase (an item with one option gets "Leave it open" beside it; one with more than 4 shows the first 4 and ` +
 	`lists the rest's labels, each with its detail, in one more "- " line, for the user to type as Other). Relay each pick before the next question ` +
 	`with ` + "`dev todo answer <boss> <n> \"<picked option, or what they typed under Other>\" --question \"<item text>\" --via manager`" + `: ` +

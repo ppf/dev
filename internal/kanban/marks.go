@@ -76,6 +76,9 @@ func marksOf(c card, now time.Time) marks {
 	}
 	m.line = it.Now
 	switch {
+	case it.Asking:
+		// The manager's question about it is up: the user answers there or here
+		m.line = "asked in manager now"
 	case it.WaitsOn != nil && !c.closed:
 		m.line, m.lineColour = "waits on your answer to #"+strconv.Itoa(it.WaitsOn.ID), sidebar.Red
 	case it.Doing != nil:

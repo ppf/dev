@@ -3,7 +3,6 @@ package inbox
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -124,98 +123,11 @@ func self(c *tmux.Client, pane string, inboxOff bool) (Boss, bool, error) {
 	return b, true, nil
 }
 
-// promptRow is Claude's input row: "❯" (or ">" in older versions) and a space or no-break space.
-var promptRow = regexp.MustCompile(`^[│|]?\s*[❯>][ \x{00a0}]?(.*)$`)
-
-// sgr is one ANSI SGR escape.
-var sgr = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
-
-// InputEmpty reports whether Claude's input box in capture (capture-pane -p -e) is empty: the last
-// prompt row between two horizontal rules holds nothing but dim placeholder text, and no draft line
-// follows it. Anything it doesn't recognise counts as not empty, so a paste never joins a draft.
+// InputEmpty reports whether Claude's input box in capture (capture-pane -p -e) is empty: nothing in it but Claude
+// Code's own dim text (screen.InputBox). Anything it doesn't recognise counts as not empty, so a paste never joins a draft.
 func InputEmpty(capture string) bool {
-	lines := strings.Split(strings.TrimRight(capture, "\n"), "\n")
-	for i := len(lines) - 1; i > 0; i-- {
-		if !isRule(lines[i]) {
-			continue
-		}
-		// lines[i] is the box's bottom rule: find its top rule
-		for j := i - 1; j >= 0; j-- {
-			if !isRule(lines[j]) && !screen.IsTopRule(strings.TrimSpace(plain(lines[j]))) {
-				continue
-			}
-			if j+1 >= i {
-				return false
-			}
-			m := promptRow.FindStringSubmatch(undimmed(lines[j+1]))
-			if m == nil || strings.TrimSpace(m[1]) != "" {
-				return false
-			}
-			for _, l := range lines[j+2 : i] {
-				if strings.TrimSpace(plain(l)) != "" {
-					return false
-				}
-			}
-			return true
-		}
-		return false
-	}
-	return false
-}
-
-// isRule: a line that is only box-drawing horizontals (Claude's input box edges), at least 10 wide.
-func isRule(line string) bool {
-	p := strings.TrimSpace(plain(line))
-	return len([]rune(p)) >= 10 && strings.Trim(p, "─━╌╍┄┅╭╮╰╯") == ""
-}
-
-// plain drops all escape sequences.
-func plain(line string) string {
-	return ansiAll.ReplaceAllString(line, "")
-}
-
-var ansiAll = regexp.MustCompile(`\x1b(\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\))`)
-
-// undimmed is line's text outside dim (SGR 2) runs, without escapes.
-func undimmed(line string) string {
-	line = ansiAll.ReplaceAllStringFunc(line, func(e string) string {
-		if sgr.MatchString(e) {
-			return e
-		}
-		return ""
-	})
-	var b strings.Builder
-	dim := false
-	for len(line) > 0 {
-		loc := sgr.FindStringSubmatchIndex(line)
-		if loc == nil {
-			if !dim {
-				b.WriteString(line)
-			}
-			break
-		}
-		if !dim {
-			b.WriteString(line[:loc[0]])
-		}
-		params := strings.Split(line[loc[2]:loc[3]], ";")
-		for i := 0; i < len(params); i++ {
-			switch params[i] {
-			case "2":
-				dim = true
-			case "", "0", "22":
-				dim = false
-			case "38", "48", "58":
-				// Extended colours: their operands (5;n or 2;r;g;b) aren't attributes
-				if i+1 < len(params) && params[i+1] == "5" {
-					i += 2
-				} else if i+1 < len(params) && params[i+1] == "2" {
-					i += 4
-				}
-			}
-		}
-		line = line[loc[1]:]
-	}
-	return b.String()
+	in, ok := screen.InputBox(capture)
+	return ok && (in.Text == "" || in.Suggestion)
 }
 
 // Deliver hands boss's pending notes to its coordinator as one prompt: sent over Claude's messaging socket when send

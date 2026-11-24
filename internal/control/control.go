@@ -41,10 +41,12 @@ type Agent struct {
 	Label   string `json:"agent"` // "Claude", "Codex" or "Grok"
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
 	// Queued marks a working Claude holding a prompt it reads at its turn's next step (screen.ClaudeQueued).
-	Queued  bool   `json:"queued,omitempty"`
-	Project string `json:"project"`
-	Branch  string `json:"branch"`
-	Path    string `json:"path"`
+	Queued bool `json:"queued,omitempty"`
+	// Input is a Claude pane's input box (dev agent get): text the user typed, Claude Code's own dim text, or empty
+	Input   *screen.Input `json:"input,omitempty"`
+	Project string        `json:"project"`
+	Branch  string        `json:"branch"`
+	Path    string        `json:"path"`
 	// CostUSD is the session's estimated cost (`dev statusline`); omitted when unknown.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 	// CostTotalUSD is a boss's cost with everything under it, closed sessions included, CostClosedUSD the closed
@@ -163,6 +165,31 @@ func (a *Agent) ReadQueued(c *tmux.Client) error {
 	}
 	a.Queued = err == nil && screen.ClaudeQueued(capture)
 	return err
+}
+
+// ReadInput sets a Claude pane's Input from its screen; none without its input box (a dialog in its place).
+func (a *Agent) ReadInput(c *tmux.Client) error {
+	if a.Label != "Claude" {
+		return nil
+	}
+	in, ok, err := inputBox(c, a.Pane)
+	if err != nil && strings.Contains(err.Error(), "can't find pane") {
+		return nil // closed since list-panes: no box
+	}
+	if ok {
+		a.Input = &in
+	}
+	return err
+}
+
+// inputBox is pane's Claude input box (screen.InputBox), read from its screen with colours.
+func inputBox(c *tmux.Client, pane string) (screen.Input, bool, error) {
+	capture, err := c.Run("capture-pane", "-p", "-e", "-t", pane)
+	if err != nil {
+		return screen.Input{}, false, err
+	}
+	in, ok := screen.InputBox(capture)
+	return in, ok, nil
 }
 
 // list is List without the branches and queued prompts, which cost a git run or a capture per agent.
@@ -703,18 +730,25 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 }
 
 // Read returns the last lines of pane's history and screen, trailing spaces and blank lines trimmed.
-// An agent drawing on the alternate screen (Claude Code's full-screen UI, Codex) has only that screen.
-func Read(c *tmux.Client, pane string, lines int) (string, error) {
+// An agent drawing on the alternate screen (Claude Code's full-screen UI, Codex) has only that screen. A claude pane's
+// input row holding only Claude Code's dim text ends with suggestionMark.
+func Read(c *tmux.Client, pane string, lines int, claude bool) (string, error) {
 	if lines < 1 {
 		return "", fmt.Errorf("lines must be at least 1, got %d", lines)
 	}
-	out, err := c.Run("capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(lines), "-t", pane)
+	args := []string{"capture-pane", "-p", "-J", "-S", "-" + strconv.Itoa(lines), "-t", pane}
+	if claude {
+		// With its colours: the mark and the text from one capture, as the box may change between two
+		args = append(args, "-e")
+	}
+	out, err := c.Run(args...)
 	if err != nil {
 		return "", err
 	}
+	in, ok := screen.InputBox(out)
 	all := strings.Split(out, "\n")
 	for i, l := range all {
-		all[i] = strings.TrimRight(l, " ")
+		all[i] = strings.TrimRight(screen.Strip(l), " ")
 	}
 	for len(all) > 0 && all[len(all)-1] == "" {
 		all = all[:len(all)-1]
@@ -725,7 +759,26 @@ func Read(c *tmux.Client, pane string, lines int) (string, error) {
 	if len(all) == 0 {
 		return "", nil
 	}
+	if claude && ok && in.Suggestion {
+		markSuggestion(all, in)
+	}
 	return strings.Join(all, "\n") + "\n", nil
+}
+
+// suggestionMark ends the input box's row in Read when Claude Code's dim suggestion fills it.
+const suggestionMark = "  [suggestion]"
+
+// markSuggestion ends with suggestionMark the last of lines that is the prompt row of in, Claude Code's dim suggestion
+// (screen.InputBox), as plain text can't tell it from the user's typing.
+func markSuggestion(lines []string, in screen.Input) {
+	// Its prompt row: a long suggestion wraps onto the rows under it
+	first, _, _ := strings.Cut(in.Text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if text, ok := screen.PromptRow(lines[i]); ok && strings.TrimSpace(text) == first {
+			lines[i] += suggestionMark
+			return
+		}
+	}
 }
 
 // keyNames maps send-keys names to tmux keys.

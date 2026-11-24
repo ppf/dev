@@ -43,10 +43,16 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 	}
 	if e.Name == "SessionStart" {
 		var ferr error
-		if e.Source == "clear" || e.Source == "startup" {
+		switch e.Source {
+		case "clear", "startup":
 			// A new conversation never saw the user's earlier words
 			if b, ok, err := Coordinator(c, pane); ok && err == nil {
 				ferr = b.Box.ForgetPrompt()
+			}
+		case "resume":
+			// A restarted coordinator has no dialog up
+			if b, ok, err := Coordinator(c, pane); ok && err == nil {
+				ferr = b.Box.ClearAsking()
 			}
 		}
 		out, err = startList(c, pane, e.Source, e.Session, hint)
@@ -55,7 +61,12 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 	if e.Name == "PostToolUse" && e.Tool == agent.AskUserQuestion {
 		picks := agent.HookPick(input)
 		if len(picks) == 0 {
-			return "", false, nil
+			// Its dialog is gone without a pick: the manager's question isn't up any more
+			b, ok, err := Coordinator(c, pane)
+			if !ok || err != nil || b.Name != Manager {
+				return "", false, err
+			}
+			return "", false, b.Box.ClearAsking()
 		}
 		// Only the manager relays a pick (dev todo answer --via manager)
 		b, ok, err := Coordinator(c, pane)

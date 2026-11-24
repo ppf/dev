@@ -52,6 +52,9 @@ function whoOf(x) {
 
 const needsYou = x => !x.done && !!x.it.needs_you;
 
+// ASKING is the line of an ask whose question the manager has up now (dev todo asking).
+const ASKING = 'asked in manager now';
+
 // marks are what a card shows beside its text: band [text, tone] across its top, word (its worker's state),
 // chips [text, tone], line (what is done on it now), red (it needs the user) and parked (the boss's own, no one on it).
 function marks(x, now = Date.now()) {
@@ -70,7 +73,8 @@ function marks(x, now = Date.now()) {
   if (it.waiting_for) m.chips.push(['waiting for ' + it.waiting_for + (list.closed ? ' · no one follows up' : ''), 'amber']);
   if (list.closed) m.chips.push(['boss closed', '']);
   if (it.part_of) m.chips.push(['⇄ with #' + it.part_of, 'blue']);
-  m.line = it.doing?.text || it.now || '';
+  // The manager's question about it is up: the user answers there or here
+  m.line = it.asking ? ASKING : it.doing?.text || it.now || '';
   m.parked = !!it.parked;
   return m;
 }

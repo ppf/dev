@@ -415,6 +415,8 @@ type state struct {
 	Prompt *Prompt `json:"prompt,omitempty"`
 	// Pick is the user's latest pick (Picked), kept through the typed prompts after it
 	Pick *Prompt `json:"pick,omitempty"`
+	// Asking is the item whose question the coordinator has up in its dialog (SetAsking), until its pick
+	Asking *Asking `json:"asking,omitempty"`
 }
 
 // Prompt is a prompt the coordinator got at At (unix seconds).
@@ -721,7 +723,8 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 	}
 	return b.update(func(s *state) error {
 		pick := *p
-		s.Prompt, s.Pick = p, &pick
+		// Its dialog answered: no question is up any more
+		s.Prompt, s.Pick, s.Asking = p, &pick, nil
 		return nil
 	})
 }
@@ -799,10 +802,10 @@ func (b Box) DropPrompt() error {
 	})
 }
 
-// ForgetPrompt drops the user's latest prompt (Arrived) and pick (Picked), for a new conversation.
+// ForgetPrompt drops the user's latest prompt (Arrived), pick (Picked) and the question up (SetAsking), for a new conversation.
 func (b Box) ForgetPrompt() error {
 	return b.update(func(s *state) error {
-		s.Prompt, s.Pick = nil, nil
+		s.Prompt, s.Pick, s.Asking = nil, nil, nil
 		return nil
 	})
 }
