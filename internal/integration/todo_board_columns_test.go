@@ -70,8 +70,8 @@ func TestTodoBoardColumns(t *testing.T) {
 	worker("w-old", "idle", false)
 	a := []string{"TMUX_PANE=" + paneA, "CLAUDECODE=1"}
 	dev(a, "todo", "ask", "Merge #148?", "--option", "Merge | ships today (Recommended)", "--option", "Wait")
-	dev(a, "todo", "add", "Restart the server")
-	dev(a, "todo", "add", "Shipped already")
+	dev(a, "todo", "add", "--no-details", "Restart the server")
+	dev(a, "todo", "add", "--no-details", "Shipped already")
 	dev(a, "todo", "add", "Parked idea", "--on", "boss")
 	dev(a, "todo", "add", "Review of the coupon change", "--on", "Ola")
 	dev(a, "todo", "add", "Works", "--on", "w-busy")
@@ -81,7 +81,7 @@ func TestTodoBoardColumns(t *testing.T) {
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	dev(user, "todo", "done", "--boss", "boss-a", "--text", "Shipped already", "3")
 	b := []string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}
-	dev(b, "todo", "add", "Left on a closed boss")
+	dev(b, "todo", "add", "--no-details", "Left on a closed boss")
 	dev(b, "todo", "add", "Closed boss, a person's", "--on", "Ola")
 	s.T("kill-session", "-t", "=boss-b")
 
@@ -211,7 +211,7 @@ func TestTodoBoardFollowsServe(t *testing.T) {
 	state("working", "UserPromptSubmit")
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	for _, text := range []string{"Do it", "Start it", "Tick it"} {
-		cmd := exec.Command(devBin, "todo", "add", text)
+		cmd := exec.Command(devBin, "todo", "add", "--no-details", text)
 		cmd.Env = s.scriptEnv(boss...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("❌ add %q: %v %s", text, err, out)
@@ -286,12 +286,12 @@ func TestTodoBoardReopen(t *testing.T) {
 	}
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
-	dev(boss, "todo", "add", "Ship it", "--link", "https://example.com/pull/7")
-	dev(boss, "todo", "add", "Other")
+	dev(boss, "todo", "add", "--no-details", "Ship it", "--link", "https://example.com/pull/7")
+	dev(boss, "todo", "add", "--no-details", "Other")
 	dev(user, "todo", "done", "--boss", "boss-a", "--text", "Ship it", "1")
 	// Past the 5 s a ticked item stays, a write moves it to the finished items
 	time.Sleep(5200 * time.Millisecond)
-	dev(boss, "todo", "add", "Later")
+	dev(boss, "todo", "add", "--no-details", "Later")
 	type item struct {
 		ID     int    `json:"id"`
 		Text   string `json:"text"`
@@ -363,7 +363,7 @@ func TestTodoBoardDoing(t *testing.T) {
 		t.Fatalf("❌ register: %v %s", err, out)
 	}
 	waitFor(t, "the stub boss drawn", func() bool { return strings.Contains(s.T("capture-pane", "-p", "-t", pane), "Try") })
-	cmd := exec.Command(devBin, "todo", "add", "Send the cert")
+	cmd := exec.Command(devBin, "todo", "add", "--no-details", "Send the cert")
 	cmd.Env = s.scriptEnv("TMUX_PANE="+pane, "CLAUDECODE=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("❌ add: %v %s", err, out)

@@ -43,7 +43,7 @@ esac`, "gh")
 	}
 	boss := []string{"TMUX_PANE=" + pane}
 	dev(boss, "todo", "add", "PR #412 open, CI pending", "--on", "reviewers", "--link", url)
-	dev(boss, "todo", "add", "Ask Mara for the API key")
+	dev(boss, "todo", "add", "--no-details", "Ask Mara for the API key")
 
 	pr("REVIEW_REQUIRED")
 	if out := dev(boss, "todo", "check"); strings.Contains(out, "⚠") {
@@ -83,7 +83,7 @@ esac`, "gh")
 			t.Errorf("❌ dev %s took it:\n%s", strings.Join(argv, " "), out)
 		}
 	}
-	fails("todo", "add", "--boss", "boss-orbit", "new")
+	fails("todo", "add", "--no-details", "--boss", "boss-orbit", "new")
 	fails("todo", "done", "--boss", "other", "1")
 	fails("todo", "done", "--boss", "boss-nope", "1")
 }

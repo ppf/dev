@@ -168,7 +168,7 @@ func TestPickedClaim(t *testing.T) {
 	if err := b.Claim(*pick); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "answered an item already") {
+	if err := b.Claim(*pick); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("second Claim: %v, want refused", err)
 	}
 	if err := b.Arrived("merge it", at.Add(time.Minute)); err != nil {
@@ -183,6 +183,101 @@ func TestPickedClaim(t *testing.T) {
 	}
 	if p, err := b.UserPrompt(); err != nil || p == nil || p.Text != "A? picked x; B? picked y" || p.Question != "" {
 		t.Errorf("two picks: %+v, %v", p, err)
+	}
+}
+
+// The user's latest pick outlives the typed prompts after it, for ClaimPick only (Claim still wants the latest
+// words); one pick is spent by either claim, and a new conversation forgets it.
+func TestLatestPick(t *testing.T) {
+	at := time.Unix(1700000000, 0)
+	picked := func(b Box) Prompt {
+		t.Helper()
+		if err := b.Picked([]agent.Pick{{Question: "boss-a #1: Merge #148?", Answer: "Merge"}}, at); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Arrived("yes, and tell the API team", at.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		p, err := b.LatestPick()
+		if err != nil || p == nil || p.Answer != "Merge" || p.Spent {
+			t.Fatalf("LatestPick after a typed prompt = %+v, %v", p, err)
+		}
+		return *p
+	}
+
+	b := testBox(t)
+	p := picked(b)
+	if err := b.Claim(p); err == nil || !strings.Contains(err.Error(), "said something since") {
+		t.Errorf("Claim after a typed prompt: %v, want refused", err)
+	}
+	if err := b.ClaimPick(p); err != nil {
+		t.Fatalf("ClaimPick after a typed prompt: %v", err)
+	}
+	if err := b.Arrived("and rebase", at.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "pick was used already") {
+		t.Errorf("second ClaimPick: %v, want refused", err)
+	}
+	if err := b.Unclaim(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(p); err != nil {
+		t.Errorf("ClaimPick after Unclaim: %v", err)
+	}
+
+	// Spent by Claim while it was the latest words: ClaimPick refuses it after a typed prompt
+	b = testBox(t)
+	if err := b.Picked([]agent.Pick{{Question: "boss-a #1: Merge #148?", Answer: "Merge"}}, at); err != nil {
+		t.Fatal(err)
+	}
+	latest, _ := b.UserPrompt()
+	if err := b.Claim(*latest); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Arrived("ok", at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*latest); err == nil || !strings.Contains(err.Error(), "pick was used already") {
+		t.Errorf("ClaimPick of a pick Claim spent: %v, want refused", err)
+	}
+
+	// A pick since refuses the older one; ForgetPrompt drops the pick too
+	b = testBox(t)
+	p = picked(b)
+	if err := b.Picked([]agent.Pick{{Question: "boss-a #2: Tag?", Answer: "Tag"}}, at.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "picked something since") {
+		t.Errorf("ClaimPick of an older pick: %v, want refused", err)
+	}
+	if err := b.ForgetPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.LatestPick(); p != nil || err != nil {
+		t.Errorf("LatestPick after ForgetPrompt = %+v, %v", p, err)
+	}
+
+	// A hand-on question drops the latest prompt, not an item's pick waiting for its relay
+	b = testBox(t)
+	p = picked(b)
+	if err := b.DropPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p) != nil {
+		t.Errorf("after DropPrompt: latest %+v, %v; want none, the pick still claimable", latest, err)
+	}
+
+	// A file from before the pick slot: its latest prompt, a pick, is claimed as the latest pick
+	b = testBox(t)
+	if err := os.MkdirAll(filepath.Dir(b.path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b.path, []byte(`{"notes":[],"last":{},"prompt":{"text":"x","at":1700000000,"pick":true,"question":"boss-a #1: Merge?","answer":"Merge"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := b.LatestPick(); err != nil || p == nil || b.ClaimPick(*p) != nil {
+		t.Errorf("LatestPick of an older file = %+v, %v; want it claimable", p, err)
 	}
 }
 

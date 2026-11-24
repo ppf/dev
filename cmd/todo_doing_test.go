@@ -45,7 +45,7 @@ func TestTodoDoingDesktop(t *testing.T) {
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("CLAUDE_CODE_HOST_SESSION_ID", "local_boss")
 	t.Setenv("CLAUDECODE", "1")
-	for _, args := range [][]string{{"todo", "add", "mine"}, {"todo", "add", "parked", "--on", "boss"}} {
+	for _, args := range [][]string{{"todo", "add", "mine", "--no-details"}, {"todo", "add", "parked", "--on", "boss"}} {
 		if _, _, err := execute(t, "", args...); err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +81,7 @@ func TestTodoDoingDesktop(t *testing.T) {
 // add --part-of links the new item to an open one, both shown in --json; one linked already is refused.
 func TestTodoAddPartOf(t *testing.T) {
 	todoEnv(t)
-	run(t, "", "todo", "add", "send the cert")
+	run(t, "", "todo", "add", "--no-details", "send the cert")
 	if out := run(t, "", "todo", "add", "install the cert", "--on", "boss", "--part-of", "1"); out != "added 2 · to do 2\n" {
 		t.Errorf("add --part-of = %q", out)
 	}
@@ -89,7 +89,7 @@ func TestTodoAddPartOf(t *testing.T) {
 	if !strings.Contains(out, `"id":1,"text":"sendthecert"`) || strings.Count(out, `"part_of":`) != 2 || !strings.Contains(out, `"part_of":2`) || !strings.Contains(out, `"part_of":1`) {
 		t.Errorf("--json: %s", out)
 	}
-	if _, _, err := execute(t, "", "todo", "add", "x", "--part-of", "1"); err == nil || !strings.Contains(err.Error(), "already linked") {
+	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x", "--part-of", "1"); err == nil || !strings.Contains(err.Error(), "already linked") {
 		t.Errorf("second link: %v", err)
 	}
 }
@@ -102,7 +102,7 @@ func TestPageDoing(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("CLAUDECODE", "1")
 	run(t, "", "todo", "add", "theirs", "--waiting-for", "Carl")
-	run(t, "", "todo", "add", "mine")
+	run(t, "", "todo", "add", "--no-details", "mine")
 	var ref serve.Refused
 	if err := pageDoing(io.Discard)("boss-nope", 1, "x", todo.Seen{}, "y", false); err == nil || errors.As(err, &ref) {
 		t.Errorf("no list, closed lists not read: %v, want an error, not a refusal", err)

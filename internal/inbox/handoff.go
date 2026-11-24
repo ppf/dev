@@ -185,7 +185,7 @@ func recordHandOn(c *tmux.Client, picks []agent.Pick, now time.Time) error {
 }
 
 // AskingHandOn drops the user's latest prompt when the manager in pane opens a hand-on question q: dismissed, it
-// leaves no earlier pick to hand on with.
+// leaves no earlier pick to hand on with; an item's pick not yet relayed stays (Box.DropPrompt).
 func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 	handOn := func(a agent.Ask) bool {
 		return slices.ContainsFunc(a.Options, func(o agent.Choice) bool { return IsPicked(o.Label, HandItOn) })
@@ -197,5 +197,5 @@ func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 	if err != nil || !ok || b.Name != Manager {
 		return err
 	}
-	return b.Box.ForgetPrompt()
+	return b.Box.DropPrompt()
 }

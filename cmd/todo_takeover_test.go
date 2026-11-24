@@ -92,7 +92,7 @@ func as(t *testing.T, id string, args ...string) (string, string, error) {
 func TestTodoTakeOver(t *testing.T) {
 	lists := takeOverEnv(t)
 	for _, args := range [][]string{
-		{"todo", "add", "Build dev agent start --from", "--link", "https://github.com/ppf/dev/pull/282"},
+		{"todo", "add", "--no-details", "Build dev agent start --from", "--link", "https://github.com/ppf/dev/pull/282"},
 		{"todo", "ask", "Merge #282?", "--option", "Merge (Recommended)", "--option", "Wait"},
 		{"todo", "note", "decided", "branch takeover: picks A-G approved"},
 	} {
@@ -164,7 +164,7 @@ func TestTodoTakeOver(t *testing.T) {
 	}
 
 	at := time.Now().Format("15:04")
-	_, _, err := as(t, oldThread, "todo", "add", "Merge #283")
+	_, _, err := as(t, oldThread, "todo", "add", "--no-details", "Merge #283")
 	if want := "list moved to t3:5f1c2d90 at " + at + " (dev todo take-over): this boss's to do list is there now; take it back there with dev todo take-over t3:5f1c2d90"; err == nil || err.Error() != want {
 		t.Errorf("old thread's add: %v, want %q", err, want)
 	}
@@ -178,7 +178,7 @@ func TestTodoTakeOver(t *testing.T) {
 	if out, _, err := as(t, oldThread, "todo", "take-over", "t3:5f1c2d90"); err != nil || !strings.HasPrefix(out, "✅ Took over t3:5f1c2d90 (T3 Code, dev): 2 items, 1 note\n") {
 		t.Errorf("take back: %q %v", out, err)
 	}
-	if _, _, err := execute(t, "", "todo", "add", "x"); err == nil || !strings.Contains(err.Error(), "list moved to t3:49f62c8e") {
+	if _, _, err := execute(t, "", "todo", "add", "--no-details", "x"); err == nil || !strings.Contains(err.Error(), "list moved to t3:49f62c8e") {
 		t.Errorf("new thread's add after the take back: %v", err)
 	}
 }
@@ -195,7 +195,7 @@ func TestTodoTakeOverRefusals(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(lists, "t3-eeeeeeee-4444.json"), []byte(`{"items":[],"next":1,"dir":"/p/dev"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := as(t, oldThread, "todo", "add", "theirs"); err != nil {
+	if _, _, err := as(t, oldThread, "todo", "add", "--no-details", "theirs"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
@@ -283,7 +283,7 @@ func TestTodoTakeOverHint(t *testing.T) {
 	if _, stderr, err := execute(t, "", "todo"); err != nil || stderr != "" {
 		t.Errorf("nothing to take: %q %v, want no hint", stderr, err)
 	}
-	if _, _, err := as(t, oldThread, "todo", "add", "theirs"); err != nil {
+	if _, _, err := as(t, oldThread, "todo", "add", "--no-details", "theirs"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := as(t, oldThread, "todo", "note", "risk", "flaky CI"); err != nil {
@@ -298,7 +298,7 @@ func TestTodoTakeOverHint(t *testing.T) {
 	if _, stderr, _ := execute(t, "", "todo", "--json"); stderr != "" {
 		t.Errorf("--json: stderr %q, want no hint", stderr)
 	}
-	run(t, "", "todo", "add", "mine")
+	run(t, "", "todo", "add", "--no-details", "mine")
 	if _, stderr, err := execute(t, "", "todo"); err != nil || stderr != "" {
 		t.Errorf("own list not empty: %q %v, want no hint", stderr, err)
 	}
@@ -311,12 +311,12 @@ func TestTodoTakeOverHint(t *testing.T) {
 // A take into a list with items merges: --json says mode merge, each item's and note's numbers, the dropped state note.
 func TestTodoTakeOverMergeJSON(t *testing.T) {
 	takeOverEnv(t)
-	for _, args := range [][]string{{"todo", "add", "theirs"}, {"todo", "note", "state", "their state"}} {
+	for _, args := range [][]string{{"todo", "add", "--no-details", "theirs"}, {"todo", "note", "state", "their state"}} {
 		if _, _, err := as(t, oldThread, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
-	run(t, "", "todo", "add", "mine")
+	run(t, "", "todo", "add", "--no-details", "mine")
 	run(t, "", "todo", "note", "state", "my state")
 	out := run(t, "", "todo", "take-over", "--json", "t3:49f62c8e")
 	var v struct {

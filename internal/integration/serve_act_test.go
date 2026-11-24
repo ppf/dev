@@ -81,10 +81,10 @@ func TestServeAnswerDone(t *testing.T) {
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	must(boss, "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait")
 	must(boss, "todo", "ask", "Release?", "--option", "Now", "--option", "Later")
-	must(boss, "todo", "add", "Read the plan")
-	must(boss, "todo", "add", "Update the docs")
-	must(boss, "todo", "add", "Keep me") // never ticked: the list never empties, so item numbers don't restart
-	must([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "add", "Close the ticket")
+	must(boss, "todo", "add", "--no-details", "Read the plan")
+	must(boss, "todo", "add", "--no-details", "Update the docs")
+	must(boss, "todo", "add", "--no-details", "Keep me") // never ticked: the list never empties, so item numbers don't restart
+	must([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "add", "--no-details", "Close the ticket")
 	must([]string{"TMUX_PANE=" + paneB, "CLAUDECODE=1"}, "todo", "ask", "Ship it?", "--option", "Yes")
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	url := startServe(t, s, user...)

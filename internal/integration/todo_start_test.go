@@ -74,7 +74,7 @@ func TestTodoStart(t *testing.T) {
 	boss := []string{"TMUX_PANE=" + pane, "CLAUDECODE=1"}
 	user := []string{"TMUX_PANE=", "CLAUDECODE="}
 	for _, text := range []string{"Deploy the fix", "Write the notes"} {
-		if _, err := dev(boss, "todo", "add", text); err != nil {
+		if _, err := dev(boss, "todo", "add", "--no-details", text); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -92,7 +92,7 @@ func TestTodoStart(t *testing.T) {
 		t.Errorf("❌ --all --json after start:\n%s", j)
 	}
 	refused(user, "item 1: already sent to boss-a 0m ago", "todo", "start", "boss-a", "1", "--question", "Deploy the fix")
-	if _, err := dev(boss, "todo", "add", "--replaces", "1", "--on", "me"); err != nil {
+	if _, err := dev(boss, "todo", "add", "--replaces", "1", "--on", "me", "--no-details"); err != nil {
 		t.Fatal(err)
 	}
 	if j := listed(); strings.Contains(j, `"started"`) || strings.Contains(j, `"starting"`) {
@@ -159,7 +159,7 @@ func TestTodoStart(t *testing.T) {
 	}
 	// The manager's own list: the user's item starts, the manager's own doesn't
 	mgr := []string{"TMUX_PANE=" + mpane, "CLAUDECODE=1"}
-	for _, argv := range [][]string{{"Read the plan"}, {"--on", "boss", "Tidy the lists"}} {
+	for _, argv := range [][]string{{"--no-details", "Read the plan"}, {"--on", "boss", "Tidy the lists"}} {
 		if _, err := dev(mgr, append([]string{"todo", "add"}, argv...)...); err != nil {
 			t.Fatal(err)
 		}

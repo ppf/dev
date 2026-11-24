@@ -13,8 +13,8 @@ import (
 )
 
 // The manager relays the user's answer with --via manager: only from its coordinator pane, only from their pick in its
-// AskUserQuestion (not a typed message, nor a batch dev pasted), only for an item older than that pick, and the boss's
-// note quotes it. --all keeps
+// AskUserQuestion (not a typed message, nor a batch dev pasted; typed messages after the pick don't stop it), only for
+// an item older than that pick, and the boss's note quotes it. --all keeps
 // the other bosses when one's list can't be read, marking that one.
 func TestTodoAnswerViaManager(t *testing.T) {
 	tmp := t.TempDir()
@@ -71,6 +71,8 @@ func TestTodoAnswerViaManager(t *testing.T) {
 
 	refused("before any prompt", claude(pane["manager"]), "hasn't prompted the manager yet")
 	prompt("what's waiting?")
+	// Only a pick answers an item: a typed message can't be tied to one
+	refused("a typed message, no pick", claude(pane["manager"]), "a typed message, not a pick: ask the item as a one-click question")
 	ask("boss-a #1: Merge #148?", `,"answers":{"boss-a #1: Merge #148?":"Merge"}`)
 	time.Sleep(1100 * time.Millisecond)
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait"); err != nil {
@@ -80,10 +82,10 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		t.Errorf("❌ an item newer than the pick: %v %q", err, stderr)
 	}
 	time.Sleep(1100 * time.Millisecond)
-	// Only a pick answers an item: a typed message can't be tied to one
+	// A typed message after the pick leaves it the one relayed: still older than the item
 	prompt("merge 148, wait on the API one")
-	if _, stderr, err := merge(); err == nil || !strings.Contains(stderr, "a typed message, not a pick: ask the item as a one-click question") {
-		t.Errorf("❌ a typed message: %v %q", err, stderr)
+	if _, stderr, err := merge(); err == nil || !strings.Contains(stderr, "newer than the user's latest prompt") {
+		t.Errorf("❌ a typed message after an older pick: %v %q", err, stderr)
 	}
 	prompt("[dev boss inbox] 1 worker update(s):\n- boss-b waits on you: #1 Deploy?")
 	refused("from another boss", claude(pane["boss-a"]), "only in the manager's coordinator pane")
@@ -100,9 +102,12 @@ func TestTodoAnswerViaManager(t *testing.T) {
 	}
 
 	ask("boss-a #1: Merge #148?", `,"answers":{"boss-a #1: Merge #148?":"Merge"}`)
+	// The user's typed lines after their pick, widening it, don't stop the pick
+	prompt("yes merge it, and tell the API team")
+	prompt("then rebase the rest")
 	out, stderr, err := merge()
 	if err != nil || out != "#1 answered, sent to boss-a\n" {
-		t.Fatalf("❌ answer via manager: %q %v %s", out, err, stderr)
+		t.Fatalf("❌ answer via manager with typed messages after the pick: %q %v %s", out, err, stderr)
 	}
 	waitFor(t, "boss-a gets the quoted answer", func() bool {
 		data, _ := os.ReadFile(filepath.Join(tmp, "boss-a.log"))
@@ -144,7 +149,7 @@ func TestTodoAnswerViaManager(t *testing.T) {
 		!strings.Contains(out, `- you answered #2 \"Rebase #150?\" via manager (\"boss-a #2: Rebase #150? picked Rebase\"): Rebase`) {
 		t.Errorf("❌ boss-a's note quoting the pick: %q %v %s", out, err, stderr)
 	}
-	if _, stderr, err := answer("2", "Rebase", "Rebase #150?"); err == nil || !strings.Contains(stderr, "the user's latest pick answered an item already") {
+	if _, stderr, err := answer("2", "Rebase", "Rebase #150?"); err == nil || !strings.Contains(stderr, "the user's latest pick was used already") {
 		t.Errorf("❌ a spent pick: %v %q", err, stderr)
 	}
 
@@ -161,7 +166,7 @@ func TestTodoAnswerViaManager(t *testing.T) {
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Release?", "--option", "Now"); err != nil {
 		t.Fatal(err, stderr)
 	}
-	if _, stderr, err := dev(claude(pane["boss-b"]), "", "todo", "add", "Deploy"); err != nil {
+	if _, stderr, err := dev(claude(pane["boss-b"]), "", "todo", "add", "--no-details", "Deploy"); err != nil {
 		t.Fatal(err, stderr)
 	}
 	files, _ := filepath.Glob(filepath.Join(state, "dev", "todo", "*boss-b.json"))

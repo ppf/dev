@@ -411,6 +411,8 @@ type state struct {
 	PasteNext bool `json:"paste_next,omitempty"`
 	// Prompt is the user's latest prompt to the coordinator, not one dev sent (a batch, ResumePrompt)
 	Prompt *Prompt `json:"prompt,omitempty"`
+	// Pick is the user's latest pick (Picked), kept through the typed prompts after it
+	Pick *Prompt `json:"pick,omitempty"`
 }
 
 // Prompt is a prompt the coordinator got at At (unix seconds).
@@ -505,6 +507,11 @@ func (b Box) read() (state, error) {
 	}
 	if s.Workers == nil {
 		s.Workers = map[string]*health{}
+	}
+	// A file from before Pick: its latest prompt, a pick, is the latest pick too
+	if s.Pick == nil && s.Prompt != nil && s.Prompt.Pick {
+		pick := *s.Prompt
+		s.Pick = &pick
 	}
 	return s, nil
 }
@@ -697,7 +704,7 @@ func (b Box) Arrived(prompt string, now time.Time) error {
 	})
 }
 
-// Picked keeps picks, the user's in the coordinator's AskUserQuestion (agent.HookPick), as their latest prompt.
+// Picked keeps picks, the user's in the coordinator's AskUserQuestion (agent.HookPick), as their latest prompt and pick.
 func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 	var words []string
 	for _, p := range picks {
@@ -711,33 +718,51 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 		p.Typed = picks[0].Typed()
 	}
 	return b.update(func(s *state) error {
-		s.Prompt = p
+		pick := *p
+		s.Prompt, s.Pick = p, &pick
 		return nil
 	})
 }
 
 // Claim spends p, the pick an answer is relayed from: refused once spent or when the user said something since.
 func (b Box) Claim(p Prompt) error {
+	return b.claim(p, func(s *state) *Prompt { return s.Prompt }, "the user said something since: look again")
+}
+
+// ClaimPick is Claim for p, the user's latest pick (LatestPick): typed prompts since don't refuse it, a pick since does.
+func (b Box) ClaimPick(p Prompt) error {
+	return b.claim(p, func(s *state) *Prompt { return s.Pick }, "the user picked something since: look again")
+}
+
+// claim spends p, refused unless it is latest(s), unspent.
+func (b Box) claim(p Prompt, latest func(*state) *Prompt, since string) error {
 	return b.update(func(s *state) error {
-		switch {
-		case !s.Prompt.is(p):
-			return errors.New("the user said something since: look again")
-		case s.Prompt.Spent:
-			return errors.New("the user's latest pick answered an item already: ask them this one")
+		switch q := latest(s); {
+		case !q.is(p):
+			return errors.New(since)
+		case q.Spent:
+			return errors.New("the user's latest pick was used already: ask them this one")
 		}
-		s.Prompt.Spent = true
+		s.spend(p, true)
 		return nil
 	})
 }
 
-// Unclaim gives back p, claimed for an answer that was refused, unless the user said something since.
+// Unclaim gives back p, claimed for an answer that was refused, wherever it is still the latest prompt or pick.
 func (b Box) Unclaim(p Prompt) error {
 	return b.update(func(s *state) error {
-		if s.Prompt.is(p) {
-			s.Prompt.Spent = false
-		}
+		s.spend(p, false)
 		return nil
 	})
+}
+
+// spend marks p spent or not in both places it is kept: one pick is good for one answer.
+func (s *state) spend(p Prompt, spent bool) {
+	for _, q := range []*Prompt{s.Prompt, s.Pick} {
+		if q.is(p) {
+			q.Spent = spent
+		}
+	}
 }
 
 // is reports p the same prompt as q, spent or not.
@@ -750,10 +775,32 @@ func (p *Prompt) is(q Prompt) bool {
 	return now == q
 }
 
-// ForgetPrompt drops the user's latest prompt (Arrived), for a new conversation.
-func (b Box) ForgetPrompt() error {
+// unhand drops worker's hand-over mark (handOver), writing only when it has one.
+func (b Box) unhand(worker string) error {
+	s, err := b.locked()
+	if h := s.Workers[worker]; err != nil || h == nil || h.Handed == "" {
+		return err
+	}
+	return b.update(func(s *state) error {
+		if h := s.Workers[worker]; h != nil {
+			h.Handed = ""
+		}
+		return nil
+	})
+}
+
+// DropPrompt drops the user's latest prompt (Arrived), keeping their latest pick for an item's relay (ClaimPick).
+func (b Box) DropPrompt() error {
 	return b.update(func(s *state) error {
 		s.Prompt = nil
+		return nil
+	})
+}
+
+// ForgetPrompt drops the user's latest prompt (Arrived) and pick (Picked), for a new conversation.
+func (b Box) ForgetPrompt() error {
+	return b.update(func(s *state) error {
+		s.Prompt, s.Pick = nil, nil
 		return nil
 	})
 }
@@ -769,13 +816,24 @@ func clip(s string) string {
 
 // UserPrompt is the user's latest prompt to the coordinator (Arrived), nil before any.
 func (b Box) UserPrompt() (*Prompt, error) {
+	s, err := b.locked()
+	return s.Prompt, err
+}
+
+// LatestPick is the user's latest pick in the coordinator (Picked), typed prompts since or not; nil before any.
+func (b Box) LatestPick() (*Prompt, error) {
+	s, err := b.locked()
+	return s.Pick, err
+}
+
+// locked reads the state under the box's lock.
+func (b Box) locked() (state, error) {
 	lock, err := b.lock()
 	if err != nil {
-		return nil, err
+		return state{}, err
 	}
 	defer func() { _ = lock.Close() }()
-	s, err := b.read()
-	return s.Prompt, err
+	return b.read()
 }
 
 // Expire puts the batch in flight back, for the paste, once it went unshown flightTimeout into the coordinator's

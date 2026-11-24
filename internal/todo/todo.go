@@ -240,6 +240,7 @@ var ErrNotBoss = errors.New("not a boss session (dev boss): the to do list is it
 type Store struct {
 	path, boss string
 	trial      bool
+	details    bool
 	result, by string
 	name, dir  string
 	created    int64
@@ -255,6 +256,23 @@ func (s Store) Trial() Store {
 func (s Store) WithResult(result string) Store {
 	s.result = result
 	return s
+}
+
+// NeedDetails is s refusing, on Add and Replace, an item the user does without details (ErrNoDetails), unless quiet.
+func (s Store) NeedDetails() Store {
+	s.details = true
+	return s
+}
+
+// ErrNoDetails is NeedDetails' refusal.
+var ErrNoDetails = errors.New("an item the user does needs --details (what it is and why, where it stands, what done looks like), or --no-details when it needs none")
+
+// checkDetails is ErrNoDetails for it, as stored, when s NeedDetails and the user does it (no --on, no session, no ask) without any.
+func (s Store) checkDetails(it Item) error {
+	if s.details && !it.Quiet && it.On == "" && it.Session == nil && it.Details == "" && len(it.Options) == 0 {
+		return ErrNoDetails
+	}
+	return nil
 }
 
 // ByUser is s with Done's ticks by the user (DoneByYou), not its boss: a dev todo done run outside Claude Code.
@@ -705,6 +723,9 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 		if it.On == Me {
 			it.On, it.Session = "", nil
 		}
+		if err := s.checkDetails(it); err != nil {
+			return err
+		}
 		f.Items = append(f.Items, it)
 		f.Next, id = it.ID+1, it.ID
 		return nil
@@ -834,6 +855,9 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 					it.Dropped = append(it.Dropped, o)
 				}
 			}
+		}
+		if err := s.checkDetails(it); err != nil {
+			return err
 		}
 		f.Items[i] = it
 		*renamed = it.Text != old.Text
@@ -1424,7 +1448,7 @@ func (l List) lines(limit int, now time.Time) string {
 		}
 	}
 	if len(flagged) > 0 {
-		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):")
+		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):")
 		for _, it := range flagged {
 			write(it)
 		}
@@ -1462,7 +1486,7 @@ func detailsLine(items string) string {
 func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
 
 // whoLine asks a boss to say who does each item, as the reminders end.
-const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user)."
+const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user, with --details when it has none)."
 
 // Reminder is the items ticked by themselves (tickedText), then the open items for a boss reading worker notes at now,
 // numbered, with a line asking it to tick what the notes closed; "" when none ticked and none is open.

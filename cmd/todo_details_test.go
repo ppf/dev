@@ -19,7 +19,7 @@ func TestTodoDetailsResult(t *testing.T) {
 	todoEnv(t)
 	t.Setenv("CLAUDECODE", "1")
 	run(t, "Second reminder, firmer.\n\n- attach the PDF\n", "todo", "add", "Send the reminder", "--details", "-")
-	run(t, "", "todo", "add", "--replaces", "1", "--link", "https://mail.example/1")
+	run(t, "", "todo", "add", "--no-details", "--replaces", "1", "--link", "https://mail.example/1")
 	run(t, "", "todo", "ask", "Send it today?", "--option", "Yes (Recommended)", "--option", "No", "--details", "The customer asked for Friday.")
 	run(t, "", "todo", "ask", "--replaces", "2", "--context", "asked on Monday")
 	if got := run(t, "", "todo", "--json"); !strings.Contains(got, `"details": "The customer asked for Friday."`) {
@@ -27,9 +27,9 @@ func TestTodoDetailsResult(t *testing.T) {
 	}
 	run(t, "", "todo", "ask", "--replaces", "2", "--details", "The customer asked for Thursday.")
 	run(t, "", "todo", "ask", "--replaces", "2", "--details", "The customer asked for Friday.")
-	run(t, "", "todo", "add", "Other")
-	run(t, "", "todo", "add", "Mine")
-	run(t, "", "todo", "add", "Board's")
+	run(t, "", "todo", "add", "--no-details", "Other")
+	run(t, "", "todo", "add", "--no-details", "Mine")
+	run(t, "", "todo", "add", "--no-details", "Board's")
 	if _, _, err := execute(t, "", "todo", "add", "x", "--details", "-"); err == nil || !strings.Contains(err.Error(), "stdin is empty") {
 		t.Errorf("--details - on empty stdin: %v", err)
 	}

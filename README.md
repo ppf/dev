@@ -210,15 +210,15 @@ tmux set -g @dev_boss_inbox off      # turn off (or per boss session with -t)
 dev todo set "Answer Vince in Slack" "Approve PR #84"   # replace the list (no arguments: stdin, one item per line)
 dev todo add "Staging access" --on "Marek (Ops)"       # add one; --on: who does it (a person, or a worker below), --link: e.g. its PR
 dev todo add "Rework companion" --on companion-1000   # on a session this boss started, worker or boss (name or local_… id): its board shows its state
-dev todo add --replaces 4 --on me                     # give item 4 back to you, keeping its text
-dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00"  # ticks itself then; --until 15:30 (today), 2026-11-16 (that day's end)
+dev todo add --replaces 4 --on me                     # give item 4 back to you, keeping its text (and details: none there, add --details)
+dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00" --no-details  # ticks itself then; --until 15:30 (today), 2026-11-16 (that day's end)
 dev todo add "Approve PR #85" --replaces 2            # in place of open item 2: keeps its number, --on, --link, --until, --done-on
 dev todo add "Approve PR #85" --on Ana --link <PR url> --done-on approved  # ticks itself once the PR is approved (merged|approved|green)
 dev todo ask "Merge #148?" --option "Merge (Recommended)" --option "Wait"  # a decision for you, up to 9 options
 dev todo ask "Test?" --option "A" --option "B" --quiet  # a test item (add or ask): a TEST tag on the boards, in no tally or roll-up, the boss above not told
 dev todo ask --replaces 5 --context "CI green" --option "Merge (Recommended)"  # correct open ask 5 in place, same number; the question, options, context, details, link not given are kept
 dev todo answer boss-dev 5 1                          # answer it: option 1, its label or your own words
-dev todo add "Send the reminder" --details -          # its longer text from stdin (up to 4000 characters, add or ask; --replaces keeps it); an item the user does or a person owes (not --on <worker>, not --quiet) without details warns on stderr, and the boss's start list marks it "(no details)"
+dev todo add "Send the reminder" --details -          # its longer text from stdin (up to 4000 characters, add or ask; --replaces keeps it); add refuses an item the user does without details (none given, none kept by --replaces) unless --no-details; one a person owes, or an ask, without details warns on stderr (not --on <worker>, not --quiet), and the boss's start list marks it "(no details)"
 dev todo done 2 3                                     # tick by number
 dev todo done 4 --result "Mail sent 12:40 to accounts@…, id 19ab3f"  # tick one, saying what was done (one line, up to 300 characters)
 dev todo clear                                        # empty: no block

@@ -30,7 +30,7 @@ const (
 	// hourCap is the most messages a boss sends in an hour.
 	hourCap = 20
 	// maxMessage is the longest message, in runes.
-	maxMessage = 1000
+	maxMessage = 1500
 	// keepThreads is how long a thread stays after its last message.
 	keepThreads = 7 * 24 * time.Hour
 )
@@ -51,7 +51,7 @@ const answeredHint = `(a "you answered" note is the user's own answer to that it
 
 // toDoHint ends a batch holding a to do note.
 const toDoHint = `(a "to do" note is an item on your list that may be out of date: check it at its source, then tick it ` +
-	`(dev todo done <n>), replace it with what's true now, or confirm it holds (dev todo add --replaces <n>). One ticked by ` +
+	`(dev todo done <n>), replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none). One ticked by ` +
 	`itself is done: add what comes next, if anything)`
 
 // messageHint ends a batch holding a message.
@@ -488,7 +488,7 @@ func Started(boss string, it todo.Shown, closed bool) Note {
 			id, text, it.Session.Name, id)
 	default:
 		n.Text = fmt.Sprintf(marked+`start a worker on it and link it with dev todo add --replaces %d --on <worker>; `+
-			`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>")`, id, text, id, id)
+			`if it is the user's own to do, say so on the list (dev todo add --replaces %d --on me "<text, why>", with --details '<what, why, done when>' when it has none)`, id, text, id, id)
 	}
 	if it.Details != "" && !closed {
 		n.Text += fmt.Sprintf("; it has details: read them in dev todo --json (item %d's details), and put them in a worker's brief", id)

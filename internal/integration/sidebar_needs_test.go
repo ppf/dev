@@ -81,7 +81,7 @@ func TestSidebarNeedsYouAnswer(t *testing.T) {
 func TestNeedsYouTick(t *testing.T) {
 	d := actServer(t)
 	pane, _, dev := needsBoss(t, d)
-	dev("todo", "add", "Call Vince")
+	dev("todo", "add", "--no-details", "Call Vince")
 	dev("todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait")
 
 	previews := d.T("split-window", "-t", pane, "-h", "-l", "90", "-PF", "#{pane_id}", devBin+" boss --previews")
@@ -111,7 +111,7 @@ func TestSidebarNeedsYouTick(t *testing.T) {
 	d := actServer(t, "app")
 	_, _, dev := needsBoss(t, d)
 	d.T("set-option", "-t", "=boss-a:", "@dev_started_by", d.T("display", "-t", "=app:", "-p", "#{session_id}"))
-	dev("todo", "add", "Call Vince")
+	dev("todo", "add", "--no-details", "Call Vince")
 	dev("todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait")
 	sidebar := actEnsure(d, "boss-a")
 	waitScreen(t, d.server, sidebar, "TO DO  1 need you · 2 mine")

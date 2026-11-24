@@ -55,12 +55,13 @@ func (v sessionView) boss() (Boss, bool, error) {
 
 // workerView is a worker pane as BossOf reads it.
 type workerView struct {
-	StartedBy string `tmux:"@dev_started_by"`
-	Session   string `tmux:"session_name"`
-	Since     string `tmux:"@agent_since"`
-	Question  string `tmux:"@agent_question"`
-	Outside   string `tmux:"@dev_started_outside"`
-	Herd      string `tmux:"@dev_herd"` // set when the worker is itself a boss
+	StartedBy  string `tmux:"@dev_started_by"`
+	Session    string `tmux:"session_name"`
+	Since      string `tmux:"@agent_since"`
+	WaitingFor string `tmux:"@agent_waiting_for"`
+	Question   string `tmux:"@agent_question"`
+	Outside    string `tmux:"@dev_started_outside"`
+	Herd       string `tmux:"@dev_herd"` // set when the worker is itself a boss
 }
 
 // BossOf is the boss that started pane's session (@dev_started_by), and the worker pane itself.

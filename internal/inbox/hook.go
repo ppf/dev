@@ -315,6 +315,10 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 	if ok && n.Kind == Decision && w.Herd == "" && w.Outside == "" {
 		n.Handed, handErr = handOver(c, clk, b, w, n)
 	}
+	if ok && n.Kind != Decision {
+		// The worker moved on: its hand-over mark goes, or a decision of the same second (@agent_since) would match it
+		handErr = b.Box.unhand(w.Session)
+	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
@@ -339,6 +343,24 @@ func handOver(c *tmux.Client, clk control.Clock, b Boss, w workerView, n Note) (
 		s.health(w.Session).Handed = w.Since
 		return nil
 	}), Deliver(c, clk, m))
+}
+
+// HandedToManager reports the decision worker pane shows, in trusted state, as one handOver gave the live Manager:
+// its pick is the Manager's to send until the worker moves on (a new @agent_since).
+func HandedToManager(c *tmux.Client, pane, state string) (bool, error) {
+	b, w, ok, err := BossOf(c, pane)
+	if !ok || err != nil || !agent.Deciding(state, w.WaitingFor) {
+		return false, err
+	}
+	if _, live, err := managerOver(c, b); !live || err != nil {
+		return false, err
+	}
+	s, err := b.Box.locked()
+	if err != nil {
+		return false, err
+	}
+	h := s.Workers[w.Session]
+	return h != nil && h.Handed != "" && h.Handed == w.Since, nil
 }
 
 // managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.
