@@ -37,6 +37,16 @@ const (
 	exitStalled = 3
 )
 
+// timedOut turns the timeout of a wait on a working agent into one neutral stdout line that still exits 2: it is
+// not failing. Any other error, a timeout in another state included, passes through.
+func timedOut(cmd *cobra.Command, st control.Status, err error, timeout time.Duration) error {
+	if !errors.Is(err, control.ErrTimeout) || st.Trusted() != agent.Working {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "working: still at it after %s; wait again or read it\n", timeout)
+	return fmt.Errorf("%w: %w", open.ErrShown, err)
+}
+
 // exitCode maps an error to dev's exit status.
 func exitCode(err error) int {
 	switch {
@@ -53,7 +63,7 @@ func newAgentCmd() *cobra.Command {
 		Use:   "agent",
 		Short: "Drive agent sessions from a coordinator agent (targets: session name or pane id)",
 		Long: `Drive agent sessions from a coordinator agent. A target is a session name (exact) or an agent
-pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout, 3 stalled (prompt not picked up).
+pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout (a neutral line on stdout while it still works), 3 stalled (prompt not picked up).
 Run "dev agent skill [dev-agents|desktop-boss]" for a coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(), newAgentWaitUntilCmd(),
@@ -274,6 +284,11 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 			if control.NotSent(err) {
 				gerr = g.done(false, time.Now())
 			}
+			// A gated hand-on keeps its error (it says the brief reached the pane), and so does a timeout before the stall
+			// check could confirm the pickup
+			if gerr == nil && (g == nil || g.pick == nil) && timeout >= stall {
+				err = timedOut(cmd, st, err, timeout)
+			}
 			if err != nil || gerr != nil {
 				return errors.Join(g.typed(err), gerr)
 			}
@@ -311,7 +326,7 @@ func newAgentWaitCmd() *cobra.Command {
 			}
 			st, err := control.Wait(c, control.RealClock, a.Pane, timeout, done)
 			if err != nil {
-				return err
+				return timedOut(cmd, st, err, timeout)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), st.Trusted())
 			return nil

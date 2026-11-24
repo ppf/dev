@@ -109,10 +109,16 @@ func TestAgentControl(t *testing.T) {
 		})
 		_, errOut, status := devAgent(env, "", "prompt", "w1", "--wait", "again")
 		check(t, "prompt --wait on a busy agent", status+" "+errOut, "1 ❌ agent is working: wait for it first\n")
-		_, _, status = devAgent(env, "", "wait", "w1", "--until", "idle", "--timeout", "500ms")
-		check(t, "wait timeout exit", status, "2")
-		out, _, status := devAgent(env, "", "wait", "w1", "--timeout", "30s")
+		out, errOut, status := devAgent(env, "", "wait", "w1", "--until", "idle", "--timeout", "500ms")
+		check(t, "wait timeout: neutral line on stdout, nothing on stderr, exit 2", status+" "+out+"|"+errOut,
+			"2 working: still at it after 500ms; wait again or read it\n|")
+		out, _, status = devAgent(env, "", "wait", "w1", "--timeout", "30s")
 		check(t, "wait settled", status+" "+out, "0 idle\n")
+		out, errOut, status = devAgent(env, "", "prompt", "w1", "--wait", "--stall", "300ms", "--timeout", "1s", "slow")
+		check(t, "prompt --wait timeout: neutral line, exit 2", status+" "+out+"|"+errOut,
+			"2 working: still at it after 1s; wait again or read it\n|")
+		out, _, status = devAgent(env, "", "wait", "w1", "--timeout", "30s")
+		check(t, "wait settled again", status+" "+out, "0 idle\n")
 	})
 
 	t.Run("permission prompt", func(t *testing.T) {

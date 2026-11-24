@@ -18,16 +18,16 @@ import (
 const (
 	// IdleLimit is how long a boss rests before dev offers to clear it (Offer).
 	IdleLimit = 30 * time.Minute
-	// BigContext is the context share (percent) from which the manager is offered a clear after only QuietFor of rest.
+	// BigContext is the context share (percent) from which a boss is offered a clear after only QuietFor of rest.
 	BigContext = 40
-	// QuietFor is how long the manager rests, at BigContext or more, before dev offers its clear.
+	// QuietFor is how long a boss rests, at BigContext or more, before dev offers its clear.
 	QuietFor = 2 * time.Minute
 	// OptOffered is the coordinator pane option holding the idle stretch (its @agent_since) a clear was last offered for.
 	OptOffered = "@dev_clear_offered"
 	// OptChecked is the coordinator pane option holding "<idle stretch> <unix time>" of the last offer refused by Check:
 	// the full read waits CheckEvery after it
 	OptChecked = "@dev_clear_checked"
-	// OptOfferedAt is the coordinator pane option holding the unix time of the last offer: the manager's early offer
+	// OptOfferedAt is the coordinator pane option holding the unix time of the last offer: a boss's early offer
 	// (QuietFor) waits IdleLimit after it, so a "Not now" isn't asked again after the next turn.
 	OptOfferedAt = "@dev_clear_offered_at"
 	// CheckEvery is how often a stretch Check refused is read again
@@ -54,7 +54,7 @@ type offerRow struct {
 }
 
 // Offer, run by the watch loop of the boss session pane is in, offers once per idle stretch to clear its boss once it
-// has rested IdleLimit (the manager at BigContext or more: QuietFor) and Check passes without --force: a note to the
+// has rested IdleLimit (at BigContext or more: QuietFor, unless the manager has one of its asks up) and Check passes without --force: a note to the
 // manager that started or adopted it, or for the manager itself an ask on its own list, which the user's NEEDS YOU
 // shows (they run dev agent clear from a shell).
 // None for a boss without a live manager over it or a recorded transcript, or while a clear runs; a stretch is marked
@@ -91,9 +91,9 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	idle := now.Sub(time.Unix(since, 0))
 	st := agent.Trusted(r.State, r.StateCmd, r.Command)
 	manager := r.Session == sidebar.Manager
-	limit := IdleLimit
-	if at, err := strconv.ParseInt(r.OfferedAt, 10, 64); manager && used >= BigContext && (err != nil || now.Sub(time.Unix(at, 0)) >= IdleLimit) {
-		limit = QuietFor
+	limit, early := IdleLimit, false
+	if at, err := strconv.ParseInt(r.OfferedAt, 10, 64); used >= BigContext && (err != nil || now.Sub(time.Unix(at, 0)) >= IdleLimit) {
+		limit, early = QuietFor, true
 	}
 	if idle < limit || used < MinContext || st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
 		return nil
@@ -113,6 +113,13 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	}
 	if held, err := inbox.ClearHeld(c, r.Pane); held || err != nil {
 		return err
+	}
+	// A boss's early offer waits for the manager to finish asking the user one of its asks
+	if early && !manager && idle < IdleLimit {
+		asking, err := inbox.ManagerAsking(c, now)
+		if err != nil || slices.ContainsFunc(asking, func(a inbox.Asking) bool { return a.Boss == r.Session }) {
+			return err
+		}
 	}
 	a, err := control.Resolve(c, r.Session)
 	if err != nil {
