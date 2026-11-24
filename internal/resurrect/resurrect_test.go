@@ -1121,10 +1121,22 @@ func TestSnapshotTimeout(t *testing.T) {
 	if took := time.Since(start); took > 4*time.Second {
 		t.Errorf("Snapshot took %v: it waited for save.sh's child", took)
 	}
-	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 1s: dumping") {
+	if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh timed out after 1s (no pane count: tmux list-panes -a -F #{pane_id}: unexpected command): dumping") {
 		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
 	}
 	waitGone(t, childPid(t, pidFile))
+}
+
+// save.sh takes about 0.6-0.9 s per pane (a ps per pane), so a save past snapshotTimeout with many panes isn't hung.
+func TestSnapshotTimeoutPerPane(t *testing.T) {
+	saveScript(t, t.TempDir(), "sleep 2\n")
+	old := snapshotTimeout
+	snapshotTimeout = time.Second
+	t.Cleanup(func() { snapshotTimeout = old })
+	f := &fakeServer{replies: map[string]any{"list-panes -a -F #{pane_id}": "%1\n"}}
+	if err := Snapshot(f.client()); err != nil {
+		t.Errorf("Snapshot = %v, calls %q; want save.sh given time for its pane", err, f.calls)
+	}
 }
 
 // childPid reads the pid save.sh's child wrote to file, killed at the test's end.
