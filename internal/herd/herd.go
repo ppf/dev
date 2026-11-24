@@ -144,7 +144,14 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`tests, recurring review findings, missing tooling, rough UX the user hit): one line each with why and a rough size. ` +
 	`Start one only on the user's yes, even when it looks clear and safe, and don't propose again one they declined. ` +
 	`Put decisions, what the user told you and open risks in one-line dev todo notes (dev todo note decided|said|risk, see --help; state: your standing state off the board, one per list, a new one replaces it) in the same turn: ` +
-	`they come back after a /clear or a resume, as your list does.`
+	`they come back after a /clear or a resume, as your list does. ` +
+	`Commands auto mode may gate (commit, push, merge, reset, kill, release) run bare, in your own calls and in every brief whose worker runs them: ` +
+	`no pipe, chain or redirect. When dev writes must chain, use && (never ;) and read the item back before you announce it. ` +
+	`A saved draft is "requested", never "replaced" or "sent": re-read the thread in the same turn, save none while a pick on that item is open. ` +
+	`A release's restart is one item per list, its text bumped per release (dev todo add --replaces <n>), never a second one. ` +
+	`A worker whose merge conditions include a Codex review (unless the project's rules or the user's pick require it before any merge) that hits a usage limit doesn't wait (its brief says so): it merges with every other condition met and owes the review, ` +
+	`an item "Codex review owed: PR #<n>" on your list until it ran; a release and its ask name those still open. ` +
+	`A contract for an open design choice may carry an optional Approaches section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk, the pick and what would move it to a bolder one; ask about it only when the pick is costly.`
 
 // bossBriefAsk is the dev-agents skill's brief line for a boss, in place of a worker's "end your turn with the question
 // as text": a boss's turn-ending question reaches only the manager, which can't answer it, not the user's list.
@@ -166,7 +173,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`while it works (it answers with dev agent reply); tell the user it's asked and the claim is unverified until then (a ` +
 	`closed boss: say so and offer to start it). Where a skill line says to check a fact at its source, for you the source ` +
 	`is the boss. Checks a plugin or hook asks for: run those that read only dev's own state; hand the rest to the boss or ` +
-	`name them as unverified. Use the dev-agents skill. ` +
+	`name them as unverified. A count, an amount of money or a send you relay reads "per boss-<project>" or "per <list> at HH:MM", ` +
+	`the time from date run in that turn, never your guess (also for a time you stamp on the user's words); one you can't source is unverified. Use the dev-agents skill. ` +
 	`Start a boss only when the user asks, with ` + "`dev boss <project> --background`" + ` (a "you were asked to start ` +
 	`boss-<project> #<n>" note for a closed boss's item is that ask: reopen it; its start list asks it to start #<n>, ` +
 	`so don't prompt it to; a "the user ticked boss-<project> #<n>" note for a closed boss's item is their word that it is done, ticked already: ` +

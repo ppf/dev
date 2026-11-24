@@ -254,3 +254,42 @@ func TestTodoNoteRule(t *testing.T) {
 		}
 	}
 }
+
+// The rules of the 24.11 analysis (PR A): each is pinned in every skill, its boss-core block being shared.
+func TestAnalysisRules(t *testing.T) {
+	for name, text := range byName {
+		for _, want := range []string{
+			// P3: gated commands run bare
+			"Run commands auto mode may gate (commit, push, merge, reset, kill, release) bare: no pipe, chain or redirect",
+			// P4: one CI wait loop, waiting for checks to exist, ending on a pass and on a failed check
+			`for i in $(seq 40); do out=$(gh pr checks <n> 2>&1); rc=$?; [ $rc = 8 ] || { [ $rc = 1 ] && [[ $out == *"no checks reported"* ]]; } || break; sleep 30; done; echo "$out"; echo "exit $rc"; (exit $rc)`,
+			"it waits until checks exist, then ends on all passed or on any failed check",
+			// P6: chained dev writes
+			"use `&&`, never `;`, and read the item back (`dev todo show --print <boss> <n>` for a tmux boss, `dev todo --json` for a desktop or T3 one) before you tell anyone it is written",
+			// P7: drafts
+			"**A saved draft is `requested`,** never `replaced` or `sent`: re-read the thread in the same turn you save it, and save no draft while a pick on that item is open.",
+			// P11, P15: owed Codex reviews
+			"**A release, and the ask put for it, names every owed Codex review still open**",
+			"> If Codex refuses with a usage limit, don't wait for the reset: merge once every other condition holds",
+			`"Codex review owed (usage limit)"`,
+			// P12: one restart item
+			"**One restart item per list:**", "never a second item",
+			// P13: optional Approaches
+			"optional **Approaches** section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk, then the pick and what would move it to a bolder one",
+			"the user is asked about it only when the pick is costly",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: missing %q", name, want)
+			}
+		}
+		for _, old := range []string{"[ $? = 8 ] || break"} {
+			if strings.Contains(text, old) {
+				t.Errorf("%s/SKILL.md: still has the old CI wait %q", name, old)
+			}
+		}
+	}
+	// P9: the manager labels what it relays
+	if want := "A count, an amount of money or a send you relay reads `per boss-<project>` or `per <list> at HH:MM`, the time from `date` run in that turn"; !strings.Contains(DevAgents, want) {
+		t.Errorf("dev-agents/SKILL.md: missing %q", want)
+	}
+}
