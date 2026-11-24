@@ -38,7 +38,8 @@ the other options by its number (as dev todo overrule); o opens
 its link, w goes to the worker it's on, g to its boss; esc closes. The boards' and the sidebar's TO DO open it with space.
 Item n is the open one, else the newest ticked in the last day, as Done shows it. --question refuses it unless item n
 still reads that text (item numbers restart once a list empties). --print prints it instead, no popup: its line as
-dev todo has it (number, mark, text, who it waits on, answer), its context and details, as the manager checks a note.`,
+dev todo has it (number, mark, text, on whom when not you, answer), an open one's context, its details, as the manager
+checks one item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {

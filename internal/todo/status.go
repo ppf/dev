@@ -167,6 +167,22 @@ func (it Shown) Box() string {
 	return "☐"
 }
 
+// ItemState is item id's State: the open one first, as a ticked one may share its number (numbers restart), then a
+// ticked one still on the list, then a finished one; ok false when none is.
+func (l List) ItemState(id int) (state string, ok bool) {
+	i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.ID == id && !it.Done })
+	if i < 0 {
+		i = slices.IndexFunc(l.Items, func(it Shown) bool { return it.ID == id })
+	}
+	if i >= 0 {
+		return l.Items[i].State(), true
+	}
+	if i := slices.IndexFunc(l.Finished, func(f Finished) bool { return f.ID == id }); i >= 0 {
+		return l.Finished[i].Shown().State(), true
+	}
+	return "", false
+}
+
 // State is the item's Box and who it waits on, as a note about it names them: "☐ on you", "☐ boss's own",
 // "◌ on fix-ci", "☑ answered", "☑ done".
 func (it Shown) State() string {

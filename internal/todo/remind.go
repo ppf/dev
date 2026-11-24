@@ -58,14 +58,12 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 	return withTicked(ticked, head+"; the others as before (dev todo lists them):"+items+tickLine+whoLine+detailsLine(items)), shown
 }
 
-// Remind is l's reminder for its boss reading worker notes at now: the full list (Reminder) the first time since its
-// start (StartRemind) or ForgetShown, then only the items changed since under a count line. What it names is kept for
-// the next one.
-func (s Store) Remind(l List, ticked []Ticked, now time.Time) (string, error) {
-	seen, err := s.readShown()
-	if err != nil {
-		return "", err
-	}
+// Remind is l's reminder for its boss reading worker notes at now in conversation (its Claude session id): the full
+// list (Reminder) when none is kept for that conversation (StartRemind or an earlier Remind in it; ForgetShown drops it),
+// else only the items changed since under a count line. What it names is kept for the next one. The text holds even
+// with err: the shown file not read (it is then the full list) or not written.
+func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Time) (string, error) {
+	seen, readErr := s.readShown(conversation)
 	text, shown := l.reminder(ticked, seen, now)
 	// An open item not named again is as the boss last got it
 	for _, it := range l.Items {
@@ -73,13 +71,14 @@ func (s Store) Remind(l List, ticked []Ticked, now time.Time) (string, error) {
 			shown[it.ID] = line
 		}
 	}
-	return text, s.writeShown(shown)
+	return text, errors.Join(readErr, s.writeShown(conversation, shown))
 }
 
-// StartRemind is l's StartReminder, what it names kept for the next Remind.
-func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, now time.Time) (string, error) {
+// StartRemind is l's StartReminder, what it names kept for the next Remind in conversation; the text holds even with
+// err, the shown file not written.
+func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (string, error) {
 	text, shown := l.startReminder(kept, age, ticked, now)
-	return text, s.writeShown(shown)
+	return text, s.writeShown(conversation, shown)
 }
 
 // ForgetShown drops what the boss last got of its list, as a compaction may have dropped it: the next Remind is the full list.
@@ -90,8 +89,15 @@ func (s Store) shownPath() string {
 	return filepath.Join(filepath.Dir(s.path), "shown", filepath.Base(s.path))
 }
 
-// readShown loads the lines its boss last got, nil for none: no file, or one that isn't JSON, which it removes.
-func (s Store) readShown() (map[int]string, error) {
+// shownFile is the lines a boss last got of its list, by item id, and the conversation it got them in.
+type shownFile struct {
+	Conversation string         `json:"conversation"`
+	Lines        map[int]string `json:"lines"`
+}
+
+// readShown is the lines its boss last got in conversation, nil for none: no file, another conversation's, or one
+// that isn't JSON, which it removes and reports.
+func (s Store) readShown(conversation string) (map[int]string, error) {
 	data, err := os.ReadFile(s.shownPath())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -99,20 +105,23 @@ func (s Store) readShown() (map[int]string, error) {
 	case err != nil:
 		return nil, err
 	}
-	var seen map[int]string
-	if json.Unmarshal(data, &seen) != nil || seen == nil {
-		return nil, ignoreMissing(os.Remove(s.shownPath()))
+	var f shownFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, errors.Join(fmt.Errorf("%s: %w: removed, the full list goes out", s.shownPath(), err), ignoreMissing(os.Remove(s.shownPath())))
 	}
-	return seen, nil
+	if f.Conversation != conversation || f.Lines == nil {
+		return nil, nil
+	}
+	return f.Lines, nil
 }
 
-// writeShown keeps shown as the lines its boss last got.
-func (s Store) writeShown(shown map[int]string) error {
+// writeShown keeps shown as the lines its boss last got in conversation.
+func (s Store) writeShown(conversation string, shown map[int]string) error {
 	path := s.shownPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.Marshal(shown)
+	data, err := json.Marshal(shownFile{Conversation: conversation, Lines: shown})
 	if err != nil {
 		return err
 	}

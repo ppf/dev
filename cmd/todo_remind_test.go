@@ -36,6 +36,13 @@ func TestStateSideSessionsTodoChanges(t *testing.T) {
 	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "3 open, 1 changed since the last one; the others as before (dev todo lists them):\n3. Tag v1") {
 		t.Errorf("after an add = %q, want only the new item", got)
 	}
+	// Another conversation (a restored boss): the full list
+	other := event
+	event = strings.Replace(event, `"s1"`, `"s2"`, 1)
+	if got := context(); !strings.Contains(got, "1. Merge PR #9 (no details)\n2. Ship v1 (no details)\n3. Tag v1") {
+		t.Errorf("another conversation = %q, want the full list", got)
+	}
+	event = other
 	run(t, `{"hook_event_name":"SessionStart","session_id":"s1","source":"compact"}`, "state", "working")
 	if got := context(); !strings.Contains(got, "1. Merge PR #9 (no details)\n2. Ship v1 (no details)\n3. Tag v1") {
 		t.Errorf("after a compaction = %q, want the full list", got)

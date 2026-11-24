@@ -180,6 +180,8 @@ func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
 		Name   string `json:"hook_event_name"`
 		Prompt string `json:"prompt"`
 		Source string `json:"source"`
+		// The conversation (todo.Store.Remind)
+		Session string `json:"session_id"`
 	}
 	id := os.Getenv("CLAUDE_CODE_HOST_SESSION_ID")
 	if json.Unmarshal(input, &e) != nil || id == "" {
@@ -196,7 +198,7 @@ func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
 			return "", err
 		}
 		hint := func(s todo.Store) string { return desktopHint(cmd, s, id) }
-		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, hint, e.Source, time.Now())
+		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, hint, e.Source, e.Session, time.Now())
 	}
 	if e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") {
 		return "", nil
@@ -221,9 +223,11 @@ func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	text, err := s.Remind(l, ticked, now)
-	if text == "" || err != nil {
+	// The text holds even with err: what it named not kept
+	text, err := s.Remind(l, ticked, e.Session, now)
+	if text == "" {
 		return "", err
 	}
-	return inbox.PromptContext(text)
+	out, jerr := inbox.PromptContext(text)
+	return out, errors.Join(err, jerr)
 }

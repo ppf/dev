@@ -974,8 +974,12 @@ func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, f
 func waitsOnYou(boss string, stderr io.Writer, id int, text string, options []string) {
 	pane, _, err := todoBoss(boss)
 	queued := false
+	var noState error
 	if err == nil && pane != "" {
-		queued, err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, text, options)
+		queued, noState, err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, text, options)
+	}
+	if noState != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: the boss above's note lacks the item's state: "+noState.Error())
 	}
 	switch {
 	case err != nil && queued:

@@ -20,3 +20,17 @@ func TestShownState(t *testing.T) {
 		}
 	}
 }
+
+// A note names the open item of a number first: a ticked one may share it (numbers restart); then a ticked or finished one.
+func TestListItemState(t *testing.T) {
+	l := List{Items: []Shown{{ID: 1, Text: "old", Done: true, Answer: "Merge"}, {ID: 1, Text: "new"}, {ID: 2, Done: true}},
+		Finished: []Finished{{ID: 3, Text: "gone", Answer: "Wait"}}}
+	for id, want := range map[int]string{1: "☐ on you", 2: "☑ done", 3: "☑ answered"} {
+		if got, ok := l.ItemState(id); !ok || got != want {
+			t.Errorf("#%d: %q %v, want %q", id, got, ok, want)
+		}
+	}
+	if got, ok := l.ItemState(4); ok {
+		t.Errorf("#4: %q, want none", got)
+	}
+}

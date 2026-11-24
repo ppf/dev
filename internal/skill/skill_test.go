@@ -175,8 +175,8 @@ func TestAskRules(t *testing.T) {
 		// The manager puts asks to the user itself; the shared boss rule stays dev todo ask
 		"Unlike a boss (this overrides \"Never wait on a decision\" above), you put what waits on the user to them yourself, one by one with AskUserQuestion",
 		"**One question per call, in order.** Re-check its item right before each with `dev todo show --print <boss> <n>`",
-		"names its number, mark and who it waits on as dev has them (`boss-<project> waits on you: #<n> ☐ on you: …`)",
-		"then only the items changed since under a count line",
+		"name the item's number, mark and who it waits on as dev had them when the note went (`boss-<project> waits on you: #<n> ☐ on you: …`)",
+		"only the items changed since you last got it, under a count line",
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
 		"a message the user typed here answers no item (dev refuses it): ask that item as a question",
