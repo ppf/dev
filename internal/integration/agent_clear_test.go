@@ -15,7 +15,8 @@ import (
 // clearStub is a Claude stand-in for dev agent clear: hooks like agentStub's (SessionStart's output kept in
 // $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn after each turn, and the
 // files dev asks for copied from $STUB_DIR: save.md as the handoff, fix.md on a handoff fix, proof.md as the proof,
-// proof-fix.md on a proof fix (a missing source writes nothing). On the save prompt it runs $STUB_DIR/on-save if
+// proof-fix.md on a proof fix (a missing source writes nothing); with $STUB_DIR/noclear there it ignores /clear. On
+// the save prompt it runs $STUB_DIR/on-save if
 // there; with $STUB_DIR/decide there, a turn ends on a permission prompt.
 func clearStub(t *testing.T, dir string) string {
 	t.Helper()
@@ -28,6 +29,10 @@ stty -icanon 2>/dev/null
 hook idle SessionStart startup
 box
 while IFS= read -r line; do
+	if [ "$line" = /clear ] && [ -f "$STUB_DIR/noclear" ]; then
+		box
+		continue
+	fi
 	if [ "$line" = /clear ]; then
 		hook clear SessionEnd
 		n=$((n + 1))
@@ -147,6 +152,30 @@ func TestAgentClear(t *testing.T) {
 	s.T("set-option", "-p", "-t", app, "@dev_handoff", strconv.Itoa(os.Getpid())+" "+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)+" s0 /other.md")
 	refused("another clear running", manager, "boss-app", "another dev agent clear runs for boss-app")
 	s.T("set-option", "-pu", "-t", app, "@dev_handoff")
+	s.T("set-option", "-pu", "-t", app, "@agent_transcript")
+	refused("no transcript recorded", manager, "boss-app", "boss-app's hook records no transcript path")
+	s.T("set-option", "-p", "-t", app, "@agent_transcript", filepath.Join(appDir, "s0.jsonl"))
+	refused("--facts unreadable", manager, "boss-app", "--facts: open "+filepath.Join(tmp, "none.md"), "--facts", filepath.Join(tmp, "none.md"))
+	writeFile(t, filepath.Join(tmp, "plain.md"), "the user is away\n")
+	refused("--facts without numbered facts", manager, "boss-app", "no numbered facts", "--facts", filepath.Join(tmp, "plain.md"))
+
+	// A running clear's hold: a worker's note to an idle boss with an empty box stays queued, not pasted
+	held, _ := boss("boss-held")
+	s.T("set-option", "-p", "-t", held, "@dev_handoff", strconv.Itoa(os.Getpid())+" "+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)+" s0 /h.md")
+	s.T("new-session", "-d", "-s", "held-w", "sleep 600")
+	s.T("set-option", "-t", "=held-w:", "@dev_started_by", "boss-held")
+	hw := pane("held-w")
+	s.T("set-option", "-p", "-t", hw, "@agent_state", "working", ";", "set-option", "-p", "-t", hw, "@agent_cmd", "sleep")
+	heldPrompts := opt(held, "@agent_prompts")
+	if _, e, st := runDev(append(env, "TMUX_PANE="+hw), `{"hook_event_name":"Stop","last_assistant_message":"done"}`, "state", "idle"); st != "0" {
+		t.Fatalf("❌ worker state: %s", e)
+	}
+	// The note waits in its inbox (the clear refuses on it), and nothing was pasted
+	if _, e, st := dev(manager, "agent", "clear", "boss-held"); st == "0" || !strings.Contains(e, "inbox notes wait for it") || opt(held, "@agent_prompts") != heldPrompts {
+		t.Errorf("❌ held boss: exit %s, prompts %q → %q: %s", st, heldPrompts, opt(held, "@agent_prompts"), e)
+	}
+	s.T("set-option", "-pu", "-t", held, "@dev_handoff")
+	t.Log("✅ a hold keeps a worker's note queued, unpasted")
 	if _, e, st := runDev(env, "", "agent", "clear", "boss-app"); st == "0" || !strings.Contains(e, "cleared only by its manager's coordinator pane") {
 		t.Errorf("❌ a Claude session outside tmux: exit %s, %s", st, e)
 	}
@@ -164,11 +193,11 @@ func TestAgentClear(t *testing.T) {
 	transcript, good := filepath.Join(appDir, "s0.jsonl"), handoff(appDir)
 	proof := "## Key facts\n1. Mail on Friday. confirmed: #1\n2. v2 ready. unconfirmed\n\n## Open asks\n#2: Ship → release worker; Wait → park.\n\n" +
 		"## Roles\nThe manager answers my workers' permission prompts and dialogs and relays my asks.\n"
-	// stopped runs dev agent clear on name from caller with env, and wants it to fail with every one of want and
+	// stopped runs dev agent clear on name (with extra args) from caller with env, and wants it to fail with every one of want and
 	// the boss on conversation s<n>
-	stopped := func(t *testing.T, env []string, caller, name, conversation string, want ...string) {
+	stopped := func(t *testing.T, env []string, extra []string, caller, name, conversation string, want ...string) {
 		t.Helper()
-		_, e, st := runDev(append(env, "TMUX_PANE="+caller), "", "agent", "clear", name)
+		_, e, st := runDev(append(env, "TMUX_PANE="+caller), "", append([]string{"agent", "clear", name}, extra...)...)
 		for _, w := range want {
 			if st == "0" || !strings.Contains(e, w) {
 				t.Fatalf("❌ exit %s, want %q in: %s", st, w, e)
@@ -197,13 +226,13 @@ func TestAgentClear(t *testing.T) {
 
 	t.Run("handoff never written: not cleared", func(t *testing.T) {
 		boss("boss-mute")
-		stopped(t, env, manager, "boss-mute", "s0", "wasn't written", "nothing cleared")
+		stopped(t, env, nil, manager, "boss-mute", "s0", "wasn't written", "nothing cleared")
 	})
 
 	t.Run("save turn ends on a permission prompt: not cleared", func(t *testing.T) {
 		_, dir := boss("boss-ask")
 		write(dir, "decide", "")
-		stopped(t, env, manager, "boss-ask", "s0", "turn ended on a decision (permission_prompt)", "nothing cleared")
+		stopped(t, env, nil, manager, "boss-ask", "s0", "turn ended on a decision (permission_prompt)", "nothing cleared")
 	})
 
 	t.Run("a worker's note during the save: held, then refuses", func(t *testing.T) {
@@ -218,15 +247,27 @@ func TestAgentClear(t *testing.T) {
 		if err := os.Chmod(filepath.Join(dir, "on-save"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		stopped(t, env, manager, "boss-busy", "s0", "inbox notes wait for it", "nothing cleared")
+		stopped(t, env, nil, manager, "boss-busy", "s0", "inbox notes wait for it", "nothing cleared")
 	})
 
+	t.Run("proof never written: cleared, paths and the proof prompt printed", func(t *testing.T) {
+		_, dir := boss("boss-quiet")
+		write(dir, "save.md", handoff(dir))
+		stopped(t, env, nil, manager, "boss-quiet", "s1", "wasn't written", "the proof prompt to send by hand first")
+	})
+
+	t.Run("/clear not confirmed: the boss may still clear, proof prompt printed", func(t *testing.T) {
+		_, dir := boss("boss-stuck")
+		write(dir, "save.md", handoff(dir))
+		write(dir, "noclear", "")
+		stopped(t, env, []string{"--stall", "2s"}, manager, "boss-stuck", "s0", "/clear: ", "it may still clear", "the proof prompt to send by hand first")
+	})
 	t.Run("proof misses twice: cleared, paths and the proof prompt printed", func(t *testing.T) {
 		_, dir := boss("boss-lax")
 		write(dir, "save.md", handoff(dir))
 		write(dir, "proof.md", strings.Replace(proof, "## Roles", "## Who", 1))
 		write(dir, "proof-fix.md", strings.Replace(proof, "## Roles", "## Who", 1))
-		stopped(t, env, manager, "boss-lax", "s1", "still misses: sections missing: ## Roles", "the proof prompt to send by hand first", "command ends): [dev agent clear] Read ",
+		stopped(t, env, nil, manager, "boss-lax", "s1", "still misses: sections missing: ## Roles", "the proof prompt to send by hand first", "command ends): [dev agent clear] Read ",
 			"old transcript "+filepath.Join(dir, "s0.jsonl"))
 	})
 

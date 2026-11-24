@@ -213,7 +213,7 @@ func TestVerifyProof(t *testing.T) {
 // paste.
 func TestPrompts(t *testing.T) {
 	save := SavePrompt("/s/h.md", transcript, "/s/h-facts.md")
-	for _, want := range append([]string{"/s/h.md", transcript, "/s/h-facts.md", "--details", "dev todo note", "at most 15"}, Sections...) {
+	for _, want := range append([]string{"/s/h.md", transcript, "/s/h-facts.md", "--details", "dev todo ask --replaces", "dev todo note", "at most 15", "never worded as done"}, Sections...) {
 		if !strings.Contains(save, want) {
 			t.Errorf("save prompt lacks %q", want)
 		}

@@ -431,7 +431,7 @@ func SavePrompt(path, transcript, facts string) string {
 		"item's status, and --details on every item the user or a person owes (dev todo add --replaces <n> --details '…'; an ask: dev todo ask --replaces <n> --details '…', which keeps its question's time); " +
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
-		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\". " +
+		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\"; an unconfirmed fact is never worded as done (not \"is merged\", but \"reported merged, not checked\"). " +
 		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {
