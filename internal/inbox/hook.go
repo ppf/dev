@@ -157,21 +157,7 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 			return "", err
 		}
 	}
-	out, err := func() (string, error) {
-		s, err := todo.ForPane(c, pane)
-		if errors.Is(err, todo.ErrNotBoss) {
-			// A restored boss is marked one only after its coordinator starts
-			return "", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if handoff != "" {
-			listHint := hint
-			hint = func(s todo.Store) string { return strings.TrimSpace(listHint(s) + "\n" + handoff) }
-		}
-		return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
-	}()
+	out, err := listContext(c, pane, source, hint, handoff)
 	if err != nil && handoff != "" {
 		// The fresh boss still gets its handoff, and why its list is missing
 		data, jerr := json.Marshal(hookContext("SessionStart", handoff+"\ndev couldn't give your list and notes ("+err.Error()+
@@ -179,6 +165,23 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 		return string(data), errors.Join(err, jerr)
 	}
 	return out, err
+}
+
+// listContext is startList's output from the boss's list and notes, with the handoff line (when any) after hint's.
+func listContext(c *tmux.Client, pane, source string, hint Hint, handoff string) (string, error) {
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		// A restored boss is marked one only after its coordinator starts
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if handoff != "" {
+		listHint := hint
+		hint = func(s todo.Store) string { return strings.TrimSpace(listHint(s) + "\n" + handoff) }
+	}
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
 }
 
 // handoffLine is the start line naming the handoff of the dev agent clear that, still running, cleared pane's

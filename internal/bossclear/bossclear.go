@@ -203,8 +203,11 @@ func facts(lines []string) []Fact {
 func StatedDone(fs []Fact) string {
 	var nums, words []string
 	for _, f := range fs {
+		if f.Mark != "unconfirmed" {
+			continue
+		}
 		text := emphasis.Replace(f.Text)
-		if w := doneWord.FindString(text); f.Mark == "unconfirmed" && w != "" && !hedge.MatchString(text) {
+		if w := doneWord.FindString(text); w != "" && !hedge.MatchString(text) {
 			nums, words = append(nums, strconv.Itoa(f.N)), append(words, strconv.Quote(strings.ToLower(w)))
 		}
 	}
