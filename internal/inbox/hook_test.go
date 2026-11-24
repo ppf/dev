@@ -484,3 +484,41 @@ func TestStartContextHint(t *testing.T) {
 		t.Errorf("compact: %q, want nothing", out)
 	}
 }
+
+// A start's list is what the next reminder compares against; a compaction makes the next one the full list again.
+func TestStartContextShown(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s, err := todo.Desktop("local_boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(todo.Item{Text: "Ship", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	none := func() ([]todo.Session, error) { return nil, nil }
+	remind := func() string {
+		t.Helper()
+		l, err := s.Read(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Remind(l, nil, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if _, err := StartContext(s, none, noHint, "clear", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := remind(); !strings.Contains(got, "1 open, none changed") {
+		t.Errorf("after a start = %q, want the count line", got)
+	}
+	if _, err := StartContext(s, none, noHint, "compact", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := remind(); !strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. Ship\n") {
+		t.Errorf("after a compaction = %q, want the full list", got)
+	}
+}

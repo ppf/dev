@@ -106,7 +106,7 @@ func TestManagerAdoptClose(t *testing.T) {
 	}
 
 	ok(app, "todo", "add", "--no-details", "Pick a name")
-	if got := take(); !strings.Contains(got, "boss-app waits on you: #2 Pick a name") || strings.Contains(got, "Before") {
+	if got := take(); !strings.Contains(got, "boss-app waits on you: #2 ☐ on you: Pick a name") || strings.Contains(got, "Before") {
 		t.Errorf("❌ manager's batch:\n%s", got)
 	}
 

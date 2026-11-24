@@ -25,6 +25,7 @@ const showGuard = "DEV_TODO_SHOW_IN_POPUP"
 
 func newTodoShowCmd(boss *string) *cobra.Command {
 	var client, question string
+	var print bool
 	cmd := &cobra.Command{
 		Use:   "show <boss> <n>",
 		Short: "Show item n of a dev boss's list in a popup, as the user: answer it, tick, start, mark it in progress, reopen it, open its link, go to its boss or worker",
@@ -36,7 +37,8 @@ stopped (i again), your own ticked one reopened (r, as dev todo reopen), or, dec
 the other options by its number (as dev todo overrule); o opens
 its link, w goes to the worker it's on, g to its boss; esc closes. The boards' and the sidebar's TO DO open it with space.
 Item n is the open one, else the newest ticked in the last day, as Done shows it. --question refuses it unless item n
-still reads that text (item numbers restart once a list empties).`,
+still reads that text (item numbers restart once a list empties). --print prints it instead, no popup: its line as
+dev todo has it (number, mark, text, who it waits on, answer), its context and details, as the manager checks a note.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
@@ -51,6 +53,10 @@ still reads that text (item numbers restart once a list empties).`,
 			it, err := showItem(c, cmd.ErrOrStderr(), name, id, question)
 			if err != nil {
 				return err
+			}
+			if print {
+				printShown(cmd.OutOrStdout(), it.Shown, time.Now())
+				return nil
 			}
 			if client == "" {
 				if client, err = c.Run("display-message", "-p", "#{client_name}"); err != nil {
@@ -76,7 +82,18 @@ still reads that text (item numbers restart once a list empties).`,
 	}
 	cmd.Flags().StringVar(&client, "client", "", "the tmux client to show it on and switch: tmux's current one by default")
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
+	cmd.Flags().BoolVar(&print, "print", false, "print the item as text instead of the popup")
 	return cmd
+}
+
+// printShown prints it at now as dev todo show --print does: printItem, then its details indented.
+func printShown(out io.Writer, it todo.Shown, now time.Time) {
+	printItem(out, "", it, now)
+	if it.Details != "" {
+		for _, l := range strings.Split(it.Details, "\n") {
+			fmt.Fprintln(out, strings.TrimRight("    "+l, " "))
+		}
+	}
 }
 
 // showItem is item id of boss name's list as dev todo --all --json has it, its status set: the open one, else the newest

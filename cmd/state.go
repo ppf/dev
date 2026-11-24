@@ -221,8 +221,9 @@ func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if text := l.Reminder(ticked, now); text != "" {
-		return inbox.PromptContext(text)
+	text, err := s.Remind(l, ticked, now)
+	if text == "" || err != nil {
+		return "", err
 	}
-	return "", nil
+	return inbox.PromptContext(text)
 }

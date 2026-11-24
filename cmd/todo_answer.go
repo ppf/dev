@@ -55,7 +55,7 @@ func tellAbove(c *tmux.Client, pane string, it todo.Item, note inbox.Note, warn 
 	if it.Quiet {
 		return
 	}
-	queued, err := inbox.AnsweredUp(c, control.RealClock, pane, note)
+	queued, err := inbox.AnsweredUp(c, control.RealClock, pane, it.ID, note)
 	switch {
 	case err != nil && queued:
 		warn("queued for the boss above, delivered when it next rests: " + err.Error())

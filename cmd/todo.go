@@ -1201,14 +1201,7 @@ func printItem(out io.Writer, prefix string, it todo.Shown, now time.Time) {
 // todoLine is an item as text at now: number, ☐ (◌ waiting on someone else than the boss, ☑ ticked), text, who it waits on, link,
 // who is on it (OnIt), why to re-check it.
 func todoLine(it todo.Shown, now time.Time) string {
-	box := "☐"
-	switch {
-	case it.Done:
-		box = "☑"
-	case it.On != "" && !todo.OnBoss(it.On, it.Session):
-		box = "◌"
-	}
-	parts := []string{strconv.Itoa(it.ID), box, it.Text}
+	parts := []string{strconv.Itoa(it.ID), it.Box(), it.Text}
 	switch {
 	case it.Gone:
 		parts = append(parts, "on "+it.On+", session gone")

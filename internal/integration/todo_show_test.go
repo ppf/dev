@@ -25,6 +25,12 @@ func TestTodoShow(t *testing.T) {
 		t.Errorf("❌ show of no item: %v, want refused", err)
 	}
 
+	// --print: the item as text, no popup, as the manager checks a note from a Claude pane
+	if out, err := dev([]string{"TMUX_PANE=", "CLAUDECODE=1"}, "todo", "show", "--print", "boss-a", "1"); err != nil ||
+		out != "1\t☐\tMerge #148?\toptions: Merge | ships today (Recommended) · Wait\n    - CI green\n" {
+		t.Errorf("❌ show --print = %q, %v", out, err)
+	}
+
 	s.T("new-window", "-t", "=boss-a:", "-e", "DEV_TODO_SHOW_IN_POPUP=1", "-e", "CLAUDECODE=", devBin, "todo", "show", "boss-a", "1")
 	view := s.T("display", "-t", "=boss-a:2", "-p", "#{pane_id}")
 	waitFor(t, "the view drawn", func() bool {

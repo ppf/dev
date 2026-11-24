@@ -120,9 +120,9 @@ func TestBossUnderBoss(t *testing.T) {
 		"- boss-app asks: Merge it? - yes - no",
 		"- boss-app asks: Reply **Done** once it's connected, or **Skip** to leave it.",
 		"- boss-app needs a decision: Claude needs your permission to use Bash",
-		"- boss-app waits on you: #1 Pick a name",
-		"- boss-app waits on you: #3 Merge #148? (options: Merge (Recommended) / Wait)",
-		"- boss-app waits on you: #2 Fix CI",
+		"- boss-app waits on you: #1 ☐ on you: Pick a name",
+		"- boss-app waits on you: #3 ☐ on you: Merge #148? (options: Merge (Recommended) / Wait)",
+		"- boss-app waits on you: #2 ☐ on you: Fix CI",
 		"from boss-app",
 	} {
 		if !strings.Contains(got, want) {

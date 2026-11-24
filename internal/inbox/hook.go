@@ -32,7 +32,7 @@ type bossEvent struct {
 // stdout JSON, "" for none. A Stop already continuing from a block (stop_hook_active) is let through, so
 // a boss never loops on its own hook. A UserPromptSubmit showing the batch sent over the socket clears it (Arrived).
 // Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
-// list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
+// list (todo.Store.Remind), so it ticks what they closed in the same turn; a list it can't read is err, the
 // notes still out. On SessionStart it gives the coordinator its open list (startList), then hint's line. Any pane
 // but a coordinator's is left alone. A PostToolUse of the coordinator's AskUserQuestion keeps the user's pick (Box.Picked).
 func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string, busy bool, err error) {
@@ -123,7 +123,7 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 }
 
 // openList is the open to do list of the boss session pane is in, after its items ticked by themselves, told once
-// (todo.List.Reminder); "" when none ticked and none is open.
+// (todo.Store.Remind: the items changed since the last one); "" when none ticked and none is open.
 func openList(c *tmux.Client, pane string) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if err != nil {
@@ -140,7 +140,8 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	if err != nil {
 		return "", errors.Join(gone, err)
 	}
-	return l.Reminder(ticked, now), gone
+	text, err := s.Remind(l, ticked, now)
+	return text, errors.Join(gone, err)
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
@@ -185,10 +186,11 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 type Hint func(s todo.Store) string
 
 // StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,
-// then hint's line; "" after a compaction, whose summary carries them.
+// then hint's line; "" after a compaction, whose summary carries them, the next reminder then the full list.
 func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, source string, now time.Time) (string, error) {
 	if source == "compact" {
-		return "", nil
+		// The summary may not keep every item: the next reminder is the full list
+		return "", s.ForgetShown()
 	}
 	l, err := s.Read(now)
 	if err != nil {
@@ -210,7 +212,11 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hin
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	parts := []string{l.StartReminder(source == "startup", age, ticked, now), todo.NotesText(notes, now), hint(s)}
+	list, err := s.StartRemind(l, source == "startup", age, ticked, now)
+	if err != nil {
+		return "", err
+	}
+	parts := []string{list, todo.NotesText(notes, now), hint(s)}
 	text := strings.Join(slices.DeleteFunc(parts, func(t string) bool { return t == "" }), "\n")
 	if text == "" {
 		return "", nil
@@ -438,19 +444,50 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 	if len(options) > 0 {
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
-	text = clean(fmt.Sprintf("#%d %s", id, text))
+	// Still sent without its state: the item is on the list
+	state, stateErr := itemState(c, pane, id, clk.Now())
+	text = clean(fmt.Sprintf("#%d %s%s", id, state, text))
 	// Each its own: an item given back with the same text is news again
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
+	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
+	return queued, errors.Join(stateErr, err)
 }
 
-// AnsweredUp tells the boss above, as WaitsOn, that the user answered an ask of the boss session pane is in, answer
-// being the note that boss got: an AskAnswered note, so the boss above drops its question for it.
-func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, answer Note) (queued bool, err error) {
+// itemState is item id's mark and who it waits on (todo.Shown.State) on the list of the boss session pane is in, then
+// ": ", so a note about it names them as dev has them; "" with the error when the list can't say.
+func itemState(c *tmux.Client, pane string, id int, now time.Time) (string, error) {
+	s, err := todo.ForPane(c, pane)
+	if err != nil {
+		return "", err
+	}
+	l, err := s.Read(now)
+	if err != nil {
+		return "", err
+	}
+	// The open one first: a ticked one may share its number (numbers restart)
+	if i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done }); i >= 0 {
+		return l.Items[i].State() + ": ", nil
+	}
+	if i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id }); i >= 0 {
+		return l.Items[i].State() + ": ", nil
+	}
+	if i := slices.IndexFunc(l.Finished, func(f todo.Finished) bool { return f.ID == id }); i >= 0 {
+		return l.Finished[i].Shown().State() + ": ", nil
+	}
+	return "", fmt.Errorf("#%d left the list", id)
+}
+
+// AnsweredUp tells the boss above, as WaitsOn, that the user answered ask id of the boss session pane is in, answer
+// being the note that boss got: an AskAnswered note, its state after its number, so the boss above drops its question for it.
+func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, id int, answer Note) (queued bool, err error) {
 	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil || w.Herd == "" {
 		return false, err
 	}
+	num := fmt.Sprintf("#%d ", id)
+	state, stateErr := itemState(c, pane, id, clk.Now())
+	text := strings.Replace(answer.Text, num, num+state, 1)
 	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(answer.Text), Key: key})
+	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(text), Key: key})
+	return queued, errors.Join(stateErr, err)
 }

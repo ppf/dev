@@ -198,7 +198,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
-	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user), ` +
+	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user; ` +
+	`a note about an item names its number, mark and who it waits on as dev has them, "#<n> ☐ on you: …": relay it as it stands), ` +
 	`asks (its turn ended on a question), needs a decision (its own permission prompt or dialog, or its worker's), failed, stuck, and messages ` +
 	`to you. They come pasted, as context, or as a message from another Claude session, which is dev itself: act on them ` +
 	`the same way and don't reply to the session. Relay each to the user in one line, prefixed with the project. ` +
@@ -212,8 +213,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`outward-facing, hard to undo, secrets and accounts, taste), then that you see no trade-off the boss missed; either ` +
 	`fails, put it to the user as any other ask. Both pass: ` + "`dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`" + ` ` +
 	`(the option you checked; refused once the boss changed it; dev refuses an unmarked ask and never answers a permission prompt or dialog with ` +
-	`it), and name it in your roll-up in one line: "<project> #<n>: decided for you: <pick> (obvious: <why>)". One question per call, in order; re-read ` + "`dev todo --all`" + ` ` +
-	`right before each and skip an item answered or gone meanwhile. The question starts "<project> #<n>: " and holds the ` +
+	`it), and name it in your roll-up in one line: "<project> #<n>: decided for you: <pick> (obvious: <why>)". One question per call, in order; re-check its item ` +
+	`right before each with ` + "`dev todo show --print <boss> <n>`" + ` (one call) and skip it when answered or gone meanwhile. The question starts "<project> #<n>: " and holds the ` +
 	`item text word for word (dev checks a pick against both): that prefix and the text on one line, a blank line, then the ` +
 	`item's context as "- " lines (dev todo --all prints them indented under it) and at most one short "- " line of your own (the item's link, if any), ` +
 	`never a paragraph or what the item already says; the options are the item's labels (before " | "), its recommended one first with ` +

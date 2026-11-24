@@ -156,6 +156,33 @@ func (o Owner) bossName() string { return cmp.Or(o.Name, Boss) }
 // OnBoss reports an item its list's boss does itself: on Boss, linked to no session.
 func OnBoss(on string, session *Session) bool { return on == Boss && session == nil }
 
+// Box is the item's mark on a list: ☐ open, ◌ waiting on someone else than its boss, ☑ ticked.
+func (it Shown) Box() string {
+	switch {
+	case it.Done:
+		return "☑"
+	case it.On != "" && !OnBoss(it.On, it.Session):
+		return "◌"
+	}
+	return "☐"
+}
+
+// State is the item's Box and who it waits on, as a note about it names them: "☐ on you", "☐ boss's own",
+// "◌ on fix-ci", "☑ answered", "☑ done".
+func (it Shown) State() string {
+	switch {
+	case it.Done && it.Answer != "":
+		return it.Box() + " answered"
+	case it.Done:
+		return it.Box() + " done"
+	case OnBoss(it.On, it.Session):
+		return it.Box() + " boss's own"
+	case it.On != "":
+		return it.Box() + " on " + it.On
+	}
+	return it.Box() + " on you"
+}
+
 // Own reports an item on no one, or unlinked (no session) on boss itself: an older dev filed --on <own name> as a
 // person; its status is the user's, and the user ticks or answers it. On Boss is the boss's, even for a boss named boss.
 func Own(on string, session *Session, boss string) bool {

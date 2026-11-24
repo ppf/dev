@@ -85,7 +85,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 
 	must(boss, "", "todo", "add", "--no-details", "Keep me") // never ticked: item numbers don't restart
 	must(boss, "", "todo", "ask", "Filter row?", "--option", "A: chips", "--option", "B: label + filter row (Recommended)")
-	if got := take(); !strings.Contains(got, "- boss-a waits on you: #2 Filter row?") {
+	if got := take(); !strings.Contains(got, "- boss-a waits on you: #2 ☐ on you: Filter row?") {
 		t.Fatalf("❌ the manager's batch lacks the ask:\n%s", got)
 	}
 	time.Sleep(1100 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 		t.Fatalf("❌ page answer: %v %v", resp, err)
 	}
 	_ = resp.Body.Close()
-	if got, want := take(), `- boss-a ask answered: #2 "Filter row?" on the phone page: B: label + filter row; drop its question: don't ask or relay it`; !strings.Contains(got, want) {
+	if got, want := take(), `- boss-a ask answered: #2 ☑ answered: "Filter row?" on the phone page: B: label + filter row; drop its question: don't ask or relay it`; !strings.Contains(got, want) {
 		t.Errorf("❌ the manager's batch after the page's answer:\n%s\nwant %q", got, want)
 	}
 	waitFor(t, "boss-a told once", func() bool { return answered() == 1 })
@@ -125,7 +125,7 @@ func TestTodoAnsweredElsewhere(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	pick("boss-a #3: Tag it?", "Skip")
 	must([]string{"TMUX_PANE=", "CLAUDECODE=1"}, "", "todo", "answer", "--from-board", "--question", "Tag it?", "boss-a", "3", "Tag")
-	if got, want := take(), `- boss-a ask answered: #3 "Tag it?": Tag; drop its question: don't ask or relay it`; !strings.Contains(got, want) {
+	if got, want := take(), `- boss-a ask answered: #3 ☑ answered: "Tag it?": Tag; drop its question: don't ask or relay it`; !strings.Contains(got, want) {
 		t.Errorf("❌ the manager's batch after the board's answer:\n%s\nwant %q", got, want)
 	}
 	if _, stderr, err := relay("3", "Skip", "Tag it?"); err == nil || !strings.Contains(stderr, `item 3 is answered already: the user answered "Tag" in the sidebar, a board or a shell, not "Skip"`) {
