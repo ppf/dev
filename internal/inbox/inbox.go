@@ -418,8 +418,8 @@ type state struct {
 	Pick *Prompt `json:"pick,omitempty"`
 	// Asking is the items whose questions the coordinator has up in its dialog (SetAsking), until its pick
 	Asking []Asking `json:"asking_items,omitempty"`
-	// GoSpent is the transcript entry of the user's typed go a send used (ClaimGo)
-	GoSpent string `json:"go_spent,omitempty"`
+	// GoSpent is the transcript entries of the user's typed gos sends used (ClaimGo), the latest maxGoSpent
+	GoSpent []string `json:"go_spent,omitempty"`
 }
 
 // Prompt is a prompt the coordinator got at At (unix seconds).
@@ -824,13 +824,18 @@ func (p *Prompt) has(i int) bool {
 	return i < len(p.Asks) && (i < 0) == (len(p.Asks) == 0)
 }
 
+// maxGoSpent is how many spent typed gos a box keeps: a send reading an older one while others claim newer still
+// finds it spent.
+const maxGoSpent = 50
+
 // ClaimGo spends g, the user's typed go: refused once spent.
 func (b Box) ClaimGo(g Go) error {
 	return b.update(func(s *state) error {
-		if s.GoSpent == g.UUID {
+		if slices.Contains(s.GoSpent, g.UUID) {
 			return errors.New("--go: the user's latest message was used for a send already" + askAgain)
 		}
-		s.GoSpent = g.UUID
+		s.GoSpent = append(s.GoSpent, g.UUID)
+		s.GoSpent = s.GoSpent[max(0, len(s.GoSpent)-maxGoSpent):]
 		return nil
 	})
 }
@@ -838,9 +843,7 @@ func (b Box) ClaimGo(g Go) error {
 // UnclaimGo gives back g, claimed for a send that didn't reach the boss.
 func (b Box) UnclaimGo(g Go) error {
 	return b.update(func(s *state) error {
-		if s.GoSpent == g.UUID {
-			s.GoSpent = ""
-		}
+		s.GoSpent = slices.DeleteFunc(s.GoSpent, func(id string) bool { return id == g.UUID })
 		return nil
 	})
 }

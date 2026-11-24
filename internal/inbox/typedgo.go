@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -81,6 +82,25 @@ var (
 	imageMarker = regexp.MustCompile(`\[Image #\d+\]`)
 )
 
+// asks reports line a main-session assistant message calling AskUserQuestion.
+func asks(line []byte) bool {
+	type block struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
+	}
+	var e struct {
+		Type        string `json:"type"`
+		IsSidechain bool   `json:"isSidechain"`
+		Message     struct {
+			Content []block `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &e) != nil || e.Type != "assistant" || e.IsSidechain {
+		return false
+	}
+	return slices.Contains(e.Message.Content, block{Type: "tool_use", Name: "AskUserQuestion"})
+}
+
 // devPrompt reports text one dev types into a coordinator's pane itself: an inbox batch, a clear's prompt, a wake.
 func devPrompt(text string) bool {
 	t := strings.TrimSpace(text)
@@ -107,6 +127,7 @@ func LatestGo(path, words string) (Go, error) {
 	}
 	defer func() { _ = f.Close() }()
 	var last entry
+	var broken error
 	asked := false
 	r := bufio.NewReader(f)
 	for {
@@ -115,12 +136,11 @@ func LatestGo(path, words string) (Go, error) {
 		case bytes.Contains(line, []byte(`"type":"user"`)):
 			var e entry
 			if uerr := json.Unmarshal(line, &e); uerr != nil {
-				return Go{}, fmt.Errorf("--go: a message in the manager's transcript can't be read: %w%s", uerr, askAgain)
+				broken = uerr
+			} else if e.message() {
+				last, asked, broken = e, false, nil
 			}
-			if e.message() {
-				last, asked = e, false
-			}
-		case bytes.Contains(line, []byte(`"type":"assistant"`)) && bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)):
+		case bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)) && asks(line):
 			asked = true
 		}
 		if errors.Is(err, io.EOF) {
@@ -130,8 +150,12 @@ func LatestGo(path, words string) (Go, error) {
 			return Go{}, fmt.Errorf("--go: reading the manager's transcript: %w%s", err, askAgain)
 		}
 	}
+	if broken != nil {
+		return Go{}, fmt.Errorf("--go: a message in the manager's transcript can't be read: %w%s", broken, askAgain)
+	}
 	text := last.text()
-	typed := strings.TrimSpace(imageMarker.ReplaceAllString(pasted.ReplaceAllString(text, ""), ""))
+	// A pasted block or image splits the typed words: no phrase across one
+	typed := strings.TrimSpace(imageMarker.ReplaceAllString(pasted.ReplaceAllString(text, "\x00"), "\x00"))
 	var why string
 	switch {
 	case last.UUID == "":
@@ -154,12 +178,12 @@ func LatestGo(path, words string) (Go, error) {
 		why = fmt.Sprintf("the user's latest message came as %q, not typed", last.PromptSource)
 	case devPrompt(text):
 		why = "the latest message here is one dev typed, not the user's"
-	case typed == "":
+	case strings.Trim(typed, "\x00 \t\n") == "":
 		why = "the user's latest message is pasted text, not typed"
 	case !holds(fold(typed), fold(words)):
 		why = fmt.Sprintf("%q is not in the user's latest message", words)
 	default:
-		return Go{UUID: last.UUID, Text: typed}, nil
+		return Go{UUID: last.UUID, Text: strings.ReplaceAll(typed, "\x00", " ")}, nil
 	}
 	return Go{}, errors.New("--go: " + why + askAgain)
 }

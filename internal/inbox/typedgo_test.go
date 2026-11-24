@@ -26,6 +26,8 @@ const (
 	lineUnknown   = `{"type":"user","uuid":"n1","timestamp":"2026-11-24T10:02:00.000Z","message":{"content":"[Request interrupted by user]"}}`
 	lineBroken    = `{"type":"user","uuid":"b1","origin":"human","message":{"content":"Tak"}}`
 	lineAsk       = `{"type":"assistant","uuid":"a2","timestamp":"2026-11-24T10:02:00.000Z","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{}}]}}`
+	lineGrep      = `{"type":"assistant","uuid":"a3","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"grep -n \"name\":\"AskUserQuestion\" x"}}]}}`
+	lineSplit     = `{"type":"user","uuid":"w1","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Ta[Image #1]k"}}`
 	lineSide      = `{"type":"user","uuid":"x1","timestamp":"2026-11-24T10:02:00.000Z","isSidechain":true,"origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Tak ruszaj"}}`
 )
 
@@ -65,6 +67,9 @@ func TestLatestGo(t *testing.T) {
 		{name: "a question before the go", words: "Tak", lines: []string{lineAsk, linePick, lineTyped}, uuid: "u1"},
 		{name: "part of a word", words: "dzi", lines: []string{lineTyped}, want: `"dzi" is not in the user's latest message`},
 		{name: "no words", words: ` „” `, lines: []string{lineTyped}, want: "no words quoted"},
+		{name: "an unreadable line before the go", words: "Tak", lines: []string{lineBroken, lineTyped}, uuid: "u1"},
+		{name: "a tool's text naming AskUserQuestion", words: "Tak", lines: []string{lineTyped, lineGrep}, uuid: "u1"},
+		{name: "words across an image", words: "Tak", lines: []string{lineSplit}, want: `"Tak" is not in the user's latest message`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, err := LatestGo(transcript(t, tc.lines...), tc.words)
@@ -101,5 +106,8 @@ func TestClaimGo(t *testing.T) {
 	}
 	if err := b.ClaimGo(Go{UUID: "u2"}); err != nil {
 		t.Errorf("❌ claim of a newer go: %v", err)
+	}
+	if err := b.ClaimGo(g); err == nil {
+		t.Error("❌ an older go claimed again after a newer one")
 	}
 }
