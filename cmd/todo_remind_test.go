@@ -32,7 +32,7 @@ func TestStateSideSessionsTodoChanges(t *testing.T) {
 	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "2 open, none new or changed since the last one") {
 		t.Errorf("second = %q, want the count line, no items", got)
 	}
-	run(t, "", "todo", "add", "Tag v1")
+	run(t, "", "todo", "add", "--no-details", "Tag v1")
 	if got := context(); strings.Contains(got, "1. Merge PR #9") || !strings.Contains(got, "3 open, 1 new or changed since the last one; the others as before (dev todo lists them):\n3. Tag v1") {
 		t.Errorf("after an add = %q, want only the new item", got)
 	}

@@ -57,7 +57,7 @@ func TestRemindChangesOnly(t *testing.T) {
 	l := read(t, s, now)
 	l.Items[0].Gone, l.Items[0].On, l.Items[0].Session = true, "w", &Session{ID: "w", Name: "w"}
 	want = "[dev todo] Your open to do list: 3 open, none new or changed since the last one; the others as before (dev todo lists them):\n" +
-		"Re-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>):\n1. a (on w, session gone)\nTick"
+		"Re-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):\n1. a (on w, session gone)\nTick"
 	if got, _ := s.Remind(l, nil, "c1", now); !strings.HasPrefix(got, want) {
 		t.Errorf("flagged = %q, want prefix %q", got, want)
 	}
