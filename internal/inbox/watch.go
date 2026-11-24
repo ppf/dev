@@ -399,8 +399,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			if err != nil {
 				return err
 			}
-			if agent.ClaudeCommand(r.Command) && screen.ClaudeInterrupted(shot) {
-				// Esc ended its turn, which fired no hook: the check records it idle, moving @agent_since
+			if agent.ClaudeCommand(r.Command) && screen.ClaudeInterrupted(shot) || agent.AgyCommand(r.Command) && screen.AgyInterrupted(shot) {
+				// Esc (for agy also a declined permission prompt) ended its turn, which fired no hook: the check records it idle, moving @agent_since
 				st, err := control.ReadChecked(c, r.Pane)
 				if err != nil && strings.Contains(err.Error(), "can't find pane") {
 					continue

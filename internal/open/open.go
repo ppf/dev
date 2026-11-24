@@ -30,10 +30,10 @@ type Options struct {
 	Name     string      // project key: session base name and @project
 	Worktree string      // worktree name under .claude/worktrees; empty = main checkout
 	Detach   bool        // dev agent start: create the session if missing; no restore, title or attach
-	Agent    string      // agent.Claude, agent.Codex or agent.Grok, typed into the Agent pane; empty = claude
+	Agent    string      // agent.Claude, agent.Codex, agent.Grok or agent.Agy, typed into the Agent pane; empty = claude
 	Worker   bool        // dev agent start from a tmux pane or with --boss (marked @dev_started_by): claude starts without Remote Control
 	Boss     string      // dev agent start --boss: the boss session whose window sizes a new session
-	Start    agent.Start // dev agent start --model, --effort: what a new session's claude starts with
+	Start    agent.Start // dev agent start --model, --effort: what a new session's claude (or agy) starts with
 }
 
 // ensureSidebar makes sure an existing session shows its sidebar before it is attached.
@@ -255,8 +255,11 @@ func hasSession(c *tmux.Client, name string) (bool, error) {
 
 // agentCommand is what session's Agent pane types to start kind: claude, named session in Remote Control
 // unless a worker's, with start's model and effort, under dev pty-wrap so its images get through tmux, its clean
-// exit closing the session.
+// exit closing the session; agy with start's model and effort; codex or grok bare.
 func agentCommand(kind, session string, worker bool, start agent.Start) (string, error) {
+	if kind == agent.Agy {
+		return tmux.ShellJoin(append([]string{agent.Agy}, start.Args(false)...)...), nil
+	}
 	if kind != agent.Claude {
 		return kind, nil
 	}

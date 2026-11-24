@@ -337,7 +337,7 @@ func TestPromptWaitClear(t *testing.T) {
 		{name: "idle-waiting before", statuses: []Status{in("a", waitingFor("idle_prompt", "4")), in("b", status("idle", "4"))}, sent: true},
 		{name: "session never changes", statuses: []Status{in("a", status("idle", "4"))}, err: ErrStalled, sent: true},
 		{name: "a counted prompt isn't the reset", statuses: []Status{in("a", status("idle", "4")), in("a", status("idle", "5"))}, err: ErrStalled, sent: true},
-		{name: "no session recorded: refused", statuses: []Status{status("idle", "4")}, errText: "--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait"},
+		{name: "no session recorded: refused", statuses: []Status{status("idle", "4")}, errText: "--wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

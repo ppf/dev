@@ -1,0 +1,40 @@
+\x1b[1m\x1b[33mAccessing workspace:\x1b[0m
+
+\x1b[1m/Users/storm/PhpstormProjects/ppf/dev/.claude/worktrees/agy-probe\x1b[0m
+
+Do you trust the contents of this project?
+
+\x1b[38;5;69mAntigravity CLI\x1b[39m requires permission to read, edit, and execute files here.
+
+\x1b[94m> Yes, I trust this folder\x1b[39m
+  \x1b[90mNo, exit\x1b[39m
+
+  \x1b[1m\x1b[94m↑/↓\x1b[0m\x1b[90m Navigate · \x1b[1m\x1b[94menter\x1b[0m\x1b[90m Confirm\x1b[39m
+                                                                                                                                   \x1b[33mauto\x1b[2m\x1b[39m · Gemini 3.8 Flash · low
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

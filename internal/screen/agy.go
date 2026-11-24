@@ -1,0 +1,63 @@
+package screen
+
+import (
+	"slices"
+	"strings"
+)
+
+// agyBelowBox is how many lines agy draws under its input box: its footer ("? for shortcuts", mode, model, effort).
+const agyBelowBox = 1
+
+// AgyInput finds agy's input box at the bottom of a screen's Plain lines: a > prompt row between two ─ rules,
+// its footer under it; top and bottom are its rules. ok=false without it, or while its footer says "esc to
+// cancel": working, or a dialog drawn in its place.
+func AgyInput(plain []string) (top, bottom int, ok bool) {
+	bottom = lastRule(plain, len(plain)-1, agyBelowBox+1, isRule)
+	if bottom < 0 || slices.ContainsFunc(plain[bottom+1:], func(l string) bool { return strings.HasPrefix(l, "esc to cancel") }) {
+		return 0, 0, false
+	}
+	top = lastRule(plain, bottom-1, MaxBoxLines+1, isRule)
+	if top < 0 || top == bottom-1 || !strings.HasPrefix(plain[top+1], ">") {
+		return 0, 0, false
+	}
+	return top, bottom, true
+}
+
+// AgyIdle reports agy's input box at the bottom of its captured screen, idle: not working, no dialog open.
+func AgyIdle(capture string) bool {
+	_, _, ok := AgyInput(plainScreen(capture))
+	return ok
+}
+
+// AgyInterrupted reports agy's screen after a turn ended without a Stop hook (a declined permission prompt, Esc):
+// its input box right under "⎿  Interrupted · What should Antigravity CLI do instead?". A prompt sent since
+// sits between them instead.
+func AgyInterrupted(capture string) bool {
+	plain := plainScreen(capture)
+	top, _, ok := AgyInput(plain)
+	if !ok {
+		return false
+	}
+	for i := top - 1; i >= 0; i-- {
+		if l := plain[i]; l != "" {
+			return strings.HasPrefix(l, "⎿") && strings.Contains(l, "Interrupted")
+		}
+	}
+	return false
+}
+
+// AgyTrust reports agy's trust dialog for directory dir, with its cursor on "Yes, I trust this folder": Enter
+// confirms it. The path under "Accessing workspace:" may wrap over several lines.
+func AgyTrust(capture, dir string) bool {
+	plain := plainScreen(capture)
+	at := slices.Index(plain, "Accessing workspace:")
+	if at < 0 {
+		return false
+	}
+	ask := slices.Index(plain[at:], "Do you trust the contents of this project?")
+	if ask < 0 {
+		return false
+	}
+	ask += at
+	return strings.Join(plain[at+1:ask], "") == dir && slices.Contains(plain[ask:], "> Yes, I trust this folder")
+}
