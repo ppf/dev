@@ -800,9 +800,9 @@ func TestPromptAskRules(t *testing.T) {
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
-			"Before handing on the user's own new idea or request", "Hand it on at once, with the assessment and its cons in", "Ask first only when it conflicts with something the user decided",
-			"one AskUserQuestion of your own", "skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
-			"you decide nothing for a project", "text typed under Other goes on only if it says to", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>"}},
+			"Before handing on the user's own new idea or request", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
+			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
+			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>"}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
