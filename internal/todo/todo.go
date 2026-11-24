@@ -1403,60 +1403,33 @@ const startShown = 20
 // lines is the open items, numbered, one per line after a newline; past limit (0: none) a "+N more" line. Items to
 // re-check (Flagged) come first under a line saying so, each with why, then the rest under "The rest:".
 func (l List) lines(limit int, now time.Time) string {
+	text, _ := l.linesSince(limit, nil, now)
+	return text
+}
+
+// linesSince is lines; with seen (an item's line by its id, as a boss last got them), only the rest whose line differs
+// from seen's. shown is each line written, by its item's id.
+func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text string, shown map[int]string) {
 	var flagged, rest []Shown
 	for _, it := range l.Items {
 		switch {
 		case it.Done:
 		case it.Flagged():
 			flagged = append(flagged, it)
+		case seen != nil && seen[it.ID] == it.seenAs(now):
 		default:
 			rest = append(rest, it)
 		}
 	}
 	var b strings.Builder
+	shown = map[int]string{}
 	n := 0
 	write := func(it Shown) {
 		if n++; limit > 0 && n > limit {
 			return
 		}
-		fmt.Fprintf(&b, "\n%d. %s", it.ID, it.Text)
-		switch {
-		case it.Gone:
-			b.WriteString(" (on " + it.On + ", session gone)")
-		case OnBoss(it.On, it.Session):
-			b.WriteString(" (yours to do, --on boss)")
-		case it.On != "":
-			b.WriteString(" (on " + it.On + ")")
-		}
-		if it.Until != 0 {
-			b.WriteString(" (until " + time.Unix(it.Until, 0).Format(UntilLayout) + ")")
-		}
-		if len(it.Options) > 0 {
-			b.WriteString(" (asked, options: " + strings.Join(it.Options, " · ") + ")")
-		}
-		if it.DoneOn != "" {
-			b.WriteString(" (done on " + it.DoneOn + ")")
-		}
-		if on := it.OnIt("you are on it"); on != "" {
-			b.WriteString(" (" + on + ")")
-		}
-		switch {
-		case it.Started == nil:
-		case OnBoss(it.On, it.Session):
-			b.WriteString(" (the user asked to start it: do it yourself, dev todo doing <n> takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)")
-		case it.Session != nil && it.Gone:
-			b.WriteString(" (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)")
-		case it.Session != nil:
-			b.WriteString(" (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)")
-		default:
-			b.WriteString(" (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)")
-		}
-		if it.Check != nil {
-			b.WriteString(" ⚠ " + it.Check.Long(now))
-		}
-		if it.NeedsDetails() {
-			b.WriteString(detailsMark)
-		}
+		shown[it.ID] = it.seenAs(now)
+		b.WriteString("\n" + it.line(now))
 	}
 	if len(flagged) > 0 {
 		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):")
@@ -1472,6 +1445,66 @@ func (l List) lines(limit int, now time.Time) string {
 	}
 	if limit > 0 && n > limit {
 		fmt.Fprintf(&b, "\n+%d more: dev todo", n-limit)
+	}
+	return b.String(), shown
+}
+
+// seenAs is how a boss's list keeps the item it named: its text, then its line and revision (Added), so a replace or
+// reopen that leaves the line as it was still counts; a re-check's age left out, as it changes by itself.
+func (it Shown) seenAs(now time.Time) string {
+	line := it.line(now)
+	if it.Check != nil {
+		line = strings.Replace(line, " ⚠ "+it.Check.Long(now), " ⚠ "+it.Check.Kind, 1)
+	}
+	return it.Text + "\x01" + line + "\x00" + strconv.FormatInt(it.Added, 10)
+}
+
+// seenText is the text of an item kept as seenAs has it.
+func seenText(kept string) string {
+	text, _, _ := strings.Cut(kept, "\x01")
+	return text
+}
+
+// line is the open item as a boss's list names it: number, text, who does it and the rest it needs to know at now.
+func (it Shown) line(now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d. %s", it.ID, it.Text)
+	switch {
+	case it.Gone:
+		b.WriteString(" (on " + it.On + ", session gone)")
+	case OnBoss(it.On, it.Session):
+		b.WriteString(" (yours to do, --on boss)")
+	case it.On != "":
+		b.WriteString(" (on " + it.On + ")")
+	}
+	if it.Until != 0 {
+		b.WriteString(" (until " + time.Unix(it.Until, 0).Format(UntilLayout) + ")")
+	}
+	if len(it.Options) > 0 {
+		b.WriteString(" (asked, options: " + strings.Join(it.Options, " · ") + ")")
+	}
+	if it.DoneOn != "" {
+		b.WriteString(" (done on " + it.DoneOn + ")")
+	}
+	if on := it.OnIt("you are on it"); on != "" {
+		b.WriteString(" (" + on + ")")
+	}
+	switch {
+	case it.Started == nil:
+	case OnBoss(it.On, it.Session):
+		b.WriteString(" (the user asked to start it: do it yourself, dev todo doing <n> takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)")
+	case it.Session != nil && it.Gone:
+		b.WriteString(" (the user asked to start it: start a fresh worker on it and link it with --replaces <n> --on <worker>)")
+	case it.Session != nil:
+		b.WriteString(" (the user asked to start it: see what its worker does, or start a fresh one on it and link it with --replaces <n> --on <worker>)")
+	default:
+		b.WriteString(" (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)")
+	}
+	if it.Check != nil {
+		b.WriteString(" ⚠ " + it.Check.Long(now))
+	}
+	if it.NeedsDetails() {
+		b.WriteString(detailsMark)
 	}
 	return b.String()
 }
@@ -1503,18 +1536,14 @@ const whoLine = "\nWho does an item, when not the user: dev todo add --replaces 
 // Reminder is the items ticked by themselves (tickedText), then the open items for a boss reading worker notes at now,
 // numbered, with a line asking it to tick what the notes closed; "" when none ticked and none is open.
 func (l List) Reminder(ticked []Ticked, now time.Time) string {
-	items := l.lines(0, now)
-	if items == "" {
-		return tickedText(ticked)
-	}
-	return withTicked(ticked, "[dev todo] Your open to do list:"+items+
-		"\nTick what these notes closed (dev todo done <n>); an item they changed: dev todo add --replaces <n> \"<new text>\"."+whoLine+detailsLine(items))
+	text, _ := l.reminder(ticked, nil, now)
+	return text
 }
 
-// StartReminder is the items ticked by themselves (tickedText), then the open items for a boss starting or /clear'ed
+// startReminder is the items ticked by themselves (tickedText), then the open items for a boss starting or /clear'ed
 // at now, at most startShown, with how long ago the list changed (age, e.g. "2h ago") and, when kept, that an earlier
 // boss session left it; "" when none ticked and none is open.
-func (l List) StartReminder(kept bool, age string, ticked []Ticked, now time.Time) string {
+func (l List) startReminder(kept bool, age string, ticked []Ticked, now time.Time) string {
 	items := l.lines(startShown, now)
 	if items == "" {
 		return tickedText(ticked)

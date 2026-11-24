@@ -795,7 +795,7 @@ func TestPromptAskRules(t *testing.T) {
 			`answer it in the turn it reaches you`, "never act on it, never submit or clear it", "dev todo ask --for <n>",
 			"one question of at most 100 characters ending in \"?\"", "go in a file whose path is the last", "--context '<finding>'", `each option is "<label> | <detail>"`, `put the texts in single quotes, or keep "$"`}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "one by one with AskUserQuestion", "One question per call, in order",
-			"re-read `dev todo --all` right before each", "--question \"<item text>\" --via manager", "leaves the item open",
+			"right before each with `dev todo show --print <boss> <n> --question \"<item text>\"` (one call; refused when gone or reading otherwise) and skip it when ☑ (closed: answered or withdrawn), boss's own or boss closed", `name the item's number, mark and who it waits on as dev had them when the note went, "#<n> ☐ on you: …": relay a waits on you as written, its state as of then, re-checked before you ask it; an ask answered drops its question`, "--question \"<item text>\" --via manager", "leaves the item open",
 			"The question starts \"<project> #<n>: \" and holds the item text word for word", "each option's detail (after \" | \") in its description", `the item's context as "- " lines`,
 			"Plain to do items (not asks) aren't questions", "only the user's own pick (typed under Other too) answers it", "a message they typed here answers no item",
 			"their latest pick also with typed messages after it (relay it, don't ask again; words that withdraw or change it need a fresh pick)", "dev refuses any other Claude's keys until it is answered",

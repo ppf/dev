@@ -925,12 +925,17 @@ func printBossList(out io.Writer, bl bossList, now time.Time) {
 		fmt.Fprintln(out, bl.Boss+"\t⚠ "+bl.Error)
 	}
 	for _, it := range bl.Items {
-		if bl.Closed && todo.OnBoss(it.On, it.Session) {
-			// No one is on a closed boss's own item: it's To do, as its column says
-			it.Doing = nil
-		}
-		printItem(out, bl.Boss+"\t", it, now)
+		printItem(out, bl.Boss+"\t", ofClosed(it, bl.Closed), now)
 	}
+}
+
+// ofClosed is it as printed on a list whose boss is closed or not: no one is on a closed boss's own item, it's To do,
+// as its column says.
+func ofClosed(it todo.Shown, closed bool) todo.Shown {
+	if closed && todo.OnBoss(it.On, it.Session) {
+		it.Doing = nil
+	}
+	return it
 }
 
 // todoAll is printAll's lists, never nil: with asJSON each item's status set (dev todo --all --json, dev serve's
@@ -966,8 +971,12 @@ func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, f
 func waitsOnYou(boss string, stderr io.Writer, id int, text string, options []string) {
 	pane, _, err := todoBoss(boss)
 	queued := false
+	var noState error
 	if err == nil && pane != "" {
-		queued, err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, text, options)
+		queued, noState, err = inbox.WaitsOn(tmux.New(), control.RealClock, pane, id, text, options)
+	}
+	if noState != nil {
+		fmt.Fprintln(stderr, "⚠ dev todo: the boss above's note lacks the item's state: "+noState.Error())
 	}
 	switch {
 	case err != nil && queued:
@@ -1193,14 +1202,7 @@ func printItem(out io.Writer, prefix string, it todo.Shown, now time.Time) {
 // todoLine is an item as text at now: number, ☐ (◌ waiting on someone else than the boss, ☑ ticked), text, who it waits on, link,
 // who is on it (OnIt), why to re-check it.
 func todoLine(it todo.Shown, now time.Time) string {
-	box := "☐"
-	switch {
-	case it.Done:
-		box = "☑"
-	case it.On != "" && !todo.OnBoss(it.On, it.Session):
-		box = "◌"
-	}
-	parts := []string{strconv.Itoa(it.ID), box, it.Text}
+	parts := []string{strconv.Itoa(it.ID), it.Box(), it.Text}
 	switch {
 	case it.Gone:
 		parts = append(parts, "on "+it.On+", session gone")

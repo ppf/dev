@@ -235,7 +235,7 @@ func TestReminderTicked(t *testing.T) {
 		t.Errorf("none open:\n%s\nwant\n%s", got, head)
 	}
 	l := List{Items: []Shown{{ID: 1, Text: "a"}}}
-	if got := l.StartReminder(false, "now", ticked, now); !strings.HasPrefix(got, head+"\n[dev todo] Your open to do list (updated now):\n1. a") {
+	if got := l.startReminder(false, "now", ticked, now); !strings.HasPrefix(got, head+"\n[dev todo] Your open to do list (updated now):\n1. a") {
 		t.Errorf("start:\n%s", got)
 	}
 	if got := l.Reminder(nil, now); strings.Contains(got, "Ticked") {

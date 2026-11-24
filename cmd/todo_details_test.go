@@ -166,7 +166,7 @@ func TestTodoNoDetailsStored(t *testing.T) {
 			t.Errorf("#%d %q: NeedsDetails %v, want %v", it.ID, it.Text, it.NeedsDetails(), want)
 		}
 	}
-	if got := l.StartReminder(false, "now", nil, time.Now()); strings.Count(got, "(no details)") != 2 || !strings.Contains(got, "Pay the bill (on anna) (no details)") {
+	if got := l.Reminder(nil, time.Now()); strings.Count(got, "(no details)") != 2 || !strings.Contains(got, "Pay the bill (on anna) (no details)") {
 		t.Errorf("reminder: want only the person's item marked, and the closing line:\n%s", got)
 	}
 	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")

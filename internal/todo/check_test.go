@@ -456,7 +456,7 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 		}
 		l.Items = append(l.Items, it)
 	}
-	got := l.StartReminder(false, "now", nil, now)
+	got := l.startReminder(false, "now", nil, now)
 	if !strings.Contains(got, "\n2. item 2 ⚠ boss closed\nThe rest:\n3. item 3\n") || !strings.Contains(got, "\n+2 more: dev todo") {
 		t.Errorf("StartReminder =\n%s", got)
 	}
@@ -465,7 +465,7 @@ func TestStartReminderLimitFlagged(t *testing.T) {
 		l.Items = append(l.Items, Shown{ID: i, Text: "x", Details: "d", Check: &sidebar.Check{Kind: sidebar.CheckBossClosed}})
 	}
 	l.Items = append(l.Items, Shown{ID: 99, Text: "rest", Details: "d"})
-	if got := l.StartReminder(false, "now", nil, now); strings.Contains(got, "The rest:") {
+	if got := l.startReminder(false, "now", nil, now); strings.Contains(got, "The rest:") {
 		t.Errorf("The rest: over no item:\n%s", got)
 	}
 }

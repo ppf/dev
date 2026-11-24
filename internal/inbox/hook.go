@@ -24,6 +24,7 @@ type bossEvent struct {
 	Prompt     string `json:"prompt"`
 	Source     string `json:"source"`
 	Tool       string `json:"tool_name"`
+	Session    string `json:"session_id"` // the conversation (todo.Store.Remind)
 }
 
 // BossHook hands pending notes to a coordinator through its own Claude hooks: on Stop it blocks the stop
@@ -32,7 +33,7 @@ type bossEvent struct {
 // stdout JSON, "" for none. A Stop already continuing from a block (stop_hook_active) is let through, so
 // a boss never loops on its own hook. A UserPromptSubmit showing the batch sent over the socket clears it (Arrived).
 // Notes it hands over, or a prompt that is a batch Deliver pasted or sent, come with the boss's open to do
-// list (todo.List.Reminder), so it ticks what they closed in the same turn; a list it can't read is err, the
+// list (todo.Store.Remind), so it ticks what they closed in the same turn; a list it can't read is err, the
 // notes still out. On SessionStart it gives the coordinator its open list (startList), then hint's line. Any pane
 // but a coordinator's is left alone. A PostToolUse of the coordinator's AskUserQuestion keeps the user's pick (Box.Picked).
 func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string, busy bool, err error) {
@@ -48,7 +49,7 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 				ferr = b.Box.ForgetPrompt()
 			}
 		}
-		out, err = startList(c, pane, e.Source, hint)
+		out, err = startList(c, pane, e.Source, e.Session, hint)
 		return out, false, errors.Join(ferr, err)
 	}
 	if e.Name == "PostToolUse" && e.Tool == agent.AskUserQuestion {
@@ -96,7 +97,7 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 		return "", false, werr
 	}
 	text := bt.String()
-	list, listErr := openList(c, pane)
+	list, listErr := openList(c, pane, e.Session)
 	listErr = errors.Join(werr, listErr)
 	switch {
 	case text == "":
@@ -122,8 +123,8 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 }
 
 // openList is the open to do list of the boss session pane is in, after its items ticked by themselves, told once
-// (todo.List.Reminder); "" when none ticked and none is open.
-func openList(c *tmux.Client, pane string) (string, error) {
+// (todo.Store.Remind: the items changed since the last one); "" when none ticked and none is open.
+func openList(c *tmux.Client, pane, conversation string) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if err != nil {
 		return "", err
@@ -139,14 +140,18 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	if err != nil {
 		return "", errors.Join(gone, err)
 	}
-	return l.Reminder(ticked, now), gone
+	if gone != nil {
+		// Its gone items unmarked: the full list, and the next one too
+		return l.Reminder(ticked, now), errors.Join(gone, s.ForgetShown())
+	}
+	return s.Remind(l, ticked, conversation, now)
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, and after
 // a dev agent clear's /clear its handoff's line (handoffLine), also without a list; an error reading either still gives
 // the other, with why; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
-func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
+func startList(c *tmux.Client, pane, source, session string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
 	role, err := c.Run("display-message", "-p", "-t", pane, "#{@dev_boss_pane}")
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
@@ -162,7 +167,7 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 				"minutes ago; an older one isn't yours to act on."
 		}
 	}
-	out, err := listContext(c, pane, source, hint, handoff)
+	out, err := listContext(c, pane, source, session, hint, handoff)
 	if err != nil && handoff != "" {
 		// The fresh boss still gets its handoff, and why its list is missing
 		data, jerr := json.Marshal(hookContext("SessionStart", handoff+"\ndev couldn't give your list and notes ("+err.Error()+
@@ -173,7 +178,7 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 }
 
 // listContext is startList's output from the boss's list and notes, with the handoff line (when any) after hint's.
-func listContext(c *tmux.Client, pane, source string, hint Hint, handoff string) (string, error) {
+func listContext(c *tmux.Client, pane, source, session string, hint Hint, handoff string) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if errors.Is(err, todo.ErrNotBoss) {
 		// A restored boss is marked one only after its coordinator starts
@@ -190,7 +195,7 @@ func listContext(c *tmux.Client, pane, source string, hint Hint, handoff string)
 		listHint := hint
 		hint = func(s todo.Store) string { return strings.TrimSpace(listHint(s) + "\n" + handoff) }
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, session, time.Now())
 }
 
 // handoffLine is the start line naming the handoff of the dev agent clear that, still running, cleared pane's
@@ -212,10 +217,11 @@ func handoffLine(c *tmux.Client, pane string) (string, error) {
 type Hint func(s todo.Store) string
 
 // StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,
-// then hint's line; "" after a compaction, whose summary carries them.
-func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, source string, now time.Time) (string, error) {
+// then hint's line; "" after a compaction, whose summary carries them, the next reminder then the full list.
+func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, source, conversation string, now time.Time) (string, error) {
 	if source == "compact" {
-		return "", nil
+		// The summary may not keep every item: the next reminder is the full list
+		return "", s.ForgetShown()
 	}
 	l, err := s.Read(now)
 	if err != nil {
@@ -237,13 +243,15 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hin
 	if d := now.Sub(time.Unix(l.Updated, 0)); d >= time.Minute {
 		age = Span(d) + " ago"
 	}
-	parts := []string{l.StartReminder(source == "startup", age, ticked, now), todo.NotesText(notes, now), hint(s)}
+	// The list goes out even when what it named isn't kept
+	list, shownErr := s.StartRemind(l, source == "startup", age, ticked, conversation, now)
+	parts := []string{list, todo.NotesText(notes, now), hint(s)}
 	text := strings.Join(slices.DeleteFunc(parts, func(t string) bool { return t == "" }), "\n")
 	if text == "" {
-		return "", nil
+		return "", shownErr
 	}
 	data, err := json.Marshal(hookContext("SessionStart", text))
-	return string(data), err
+	return string(data), errors.Join(shownErr, err)
 }
 
 // hookContext is a hook event's output adding text to Claude's context.
@@ -461,28 +469,63 @@ func setNote(c *tmux.Client, pane, summary string) error {
 // WaitsOn tells the boss that started the boss session pane is in (a boss under a boss) that item id of its list
 // waits on the user: a WaitsOnYou note with the item's text and options, delivered. Nothing for a boss no boss
 // started, or whose boss is gone or has its inbox off. queued reports the note in that boss's inbox, err then
-// being its delivery's.
-func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string, options []string) (queued bool, err error) {
+// being its delivery's; noState why the note went without the item's state.
+func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string, options []string) (queued bool, noState, err error) {
 	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil || w.Herd == "" {
-		return false, err
+		return false, nil, err
 	}
+	// Still sent without its state: the item is on the list
+	state, noState := itemState(c, pane, id, text, clk.Now())
 	if len(options) > 0 {
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
-	text = clean(fmt.Sprintf("#%d %s", id, text))
+	// The state outside the clip: it never cuts the options
+	if state != "" {
+		state = clean(state) + ": "
+	}
+	text = fmt.Sprintf("#%d %s", id, state) + clean(text)
 	// Each its own: an item given back with the same text is news again
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
+	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
+	return queued, noState, err
 }
 
-// AnsweredUp tells the boss above, as WaitsOn, that the user answered an ask of the boss session pane is in, answer
-// being the note that boss got: an AskAnswered note, so the boss above drops its question for it.
-func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, answer Note) (queued bool, err error) {
+// itemState is the mark and who it waits on (todo.List.ItemState) of item id reading text on the list of the boss
+// session pane is in, so a note about it names them as dev has them; "" with the error when the list can't say.
+func itemState(c *tmux.Client, pane string, id int, text string, now time.Time) (string, error) {
+	s, err := todo.ForPane(c, pane)
+	if err != nil {
+		return "", err
+	}
+	l, err := s.Read(now)
+	if err != nil {
+		return "", err
+	}
+	state, ok := l.ItemState(id, text)
+	if !ok {
+		return "", fmt.Errorf("#%d %q left the list", id, text)
+	}
+	return state, nil
+}
+
+// AnsweredUp tells the boss above, as WaitsOn, that the user answered ask it of the boss session pane is in, answer
+// being the note that boss got: an AskAnswered note, its state after its number, so the boss above drops its question
+// for it; noState says why that state isn't there.
+func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, it todo.Item, answer Note) (queued bool, noState, err error) {
 	b, w, ok, err := BossOf(c, pane)
 	if !ok || err != nil || w.Herd == "" {
-		return false, err
+		return false, nil, err
+	}
+	// The answered item itself: a list set since may give its number to another
+	num, text := fmt.Sprintf("#%d ", it.ID), clean(answer.Text)
+	if strings.HasPrefix(text, num) {
+		// The state outside the clip
+		text = num + clean(it.State()) + ": " + strings.TrimPrefix(text, num)
+	} else {
+		noState = fmt.Errorf("the note doesn't start with %q", num)
 	}
 	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	return b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(answer.Text), Key: key})
+	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: text, Key: key})
+	return queued, noState, err
 }

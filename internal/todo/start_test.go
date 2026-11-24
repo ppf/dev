@@ -234,7 +234,7 @@ func TestStartLines(t *testing.T) {
 		{ID: 3, Text: "lost", On: "gone", Session: link("gone"), Gone: true, Started: started},
 		{ID: 4, Text: "runs", On: "busy", Session: link("busy"), Started: started},
 	}}
-	got := l.StartReminder(false, "1m ago", nil, now)
+	got := l.startReminder(false, "1m ago", nil, now)
 	for _, want := range []string{
 		"\n1. mine (the user asked to start it: start a worker on it and link it with --replaces <n> --on <worker>)",
 		"\n2. parked (yours to do, --on boss) (the user asked to start it: do it yourself, dev todo doing <n> takes the start, or start a worker on it and link it with --replaces <n> --on <worker>)",
