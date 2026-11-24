@@ -1,10 +1,12 @@
 package itemview
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/sidebar"
@@ -183,12 +185,62 @@ func TestDecidedBlock(t *testing.T) {
 		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
 	v := ansi.Strip(New(it, Actions{}, false).View(Width, 50, now))
 	at := now.Add(-time.Hour).Format("15:04")
-	for _, want := range []string{"─ decided for you: manager ─", at + " · by manager ─", "picked  ★ Re-run the job", "over    Look into it first", "why     known flake, 2 of the last 10 runs"} {
+	for _, want := range []string{"─ decided for you: manager ─", at + " · by manager ─", "picked  ★ Re-run the job", "over    Look into it first", "why     the boss marked it obvious: known flake, 2 of the last 10 runs"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}
 	}
 	if strings.Contains(v, "what was done") {
 		t.Errorf("a decided ask shows what was done:\n%s", v)
+	}
+}
+
+// decidedItem is ask #34 settled for the user by the manager, ticked at doneAt, options in the ask's order.
+func decidedItem(doneAt time.Time) Item {
+	options := []string{"Re-run the job | known flake (Recommended)", "Look into it first | reads the log", "Skip it"}
+	return Item{Boss: "boss-dev", DoneAt: doneAt.Unix(), Shown: todo.Shown{ID: 34, Text: "Re-run CI on #301?", Done: true, DoneBy: todo.DecidedManager,
+		Answer: "Re-run the job", Options: options,
+		Decided:   &todo.Decided{By: todo.DecidedManager, Pick: options[0], Over: options[1:], Why: "known flake", At: doneAt.Unix()},
+		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+}
+
+// An ask decided for the user lists each other option as an Overrule, keyed by its number in the ask, in Reopen's
+// place; its key runs dev todo overrule with the option as stored.
+func TestOverruleEntries(t *testing.T) {
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = time.Now })
+	var got []string
+	acts := Actions{Overrule: func(boss string, id int, text, option string) (string, error) {
+		got = append(got, fmt.Sprintf("%s#%d %s=%s", boss, id, text, option))
+		return "overruled", nil
+	}}
+	m := New(decidedItem(now.Add(-time.Hour)), acts, false)
+	v := ansi.Strip(m.View(Width, 50, now))
+	for _, want := range []string{"▸ 2  Look into it first   overrule: reopens #34 with this, tells boss-dev", "  3  Skip it", "2/3 overrule · j/k ⏎ run · g go to boss · esc close"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Reopen") {
+		t.Errorf("Reopen beside Overrule:\n%s", v)
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	m, _ = m.Update(cmd())
+	if !m.Done || m.Result != "overruled" || len(got) != 1 || got[0] != "boss-dev#34 Re-run CI on #301?=Skip it" {
+		t.Errorf("3 = done %v %q, calls %q", m.Done, m.Result, got)
+	}
+	// Ticked over a day ago, a closed boss's: Reopen's line, no Overrule
+	for name, it := range map[string]Item{"old": decidedItem(now.Add(-25 * time.Hour)), "closed": func() Item { it := decidedItem(now); it.Closed = true; return it }()} {
+		v := ansi.Strip(New(it, acts, false).View(Width, 50, now))
+		if strings.Contains(v, "overrule") || !strings.Contains(v, "r  Reopen") {
+			t.Errorf("%s:\n%s", name, v)
+		}
+	}
+	// Open past the day: its key says so and the list drops it
+	m = New(decidedItem(now.Add(-23*time.Hour)), acts, false)
+	timeNow = func() time.Time { return now.Add(2 * time.Hour) }
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	if cmd != nil || !strings.Contains(m.msg, "over a day ago") || strings.Contains(ansi.Strip(m.View(Width, 50, now)), "overrule:") {
+		t.Errorf("late 2 = %q, cmd %v", m.msg, cmd != nil)
 	}
 }

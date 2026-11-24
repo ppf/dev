@@ -178,6 +178,7 @@ const want = [
   ['Merge #148 now or after the release?', 'todo', ME, true, false],
   ['Read the plan', 'todo', ME, false, false],
   ["Start the phone's Done now?", 'todo', ME, true, false],
+  ['Re-run CI?', 'done', ME, false, true],
   ['Send the invoice', 'waiting', 'boss-a', false, false],
   ['Fix the login', 'progress', 'a-fix', false, false],
   ['Pick the layout', 'progress', 'a-ask', false, false],
@@ -191,7 +192,8 @@ if (!marks(cards(board).find(x => x.it.on === 'boss')).parked) console.log('park
 if (tally(cards(board)).need !== 2) console.log('an asks card counted as needing you: ' + tally(cards(board)).need);
 const parkedCard = cards(board).find(x => x.it.on === 'boss');
 if (parkedCard.it.waits_on?.id !== 7 || parkedCard.it.waits_on.text !== "Start the phone's Done now?" || parkedCard.it.waits_on.options.length !== 2) console.log('waits_on not read: ' + JSON.stringify(parkedCard.it.waits_on));
-if (lanes(cards(board))[4].xs[0]?.it.done_at !== 1699999940) console.log('done_at not read');
+if (lanes(cards(board))[4].xs.find(x => x.it.text === 'Ship the notes')?.it.done_at !== 1699999940) console.log('done_at not read');
+if (cards(board).find(x => x.it.text === 'Re-run CI?').it.decided?.by !== 'boss') console.log('decided not read');
 const chips = whos(cards(board)), openSum = chips.reduce((n, [, c]) => n + c, 0);
 if (openSum !== tally(cards(board)).open || openSum !== 7) console.log('chip counts ' + JSON.stringify(chips) + ' do not add up to the tally: ' + tally(cards(board)).open);
 `)

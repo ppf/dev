@@ -911,3 +911,29 @@ func TestObserveUnsentQuestion(t *testing.T) {
 		t.Errorf("under a health note = %q", got)
 	}
 }
+
+// Reopened or overruled, an item's queued settled note goes; the user's own answer to it and another item's stay.
+func TestWithdrawSettled(t *testing.T) {
+	b := testBox(t)
+	settled := AnswerSettled(4, "Re-run CI?", "Re-run")
+	keep := []Note{Answer(4, "Re-run CI?", "Look first"), AnswerSettled(4, "Other?", "Yes"), AnswerSettled(5, "Re-run CI?", "Re-run")}
+	for _, n := range append([]Note{settled}, keep...) {
+		if _, err := b.Add(n, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.WithdrawSettled(4, "Re-run CI?"); err != nil {
+		t.Fatal(err)
+	}
+	bt, _ := b.Take()
+	if len(bt.Notes) != len(keep) || bt.Notes[0] != keep[0] {
+		t.Errorf("left = %+v, want %+v", bt.Notes, keep)
+	}
+	n := AnswerOverruled(4, "Re-run CI?", "Look first", "Re-run", "manager")
+	if want := `#4 "Re-run CI?" overruled by the user (the manager had settled it with Re-run): Look first`; n.Text != want || n.Key != "answer 4" {
+		t.Errorf("overruled = %+v, want %q", n, want)
+	}
+	if n := AnswerOverruled(4, "Q?", "B", "A", "boss"); !strings.Contains(n.Text, "(you had decided A): B") {
+		t.Errorf("overruled a boss's own = %q", n.Text)
+	}
+}

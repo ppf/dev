@@ -98,6 +98,40 @@
           "needs_you": true
         },
         {
+          "id": 9,
+          "text": "Re-run CI?",
+          "done": true,
+          "options": [
+            "Re-run (Recommended)",
+            "Look first"
+          ],
+          "choices": [
+            {
+              "label": "Re-run",
+              "recommended": true
+            },
+            {
+              "label": "Look first"
+            }
+          ],
+          "done_by": "boss-a",
+          "answer": "Re-run",
+          "added": 1700000000,
+          "decided": {
+            "by": "boss",
+            "pick": "Re-run (Recommended)",
+            "over": [
+              "Look first"
+            ],
+            "why": "flaky, see ~/ci.log",
+            "at": 1700000000
+          },
+          "column": "done",
+          "assignee": {
+            "kind": "you"
+          }
+        },
+        {
           "id": 3,
           "text": "Send the invoice",
           "on": "alice",
@@ -182,7 +216,7 @@
           "parked": true
         }
       ],
-      "updated": 1699999940,
+      "updated": 1700000000,
       "stale": false,
       "finished": [
         {

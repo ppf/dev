@@ -228,3 +228,111 @@ func TestReopenSettled(t *testing.T) {
 		t.Errorf("settle after reopen is no Answered: %v", err)
 	}
 }
+
+// Overruled, an ask settled for the user is answered with their pick among the others in one write: ticked by the user,
+// no longer decided; from the list and once it left it, for a day.
+func TestOverrule(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1_800_000_000, 0)
+	id, err := s.Add(Item{Text: "Re-run CI?", Options: obviousOptions, Obvious: "known flake"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Settle(id, "Re-run CI?", "1", now); err != nil {
+		t.Fatal(err)
+	}
+	it, was, err := s.Overrule(id, "Re-run CI?", "look into it first", ViaPage, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.ID != id || it.Done != now.Add(time.Minute).Unix() || it.DoneBy != DoneByYou || it.Answer != "Look into it first" || it.Via != ViaPage ||
+		it.Decided != nil || it.Obvious != "" || was.By != DecidedManager || was.Pick != obviousOptions[0] {
+		t.Fatalf("overruled = %+v, was %+v", it, was)
+	}
+	l := read(t, s, now.Add(time.Minute))
+	if len(l.Items) != 1 || !l.Items[0].Done || l.Items[0].Decided != nil || l.Items[0].Answer != "Look into it first" {
+		t.Errorf("shown = %+v", l.Items)
+	}
+
+	// A boss's own decision, overruled once it left the list for the finished items
+	id, err = s.Decide(Item{Text: "Parser first?", Options: []string{"Parser first (Recommended)", "Export first"}}, "unblocks", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(3 * time.Hour)
+	if l := read(t, s, later); len(l.Finished) != 2 {
+		t.Fatalf("finished = %+v", l.Finished)
+	}
+	if it, was, err = s.Overrule(id, "Parser first?", "2", "", later); err != nil || it.Answer != "Export first" || was.By != DecidedBoss {
+		t.Fatalf("overrule of a finished item = %+v, %+v, %v", it, was, err)
+	}
+	if l := read(t, s, later); len(l.Finished) != 1 || len(l.Items) != 1 || l.Items[0].Decided != nil {
+		t.Errorf("after: items %+v, finished %+v", l.Items, l.Finished)
+	}
+}
+
+// Options named by numbers: a label names its option before a number reads as a position, as Pick reads them.
+func TestOverruleNumberLabels(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1_800_000_000, 0)
+	id, err := s.Decide(Item{Text: "How many replicas?", Options: []string{"3 (Recommended)", "2", "1"}}, "the default", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The decided pick's own label is refused, not read as option 2's number
+	id2, err := s.Decide(Item{Text: "Shards?", Options: []string{"2 (Recommended)", "Wait"}}, "the default", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it, _, err := s.Overrule(id2, "Shards?", "2", "", now); err == nil {
+		t.Errorf("overrule with the decided label 2 = %q", it.Answer)
+	}
+	it, _, err := s.Overrule(id, "How many replicas?", "1", "", now)
+	if err != nil || it.Answer != "1" {
+		t.Errorf("overrule with label 1 = %q, %v", it.Answer, err)
+	}
+}
+
+// Overrule refuses, changing nothing: a pick not among the others (the decided pick itself, own words), an item not
+// decided for the user, and one ticked too long ago to reopen.
+func TestOverruleRefused(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1_800_000_000, 0)
+	settled, err := s.Add(Item{Text: "Re-run CI?", Options: obviousOptions, Obvious: "known flake"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Settle(settled, "Re-run CI?", "1", now); err != nil {
+		t.Fatal(err)
+	}
+	answered, err := s.Add(Item{Text: "Merge?", Options: []string{"Merge", "Wait"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Answer(answered, "Merge?", "Merge", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	before := read(t, s, now)
+	for _, tt := range []struct {
+		name string
+		id   int
+		text string
+		pick string
+		at   time.Time
+		want string
+	}{
+		{"the decided pick", settled, "Re-run CI?", "Re-run the job", now, `other options are "Look into it first", not "Re-run the job"`},
+		{"the decided pick's number", settled, "Re-run CI?", "1", now, `not "1"`},
+		{"own words", settled, "Re-run CI?", "do both", now, `not "do both"`},
+		{"not decided", answered, "Merge?", "Wait", now, "wasn't decided for the user"},
+		{"too old to reopen", settled, "Re-run CI?", "Look into it first", now.Add(25 * time.Hour), "no ticked item"},
+	} {
+		_, _, err := s.Overrule(tt.id, tt.text, tt.pick, "", tt.at)
+		if err == nil || !strings.Contains(err.Error(), tt.want) || !errors.As(err, new(Refused)) {
+			t.Errorf("%s: %v, want a refusal %q", tt.name, err, tt.want)
+		}
+	}
+	if after := read(t, s, now); !reflect.DeepEqual(after.Items, before.Items) {
+		t.Errorf("refusals changed the list: %+v, was %+v", after.Items, before.Items)
+	}
+}

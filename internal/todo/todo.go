@@ -1071,7 +1071,7 @@ func (a Answered) Error() string {
 	}
 	msg := fmt.Sprintf("item %d is answered already: the user answered %q %s", a.Item.ID, a.Item.Answer, where)
 	if d := a.Item.Decided; d != nil {
-		msg = fmt.Sprintf("item %d is answered already: decided for the user by the %s, %q (the user overrules it with dev todo reopen, then answers)", a.Item.ID, d.By, a.Item.Answer)
+		msg = fmt.Sprintf("item %d is answered already: decided for the user by the %s, %q (the user overrules it with dev todo overrule)", a.Item.ID, d.By, a.Item.Answer)
 	}
 	if !a.Same && a.arg != "" {
 		msg += fmt.Sprintf(", not %q", a.arg)

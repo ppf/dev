@@ -184,14 +184,14 @@ func TestFinishedExpiryAndCap(t *testing.T) {
 	if len(done) != keptMax || done[0] != keptMax+10 || done[keptMax-1] != 11 {
 		t.Errorf("finished %v: want the newest %d, newest first", done, keptMax)
 	}
-	l, err := s.Read(t0.Add(keptFor + 30*time.Second))
+	l, err := s.Read(t0.Add(KeptFor + 30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(l.Finished) != 29 || l.Finished[len(l.Finished)-1].ID != 32 {
 		t.Errorf("a day on: %d finished, want 29 (ticked 31 s or less after t0, ids 32-60)", len(l.Finished))
 	}
-	if err := s.keepDone(nil, t0.Add(2*keptFor)); err != nil {
+	if err := s.keepDone(nil, t0.Add(2*KeptFor)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(s.donePath()); !os.IsNotExist(err) {

@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ppf/dev/internal/sidebar"
 )
 
 const (
-	// keptFor is how long a ticked item stays among its list's finished items once it left the list.
-	keptFor = 24 * time.Hour
+	// KeptFor is how long a ticked item stays among its list's finished items once it left the list: Reopen finds it
+	// that long.
+	KeptFor = 24 * time.Hour
 	// keptMax is the most finished items a list keeps, the newest.
 	keptMax = 50
 )
@@ -26,6 +29,7 @@ type Finished struct {
 	Text     string   `json:"text"`
 	Link     string   `json:"link,omitempty"`
 	Answer   string   `json:"answer,omitempty"`
+	Options  []string `json:"options,omitempty"`
 	Context  []string `json:"context,omitempty"`
 	Details  string   `json:"details,omitempty"`
 	Result   string   `json:"result,omitempty"`
@@ -35,6 +39,13 @@ type Finished struct {
 	DoneAt   int64    `json:"done_at"`
 	Quiet    bool     `json:"quiet,omitempty"`
 	Decided  *Decided `json:"decided,omitempty"`
+}
+
+// Shown is f as the boards show a ticked card: in Done, its assignee as stored.
+func (f Finished) Shown() Shown {
+	return Shown{ID: f.ID, Text: f.Text, Link: f.Link, Answer: f.Answer, Options: f.Options, On: f.On, Quiet: f.Quiet, Done: true,
+		Context: f.Context, Details: f.Details, Result: f.Result, DoneBy: f.DoneBy, Decided: f.Decided,
+		Placement: Placement{Column: sidebar.ColumnDone, Assignee: f.Assignee}}
 }
 
 // donePath is the file of the list's finished items: beside the lists, not among them, as checksPath is.
@@ -91,10 +102,10 @@ func (s Store) saveDone(kept []Item) error {
 	return os.Rename(tmp, path)
 }
 
-// finished is items ticked within keptFor of now, each once (ids restart: by id, added, done and text), newest first,
+// finished is items ticked within KeptFor of now, each once (ids restart: by id, added, done and text), newest first,
 // at most keptMax.
 func finished(items []Item, now time.Time) []Item {
-	items = slices.DeleteFunc(items, func(it Item) bool { return now.Sub(time.Unix(it.Done, 0)) >= keptFor })
+	items = slices.DeleteFunc(items, func(it Item) bool { return now.Sub(time.Unix(it.Done, 0)) >= KeptFor })
 	slices.SortFunc(items, func(a, b Item) int {
 		return cmp.Or(cmp.Compare(b.Done, a.Done), cmp.Compare(a.ID, b.ID), cmp.Compare(a.Added, b.Added), strings.Compare(a.Text, b.Text))
 	})
@@ -124,7 +135,7 @@ func shownFinished(items []Item, boss string) []Finished {
 	out := make([]Finished, 0, len(items))
 	for _, it := range items {
 		by := o.stored(Shown{On: it.On, Session: it.Session}, Own(it.On, it.Session, boss)).Assignee
-		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet, Decided: it.Decided})
+		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet, Decided: it.Decided})
 	}
 	return out
 }
@@ -135,6 +146,57 @@ func shownFinished(items []Item, boss string) []Finished {
 // the answer, its doer, start and other half. It returns the item as reopened. The list is written before the
 // finished items, so a failure between keeps it twice, never none.
 func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
+	return s.reopen(id, text, nil, now)
+}
+
+// Overrule reopens the user's ticked item id, an ask decided for them (Decided), while it reads text, and answers it
+// with pick, one of the options it was picked over (its label, or its number in the ask), in the same write: it stays
+// ticked, by the user, with no Decided. It returns the item as answered and what was decided; via is where (Item.Via).
+// Refused, changing nothing, for an item Reopen refuses (not the user's, ticked over a day ago), one not decided for the
+// user, or a pick not among the others. A StillDone error says it is answered all the same.
+func (s Store) Overrule(id int, text, pick, via string, now time.Time) (it Item, was Decided, err error) {
+	it, err = s.reopen(id, text, func(p *Item, orig Item) error {
+		if orig.Decided == nil {
+			return Refused{fmt.Errorf("item %d wasn't decided for the user: reopen it to answer it again", id)}
+		}
+		was = *orig.Decided
+		want := Split(Clean(pick))
+		names := func(o string) bool {
+			c := Split(o)
+			return strings.EqualFold(c.Label, want.Label) && (want.Detail == "" || strings.EqualFold(c.Detail, want.Detail))
+		}
+		// As Pick reads it: an option's label, else its number in the ask, as its keys are
+		if n, err := strconv.Atoi(want.Label); !slices.ContainsFunc(p.Options, names) && err == nil && n >= 1 && n <= len(p.Options) {
+			want = Split(p.Options[n-1])
+		}
+		i := slices.IndexFunc(was.Over, names)
+		if i < 0 {
+			return Refused{fmt.Errorf("item %d's other options are %s, not %q", id, strings.Join(quoted(was.OverLabels()), ", "), pick)}
+		}
+		p.tick(now.Unix(), DoneByYou)
+		p.Answer, p.Via = answerOf(p.Options, was.Over[i]), via
+		return nil
+	}, now)
+	return it, was, err
+}
+
+// StillDone is a reopen's failure once the list is written: the item is reopened (or overruled), and still shows among
+// the finished items too.
+type StillDone struct{ error }
+
+func (e StillDone) Unwrap() error { return e.error }
+
+// quoted is each of ss in double quotes.
+func quoted(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strconv.Quote(s)
+	}
+	return out
+}
+
+// reopen is Reopen, running then (when not nil) on the reopened item before it is written: its refusal writes nothing.
+func (s Store) reopen(id int, text string, then func(p *Item, orig Item) error, now time.Time) (Item, error) {
 	var it Item
 	err := s.locked(func() error {
 		f, err := s.read()
@@ -180,6 +242,11 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		if it.Until != 0 && now.Unix() >= it.Until {
 			it.Until = 0
 		}
+		if then != nil {
+			if err := then(&it, orig); err != nil {
+				return err
+			}
+		}
 		f.Items = append(f.Items, it)
 		f.Next = max(f.Next, it.ID+1)
 		if s.trial {
@@ -197,7 +264,7 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 			err = s.saveDone(slices.DeleteFunc(kept, func(x Item) bool { return sameItem(x, orig) }))
 		}
 		if err != nil {
-			return fmt.Errorf("#%d reopened as #%d, but it still shows in Done: %w", orig.ID, it.ID, err)
+			return StillDone{fmt.Errorf("#%d reopened as #%d, but it still shows in Done: %w", orig.ID, it.ID, err)}
 		}
 		return nil
 	})

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,6 +99,31 @@ func TestTodoAnswerRecommended(t *testing.T) {
 		t.Errorf("❌ settled twice: %v %q", err, stderr)
 	}
 
+	// The user overrules #1 with the other option: only the user, only among the others; the boss gets their answer
+	user := []string{"TMUX_PANE=", "CLAUDECODE="}
+	overrule := func(env []string, pick string) (string, string, error) {
+		return dev(env, "", "todo", "overrule", "boss-a", "1", pick, "--question", "Re-run CI on #301?")
+	}
+	if _, stderr, err := overrule(claude(pane["boss-a"]), "Look first"); err == nil || !strings.Contains(stderr, "only the user overrules") {
+		t.Errorf("❌ overrule from a Claude Code session: %v %q", err, stderr)
+	}
+	if _, stderr, err := overrule(user, "Re-run"); err == nil || !strings.Contains(stderr, `other options are "Look first"`) {
+		t.Errorf("❌ overrule with the decided pick: %v %q", err, stderr)
+	}
+	if out, stderr, err := overrule(user, "2"); err != nil || out != "#1 overruled with \"Look first\", sent to boss-a\n" {
+		t.Fatalf("❌ overrule: %q %v %s", out, err, stderr)
+	}
+	// boss-a's box holds the first note's paste: its Stop hook takes the overrule
+	want := `- you answered #1 "Re-run CI on #301?" overruled by the user (the manager had settled it with Re-run): Look first`
+	var hook struct{ Reason string }
+	out, stderr, err = dev([]string{"TMUX_PANE=" + pane["boss-a"]}, `{"hook_event_name":"Stop"}`, "state", "idle")
+	if err != nil || json.Unmarshal([]byte(out), &hook) != nil || !strings.Contains(hook.Reason, want) {
+		t.Errorf("❌ boss-a's Stop hook: %v %s %q", err, stderr, out)
+	}
+	if list, stderr, err = dev(user, "", "todo", "--json", "--boss", "boss-a"); err != nil || strings.Contains(list, `"by": "manager"`) || !strings.Contains(list, `"answer": "Look first"`) {
+		t.Errorf("❌ after the overrule: %v %s\n%s", err, stderr, list)
+	}
+
 	// A boss in its own permission prompt: the prompt is no item to settle, and settling a marked ask meanwhile
 	// leaves the prompt as it is
 	if _, stderr, err := dev(claude(pane["boss-a"]), "", "todo", "ask", "Retry the flaky test?", "--option", "Retry (Recommended)", "--option", "Skip", "--obvious", "known flake", "--details", "x"); err != nil {
@@ -119,5 +145,15 @@ func TestTodoAnswerRecommended(t *testing.T) {
 	}
 	if got := s.T("show-option", "-pqv", "-t", pane["boss-a"], "@agent_question"); got != asked || s.T("capture-pane", "-p", "-t", pane["boss-a"]) != shown {
 		t.Errorf("❌ boss-a's permission prompt touched: %q", got)
+	}
+
+	// #3's settled note still queued (boss-a in its prompt): the overrule withdraws it, the boss hears only the user's pick
+	if out, stderr, err := dev(user, "", "todo", "overrule", "boss-a", "3", "Skip", "--question", "Retry the flaky test?"); err != nil || !strings.HasPrefix(out, "#3 overruled with \"Skip\"") {
+		t.Fatalf("❌ overrule of #3: %q %v %s", out, err, stderr)
+	}
+	out, stderr, err = dev([]string{"TMUX_PANE=" + pane["boss-a"]}, `{"hook_event_name":"Stop"}`, "state", "idle")
+	if err != nil || json.Unmarshal([]byte(out), &hook) != nil || !strings.Contains(hook.Reason, `#3 "Retry the flaky test?" overruled by the user`) ||
+		strings.Contains(hook.Reason, `#3 "Retry the flaky test?" settled by the manager`) {
+		t.Errorf("❌ boss-a's notes after #3's overrule: %v %s %q", err, stderr, out)
 	}
 }

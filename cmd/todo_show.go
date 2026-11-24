@@ -32,9 +32,11 @@ func newTodoShowCmd(boss *string) *cobra.Command {
 context, options or actions, status, link and list. An ask is answered with 1-9, j/k and ⏎, or m in your own words
 (as dev todo answer); your own item is started (s, as dev todo start) or ticked (d, as dev todo done), your own To do
 card marked in progress with a line of what you do now (i, as dev todo doing; esc cancels) or, with a doing line,
-stopped (i again), your own ticked one opened from dev todo board's Done reopened (r, as dev todo reopen); o opens
+stopped (i again), your own ticked one reopened (r, as dev todo reopen), or, decided for you, overruled with one of
+the other options by its number (as dev todo overrule); o opens
 its link, w goes to the worker it's on, g to its boss; esc closes. The boards' and the sidebar's TO DO open it with space.
---question refuses it unless item n still reads that text (item numbers restart once a list empties).`,
+Item n is the open one, else the newest ticked in the last day, as Done shows it. --question refuses it unless item n
+still reads that text (item numbers restart once a list empties).`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
@@ -77,10 +79,11 @@ its link, w goes to the worker it's on, g to its boss; esc closes. The boards' a
 	return cmd
 }
 
-// showItem is item id of boss name's list as dev todo --all --json has it, its status set; refused when it's gone,
-// ticked, or reads other than question.
+// showItem is item id of boss name's list as dev todo --all --json has it, its status set: the open one, else the newest
+// ticked one (still on the list, or among its finished items, as the boards' Done shows them); refused when it's gone
+// or reads other than question.
 func showItem(c *tmux.Client, stderr io.Writer, name string, id int, question string) (itemview.Item, error) {
-	lists, err := todoAll(c, stderr, time.Now(), true, false, false)
+	lists, err := todoAll(c, stderr, time.Now(), true, false, true)
 	if err != nil {
 		return itemview.Item{}, err
 	}
@@ -92,25 +95,35 @@ func showItem(c *tmux.Client, stderr io.Writer, name string, id int, question st
 	if bl.Error != "" {
 		return itemview.Item{}, fmt.Errorf("%s: %s", name, bl.Error)
 	}
+	reads := func(text string) bool { return question == "" || text == question }
 	i := slices.IndexFunc(bl.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done })
-	switch {
-	case i < 0:
-		return itemview.Item{}, fmt.Errorf("%s has no open item #%d", name, id)
-	case question != "" && bl.Items[i].Text != question:
+	if i >= 0 && reads(bl.Items[i].Text) {
+		return itemview.Item{Boss: name, Closed: bl.Closed, Shown: bl.Items[i]}, nil
+	}
+	// Ticked ones: still on the list first, then the finished ones, newest first
+	if j := slices.IndexFunc(bl.Items, func(it todo.Shown) bool { return it.ID == id && it.Done && reads(it.Text) }); j >= 0 {
+		return itemview.Item{Boss: name, Closed: bl.Closed, Shown: bl.Items[j]}, nil
+	}
+	if j := slices.IndexFunc(bl.Finished, func(f todo.Finished) bool { return f.ID == id && reads(f.Text) }); j >= 0 {
+		f := bl.Finished[j]
+		return itemview.Item{Boss: name, Closed: bl.Closed, DoneAt: f.DoneAt, Shown: f.Shown()}, nil
+	}
+	if i >= 0 {
 		return itemview.Item{}, fmt.Errorf("%s's #%d is %q now, not %q", name, id, bl.Items[i].Text, question)
 	}
-	return itemview.Item{Boss: name, Closed: bl.Closed, Shown: bl.Items[i]}, nil
+	return itemview.Item{}, fmt.Errorf("%s has no item #%d, open or ticked in the last day", name, id)
 }
 
-// showActions are the view's keys' paths: the boards' dev todo answer, done, start, reopen and doing, the browser, and a
-// switch of client.
+// showActions are the view's keys' paths: the boards' dev todo answer, done, start, reopen, overrule and doing, the
+// browser, and a switch of client.
 func showActions(c *tmux.Client, client string) itemview.Actions {
 	return itemview.Actions{
-		Answer: sidebar.AnswerNeed,
-		Tick:   sidebar.TickNeed,
-		Start:  sidebar.StartNeed,
-		Reopen: sidebar.ReopenNeed,
-		Doing:  sidebar.DoingNeed,
+		Answer:   sidebar.AnswerNeed,
+		Tick:     sidebar.TickNeed,
+		Start:    sidebar.StartNeed,
+		Reopen:   sidebar.ReopenNeed,
+		Overrule: sidebar.OverruleNeed,
+		Doing:    sidebar.DoingNeed,
 		Open: func(url string) error {
 			// A link is the boss's text: never an option to open
 			if strings.HasPrefix(url, "-") {

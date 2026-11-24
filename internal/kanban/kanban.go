@@ -377,10 +377,7 @@ func (m Model) all() []card {
 			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: it.Done})
 		}
 		for _, f := range l.Finished {
-			it := todo.Shown{ID: f.ID, Text: f.Text, Link: f.Link, Answer: f.Answer, On: f.On, Quiet: f.Quiet, Done: true,
-				Context: f.Context, Details: f.Details, Result: f.Result, DoneBy: f.DoneBy, Decided: f.Decided,
-				Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: f.Assignee}}
-			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: true, doneAt: f.DoneAt})
+			out = append(out, card{boss: l.Boss, closed: l.Closed, it: f.Shown(), done: true, doneAt: f.DoneAt})
 		}
 	}
 	return out
@@ -767,8 +764,9 @@ func (m Model) column(i int, cs []card, sel bool, cw int, now time.Time) ([]stri
 }
 
 // cardLines are a card cw wide: project #id (a red ! when it waits on the user) and at the right its state (a start's,
-// a PR's, a worker's), in the marks' colours; the title on 2 lines, bold for an ask; @assignee with its chips, options
-// and link; what is done on it now. The selected card is on the selection band.
+// a PR's, a worker's), in the marks' colours; the title on 2 lines, bold for an open ask; @assignee with its chips, options
+// and link; what is done on it now, or on a ticked card decided for the user who decided it. The selected card is on
+// the selection band.
 func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	it := c.it
 	mk := marksOf(c, now)
@@ -783,7 +781,7 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	word := ansi.Truncate(mk.state, max(0, cw-ansi.StringWidth(num)-1), "…")
 	lines := []string{num + strings.Repeat(" ", max(0, cw-ansi.StringWidth(num)-ansi.StringWidth(word))) + mk.stateColour + word + reset}
 	style := ""
-	if len(it.Options) > 0 {
+	if len(it.Options) > 0 && !c.done {
 		style = bold
 	}
 	title := strings.Split(ansi.Wrap(strings.Join(strings.Fields(it.Text), " "), cw, ""), "\n")
@@ -824,7 +822,11 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	}
 	lines = append(lines, ansi.Truncate(strings.Join(foot, sidebar.Muted+" · "+reset), cw, "…"))
 	doing := ""
-	if mk.line != "" {
+	switch {
+	case c.done && it.Decided != nil:
+		// A ticked card has no doing line: who decided it for the user takes it
+		doing = sidebar.Gold + ansi.Truncate("decided for you: "+it.Decided.By, cw, "…") + reset
+	case mk.line != "":
 		doing = mk.lineColour + ansi.Truncate("▸ "+strings.Join(strings.Fields(mk.line), " "), cw, "…") + reset
 	}
 	lines = append(lines, doing)

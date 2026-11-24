@@ -20,6 +20,9 @@ import (
 	"github.com/ppf/dev/internal/wait"
 )
 
+// timeNow is the time New lists the actions at, and an Overrule key checks the item's age at: a test's own.
+var timeNow = time.Now
+
 // Width is the box's width where the screen has room.
 const Width = 84
 
@@ -39,23 +42,25 @@ type Item struct {
 	todo.Shown
 }
 
-// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done, start, reopen and doing
-// (their output, or why not), the browser, a switch of the client to a session.
+// Actions are the paths the view's keys run, each off the update loop: dev todo answer, done, start, reopen, overrule
+// and doing (their output, or why not), the browser, a switch of the client to a session.
 type Actions struct {
-	Answer func(boss string, id int, question, answer string) (string, error)
-	Tick   func(boss string, id int, text string) (string, error)
-	Start  func(boss string, id int, text string) (string, error)
-	Reopen func(boss string, id int, text string) (string, error)
-	Doing  func(boss string, id int, text, seen, doing string, stop bool) (string, error)
-	Open   func(url string) error
-	Switch func(session string) error
+	Answer   func(boss string, id int, question, answer string) (string, error)
+	Tick     func(boss string, id int, text string) (string, error)
+	Start    func(boss string, id int, text string) (string, error)
+	Reopen   func(boss string, id int, text string) (string, error)
+	Overrule func(boss string, id int, text, option string) (string, error)
+	Doing    func(boss string, id int, text, seen, doing string, stop bool) (string, error)
+	Open     func(url string) error
+	Switch   func(session string) error
 }
 
 // entry is a line of the view's list: an ask's option (key 1-9) or own words (m), or an action (I'm on it, i, has a
-// field too).
+// field too); over is the option an Overrule line answers with, its key that option's number in the ask.
 type entry struct {
 	key, word, detail string
 	rec               bool
+	over              string
 }
 
 // Model is the view of one item. Done once an action went through or the user closed it; Result says what went.
@@ -83,7 +88,7 @@ type doneMsg struct {
 // New is the view of it; managerRuns offers Start on a closed boss's own item, which the manager then takes.
 func New(it Item, acts Actions, managerRuns bool) Model {
 	m := Model{it: it, acts: acts, managerRuns: managerRuns}
-	m.entries = m.list()
+	m.entries = m.list(timeNow())
 	if _, _, options, ok := m.question(); ok && !m.ask() && len(m.entries) > len(options)+1 {
 		// The item's own first action: ⏎ never answers the ask it waits on unpicked
 		m.sel = len(options) + 1
@@ -146,8 +151,17 @@ func (m Model) canReopen() bool {
 	return m.it.Done && m.own() && !strings.HasPrefix(m.it.Boss, "local_")
 }
 
-// list is what the view lists: an ask's options then own words; else its actions.
-func (m Model) list() []entry {
+// canOverrule is what todo.Overrule takes, as the web page offers it: the user's ask decided for them, while Reopen
+// still finds it (ticked under a day ago; DoneAt 0: still on the list), its boss running to be told.
+func (m Model) canOverrule(now time.Time) bool {
+	it := m.it
+	return m.canReopen() && it.Decided != nil && len(it.Decided.Over) > 0 && !it.Closed &&
+		(it.DoneAt == 0 || now.Sub(time.Unix(it.DoneAt, 0)) < todo.KeptFor)
+}
+
+// list is what the view lists at now: an ask's options then own words; else its actions, Overrule's lines in Reopen's
+// place.
+func (m Model) list(now time.Time) []entry {
 	var out []entry
 	if _, _, options, ok := m.question(); ok {
 		for i, o := range options {
@@ -173,7 +187,14 @@ func (m Model) list() []entry {
 	if m.canTick() {
 		out = append(out, entry{key: "d", word: "Tick", detail: "done: it leaves every board"})
 	}
-	if m.canReopen() {
+	switch {
+	case m.canOverrule(now):
+		for _, o := range m.it.Decided.Over {
+			key := strconv.Itoa(slices.Index(m.it.Options, o) + 1)
+			out = append(out, entry{key: key, word: todo.Split(o).Label, over: o,
+				detail: fmt.Sprintf("overrule: reopens #%d with this, tells %s", m.it.ID, m.it.Boss)})
+		}
+	case m.canReopen():
 		out = append(out, entry{key: "r", word: "Reopen", detail: "back to To do"})
 	}
 	if m.worker() {
@@ -276,7 +297,15 @@ func (m Model) key(k string) (Model, tea.Cmd) {
 		k = m.entries[m.sel].key
 	}
 	it := m.it
+	over := slices.IndexFunc(m.entries, func(e entry) bool { return e.over != "" && e.key == k })
 	switch {
+	case over >= 0 && !m.canOverrule(timeNow()):
+		// Done no longer keeps it: Reopen can't find it either
+		m.entries, m.sel = m.list(timeNow()), 0
+		m.msg = "#" + strconv.Itoa(it.ID) + " was ticked over a day ago: it can't be overruled now"
+	case over >= 0:
+		o := m.entries[over].over
+		return m.run("overruling", func() (string, error) { return m.acts.Overrule(it.Boss, it.ID, it.Text, o) })
 	case len(k) == 1 && k >= "1" && k <= "9" && m.answers() && !it.Closed:
 		id, text, options, _ := m.question()
 		n := int(k[0] - '1')
@@ -510,7 +539,11 @@ func (m Model) block(in int, now time.Time) []string {
 		if len(d.Over) > 0 {
 			out = append(out, row("over", strings.Join(d.OverLabels(), " · "))...)
 		}
-		return append(append(out, row("why", d.Why)...), end)
+		why := d.Why
+		if d.By == todo.DecidedManager {
+			why = "the boss marked it obvious: " + why
+		}
+		return append(append(out, row("why", why)...), end)
 	case it.Done && it.Result != "":
 		out := []string{rule("what was done", sidebar.Green+ticked(it, now)+reset)}
 		out = append(out, strings.Split(ansi.Wrap(it.Result, in, ""), "\n")...)
@@ -782,9 +815,20 @@ func (m Model) keys() string {
 			ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
 		}
 	default:
-		ks = [][2]string{{"j/k ⏎", "run"}}
+		var overs []string
 		for _, e := range m.entries {
-			ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
+			if e.over != "" {
+				overs = append(overs, e.key)
+			}
+		}
+		if len(overs) > 0 {
+			ks = append(ks, [2]string{strings.Join(overs, "/"), "overrule"})
+		}
+		ks = append(ks, [2]string{"j/k ⏎", "run"})
+		for _, e := range m.entries {
+			if e.over == "" {
+				ks = append(ks, [2]string{e.key, strings.ToLower(e.word)})
+			}
 		}
 	}
 	if m.ask() && m.typing == "" {

@@ -66,3 +66,25 @@ func TestTodoReopen(t *testing.T) {
 		t.Errorf("reopen over a taken number = %q", out)
 	}
 }
+
+// Overrule refuses a Claude Code session (not a board's key), no --question, --boss and a bad number before reaching
+// tmux.
+func TestTodoOverruleRefused(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("TMUX_PANE", "")
+	for _, tt := range []struct {
+		claude string
+		args   []string
+		want   string
+	}{
+		{"1", []string{"todo", "overrule", "boss-dev", "1", "B", "--question", "a"}, "refused in a Claude Code session"},
+		{"", []string{"todo", "overrule", "boss-dev", "1", "B"}, "--question <the item's text> is needed"},
+		{"", []string{"todo", "overrule", "boss-dev", "1", "B", "--question", "a", "--boss", "boss-x"}, "leave out --boss"},
+		{"", []string{"todo", "overrule", "boss-dev", "x", "B", "--question", "a"}, `item number "x"`},
+	} {
+		t.Setenv("CLAUDECODE", tt.claude)
+		if _, _, err := execute(t, "", tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("dev %s: %v, want %q", strings.Join(tt.args, " "), err, tt.want)
+		}
+	}
+}

@@ -230,7 +230,7 @@ func TestReopenRefused(t *testing.T) {
 	for _, c := range []struct {
 		text string
 		at   time.Time
-	}{{"not mine", t0.Add(time.Minute)}, {"mine", t0.Add(keptFor)}} {
+	}{{"not mine", t0.Add(time.Minute)}, {"mine", t0.Add(KeptFor)}} {
 		if _, err := s.Reopen(1, c.text, c.at); !errors.As(err, new(Refused)) {
 			t.Errorf("%q at +%v: err %v, want refused", c.text, c.at.Sub(t0), err)
 		}

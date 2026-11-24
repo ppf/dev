@@ -366,6 +366,7 @@ const offIt = (list, it) => itemCall('/v1/doing', list, it, { stop: true, seen: 
 // A finished card's key: its number may be an open card's again
 const doneKey = (boss, id) => 'done:' + key(boss, id);
 const reopen = (list, it) => itemCall('/v1/reopen', list, it, {}, 'Reopened: ', doneKey(list.boss, it.id));
+const overrule = (list, it, option) => itemCall('/v1/overrule', list, it, { option }, 'Overruled: ', doneKey(list.boss, it.id));
 // What each verdict act calls: the sheet's buttons' own; stop doing and reopen have no button yet
 const ACTS = { tick, start, doing: onIt, stop: offIt, reopen };
 
@@ -521,10 +522,11 @@ function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   // Focusable, so a card ticked from the keyboard keeps focus
-  return el('article', { class: 'card done' + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
+  return el('article', { class: 'card done' + (it.decided ? ' has-dec' : '') + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
     movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('a', { class: 't row', href: doneHash(list.boss, it), 'data-f': doneHash(list.boss, it) }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
-    it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'));
+    it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'),
+    it.decided && el('span', { class: 'tag wait dec' }, 'decided for you: ' + it.decided.by));
 }
 
 // filters are the Project chips (a menu on the phone) and the Assignee avatars; those toggle, several at once, ME first.
@@ -869,7 +871,12 @@ function liveBlock(x) {
 const BY = { you: 'you', until: 'itself, at its time', 'done-on': "itself, at its PR's move" };
 const byOf = it => BY[it.done_by] || it.done_by;
 
-// doneSheet is finished item id of boss's list ticked at at (0: its newest), read-only; Reopen only for the user's own.
+// overrulable is a ticked ask decided for the user that todo.Overrule takes: its boss running to be told, ticked under a
+// day ago (still on the list: no done_at), as Reopen finds it.
+const overrulable = ({ list, it }) => !!it.decided?.over?.length && !list.closed && (!it.done_at || Date.now() / 1000 - it.done_at < DAY);
+
+// doneSheet is finished item id of boss's list ticked at at (0: its newest), read-only; Reopen only for the user's own,
+// Overrule's options in its place on an ask decided for them.
 function doneSheet(boss, id, at) {
   const x = findDone(boss, id, at);
   const close = el('button', { class: 'close', type: 'button', 'aria-label': 'Close', onclick: closeSheet }, '×');
@@ -889,12 +896,27 @@ function doneSheet(boss, id, at) {
       el('div', { class: 'lv-top' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), el('span', { class: 'lv-who' }, 'What was done'), ticked && el('span', { class: 'lv-since' }, ticked)),
       el('p', { class: 'res' }, it.result)));
   }
-  if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, it.decided ? 'Decided for you: ' + it.decided.by : 'You answered'), el('span', null, it.answer)));
+  const d = it.decided;
+  if (d) {
+    const why = d.by === 'manager' ? 'The boss marked it obvious: ' + d.why : d.why;
+    out.push(el('section', { class: 'live decided', 'aria-label': 'Decided for you' },
+      el('div', { class: 'lv-top' }, el('span', { class: 'lv-who' }, 'Decided for you'), ticked && el('span', { class: 'lv-since' }, ticked)),
+      el('div', { class: 'lv-row' }, el('b', null, 'Picked'), el('span', null, el('i', null, option(d.pick).label), ' ', el('span', { class: 'star' }, '★ recommended'))),
+      d.over?.length > 0 && el('div', { class: 'lv-row' }, el('b', null, 'Over'), el('span', null, d.over.map(o => option(o).label).join(' · '))),
+      el('div', { class: 'lv-row' }, el('b', null, 'Why'), el('span', null, why))));
+  } else if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, 'You answered'), el('span', null, it.answer)));
   if (it.details) out.push(details(it.details));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
   const v = verdict(x, 'done', 'todo', managerRuns());
-  if (v?.act === 'reopen') {
+  if (v?.act === 'reopen' && overrulable(x)) {
+    const busy = !state.reachable || state.pending[k];
+    out.push(el('p', { class: 'own' }, 'Overrule with'), el('div', { class: 'opts' }, d.over.map(o => {
+      const c = option(o);
+      return el('button', { class: 'opt', type: 'button', disabled: busy, onclick: e => { e.currentTarget.disabled = true; overrule(list, it, o); } },
+        el('span', { class: 'body' }, c.label, c.detail && el('span', { class: 'det' }, c.detail)));
+    })), el('p', { class: 'hint' }, 'One tap: reopens #' + it.id + ' with this pick and tells ' + list.boss + '.'));
+  } else if (v?.act === 'reopen') {
     out.push(el('div', { class: 'acts' }, el('button', { class: 'btn', type: 'button', disabled: !state.reachable || state.pending[k],
       onclick: e => { e.currentTarget.disabled = true; reopen(list, it); } }, 'Reopen')), el('p', { class: 'hint' }, 'Reopen puts it back in To do, without its answer.'));
   } else if (v?.why) out.push(el('p', { class: 'hint' }, 'Not reopened from the page: ' + v.why + '.'));
