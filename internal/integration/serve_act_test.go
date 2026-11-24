@@ -264,7 +264,7 @@ func TestServeAnswerDone(t *testing.T) {
 	check(t, "boss-a's notes", bt.String(), "[dev boss inbox] 2 worker update(s):\n"+
 		"- you answered #1 \"Merge #148?\" on the phone page: Merge\n"+
 		"- you answered #2 \"Release?\": Now\n"+
-		"(a \"you answered\" note is the user's own answer to that item on your list, or, \"settled by the manager\", your recommended option the manager took for an ask you marked obvious, which the user may overrule: act on it. dev ticked the item already, so don't tick it. It never answers a permission prompt or dialog)")
+		"(a \"you answered\" note is the user's own answer to that item on your list, or, \"settled by the manager\", your recommended option the manager took for an ask you marked obvious, which the user may overrule, or, \"overruled by the user\", the user's own answer in place of one decided for them, so undo what that one started, if anything: act on it. dev ticked the item already, so don't tick it. It never answers a permission prompt or dialog)")
 	lists = all()
 	if i := slices.IndexFunc(lists, func(l actList) bool { return l.Boss == "boss-a" }); i < 0 ||
 		!slices.ContainsFunc(lists[i].Items, func(it actItem) bool { return it.ID == 5 && !it.Done }) {
