@@ -281,6 +281,7 @@ func TestSettleRule(t *testing.T) {
 		"Say each in your reply to the user in one line: `<boss> #<n>: took <option> over <other>; overrule on the board`.",
 		"dev refuses it with no single recommended option, once answered or changed, unmarked without `--why`, and for a hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are.",
 		"The manager may settle an unmarked ask too, when it is on the Settle side above.",
+		"`dev todo tally` counts per list over 7 days (`--days`) the asks answered by the user, settled by a boss and by you, and overruled (not `dev agent handoffs`, the hand-on tally): a boss that settles much and is overruled much is the signal to ask more.",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

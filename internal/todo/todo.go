@@ -131,6 +131,8 @@ type file struct {
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
 	dropped []Item
 	pruned  time.Time
+	// events are the tally events of the change: write appends them to the log before it writes the list
+	events []Event
 }
 
 // List is a list as its boards show it, for dev todo --json: items waiting on the user first, then those
@@ -1177,6 +1179,7 @@ func (s Store) AnswerPick(id int, question, arg, picked, via string, before int6
 		}
 		p.tick(now.Unix(), DoneByYou)
 		p.Answer, p.Via = answer, via
+		f.note(s, *p, TallyAnswered, "", now)
 		it = *p
 		return nil
 	}))
@@ -1364,6 +1367,12 @@ func (s Store) write(f file) error {
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
+	}
+	// Last before the rename, which commits the change: only a failed rename leaves an event for no change
+	if len(f.events) > 0 {
+		if err := appendEvents(f.events); err != nil {
+			return errors.Join(fmt.Errorf("tally not written, the list is unchanged: %w", err), ignoreMissing(os.Remove(tmp)))
+		}
 	}
 	return os.Rename(tmp, s.path)
 }

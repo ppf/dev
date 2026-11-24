@@ -68,7 +68,7 @@ func TestSettleUnmarked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &Decided{By: DecidedManager, Pick: obviousOptions[0], Over: obviousOptions[1:], Why: "local, rebuilt in a minute", At: now.Unix()}
+	want := &Decided{By: DecidedManager, Pick: obviousOptions[0], Over: obviousOptions[1:], Why: "local, rebuilt in a minute", At: now.Unix(), Unmarked: true}
 	if it.Answer != "Re-run the job" || it.Via != ViaManager || !reflect.DeepEqual(it.Decided, want) {
 		t.Fatalf("settled = %+v, decided %+v", it, it.Decided)
 	}

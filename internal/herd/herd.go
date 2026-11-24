@@ -232,7 +232,9 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`plus --why '<one line>' when its boss didn't mark it obvious ("obvious: <why>" in dev todo --all). ` + settleLists + ` ` +
 	`Say each in your reply to the user in one line: "<boss> #<n>: took <option> over <other>; overrule on the board". ` +
 	`dev refuses it with no single recommended option, once answered or changed, unmarked without --why, and for a ` +
-	`hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are. Up to 4 asks per call, in order, one per question, ` +
+	`hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are. ` +
+	`dev todo tally counts per list over 7 days (--days) the asks answered by the user, settled by a boss and by you, and ` +
+	`overruled (not dev agent handoffs, the hand-on tally): a boss that settles much and is overruled much is the signal to ask more. Up to 4 asks per call, in order, one per question, ` +
 	`only independent ones (no pick changes another's options or whether it is needed; else one per call); a hand-on ` +
 	`question stays alone in its call, as does an item offering "Hand it on" (dev relays nothing from a call mixing one with other questions). Re-check each item ` +
 	`right before each call with ` + "`dev todo show --print <boss> <n> --question \"<item text>\"`" + ` (one call; refused when gone or reading otherwise) and leave it out when ☑ (closed: answered or withdrawn), boss's own or boss closed ` +

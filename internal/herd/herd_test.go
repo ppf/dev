@@ -786,6 +786,7 @@ func TestPromptSettleRule(t *testing.T) {
 			"Settle, don't ask, a boss's ask that is cheap, reversible and inside what the user already agreed (a picked contract, an earlier pick, a standing rule), when you see no trade-off the boss missed: `dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`, plus --why '<one line>' when its boss didn't mark it obvious (\"obvious: <why>\" in dev todo --all). " + lists,
 			`Say each in your reply to the user in one line: "<boss> #<n>: took <option> over <other>; overrule on the board".`,
 			"dev refuses it with no single recommended option, once answered or changed, unmarked without --why, and for a hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are.",
+			"dev todo tally counts per list over 7 days (--days) the asks answered by the user, settled by a boss and by you, and overruled (not dev agent handoffs, the hand-on tally): a boss that settles much and is overruled much is the signal to ask more.",
 		}},
 	} {
 		for _, want := range tt.want {

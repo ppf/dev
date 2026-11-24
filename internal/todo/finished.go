@@ -155,9 +155,9 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 // Refused, changing nothing, for an item Reopen refuses (not the user's, ticked over a day ago), one not decided for the
 // user, or a pick not among the others. A StillDone error says it is answered all the same.
 func (s Store) Overrule(id int, text, pick, via string, now time.Time) (it Item, was Decided, err error) {
-	it, err = s.reopen(id, text, func(p *Item, orig Item) error {
+	it, err = s.reopen(id, text, func(p *Item, orig Item) (string, error) {
 		if orig.Decided == nil {
-			return Refused{fmt.Errorf("item %d wasn't decided for the user: reopen it to answer it again", id)}
+			return "", Refused{fmt.Errorf("item %d wasn't decided for the user: reopen it to answer it again", id)}
 		}
 		was = *orig.Decided
 		want := Split(Clean(pick))
@@ -171,11 +171,11 @@ func (s Store) Overrule(id int, text, pick, via string, now time.Time) (it Item,
 		}
 		i := slices.IndexFunc(was.Over, names)
 		if i < 0 {
-			return Refused{fmt.Errorf("item %d's other options are %s, not %q", id, strings.Join(quoted(was.OverLabels()), ", "), pick)}
+			return "", Refused{fmt.Errorf("item %d's other options are %s, not %q", id, strings.Join(quoted(was.OverLabels()), ", "), pick)}
 		}
 		p.tick(now.Unix(), DoneByYou)
 		p.Answer, p.Via = answerOf(p.Options, was.Over[i]), via
-		return nil
+		return was.kind(), nil
 	}, now)
 	return it, was, err
 }
@@ -195,8 +195,9 @@ func quoted(ss []string) []string {
 	return out
 }
 
-// reopen is Reopen, running then (when not nil) on the reopened item before it is written: its refusal writes nothing.
-func (s Store) reopen(id int, text string, then func(p *Item, orig Item) error, now time.Time) (Item, error) {
+// reopen is Reopen, running then (when not nil) on the reopened item before it is written: its refusal writes nothing,
+// the tally kind of the decision it returns is noted as an overruled event.
+func (s Store) reopen(id int, text string, then func(p *Item, orig Item) (overruled string, err error), now time.Time) (Item, error) {
 	var it Item
 	err := s.locked(func() error {
 		f, err := s.read()
@@ -243,9 +244,11 @@ func (s Store) reopen(id int, text string, then func(p *Item, orig Item) error, 
 			it.Until = 0
 		}
 		if then != nil {
-			if err := then(&it, orig); err != nil {
+			of, err := then(&it, orig)
+			if err != nil {
 				return err
 			}
+			f.note(s, it, TallyOverruled, of, now)
 		}
 		f.Items = append(f.Items, it)
 		f.Next = max(f.Next, it.ID+1)
