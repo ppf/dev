@@ -191,6 +191,17 @@ func refs(text string) map[int]bool {
 	return out
 }
 
+// unnamed is the ids not in named.
+func unnamed(ids []int, named map[int]bool) []int {
+	var out []int
+	for _, id := range ids {
+		if !named[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // numbers is ids as "#n, #m".
 func numbers(ids []int) string {
 	s := make([]string, len(ids))
@@ -230,15 +241,8 @@ func VerifyHandoff(text string, open []int, transcript string) (Handoff, []strin
 	if len(unmarked) > 0 {
 		miss = append(miss, "key facts "+strings.Join(unmarked, ", ")+" end in neither \"confirmed: <item number, PR or file>\" nor \"unconfirmed\"")
 	}
-	named := refs(text)
-	var unnamed []int
-	for _, id := range open {
-		if !named[id] {
-			unnamed = append(unnamed, id)
-		}
-	}
-	if len(unnamed) > 0 {
-		miss = append(miss, "open items not named: "+numbers(unnamed))
+	if ids := unnamed(open, refs(text)); len(ids) > 0 {
+		miss = append(miss, "open items not named: "+numbers(ids))
 	}
 	if transcript != "" && !strings.Contains(text, transcript) {
 		miss = append(miss, "the old transcript's path "+transcript+" isn't in it")
@@ -271,15 +275,8 @@ func VerifyProof(proof string, h Handoff, asks []int) []string {
 	if extra := len(got) - len(h.Facts); extra > 0 {
 		miss = append(miss, fmt.Sprintf("%d more key facts than the handoff's %d", extra, len(h.Facts)))
 	}
-	named := refs(strings.Join(secs["open asks"], "\n"))
-	var unnamed []int
-	for _, id := range asks {
-		if !named[id] {
-			unnamed = append(unnamed, id)
-		}
-	}
-	if len(unnamed) > 0 {
-		miss = append(miss, "open asks not under ## Open asks: "+numbers(unnamed))
+	if ids := unnamed(asks, refs(strings.Join(secs["open asks"], "\n"))); len(ids) > 0 {
+		miss = append(miss, "open asks not under ## Open asks: "+numbers(ids))
 	}
 	if r, ok := secs["roles"]; ok && !slices.ContainsFunc(r, func(l string) bool { return strings.TrimSpace(l) != "" }) {
 		miss = append(miss, "nothing under ## Roles")

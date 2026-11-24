@@ -76,10 +76,10 @@ unconfirmed fact stated as done, the roles) and tell the user in one line. The f
 // clearCaller refuses dev agent clear in a Claude Code session other than boss a's manager (its starter): another
 // boss never clears a peer.
 func clearCaller(c *tmux.Client, a control.Agent) error {
-	pane := os.Getenv("TMUX_PANE")
 	if os.Getenv("CLAUDECODE") == "" {
 		return nil
 	}
+	pane := os.Getenv("TMUX_PANE")
 	if pane == "" {
 		return fmt.Errorf("%s is cleared only by its manager's coordinator pane, or by the user in a shell", a.Session)
 	}
@@ -87,7 +87,8 @@ func clearCaller(c *tmux.Client, a control.Agent) error {
 	if err != nil {
 		return err
 	}
-	if own = strings.TrimSpace(own); a.StartedBy == "" || own != a.StartedBy {
+	own = strings.TrimSpace(own)
+	if a.StartedBy == "" || own != a.StartedBy {
 		return fmt.Errorf("%s is cleared only by the manager that started or adopted it (%q), or by the user in a shell; not from %s",
 			a.Session, a.StartedBy, own)
 	}

@@ -35,11 +35,9 @@ func Read(c *tmux.Client, a control.Agent, now time.Time) (Boss, []Pane, error) 
 	if n, err := strconv.Atoi(strings.TrimSpace(used)); err == nil {
 		b.Context = &n
 	}
-	shot, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)
-	if err != nil {
+	if b.InputEmpty, err = inputEmpty(c, a.Pane); err != nil {
 		return b, nil, err
 	}
-	b.InputEmpty = inbox.InputEmpty(shot)
 	box, ok, err := inbox.Here(c, a.Pane)
 	if err != nil {
 		return b, nil, err
@@ -179,7 +177,6 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (Result,
 	fmt.Fprintf(o.Out, "Cleared: %s runs a new conversation\n", a.Session)
 
 	proof := ProofPrompt(r.Handoff, r.Proof)
-	// manual is what the caller does when the proof step fails
 	manual := fmt.Sprintf("handoff %s, old transcript %s; the proof prompt to send by hand: %s", r.Handoff, r.Transcript, proof)
 	if err := prompt(c, clk, a, proof, o); err != nil {
 		return r, fmt.Errorf("proof: %w; %s", err, manual)
@@ -220,11 +217,11 @@ func check(c *tmux.Client, a control.Agent, force bool, now time.Time) error {
 // prompt sends text to boss a once it is idle with an empty input box, and waits for its turn to end; a turn ending
 // on a decision (a permission prompt, a question) is an error: that stays the user's.
 func prompt(c *tmux.Client, clk control.Clock, a control.Agent, text string, o Options) error {
-	shot, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)
+	empty, err := inputEmpty(c, a.Pane)
 	if err != nil {
 		return err
 	}
-	if !inbox.InputEmpty(shot) {
+	if !empty {
 		return fmt.Errorf("%s's input box holds text, maybe the user's draft", a.Session)
 	}
 	st, err := control.PromptWait(c, clk, a.Pane, text, o.Stall, o.Timeout)
@@ -235,6 +232,15 @@ func prompt(c *tmux.Client, clk control.Clock, a control.Agent, text string, o O
 		return fmt.Errorf("%s's turn ended on a decision (%s): the user's to answer", a.Session, st.WaitingFor)
 	}
 	return nil
+}
+
+// inputEmpty reports pane's input box empty, a dim suggestion counting as empty.
+func inputEmpty(c *tmux.Client, pane string) (bool, error) {
+	shot, err := c.Run("capture-pane", "-p", "-e", "-t", pane)
+	if err != nil {
+		return false, err
+	}
+	return inbox.InputEmpty(shot), nil
 }
 
 // list is boss a's list as read now, gone workers marked.
@@ -320,7 +326,7 @@ func SavePrompt(path, transcript, facts string) string {
 		"item's status, and --details on every item the user or a person owes (dev todo add --replaces <n> --details '…'); " +
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
-		"most 15, the facts you must not lose, each ending \"confirmed: <item number, PR or file>\" or \"unconfirmed\". " +
+		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"confirmed: <item number, PR or file>\" or \"unconfirmed\". " +
 		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {
