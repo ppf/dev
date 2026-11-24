@@ -142,6 +142,7 @@ func TestTodoAsking(t *testing.T) {
 	}{
 		{[]string{"boss-a", "3", "boss-a", "4", "--question", "Ship?"}, "one --question with the ask's text per <boss> <n>, in order: 1 for 2"},
 		{[]string{"boss-a", "3", "boss-a"}, "1 to 4 pairs of <boss> <n>"},
+		{[]string{"boss-a", "3", "--question", ""}, "one is empty"},
 		{[]string{"boss-a", "3", "boss-a", "2", "--question", "Ship?", "--question", "Book a room"}, "boss-a #2 is no ask"},
 		{[]string{"boss-a", "3", "boss-a", "3", "--question", "Ship?", "--question", "Ship?"}, "boss-a #3 is named twice"},
 	} {

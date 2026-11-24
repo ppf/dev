@@ -36,6 +36,9 @@ refused unless open ask n still reads it; one refused item marks none. Only from
 			if *boss != "" {
 				return errors.New("the boss is asking's first argument: leave out --boss")
 			}
+			if slices.Contains(questions, "") {
+				return errors.New("asking needs --question with the ask's text: one is empty")
+			}
 			if len(questions) != len(args)/2 {
 				return fmt.Errorf("asking needs one --question with the ask's text per <boss> <n>, in order: %d for %d", len(questions), len(args)/2)
 			}

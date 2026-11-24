@@ -151,8 +151,8 @@ func FirstLine(text string) string {
 	return ""
 }
 
-// isHandOn reports question, offering labels, the manager's hand-on question: it offers HandItOn or, in a dialog of
-// several, its first line starts "Hand on to boss-", as the hand-on gate wants it. An item's ask offering HandItOn
+// isHandOn reports question, offering labels, the manager's hand-on question: it offers HandItOn or its first line
+// starts "Hand on to boss-", as the hand-on gate wants it. An item's ask offering HandItOn
 // counts too: the safe side, as a dialog mixing a hand-on question with others relays nothing.
 func isHandOn(question string, labels []string) bool {
 	return slices.ContainsFunc(labels, func(l string) bool { return IsPicked(l, HandItOn) }) ||
