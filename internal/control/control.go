@@ -505,10 +505,10 @@ const enterDelay = 150 * time.Millisecond
 func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err error) {
 	st, err := ReadChecked(c, pane)
 	if err != nil {
-		return false, err
+		return false, notSent{err}
 	}
 	if err := st.checkPromptable(); err != nil {
-		return false, err
+		return false, notSent{err}
 	}
 	claude := agent.ClaudeCommand(st.Command)
 	queued = st.Trusted() == agent.Working && claude
@@ -516,10 +516,10 @@ func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err erro
 		// Claude records a dialog seconds after drawing it (not at all while someone types in it)
 		capture, err := c.Run("capture-pane", "-p", "-t", pane)
 		if err != nil {
-			return false, err
+			return false, notSent{err}
 		}
 		if screen.ClaudeState(capture) == "" {
-			return false, errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")
+			return false, notSent{errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")}
 		}
 	}
 	if err := paste(c, clk, pane, text); err != nil {
@@ -596,14 +596,25 @@ func (cmd *command) step(c *tmux.Client, pane string, elapsed time.Duration) (ra
 	return "", nil
 }
 
+// notSent is an error from before a prompt's text reached the pane.
+type notSent struct{ error }
+
+func (e notSent) Unwrap() error { return e.error }
+
+// NotSent reports whether err, from Prompt or PromptWait, came before the text reached the pane: nothing was typed.
+func NotSent(err error) bool {
+	var n notSent
+	return errors.As(err, &n)
+}
+
 func paste(c *tmux.Client, clk Clock, pane, text string) error {
 	if strings.TrimSpace(text) == "" {
-		return errors.New("empty prompt")
+		return notSent{errors.New("empty prompt")}
 	}
 	// From a file, not argv: tmux splits commands at an argument's trailing ";" and caps a command's size
 	f, err := os.CreateTemp("", "dev-agent-prompt-")
 	if err != nil {
-		return err
+		return notSent{err}
 	}
 	defer func() { _ = os.Remove(f.Name()) }()
 	_, err = f.WriteString(text)
@@ -611,16 +622,16 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 		err = cerr
 	}
 	if err != nil {
-		return err
+		return notSent{err}
 	}
 	buffer := "dev-agent-" + strconv.Itoa(os.Getpid())
 	if _, err := c.Run("load-buffer", "-b", buffer, f.Name()); err != nil {
-		return err
+		return notSent{err}
 	}
 	if _, err := c.Run("paste-buffer", "-p", "-d", "-b", buffer, "-t", pane); err != nil {
 		// -d only deletes after a paste
 		_, _ = c.Run("delete-buffer", "-b", buffer)
-		return err
+		return notSent{err}
 	}
 	clk.Sleep(enterDelay)
 	_, err = c.Run("send-keys", "-t", pane, "Enter")
@@ -635,22 +646,22 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 func PromptWait(c *tmux.Client, clk Clock, pane, text string, stall, timeout time.Duration) (Status, error) {
 	before, err := ReadChecked(c, pane)
 	if err != nil {
-		return before, err
+		return before, notSent{err}
 	}
 	switch st := before.Trusted(); {
 	case st == "":
-		return before, errNoState
+		return before, notSent{errNoState}
 	case !before.Settled():
 		// Its Stop would end the wait before the queued prompt even starts
-		return before, fmt.Errorf("agent is %s: wait for it first", st)
+		return before, notSent{fmt.Errorf("agent is %s: wait for it first", st)}
 	}
 	if err := before.checkPromptable(); err != nil {
-		return before, err
+		return before, notSent{err}
 	}
 	// Claude Code's aliases of /clear too
 	reset := slices.Contains([]string{"/clear", "/reset", "/new"}, strings.TrimSpace(text))
 	if reset && before.Session == "" {
-		return before, errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")
+		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")}
 	}
 	if err := paste(c, clk, pane, text); err != nil {
 		return before, err

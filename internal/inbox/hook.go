@@ -62,7 +62,11 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 		if !ok || err != nil || b.Name != Manager {
 			return "", false, err
 		}
-		return "", false, b.Box.Picked(picks, time.Now())
+		now := time.Now()
+		if err := b.Box.Picked(picks, now); err != nil {
+			return "", false, err
+		}
+		return "", false, recordHandOn(c, picks, now)
 	}
 	if e.Name != "Stop" && e.Name != "UserPromptSubmit" || e.StopActive {
 		return "", false, nil

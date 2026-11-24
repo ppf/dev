@@ -52,7 +52,7 @@ Run "dev agent skill [dev-agents|desktop-boss|t3-boss]" for a coordinator skill.
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(), newAgentWaitUntilCmd(),
 		newAgentSendKeysCmd(), newAgentStartCmd(), newAgentCloseCmd(), newAgentSkillCmd(), newAgentMessageCmd(), newAgentReplyCmd(),
-		newAgentMessagesCmd())
+		newAgentMessagesCmd(), newAgentHandoffsCmd())
 	return cmd
 }
 
@@ -212,6 +212,7 @@ func typeInto(c *tmux.Client, target string) (control.Agent, error) {
 
 func newAgentPromptCmd() *cobra.Command {
 	var wait bool
+	var kind string
 	var stall, timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "prompt <target> [text...]",
@@ -227,7 +228,11 @@ dialog is an error.
 again (idle or waiting), printing that state; another slash command Claude runs itself, once its screen
 shows it ran. Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box:
 read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: --wait returns once the
-agent's new conversation started (its hook recorded a new session).`,
+agent's new conversation started (its hook recorded a new session).
+
+From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
+latest prompt there being a pick of "Hand it on" on one question that names the boss and holds the brief's first
+line, once per pick.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -243,22 +248,33 @@ agent's new conversation started (its hook recorded a new session).`,
 			if err != nil {
 				return err
 			}
+			var g *handOn
+			switch boss := herd.IsBossPane(c, a.Pane); {
+			case boss:
+				if g, err = gateHandOn(c, kind, a.Session, text); err != nil {
+					return err
+				}
+			case kind != "":
+				return fmt.Errorf("--kind: %s is no boss", a.Session)
+			}
 			if !wait {
 				queued, err := control.Prompt(c, control.RealClock, a.Pane, text)
 				if queued {
 					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
 				}
-				return err
+				return errors.Join(err, g.done(!control.NotSent(err), time.Now()))
 			}
 			st, err := control.PromptWait(c, control.RealClock, a.Pane, text, stall, timeout)
-			if err != nil {
-				return err
+			gerr := g.done(!control.NotSent(err), time.Now())
+			if err != nil || gerr != nil {
+				return errors.Join(err, gerr)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), st.Trusted())
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the agent finished its turn")
+	cmd.Flags().StringVar(&kind, "kind", "", kindHelp)
 	cmd.Flags().DurationVar(&stall, "stall", 10*time.Second, "with --wait: give up when the prompt isn't picked up within this")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "with --wait: give up after this")
 	return cmd

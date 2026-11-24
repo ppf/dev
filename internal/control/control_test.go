@@ -766,3 +766,11 @@ func TestListWait(t *testing.T) {
 		t.Errorf("JSON\n%s\n%s\nwant %s on app only", app, web, want)
 	}
 }
+
+// NotSent tells a refusal before the paste from an error after it, keeping the error itself.
+func TestNotSent(t *testing.T) {
+	err := notSent{ErrStalled}
+	if !NotSent(fmt.Errorf("wrapped: %w", err)) || !errors.Is(err, ErrStalled) || NotSent(ErrStalled) || NotSent(nil) {
+		t.Error("NotSent misreads")
+	}
+}

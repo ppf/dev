@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ppf/dev/internal/tmux"
@@ -84,10 +85,16 @@ func HookQuestion(input []byte) (Question, bool) {
 		Description: cut(e.Input.Description), Questions: e.Input.Questions}, true
 }
 
-// Pick is the answer the user picked or typed for one AskUserQuestion question.
+// Pick is the answer the user picked or typed for one AskUserQuestion question, with its options' labels.
 type Pick struct {
 	Question string
 	Answer   string
+	Labels   []string
+}
+
+// Typed reports an answer typed under Other: none of p's options' labels, when it has any.
+func (p Pick) Typed() bool {
+	return len(p.Labels) > 0 && !slices.Contains(p.Labels, p.Answer)
 }
 
 // String is p as the user's words: "<question> picked <answer>".
@@ -111,6 +118,9 @@ func HookPick(input []byte) []Pick {
 	answered := false
 	for i, q := range e.Input.Questions {
 		picks[i] = Pick{Question: q.Question, Answer: strings.TrimSpace(e.Input.Answers[q.Question])}
+		for _, o := range q.Options {
+			picks[i].Labels = append(picks[i].Labels, o.Label)
+		}
 		answered = answered || picks[i].Answer != ""
 	}
 	if !answered {
