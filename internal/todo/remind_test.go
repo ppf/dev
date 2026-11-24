@@ -22,7 +22,8 @@ func TestRemindChangesOnly(t *testing.T) {
 	}
 	remindIn := func(conversation string) string {
 		t.Helper()
-		got, err := s.Remind(read(t, s, now), nil, conversation, now)
+		// A minute on: a ticked item has left the list
+		got, err := s.Remind(read(t, s, now.Add(time.Minute)), nil, conversation, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +170,7 @@ func TestRemindReplacedSameLine(t *testing.T) {
 	if err := s.Replace(1, Item{Text: "a", Details: "other"}, later); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Remind(read(t, s, later), nil, "c1", later); !strings.Contains(got, "1 new or changed since the last one; the others as before (dev todo lists them):\n1. a\n") {
+	if got, _ := s.Remind(read(t, s, later), nil, "c1", later); !strings.Contains(got, "1 new or changed since the last one:\n1. a\n") {
 		t.Errorf("replaced = %q, want it listed", got)
 	}
 }
@@ -198,5 +199,30 @@ func TestRemindLeftAndEmptyStart(t *testing.T) {
 	got, _ := s.Remind(read(t, s, now.Add(time.Minute)), []Ticked{{ID: 2, Text: "t2"}}, "c1", now)
 	if !strings.Contains(got, "#1 left it") || strings.Contains(got, "#2,") || strings.Contains(got, "#21") {
 		t.Errorf("left = %q, want #1 alone", got)
+	}
+}
+
+// A hook without a conversation id gets the full list, kept nowhere; an item ticked but still on the list didn't leave it.
+func TestRemindNoConversationAndTickedStill(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	for _, text := range []string{"a", "b"} {
+		if _, err := s.Add(Item{Text: text, Details: "d"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if got, _ := s.Remind(read(t, s, now), nil, "", now); !strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. a\n") {
+			t.Errorf("no conversation = %q, want the full list", got)
+		}
+	}
+	if _, err := s.Remind(read(t, s, now), nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Remind(read(t, s, now), nil, "c1", now); strings.Contains(got, "left it") {
+		t.Errorf("ticked, still listed = %q, want no left it", got)
 	}
 }

@@ -214,7 +214,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`fails, put it to the user as any other ask. Both pass: ` + "`dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`" + ` ` +
 	`(the option you checked; refused once the boss changed it; dev refuses an unmarked ask and never answers a permission prompt or dialog with ` +
 	`it), and name it in your roll-up in one line: "<project> #<n>: decided for you: <pick> (obvious: <why>)". One question per call, in order; re-check its item ` +
-	`right before each with ` + "`dev todo show --print <boss> <n> --question \"<item text>\"`" + ` (one call; refused when gone or reading otherwise) and skip it when answered or gone meanwhile. The question starts "<project> #<n>: " and holds the ` +
+	`right before each with ` + "`dev todo show --print <boss> <n> --question \"<item text>\"`" + ` (one call; refused when gone or reading otherwise) and skip it unless it is still open (☐; ☑ is closed, answered or withdrawn). The question starts "<project> #<n>: " and holds the ` +
 	`item text word for word (dev checks a pick against both): that prefix and the text on one line, a blank line, then the ` +
 	`item's context as "- " lines (dev todo --all prints them indented under it) and at most one short "- " line of your own (the item's link, if any), ` +
 	`never a paragraph or what the item already says; the options are the item's labels (before " | "), its recommended one first with ` +

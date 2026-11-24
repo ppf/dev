@@ -1444,9 +1444,12 @@ func (it Shown) seenAs(now time.Time) string {
 	line := it.line(now)
 	if it.Flagged() {
 		// Why, without its age
-		line = "re-check gone"
+		line = "re-check"
+		if it.Gone {
+			line += " gone"
+		}
 		if it.Check != nil {
-			line = "re-check " + it.Check.Kind
+			line += " " + it.Check.Kind
 		}
 	}
 	return line + "\x00" + strconv.FormatInt(it.Added, 10)
