@@ -372,6 +372,10 @@ func (s Store) take(from Store) (taken bool, err error) {
 		if f, err := from.read(); err != nil || f.MovedTo != "" {
 			return err
 		}
+		// What its boss last got goes first: a failure moves nothing. The next reminder is the full list
+		if err := from.forgetShown(); err != nil {
+			return err
+		}
 		taken = true
 		if err := os.MkdirAll(filepath.Dir(s.donePath()), 0o700); err != nil {
 			return err
@@ -381,10 +385,6 @@ func (s Store) take(from Store) (taken bool, err error) {
 			return err
 		}
 		if err := ignoreMissing(os.Rename(from.donePath(), s.donePath())); err != nil {
-			return err
-		}
-		// What its boss last got: the next reminder is the full list
-		if err := from.forgetShown(); err != nil {
 			return err
 		}
 		return os.Rename(from.path, s.path)
@@ -1409,7 +1409,7 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 		case it.Done:
 		case it.Flagged():
 			flagged = append(flagged, it)
-		case seen != nil && seen[it.ID] == it.line(now):
+		case seen != nil && seen[it.ID] == it.seenAs(now):
 		default:
 			rest = append(rest, it)
 		}
@@ -1421,8 +1421,8 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 		if n++; limit > 0 && n > limit {
 			return
 		}
-		shown[it.ID] = it.line(now)
-		b.WriteString("\n" + shown[it.ID])
+		shown[it.ID] = it.seenAs(now)
+		b.WriteString("\n" + it.line(now))
 	}
 	if len(flagged) > 0 {
 		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):")
@@ -1440,6 +1440,12 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 		fmt.Fprintf(&b, "\n+%d more: dev todo", n-limit)
 	}
 	return b.String(), shown
+}
+
+// seenAs is how a boss's list keeps the item it named: its line and revision (Added), so a replace or reopen that
+// leaves the line as it was still counts.
+func (it Shown) seenAs(now time.Time) string {
+	return it.line(now) + "\x00" + strconv.FormatInt(it.Added, 10)
 }
 
 // line is the open item as a boss's list names it: number, text, who does it and the rest it needs to know at now.
@@ -1516,26 +1522,20 @@ func (l List) Reminder(ticked []Ticked, now time.Time) string {
 	return text
 }
 
-// StartReminder is the items ticked by themselves (tickedText), then the open items for a boss starting or /clear'ed
+// startReminder is the items ticked by themselves (tickedText), then the open items for a boss starting or /clear'ed
 // at now, at most startShown, with how long ago the list changed (age, e.g. "2h ago") and, when kept, that an earlier
 // boss session left it; "" when none ticked and none is open.
-func (l List) StartReminder(kept bool, age string, ticked []Ticked, now time.Time) string {
-	text, _ := l.startReminder(kept, age, ticked, now)
-	return text
-}
-
-// startReminder is StartReminder, with the lines it names by their items' ids.
-func (l List) startReminder(kept bool, age string, ticked []Ticked, now time.Time) (string, map[int]string) {
-	items, shown := l.linesSince(startShown, nil, now)
+func (l List) startReminder(kept bool, age string, ticked []Ticked, now time.Time) string {
+	items := l.lines(startShown, now)
 	if items == "" {
-		return tickedText(ticked), shown
+		return tickedText(ticked)
 	}
 	from := "updated " + age
 	if kept {
 		from = "kept from your last boss session, " + from
 	}
 	return withTicked(ticked, "[dev todo] Your open to do list ("+from+"):"+items+
-		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."+whoLine+detailsLine(items)), shown
+		"\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")."+whoLine+detailsLine(items))
 }
 
 // Clean is s as one board row: control characters dropped, space runs collapsed, trimmed.

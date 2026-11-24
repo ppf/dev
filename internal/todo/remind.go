@@ -21,7 +21,6 @@ const tickLine = "\nTick what these notes closed (dev todo done <n>); an item th
 // count line, those to re-check always. shown is the lines it names.
 func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (string, map[int]string) {
 	items, shown := l.linesSince(0, seen, now)
-	open, _ := l.Open()
 	if seen == nil {
 		if items == "" {
 			return tickedText(ticked), shown
@@ -30,23 +29,23 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 	}
 	// New or changed: a re-check item's line changes with its age, so it counts only when new
 	changed := 0
-	isOpen := map[int]bool{}
+	open := map[int]bool{}
 	for _, it := range l.Items {
 		if it.Done {
 			continue
 		}
-		isOpen[it.ID] = true
+		open[it.ID] = true
 		if _, was := seen[it.ID]; it.Flagged() && !was || !it.Flagged() && shown[it.ID] != "" {
 			changed++
 		}
 	}
 	var left []string
 	for _, id := range slices.Sorted(maps.Keys(seen)) {
-		if !isOpen[id] {
+		if !open[id] {
 			left = append(left, "#"+strconv.Itoa(id))
 		}
 	}
-	if open == 0 {
+	if len(open) == 0 {
 		if len(left) == 0 {
 			return tickedText(ticked), shown
 		}
@@ -56,7 +55,7 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 	if changed == 0 {
 		count = "none"
 	}
-	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s new or changed since the last one", open, count)
+	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s new or changed since the last one", len(open), count)
 	if len(left) > 0 {
 		head += ", " + strings.Join(left, ", ") + " left it"
 	}
@@ -86,12 +85,18 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 	return text, err
 }
 
-// StartRemind is l's StartReminder, what it names kept for the next Remind in conversation; the text holds even with
-// err, the shown file not written.
+// StartRemind is l's start reminder (startReminder), its open items kept for the next Remind in conversation; the
+// text holds even with err, the shown file not written.
 func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
 	err = s.locked(func() error {
-		var shown map[int]string
-		text, shown = l.startReminder(kept, age, ticked, now)
+		text = l.startReminder(kept, age, ticked, now)
+		// Past startShown too: its "+N more" line named them, dev todo lists them
+		shown := map[int]string{}
+		for _, it := range l.Items {
+			if !it.Done {
+				shown[it.ID] = it.seenAs(now)
+			}
+		}
 		return s.keepShown(conversation, shown)
 	})
 	return text, err

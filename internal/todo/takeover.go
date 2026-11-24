@@ -380,8 +380,11 @@ func (s Store) TakeOver(from Store, now time.Time) (t Taken, err error) {
 	}
 	err = lockedPair(s, from, func() error {
 		var err error
-		t, err = s.takeOver(from, now)
-		return err
+		if t, err = s.takeOver(from, now); err != nil {
+			return err
+		}
+		// Both lists' items moved: their bosses' next reminders are the full lists
+		return errors.Join(from.forgetShown(), s.forgetShown())
 	})
 	return t, err
 }

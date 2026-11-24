@@ -141,8 +141,11 @@ func openList(c *tmux.Client, pane, conversation string) (string, error) {
 	if err != nil {
 		return "", errors.Join(gone, err)
 	}
-	text, err := s.Remind(l, ticked, conversation, now)
-	return text, errors.Join(gone, err)
+	if gone != nil {
+		// Its gone items unmarked: the full list, what the boss last got kept as it was
+		return l.Reminder(ticked, now), gone
+	}
+	return s.Remind(l, ticked, conversation, now)
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
@@ -440,21 +443,22 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 	if !ok || err != nil || w.Herd == "" {
 		return false, nil, err
 	}
+	// Still sent without its state: the item is on the list
+	state, noState := itemState(c, pane, id, text, clk.Now())
 	if len(options) > 0 {
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
-	// Still sent without its state: the item is on the list
-	state, noState := itemState(c, pane, id, clk.Now())
-	text = clean(fmt.Sprintf("#%d %s%s", id, state, text))
+	// The state outside the clip: it never cuts the options
+	text = fmt.Sprintf("#%d %s", id, state) + clean(text)
 	// Each its own: an item given back with the same text is news again
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
 	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
 	return queued, noState, err
 }
 
-// itemState is item id's mark and who it waits on (todo.Shown.State) on the list of the boss session pane is in, then
+// itemState is the mark and who it waits on (todo.List.ItemState) of item id reading text on the list of the boss session pane is in, then
 // ": ", so a note about it names them as dev has them; "" with the error when the list can't say.
-func itemState(c *tmux.Client, pane string, id int, now time.Time) (string, error) {
+func itemState(c *tmux.Client, pane string, id int, text string, now time.Time) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if err != nil {
 		return "", err
@@ -463,9 +467,9 @@ func itemState(c *tmux.Client, pane string, id int, now time.Time) (string, erro
 	if err != nil {
 		return "", err
 	}
-	state, ok := l.ItemState(id)
+	state, ok := l.ItemState(id, text)
 	if !ok {
-		return "", fmt.Errorf("#%d left the list", id)
+		return "", fmt.Errorf("#%d %q left the list", id, text)
 	}
 	return state + ": ", nil
 }
@@ -479,13 +483,14 @@ func AnsweredUp(c *tmux.Client, clk control.Clock, pane string, it todo.Item, an
 		return false, nil, err
 	}
 	// The answered item itself: a list set since may give its number to another
-	num, text := fmt.Sprintf("#%d ", it.ID), answer.Text
+	num, text := fmt.Sprintf("#%d ", it.ID), clean(answer.Text)
 	if strings.HasPrefix(text, num) {
+		// The state outside the clip
 		text = num + it.State() + ": " + strings.TrimPrefix(text, num)
 	} else {
 		noState = fmt.Errorf("the note doesn't start with %q", num)
 	}
 	key := AskAnswered + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
-	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: clean(text), Key: key})
+	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: AskAnswered, Text: text, Key: key})
 	return queued, noState, err
 }

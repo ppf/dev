@@ -21,16 +21,22 @@ func TestShownState(t *testing.T) {
 	}
 }
 
-// A note names the open item of a number first: a ticked one may share it (numbers restart); then a ticked or finished one.
+// A note names the open item of a number and text first: a ticked one may share both (numbers restart); then a ticked
+// or finished one; another text is none.
 func TestListItemState(t *testing.T) {
-	l := List{Items: []Shown{{ID: 1, Text: "old", Done: true, Answer: "Merge"}, {ID: 1, Text: "new"}, {ID: 2, Done: true}},
+	l := List{Items: []Shown{{ID: 1, Text: "q", Done: true, Answer: "Merge"}, {ID: 1, Text: "q"}, {ID: 2, Text: "old", Done: true}},
 		Finished: []Finished{{ID: 3, Text: "gone", Answer: "Wait"}}}
-	for id, want := range map[int]string{1: "☐ on you", 2: "☑ done", 3: "☑ answered"} {
-		if got, ok := l.ItemState(id); !ok || got != want {
-			t.Errorf("#%d: %q %v, want %q", id, got, ok, want)
+	for _, tt := range []struct {
+		id         int
+		text, want string
+	}{{1, "q", "☐ on you"}, {2, "old", "☑ done"}, {3, "gone", "☑ answered"}} {
+		if got, ok := l.ItemState(tt.id, tt.text); !ok || got != tt.want {
+			t.Errorf("#%d %q: %q %v, want %q", tt.id, tt.text, got, ok, tt.want)
 		}
 	}
-	if got, ok := l.ItemState(4); ok {
-		t.Errorf("#4: %q, want none", got)
+	for _, id := range []int{2, 4} {
+		if got, ok := l.ItemState(id, "other"); ok {
+			t.Errorf("#%d other: %q, want none", id, got)
+		}
 	}
 }

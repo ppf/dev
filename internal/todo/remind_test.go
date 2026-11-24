@@ -73,7 +73,7 @@ func TestRemindChangesOnly(t *testing.T) {
 	}
 }
 
-// The start list names at most startShown items: the next reminder lists the ones it left out, once.
+// The start list names at most startShown items, then "+N more": the next reminder counts none of them as new.
 func TestStartRemindKeepsShown(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
@@ -86,8 +86,8 @@ func TestStartRemindKeepsShown(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Remind(read(t, s, now), nil, "c1", now)
-	want := "22 open, 2 new or changed since the last one; the others as before (dev todo lists them):\n21. t21\n22. t22\n"
-	if err != nil || !strings.Contains(got, want) || strings.Contains(got, "20. t20") {
+	want := "[dev todo] Your open to do list: 22 open, none new or changed since the last one (dev todo lists them)."
+	if err != nil || !strings.HasPrefix(got, want) {
 		t.Errorf("after start = %q, %v; want %q", got, err, want)
 	}
 }
@@ -149,5 +149,24 @@ func TestRemindFlaggedAndEmptied(t *testing.T) {
 	}
 	if got, _ := s.Remind(read(t, s, now.Add(time.Minute)), nil, "c1", now); got != "[dev todo] Your open to do list is empty now: #1, #2 left it." {
 		t.Errorf("emptied = %q, want what left it", got)
+	}
+}
+
+// A replace that leaves an item's line as it was (its link, details, a confirm) still counts: its revision moved.
+func TestRemindReplacedSameLine(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "a", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Remind(read(t, s, now), nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Minute)
+	if err := s.Replace(1, Item{Text: "a", Details: "other"}, later); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Remind(read(t, s, later), nil, "c1", later); !strings.Contains(got, "1 new or changed since the last one; the others as before (dev todo lists them):\n1. a\n") {
+		t.Errorf("replaced = %q, want it listed", got)
 	}
 }
