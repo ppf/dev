@@ -394,8 +394,8 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 }
 
 // ReadChecked is ReadStatus, but a Claude or agy pane's decision (agent.Deciding) or working state is checked
-// against its screen first, as neither fires a hook when its dialog is answered No or Esc, or Esc ends its
-// turn. For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
+// against its screen first, as neither fires a hook when its permission prompt is declined or cancelled, or Esc
+// ends its turn (an agy question isn't: its PostToolUse settles it). For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
 // is open; the state it shows, idle or working, is recorded and returned. A working pane showing its turn
 // interrupted (screen.ClaudeInterrupted, screen.AgyInterrupted) is recorded idle.
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {

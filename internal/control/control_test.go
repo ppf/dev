@@ -808,3 +808,64 @@ func TestListWait(t *testing.T) {
 		t.Errorf("JSON\n%s\n%s\nwant %s on app only", app, web, want)
 	}
 }
+
+// An agy pane waiting on a permission prompt settles from its screen once the prompt is gone (declined or cancelled:
+// no hook); a question never does (its PostToolUse settles it, and its hook records it before agy draws it).
+func TestReadCheckedAgy(t *testing.T) {
+	screen := func(name string) string {
+		raw, err := os.ReadFile("../screen/testdata/" + name + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.ReplaceAll(string(raw), `\x1b`, "\x1b")
+	}
+	const permission = `{"tool":"Bash","command":"echo hi"}`
+	const question = `{"tool":"AskUserQuestion","questions":[{"question":"Red or blue?"}]}`
+	stale := Status{Command: "agy", State: "waiting", StateCmd: "agy", Prompts: "2", WaitingFor: "permission_prompt", Since: "50"}
+	fresh := stale
+	fresh.Since = strconv.FormatInt(time.Now().Unix(), 10)
+	settle := "if-shell -F -t %1 #{&&:#{==:#{@agent_state},waiting},#{==:#{@agent_since},50}} set-option -p -t %1 @agent_state "
+	tests := []struct {
+		name     string
+		st       Status
+		question string
+		screen   string
+		settled  string // the state recorded, "" for none
+	}{
+		{"declined: idle", stale, permission, "agy-declined", "idle"},
+		{"approved, no hook yet: working", stale, permission, "agy-working", "working"},
+		{"still open", stale, permission, "agy-permission", ""},
+		{"just recorded", fresh, permission, "agy-idle", ""},
+		{"a question: left to its hook", stale, question, "agy-idle", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cmds []string
+			c := tmux.NewFake(func(args []string) (string, error) {
+				switch {
+				case args[0] == "display-message" && args[len(args)-1] == "#{@agent_question}":
+					return tt.question + "\n", nil
+				case args[0] == "display-message":
+					st := tt.st
+					return tmux.FormatRow(st.Command, st.State, st.StateCmd, st.Prompts, st.WaitingFor, st.Since, st.Session, st.Active), nil
+				case args[0] == "capture-pane":
+					return screen(tt.screen), nil
+				}
+				cmds = append(cmds, strings.Join(args, " "))
+				return "", nil
+			})
+			if _, err := ReadChecked(c, "%1"); err != nil {
+				t.Fatal(err)
+			}
+			var settled []string
+			for _, cmd := range cmds {
+				if rest, ok := strings.CutPrefix(cmd, settle); ok {
+					settled = append(settled, rest)
+				}
+			}
+			if tt.settled == "" && len(cmds) > 0 || tt.settled != "" && (len(settled) != 1 || !strings.HasPrefix(settled[0], tt.settled+" ; ")) {
+				t.Errorf("cmds %q, want settled %q", cmds, tt.settled)
+			}
+		})
+	}
+}

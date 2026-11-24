@@ -81,14 +81,15 @@ func GrokSkip(input []byte) bool {
 type AgyKind int
 
 const (
-	// AgyProgress is a later model call or a tool call's end while no decision waits: activity only.
+	// AgyProgress is any other event (a later model call): activity only.
 	AgyProgress AgyKind = iota
 	// AgyTurn is a turn's start (its first model call, PreInvocation with invocationNum 0) or end (Stop).
 	AgyTurn
 	// AgyTool is a tool call about to run, other than a question: agy may draw a permission prompt for it, which
 	// no hook tells from an auto-approved call.
 	AgyTool
-	// AgyToolDone is a tool call's end (PostToolUse): a question answered, or a permission prompt approved.
+	// AgyToolDone is a tool call's end (PostToolUse): it ends a question answered or skipped, or a permission prompt
+	// approved, else it is activity only.
 	AgyToolDone
 	// AgyAsk is a question (PreToolUse of ask_question): Question holds it.
 	AgyAsk
@@ -152,6 +153,10 @@ func AgyHook(input []byte) (AgyEvent, error) {
 				a.Options = append(a.Options, Choice{Label: cut(o)})
 			}
 			ev.Question.Questions = append(ev.Question.Questions, a)
+		}
+		if len(ev.Question.Questions) == 0 {
+			// Its args in another shape: the note would ask nothing
+			return AgyEvent{}, errors.New("agent: agy ask_question without questions")
 		}
 		fields["hook_event_name"], fields["notification_type"], fields["message"] = "Notification", PermissionPrompt, ev.Question.Ask()
 	case e.Event == "PreToolUse":
@@ -477,7 +482,10 @@ func AgyLastReply(path string) (string, error) {
 		// Its first line is cut
 		lines = lines[1:]
 	}
-	for i := len(lines) - 1; i >= 0 && lines[i] != ""; i-- {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i] == "" {
+			continue
+		}
 		var step struct {
 			Source  string `json:"source"`
 			Type    string `json:"type"`
@@ -493,6 +501,9 @@ func AgyLastReply(path string) (string, error) {
 			return step.Content, nil
 		}
 	}
+	if from > 0 {
+		return "", fmt.Errorf("agent: agy transcript %s: no reply nor prompt in its last %d bytes", path, agyTail)
+	}
 	return "", nil
 }
 
@@ -505,22 +516,34 @@ const agyTail = 1 << 20
 // recorded reports the pane now waits on it.
 func AgyPermission(c *tmux.Client, pane, since, prompts, tool, what, title string) (q Question, recorded bool, err error) {
 	q = Question{Tool: cmp.Or(tool, "command"), Command: cut(what), Description: cut(title)}
-	stamp := strconv.FormatInt(now().Unix(), 10)
+	data, err := json.Marshal(q)
+	if err != nil {
+		return q, false, err
+	}
+	// The question in the same tmux command as the state, and optClaim marking this write: two checks
+	// reading the same prompt in one second (agy-dialog, the boss inbox) record and report it once
+	mark := "agy-dialog-" + strconv.FormatInt(now().UnixNano(), 10)
 	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
 	set := strings.Join([]string{
 		"set-option -p -t " + pane + " @agent_state " + Waiting,
-		"set-option -p -t " + pane + " @agent_since " + stamp,
+		"set-option -p -t " + pane + " @agent_since " + strconv.FormatInt(now().Unix(), 10),
 		"set-option -p -t " + pane + " @agent_waiting_for " + PermissionPrompt,
+		"set-option -p -t " + pane + " " + OptQuestion + " " + tmuxQuote(string(data)),
+		"set-option -p -t " + pane + " " + optClaim + " " + mark,
 	}, " ; ")
 	if _, err := c.Run("if-shell", "-F", "-t", pane, cond, set); err != nil {
 		return q, false, err
 	}
-	// The question apart: its JSON would need quoting in if-shell's command
-	out, err := c.Run("display-message", "-p", "-t", pane, "#{@agent_state} #{@agent_since}")
-	if err != nil || strings.TrimSpace(out) != Waiting+" "+stamp {
-		return q, false, err
-	}
-	return q, true, RecordQuestion(c, pane, q)
+	out, err := c.Run("display-message", "-p", "-t", pane, "#{"+optClaim+"}")
+	return q, err == nil && strings.TrimSpace(out) == mark, err
+}
+
+// optClaim is the pane option naming the last AgyPermission write.
+const optClaim = "@agent_agy_claim"
+
+// tmuxQuote is s as one double-quoted word of a tmux command: \, " and $ escaped (no environment expanded).
+func tmuxQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(s) + `"`
 }
 
 // settle records state on pane, unsetting @agent_question, when the format cond holds: the check and the

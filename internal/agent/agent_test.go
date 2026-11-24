@@ -170,6 +170,35 @@ func TestInterrupted(t *testing.T) {
 	}
 }
 
+func TestAgyPermission(t *testing.T) {
+	now = func() time.Time { return time.Unix(100, 0) }
+	t.Cleanup(func() { now = time.Now })
+	for _, claim := range []string{"agy-dialog-100000000000", "agy-dialog-99"} {
+		var calls [][]string
+		c := tmux.NewFake(func(args []string) (string, error) {
+			calls = append(calls, args)
+			if args[0] == "display-message" {
+				return claim + "\n", nil
+			}
+			return "", nil
+		})
+		q, recorded, err := AgyPermission(c, "%1", "50", "7", "Bash", `echo "$HOME" \ x`, "Run this command?")
+		if err != nil || recorded != (claim == "agy-dialog-100000000000") || q.Ask() != `allow Bash: echo "$HOME" \ x` {
+			t.Errorf("claim %s: AgyPermission = %+v, %v, %v", claim, q, recorded, err)
+		}
+		want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{==:#{@agent_prompts},7}}}",
+			"set-option -p -t %1 @agent_state waiting ; set-option -p -t %1 @agent_since 100 ; set-option -p -t %1 @agent_waiting_for permission_prompt ; " +
+				`set-option -p -t %1 @agent_question "{\"tool\":\"Bash\",\"command\":\"echo \\\"\$HOME\\\" \\\\ x\",\"description\":\"Run this command?\"}" ; ` +
+				"set-option -p -t %1 @agent_agy_claim agy-dialog-100000000000"}
+		if len(calls) != 2 || !slices.Equal(calls[0], want) {
+			t.Errorf("calls = %q, want first: %q", calls, want)
+		}
+	}
+	if _, _, err := AgyPermission(tmux.NewFake(func([]string) (string, error) { return "", errors.New("boom") }), "%1", "50", "7", "", "ls", "?"); err == nil {
+		t.Error("a failed write: no error")
+	}
+}
+
 func TestResumeCommand(t *testing.T) {
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	if err := os.WriteFile(transcript, nil, 0o644); err != nil {
@@ -295,7 +324,7 @@ func TestAgyHook(t *testing.T) {
 	if got := ev.Question.Ask(); got != "Which? (A / B) +1 more" || !ev.Question.Questions[0].MultiSelect {
 		t.Errorf("AgyHook(two questions): %q, %+v", got, ev.Question)
 	}
-	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`} {
+	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`, `{"hookEventName":"PreToolUse","toolCall":{"name":"ask_question","args":{"question":"Red?"}}}`} {
 		if _, err := AgyHook([]byte(input)); err == nil {
 			t.Errorf("AgyHook(%s): no error", input)
 		}
@@ -330,6 +359,17 @@ func TestAgyLastReply(t *testing.T) {
 		if got, err := AgyLastReply(write(tt.lines...)); err != nil || got != tt.want {
 			t.Errorf("%s: AgyLastReply = %q, %v; want %q", tt.name, got, err, tt.want)
 		}
+	}
+	if got, err := AgyLastReply(write(user, "", reply, "")); err != nil || got != "hi" {
+		t.Errorf("blank lines: AgyLastReply = %q, %v", got, err)
+	}
+	// Past its tail: the cut line is left out, and a tail without a prompt or reply is an error
+	long := `{"type":"GENERIC","content":"` + strings.Repeat("x", agyTail) + `"}`
+	if got, err := AgyLastReply(write(long, user, call, ran, reply)); err != nil || got != "hi" {
+		t.Errorf("a long transcript: AgyLastReply = %q, %v", got, err)
+	}
+	if _, err := AgyLastReply(write(user, long)); err == nil {
+		t.Error("a tail of one cut line: no error")
 	}
 	if _, err := AgyLastReply(write(user, "{")); err == nil {
 		t.Error("a line that isn't JSON: no error")
