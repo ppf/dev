@@ -25,10 +25,10 @@ import (
 var states = []string{agent.Working, agent.Waiting, agent.Idle, agent.Clear, agent.ToolFailed}
 
 func newStateCmd() *cobra.Command {
-	var codex bool
+	var codex, agy bool
 	cmd := &cobra.Command{
 		Use:   "state <working|waiting|idle|clear|tool-failed>",
-		Short: "Claude, Codex or Grok hook: record the agent state on its tmux pane (or a desktop app session's hook file)",
+		Short: "Claude, Codex, Grok or agy hook: record the agent state on its tmux pane (or a desktop app session's hook file)",
 		Args: cobra.MatchAll(cobra.ExactArgs(1), func(_ *cobra.Command, args []string) error {
 			if !slices.Contains(states, args[0]) {
 				return fmt.Errorf("unknown state %q, want one of %v", args[0], states)
@@ -37,12 +37,42 @@ func newStateCmd() *cobra.Command {
 		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pane := os.Getenv("TMUX_PANE")
-			if pane == "" && !codex && !desktop.InApp() {
+			if pane == "" && (agy || !codex && !desktop.InApp()) {
 				return nil
 			}
 			input, err := io.ReadAll(cmd.InOrStdin())
+			if err != nil && agy {
+				// agy's hooks report an error only on stderr, never through the exit status: how agy takes one is unknown
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+				return nil
+			}
 			if err != nil {
 				return err
+			}
+			c := tmux.New()
+			if agy {
+				// agy reads a hook's stdout as its decision ({} on PreToolUse denies the tool call): nothing goes there
+				command, err := c.Run("display-message", "-p", "-t", pane, "#{pane_current_command}")
+				if err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if !agent.AgyCommand(strings.TrimSpace(command)) {
+					// An agy -p another agent runs in its pane inherits the pane's TMUX_PANE, but isn't its agent
+					return nil
+				}
+				var turn bool
+				if input, turn, err = agent.AgyHook(input); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					return nil
+				}
+				if !turn {
+					// A later model call or a tool call: progress, not a turn's start or end
+					if err := agent.Touch(c, pane); err != nil {
+						fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
+					}
+					return nil
+				}
 			}
 			if pane == "" && !codex {
 				// A desktop app session: its hook file stands in for the pane's options
@@ -68,11 +98,11 @@ func newStateCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+err.Error())
 				return nil
 			}
-			c := tmux.New()
 			// Grok sets GROK_HOOK_EVENT on every hook, also on the Claude hooks it imports from ~/.claude
 			grok := os.Getenv("GROK_HOOK_EVENT") != ""
+			claude := !codex && !grok && !agy
 			var pid string
-			if !codex && !grok {
+			if claude {
 				pid = os.Getenv("CLAUDE_PID")
 				nested, err := agent.Nested(c, pane, pid)
 				if err != nil {
@@ -103,10 +133,12 @@ func newStateCmd() *cobra.Command {
 					return nil
 				}
 			}
-			// Restore resumes Claude conversations only: a Codex or Grok id would make it type `claude --resume`
+			// Codex's and Grok's hooks carry no conversation dev records; agy's is recorded, never resumed
 			var session agent.Session
-			if !codex && !grok {
+			if claude || agy {
 				session = agent.HookSession(input)
+			}
+			if claude {
 				hook.Socket, hook.PID = os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"), pid
 			}
 			if codex {
@@ -120,8 +152,8 @@ func newStateCmd() *cobra.Command {
 			}
 			var out string
 			busy := false
-			// Grok reads a Stop hook's stdout as a reply, and is never a boss
-			if !codex && !grok {
+			// Grok reads a Stop hook's stdout as a reply, agy any hook's as a decision, and neither is a boss
+			if claude {
 				// Before Record: a Stop blocked with inbox notes keeps the boss working
 				if out, busy, err = inbox.BossHook(c, pane, input, func(s todo.Store) string { return takeOverHint(cmd, s, pane, "", time.Now()) }); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: inbox: "+err.Error())
@@ -140,7 +172,7 @@ func newStateCmd() *cobra.Command {
 					state = agent.Working
 				}
 			}
-			if state == agent.Clear && !codex && !grok {
+			if state == agent.Clear && claude {
 				// Before Record unsets the cost: the boss's total keeps the ended conversation's
 				if err := spent.Ended(c, pane, session.ID); err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: cost: "+err.Error())
@@ -151,6 +183,10 @@ func newStateCmd() *cobra.Command {
 				// The notes are already out of the inbox: print them even if Record failed. Claude reads a
 				// hook's stdout as JSON, so nothing else may go there
 				fmt.Fprintln(cmd.OutOrStdout(), out)
+			}
+			if recErr != nil && agy {
+				fmt.Fprintln(cmd.ErrOrStderr(), "❌ dev state: "+recErr.Error())
+				return nil
 			}
 			if recErr != nil {
 				return recErr
@@ -169,6 +205,8 @@ func newStateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&codex, "codex", false, "Codex hook: find the pane by the hook's cwd instead of TMUX_PANE")
+	cmd.Flags().BoolVar(&agy, "agy", false, "agy (Antigravity) hook: a turn starts at PreInvocation (invocationNum 0) and ends at Stop; prints nothing")
+	cmd.MarkFlagsMutuallyExclusive("codex", "agy")
 	return cmd
 }
 

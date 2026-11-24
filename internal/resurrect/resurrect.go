@@ -151,9 +151,10 @@ func Save(c *tmux.Client, snapshot string) error {
 	}
 	saved := map[string]bool{}
 	for _, p := range panes {
-		// Once per pane, under the first session listing a linked window; a crash's leftover isn't live
+		// Once per pane, under the first session listing a linked window; a crash's leftover isn't live, and only
+		// Claude is resumed (an agy pane records its conversation too)
 		boss, ok := coordinatorOf[p.ID]
-		if p.AgentID == "" || p.Command != p.AgentCmd || saved[p.ID] || ok && boss != p.Session {
+		if p.AgentID == "" || p.Command != p.AgentCmd || !agent.ClaudeCommand(p.Command) || saved[p.ID] || ok && boss != p.Session {
 			continue
 		}
 		saved[p.ID] = true

@@ -60,7 +60,7 @@ type Session struct {
 	Project  string    // Group before Order regroups it
 	Branch   string    // the agent pane's branch; "" without an agent pane
 	Named    bool      // Name is SessionName(Group before Order regroups it, Branch), so the row leaves the branch out
-	Agent    string    // "Claude", "Codex", "Grok", or "" for no agent
+	Agent    string    // "Claude", "Codex", "Grok", "Agy", or "" for no agent
 	State    string    // trusted hook state (working, waiting, idle) or ""
 	Deciding bool      // State is waiting on a permission prompt or question, not Claude's idle reminder
 	Question string    // its dialog's @agent_question as recorded (JSON); "" when none

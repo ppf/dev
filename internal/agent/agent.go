@@ -1,4 +1,4 @@
-// Package agent records Claude, Codex and Grok hook state on tmux panes, detects a session's agent pane and
+// Package agent records Claude, Codex, Grok and agy hook state on tmux panes, detects a session's agent pane and
 // gives the command that reopens a saved Claude conversation.
 package agent
 
@@ -75,6 +75,37 @@ func GrokSkip(input []byte) bool {
 		return e.Event != "Notification" || e.NotificationType != "permission_prompt" && e.NotificationType != "elicitation_dialog"
 	}
 	return e.Event == "Stop" && e.Reason != "end_turn"
+}
+
+// AgyHook is an agy hook's input (camelCase fields, its own events) in the shape of Claude's that the state
+// recorder, notifications and boss notes read: a turn starts at its first model call (PreInvocation with
+// invocationNum 0), recorded as a UserPromptSubmit with its prompt, and ends at Stop; the conversation is the
+// session. ok=false for agy's other events (a later model call, a tool call). Malformed input is an error.
+func AgyHook(input []byte) (out []byte, ok bool, err error) {
+	var e struct {
+		Event        string `json:"hookEventName"`
+		Invocation   *int   `json:"invocationNum"`
+		Prompt       string `json:"lastUserInput"`
+		Conversation string `json:"conversationId"`
+		Transcript   string `json:"transcriptPath"`
+		Cwd          string `json:"cwd"`
+	}
+	if err := json.Unmarshal(input, &e); err != nil {
+		return nil, false, fmt.Errorf("agent: hook input: %w", err)
+	}
+	event := e.Event
+	switch {
+	case e.Event == "PreInvocation" && e.Invocation == nil:
+		// Else no turn would ever start, and prompt --wait would stall without a word
+		return nil, false, errors.New("agent: agy PreInvocation without invocationNum")
+	case e.Event == "PreInvocation" && *e.Invocation == 0:
+		event = "UserPromptSubmit"
+	case e.Event != "Stop":
+		return nil, false, nil
+	}
+	out, err = json.Marshal(map[string]string{"hook_event_name": event, "prompt": e.Prompt, "session_id": e.Conversation,
+		"transcript_path": e.Transcript, "cwd": e.Cwd})
+	return out, true, err
 }
 
 // resumers are the background task types whose end resumes Claude on its own. Left out: Claude's own
@@ -394,10 +425,11 @@ func Trusted(state, stateCmd, command string) string {
 // Claude is the agent kind whose sessions `dev state` records.
 const Claude = "claude"
 
-// Codex and Grok are the other agent kinds dev agent start can open.
+// Codex, Grok and Agy (Antigravity's CLI) are the other agent kinds dev agent start can open.
 const (
 	Codex = "codex"
 	Grok  = "grok"
+	Agy   = "agy"
 )
 
 // ClaudeArgv is claude's argv with args, its Remote Control session named session. Not --name: that pins
@@ -566,7 +598,7 @@ type Pane struct {
 // Agent is a session's detected agent pane.
 type Agent struct {
 	Pane  Pane
-	Label string // "Claude", "Codex" or "Grok"
+	Label string // "Claude", "Codex", "Grok" or "Agy"
 	State string // hook state, only when @agent_cmd matches the pane's command; else ""
 	// Cost is @agent_cost in USD, only for a hook-registered Claude pane (@agent_cmd ties it to the process)
 	Cost   float64
@@ -575,18 +607,24 @@ type Agent struct {
 
 // Detect finds the agent among one session's panes: in window 1, excluding sidebarPane, the pane whose
 // command equals its @agent_cmd (hook-registered Claude), else one whose command is grok or grok-*, else
-// one whose command is codex or codex-*.
+// agy, else one whose command is codex or codex-*.
 func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
-	var codex, grok *Pane
+	var codex, grok, agy *Pane
 	for i := range panes {
 		p := &panes[i]
 		if p.Window != 1 || p.ID == sidebarPane {
 			continue
 		}
-		// Before the Claude check: Grok's hooks set @agent_cmd too
+		// Before the Claude check: Grok's and agy's hooks set @agent_cmd too
 		if isGrok(p.Command) {
 			if grok == nil {
 				grok = p
+			}
+			continue
+		}
+		if AgyCommand(p.Command) {
+			if agy == nil {
+				agy = p
 			}
 			continue
 		}
@@ -605,17 +643,23 @@ func Detect(panes []Pane, sidebarPane string) (Agent, bool) {
 	if grok != nil {
 		return Agent{Pane: *grok, Label: "Grok", State: Trusted(grok.State, grok.StateCmd, grok.Command)}, true
 	}
+	if agy != nil {
+		return Agent{Pane: *agy, Label: "Agy", State: Trusted(agy.State, agy.StateCmd, agy.Command)}, true
+	}
 	if codex == nil {
 		return Agent{}, false
 	}
 	return Agent{Pane: *codex, Label: "Codex", State: Trusted(codex.State, codex.StateCmd, codex.Command)}, true
 }
 
-// ClaudeCommand reports a pane command that isn't Codex's or Grok's: Claude's screens are the only ones
+// ClaudeCommand reports a pane command that isn't Codex's, Grok's or agy's: Claude's screens are the only ones
 // screen.ClaudeState reads.
 func ClaudeCommand(command string) bool {
-	return !isCodex(command) && !isGrok(command)
+	return !isCodex(command) && !isGrok(command) && !AgyCommand(command)
 }
+
+// AgyCommand reports a pane running agy, Antigravity's CLI.
+func AgyCommand(command string) bool { return command == Agy }
 
 func isCodex(command string) bool {
 	return command == "codex" || strings.HasPrefix(command, "codex-")
@@ -624,6 +668,17 @@ func isCodex(command string) bool {
 // isGrok matches grok and its versioned binary (grok-1.0.62-macos-aarch64, cut by macOS to grok-1.0.62-mac).
 func isGrok(command string) bool {
 	return command == "grok" || strings.HasPrefix(command, "grok-")
+}
+
+// AgyModels are the model slugs in agy models' output: each line's first tab-separated field.
+func AgyModels(out string) []string {
+	var slugs []string
+	for l := range strings.Lines(out) {
+		if slug, _, ok := strings.Cut(l, "\t"); ok {
+			slugs = append(slugs, slug)
+		}
+	}
+	return slugs
 }
 
 // OptContext is the pane option holding the share of Claude's context window in use (whole percent), from its

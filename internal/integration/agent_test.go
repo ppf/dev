@@ -262,7 +262,7 @@ func TestAgentStart(t *testing.T) {
 		"1 ❌ session app was started without --effort, not with low: --model and --effort only apply to a new session\n")
 	env = d.scriptEnv(writeProjects(t, [2]string{"app", dir}, [2]string{"fl", tempDir(t)}))
 	out, errOut, status = devAgent(env, "", "start", "fl", "--agent", "codex", "--model", "sonnet", "--timeout", "30s")
-	check(t, "a model for codex", out+status+" "+errOut, "1 ❌ --model and --effort only apply to Claude, not --agent codex\n")
+	check(t, "a model for codex", out+status+" "+errOut, "1 ❌ --model and --effort only apply to Claude and agy, not --agent codex\n")
 	if _, err := d.Try("has-session", "-t", "=fl:"); err == nil {
 		t.Error("❌ refused start opened fl")
 	}

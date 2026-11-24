@@ -37,6 +37,12 @@ func TestAgentCommand(t *testing.T) {
 	if got, _ := agentCommand("codex", "dev-x", false, agent.Start{}); got != "codex" {
 		t.Errorf("codex = %q, want it as is", got)
 	}
+	if got, _ := agentCommand("agy", "dev-x", true, agent.Start{Model: "gemini-3.8-flash-low", Effort: "high"}); got != tmux.ShellJoin("agy", "--model", "gemini-3.8-flash-low", "--effort", "high") {
+		t.Errorf("agy = %q, want it with its model and effort", got)
+	}
+	if got, _ := agentCommand("agy", "dev-x", true, agent.Start{}); got != tmux.ShellJoin("agy") {
+		t.Errorf("agy without a model or effort = %q, want it bare", got)
+	}
 }
 
 func fixed(w, h string, ok bool) sizeSource {

@@ -38,7 +38,7 @@ var (
 type Agent struct {
 	Session string `json:"session"`
 	Pane    string `json:"pane"`
-	Label   string `json:"agent"` // "Claude", "Codex" or "Grok"
+	Label   string `json:"agent"` // "Claude", "Codex", "Grok" or "Agy"
 	State   string `json:"state"` // trusted hook state (working, waiting, idle) or "" when unknown
 	// Queued marks a working Claude holding a prompt it reads at its turn's next step (screen.ClaudeQueued).
 	Queued bool `json:"queued,omitempty"`
@@ -397,14 +397,20 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 // against its screen first, as Claude fires no hook when its dialog is answered No or Esc, or Esc ends its
 // turn. For a decision, its own input box back at the bottom (screen.ClaudeState) means no dialog is open;
 // the state it shows, idle or working, is recorded and returned. A working pane showing its turn
-// interrupted (screen.ClaudeInterrupted) is recorded idle.
+// interrupted (screen.ClaudeInterrupted) is recorded idle, as is a working agy pane (screen.AgyInterrupted).
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	st, err := ReadStatus(c, pane)
-	if err != nil || !agent.ClaudeCommand(st.Command) {
+	if err != nil {
 		return st, err
 	}
+	if agent.AgyCommand(st.Command) && st.Trusted() == agent.Working {
+		return checkInterrupted(c, pane, st, screen.AgyInterrupted)
+	}
+	if !agent.ClaudeCommand(st.Command) {
+		return st, nil
+	}
 	if st.Trusted() == agent.Working {
-		return checkInterrupted(c, pane, st)
+		return checkInterrupted(c, pane, st, screen.ClaudeInterrupted)
 	}
 	// Only permission prompts and questions: no other dialog's screen is known to replace the input box
 	if st.Trusted() != agent.Waiting || st.WaitingFor != agent.PermissionPrompt {
@@ -431,15 +437,15 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 	return ReadStatus(c, pane)
 }
 
-// checkInterrupted records working pane st idle when its screen shows Esc ended its turn. Not within
-// dialogGrace of its last hook (agent.OptActive): a new prompt's may run before Claude draws the prompt,
-// under the last turn's "Interrupted".
-func checkInterrupted(c *tmux.Client, pane string, st Status) (Status, error) {
+// checkInterrupted records working pane st idle when its screen shows its turn ended without a hook
+// (interrupted: Esc, or for agy also a declined permission prompt). Not within dialogGrace of its last hook
+// (agent.OptActive): a new prompt's may run before the agent draws the prompt, under the last turn's "Interrupted".
+func checkInterrupted(c *tmux.Client, pane string, st Status, interrupted func(string) bool) (Status, error) {
 	if sec, err := strconv.ParseInt(st.Active, 10, 64); err == nil && now().Sub(time.Unix(sec, 0)) < dialogGrace {
 		return st, nil
 	}
 	capture, err := c.Run("capture-pane", "-p", "-t", pane)
-	if err != nil || !screen.ClaudeInterrupted(capture) {
+	if err != nil || !interrupted(capture) {
 		return st, err
 	}
 	if err := agent.Interrupted(c, pane, st.Since, st.Prompts); err != nil {
@@ -467,7 +473,7 @@ var RealClock = Clock{Now: time.Now, Sleep: time.Sleep}
 const pollInterval = 200 * time.Millisecond
 
 // Wait polls pane until done reports true for its status, or timeout passes (ErrTimeout). A pane
-// without a trusted state (Codex or Grok without its hooks) fails at once.
+// without a trusted state (Codex or Grok without its hooks, agy before its start saw its input box) fails at once.
 func Wait(c *tmux.Client, clk Clock, pane string, timeout time.Duration, done func(Status) bool) (Status, error) {
 	st, err := ReadChecked(c, pane)
 	if err != nil {
@@ -537,6 +543,9 @@ func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err erro
 	if err := st.checkPromptable(); err != nil {
 		return false, notSent{err}
 	}
+	if err := checkAgyBox(c, pane, st); err != nil {
+		return false, notSent{err}
+	}
 	claude := agent.ClaudeCommand(st.Command)
 	queued = st.Trusted() == agent.Working && claude
 	if queued && claude {
@@ -571,6 +580,22 @@ const (
 	// locally (/effort): a command that starts a turn (a skill's) shows working by then.
 	localGrace = time.Second
 )
+
+// checkAgyBox refuses an agy pane whose screen shows no input box: agy records no hook for its permission prompts
+// and questions, and a paste and its Enter would pick an answer.
+func checkAgyBox(c *tmux.Client, pane string, st Status) error {
+	if !agent.AgyCommand(st.Command) {
+		return nil
+	}
+	capture, err := c.Run("capture-pane", "-p", "-t", pane)
+	if err != nil {
+		return err
+	}
+	if !screen.AgyBox(capture) {
+		return errors.New("agy's screen shows no input box: a dialog may be open; read it and answer with send-keys")
+	}
+	return nil
+}
 
 // squash is s without whitespace, so a command wrapped in the input box still matches.
 func squash(s string) string {
@@ -690,10 +715,14 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 	if err := before.checkPromptable(); err != nil {
 		return before, notSent{err}
 	}
+	if err := checkAgyBox(c, pane, before); err != nil {
+		return before, notSent{err}
+	}
 	// Claude Code's aliases of /clear too
 	reset := slices.Contains([]string{"/clear", "/reset", "/new"}, strings.TrimSpace(text))
-	if reset && before.Session == "" {
-		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none (Codex, Grok): send it without --wait")}
+	// agy's hooks record a session, but only from its first turn on: none starts with /clear
+	if reset && (before.Session == "" || agent.AgyCommand(before.Command)) {
+		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait")}
 	}
 	err = paste(c, clk, pane, text)
 	if !NotSent(err) {

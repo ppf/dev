@@ -2,11 +2,15 @@ package cmd
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +27,7 @@ import (
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/skill"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/worktree"
 )
 
 // Exit codes of dev agent besides 0 and 1, for coordinators to branch on.
@@ -379,11 +384,14 @@ func newAgentStartCmd() *cobra.Command {
 		Short: "Open a project (or its worktree) in the background and wait until its agent is registered",
 		Long: `Open a project's session, or its worktree's (created when missing), without attaching to it, and
 wait until its agent's first hook registers it (a Codex or Grok pane counts once its CLI runs, so read its
-screen before the first prompt). An existing session is reused; one running another agent than an explicit
---agent is an error. A new session started from a tmux pane, or with --boss, is that session's worker.
---model and --effort start a new session's Claude with them (list --json and get --json show them, and it keeps
-them when dev restarts it). With an existing session they are an error unless they equal what it was started
-with, and with --agent codex or grok always.
+screen before the first prompt). An agy pane counts once its input box shows, recorded idle (agy runs no hook
+before its first turn); dev confirms its trust dialog only in a worktree this start made, and leaves any other
+screen (a login, a dialog) to the user, saying so on stderr. An existing session is reused; one running another
+agent than an explicit --agent is an error. A new session started from a tmux pane, or with --boss, is that
+session's worker.
+--model and --effort start a new session's Claude (or agy) with them (list --json and get --json show them, and
+Claude keeps them when dev restarts it); agy's --model must be one agy models lists. With an existing session
+they are an error unless they equal what it was started with, and with --agent codex or grok always.
 --from <worker> hands a worker's half-done branch to a fresh Claude: refused unless this session (or
 --boss's) started the worker, it is idle (or waiting only because it sat idle) and no other session has a pane
 in its worktree. Its session is closed without dev agent close's delivered and changes checks, its worktree,
@@ -399,14 +407,14 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			if from == "" && len(args) == 0 {
 				return errors.New("requires <project> [worktree], or --from <worker>")
 			}
-			if agentCmd != agent.Claude && agentCmd != agent.Codex && agentCmd != agent.Grok {
-				return fmt.Errorf("unknown --agent %q, want claude, codex or grok", agentCmd)
+			if !slices.Contains([]string{agent.Claude, agent.Codex, agent.Grok, agent.Agy}, agentCmd) {
+				return fmt.Errorf("unknown --agent %q, want claude, codex, grok or agy", agentCmd)
 			}
 			if err := checkStart(cmd, start); err != nil {
 				return err
 			}
-			if start != (agent.Start{}) && agentCmd != agent.Claude {
-				return fmt.Errorf("--model and --effort only apply to Claude, not --agent %s", agentCmd)
+			if start != (agent.Start{}) && agentCmd != agent.Claude && agentCmd != agent.Agy {
+				return fmt.Errorf("--model and --effort only apply to Claude and agy, not --agent %s", agentCmd)
 			}
 			if from != "" {
 				if agentCmd != agent.Claude {
@@ -430,6 +438,19 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 					return err
 				}
 			}
+			// A new agy session: its --model checked, and whether this start makes its worktree, where alone dev
+			// confirms agy's trust dialog
+			made := false
+			if missing != nil && agentCmd == agent.Agy {
+				if start.Model != "" {
+					if err := checkAgyModel(start.Model, timeout); err != nil {
+						return err
+					}
+				}
+				if made, err = worktreeMissing(cmd, args[0], wt); err != nil {
+					return err
+				}
+			}
 			// A herd's x only kills workers its coordinator started, never a reused session; workers start
 			// without Remote Control
 			worker := missing != nil && pane != ""
@@ -448,16 +469,94 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			if missing == nil && cmd.Flags().Changed("agent") && !strings.EqualFold(a.Label, agentCmd) {
 				return fmt.Errorf("session %s already runs %s, not %s", session, a.Label, agentCmd)
 			}
+			// Also a reused agy session that got no state yet: its start left a screen to the user
+			if a.Label == "Agy" && a.State == "" {
+				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, agyHooked(a.Path), timeout)
+				if err != nil {
+					return err
+				}
+				if left != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), "⚠ "+left)
+				}
+				if a, err = control.Resolve(c, session); err != nil {
+					return err
+				}
+			}
 			return printAgent(cmd.OutOrStdout(), asJSON, a)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON object")
-	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex or grok")
+	cmd.Flags().StringVar(&agentCmd, "agent", agent.Claude, "agent a new session starts: claude, codex, grok or agy")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "give up when no agent registered within this")
 	cmd.Flags().StringVar(&from, "from", "", "worker whose worktree and branch a fresh session takes over (closes the worker, keeps its work)")
 	addBossFlag(cmd, &boss)
 	addStartFlags(cmd, &start, "session's Claude")
 	return cmd
+}
+
+// checkAgyModel refuses a --model that agy models doesn't list within timeout: agy would start on its stored
+// model instead, saying so only on its screen.
+func checkAgyModel(model string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, agent.Agy, "models").Output()
+	if e, ok := errors.AsType[*exec.ExitError](err); ok && len(e.Stderr) > 0 {
+		return fmt.Errorf("checking --model: agy models: %s", strings.TrimSpace(string(e.Stderr)))
+	}
+	if err != nil {
+		return fmt.Errorf("checking --model: agy models: %w", err)
+	}
+	models := agent.AgyModels(string(out))
+	if models == nil {
+		return fmt.Errorf("checking --model: agy models listed no model: %q", strings.TrimSpace(string(out)))
+	}
+	if !slices.Contains(models, model) {
+		return fmt.Errorf("unknown --model %q for agy, want one agy models lists: %s", model, strings.Join(models, ", "))
+	}
+	return nil
+}
+
+// agyHooked reports a dev state --agy hook in agy's global hooks file or the workspace's at dir: dev only reads them.
+func agyHooked(dir string) bool {
+	files := []string{filepath.Join(dir, ".agents", "hooks.json")}
+	if home, err := os.UserHomeDir(); err == nil {
+		files = append(files, filepath.Join(home, ".gemini", "config", "hooks.json"))
+	}
+	for _, f := range files {
+		if raw, err := os.ReadFile(f); err == nil && strings.Contains(string(raw), "state --agy") {
+			return true
+		}
+	}
+	return false
+}
+
+// worktreeMissing reports that project's worktree wt isn't on disk, so the start that follows makes it; false
+// for the main checkout (no wt) and an unknown project, which openProject reports.
+func worktreeMissing(cmd *cobra.Command, project, wt string) (bool, error) {
+	if wt == "" {
+		return false, nil
+	}
+	projects, _, err := loadProjects(cmd)
+	if err != nil {
+		return false, err
+	}
+	p, ok := config.Find(projects, project)
+	if !ok {
+		return false, nil
+	}
+	dir, err := p.Dir()
+	if err != nil {
+		return false, err
+	}
+	root, ok := worktree.Root(dir)
+	if !ok {
+		return false, nil
+	}
+	_, err = os.Stat(filepath.Join(root, ".claude", "worktrees", wt))
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
 }
 
 // startFrom is dev agent start --from: worker from's session closed by the coordinator in this (or boss's) pane,

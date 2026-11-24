@@ -234,6 +234,12 @@ func TestDetect(t *testing.T) {
 		{"grok beats earlier codex", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%5", Command: "grok"}}, "%0", "%5", "Grok", ""},
 		{"grokky is not grok", []Pane{{Window: 1, ID: "%5", Command: "grokky"}}, "%0", "", "", ""},
 		{"first codex wins", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%4", Command: "codex"}}, "%0", "%3", "Codex", ""},
+		{"agy", []Pane{{Window: 1, ID: "%6", Command: "agy", State: Working, StateCmd: "agy"}}, "%0", "%6", "Agy", Working},
+		{"agy without hook", []Pane{{Window: 1, ID: "%6", Command: "agy"}}, "%0", "%6", "Agy", ""},
+		{"claude beats earlier agy", []Pane{{Window: 1, ID: "%6", Command: "agy"}, claude}, "%0", "%2", "Claude", Waiting},
+		{"agy beats earlier codex", []Pane{{Window: 1, ID: "%3", Command: "codex"}, {Window: 1, ID: "%6", Command: "agy"}}, "%0", "%6", "Agy", ""},
+		{"grok beats earlier agy", []Pane{{Window: 1, ID: "%6", Command: "agy"}, {Window: 1, ID: "%5", Command: "grok"}}, "%0", "%5", "Grok", ""},
+		{"agyx is not agy", []Pane{{Window: 1, ID: "%6", Command: "agyx"}}, "%0", "", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,6 +248,42 @@ func TestDetect(t *testing.T) {
 				t.Errorf("Detect = %+v, %v; want ID %q, Label %q, State %q", got, ok, tt.wantID, tt.label, tt.state)
 			}
 		})
+	}
+}
+
+func TestAgyHook(t *testing.T) {
+	const ids = `"conversationId":"110c93f6-c88f","transcriptPath":"/t.jsonl","cwd":"/w"`
+	const session = `"session_id":"110c93f6-c88f","transcript_path":"/t.jsonl"`
+	for input, want := range map[string]string{
+		`{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"say ok",` + ids + `}`: `{"cwd":"/w","hook_event_name":"UserPromptSubmit","prompt":"say ok",` + session + `}`,
+		`{"hookEventName":"Stop","fullyIdle":true,"lastUserInput":"say ok",` + ids + `}`:           `{"cwd":"/w","hook_event_name":"Stop","prompt":"say ok",` + session + `}`,
+		`{"hookEventName":"PreInvocation","invocationNum":1,` + ids + `}`:                          "",
+		`{"hookEventName":"PostInvocation","invocationNum":0,` + ids + `}`:                         "",
+		`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`:             "",
+		`{"hookEventName":"SessionStart",` + ids + `}`:                                             "",
+	} {
+		out, ok, err := AgyHook([]byte(input))
+		if err != nil || ok != (want != "") || string(out) != want {
+			t.Errorf("AgyHook(%s) = %s, %v, %v; want %s", input, out, ok, err, want)
+		}
+		if ok && HookSession(out) != (Session{ID: "110c93f6-c88f", Transcript: "/t.jsonl"}) {
+			t.Errorf("AgyHook(%s): session %+v", input, HookSession(out))
+		}
+	}
+	for _, input := range []string{"{", `{"hookEventName":"PreInvocation"}`} {
+		if _, _, err := AgyHook([]byte(input)); err == nil {
+			t.Errorf("AgyHook(%s): no error", input)
+		}
+	}
+}
+
+func TestAgyModels(t *testing.T) {
+	out := "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\nclaude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n"
+	if got := AgyModels(out); !slices.Equal(got, []string{"gemini-3.8-flash-high", "gemini-3.8-flash-low", "claude-sonnet-4-6"}) {
+		t.Errorf("AgyModels = %q", got)
+	}
+	if got := AgyModels("Fetching available models...\n"); got != nil {
+		t.Errorf("AgyModels without a model = %q, want none", got)
 	}
 }
 
