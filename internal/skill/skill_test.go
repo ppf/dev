@@ -293,3 +293,42 @@ func TestAnalysisRules(t *testing.T) {
 		t.Errorf("dev-agents/SKILL.md: missing %q", want)
 	}
 }
+
+func TestAdvisorRules(t *testing.T) {
+	for name, text := range byName {
+		for _, want := range []string{
+			"- **Advisor:** with an advisor tool in your session, call your advisor only before you write a contract or the options of an ask, before a release, when a worker's result contradicts its own evidence, and before a decision you settle yourself that is not plainly cheap and reversible; never on relays, state polls or list updates.",
+			"start that reply with `[advisor]`",
+			"While the trial runs (from the restart, one week)",
+			"~/.local/state/dev/design/trial/tally.log",
+			"`<your session> user-caught <what>`",
+			"A session with no advisor tool skips this rule.",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: missing %q", name, want)
+			}
+		}
+	}
+	_, para, ok := strings.Cut(DevAgents, "**Call your advisor sparingly.** (This overrides the boss's Advisor rule above.)")
+	if !ok {
+		t.Fatal("dev-agents/SKILL.md: no manager advisor paragraph")
+	}
+	para, _, _ = strings.Cut(para, "\n\n")
+	for _, want := range []string{
+		"call your advisor only before you assess the user's new idea or request",
+		"when a boss's report contradicts what its list or dev's state shows",
+		"before you show the user a text meant for other people",
+		"before a boss is cleared or closed",
+		"when you are unsure whether something is yours to settle or the user's",
+		"never on plain relays, state polls or list updates",
+		"start that reply with `[advisor]`",
+		"While the trial runs (from the restart, one week)",
+		`echo "$(date +%F' '%H:%M) manager advisor <why, 3-6 words>" >> ~/.local/state/dev/design/trial/tally.log`,
+		"`manager user-caught <what>` or `manager bad-relay <what>`",
+		"A session with no advisor tool skips this rule.",
+	} {
+		if !strings.Contains(para, want) {
+			t.Errorf("dev-agents/SKILL.md manager advisor paragraph: missing %q", want)
+		}
+	}
+}
