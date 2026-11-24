@@ -2,6 +2,7 @@ package screen
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -31,7 +32,7 @@ func InputBox(capture string) (in Input, ok bool) {
 			}
 			typed := promptRow.FindStringSubmatch(undimmed(lines[j+1]))
 			all := promptRow.FindStringSubmatch(plainLine(lines[j+1]))
-			if typed == nil || all == nil {
+			if typed == nil || all == nil || numberedMenu(lines[j+1:i]) {
 				return Input{}, false
 			}
 			// Its rows under the prompt row too: a long draft or suggestion wraps. Their dim text is a suggestion's only
@@ -56,6 +57,17 @@ func InputBox(capture string) (in Input, ok bool) {
 		return Input{}, false
 	}
 	return Input{}, false
+}
+
+// numberedMenu reports rows that are a dialog's options, not a draft: the first and a later one start numbered.
+func numberedMenu(rows []string) bool {
+	if len(rows) < 2 {
+		return false
+	}
+	first, ok := PromptRow(plainLine(rows[0]))
+	return ok && startsNumbered(strings.TrimSpace(first)) && slices.ContainsFunc(rows[1:], func(r string) bool {
+		return startsNumbered(strings.TrimSpace(plainLine(r)))
+	})
 }
 
 // box is rows as an input box's text: each without trailing spaces, blank rows at its ends dropped.

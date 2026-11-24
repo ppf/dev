@@ -550,16 +550,7 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 				if err != nil {
 					return err
 				}
-				// The alias is looked up only when a question starts with the session's name
-				var taken bool
-				if questions := append([]inbox.Asked{{Question: pick.Question}}, pick.Asks...); pick.Pick && slices.ContainsFunc(questions, func(q inbox.Asked) bool {
-					return strings.HasPrefix(strings.ToLower(q.Question), strings.ToLower(name)+" #")
-				}) {
-					if taken, err = aliasTaken(cmd, c, name); err != nil {
-						return err
-					}
-				}
-				i, err := pickFor(pick, name, id, question, !taken)
+				i, err := pickIndex(cmd, c, pick, name, id, question)
 				if err != nil {
 					return err
 				}
@@ -695,6 +686,27 @@ func pickFor(pick *inbox.Prompt, boss string, id int, question string, alias boo
 		return -1, fmt.Errorf("--via manager: the user picked %q: the item stays open", leaveOpen)
 	}
 	return i, nil
+}
+
+// pickIndex is pickFor's result for the user's latest pick. The alias is looked up only when a question starts with
+// the session's name; when that lookup fails, a pick that names the project's own boss still goes through.
+func pickIndex(cmd *cobra.Command, c *tmux.Client, pick *inbox.Prompt, name string, id int, question string) (int, error) {
+	questions := append([]inbox.Asked{{Question: pick.Question}}, pick.Asks...)
+	if !pick.Pick || !slices.ContainsFunc(questions, func(q inbox.Asked) bool {
+		return strings.HasPrefix(strings.ToLower(q.Question), strings.ToLower(name)+" #")
+	}) {
+		return pickFor(pick, name, id, question, true)
+	}
+	taken, err := aliasTaken(cmd, c, name)
+	if err != nil {
+		i, own := pickFor(pick, name, id, question, false)
+		if j, either := pickFor(pick, name, id, question, true); own != nil || either != nil || i != j {
+			return -1, fmt.Errorf("alias lookup: %w", err)
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo: alias lookup failed: "+err.Error())
+		return i, nil
+	}
+	return pickFor(pick, name, id, question, !taken)
 }
 
 // aliasTaken reports boss's session name naming another project's boss in a question: a project of that name is
@@ -1046,13 +1058,18 @@ func markAsking(c *tmux.Client, lists []bossList, now time.Time, stderr io.Write
 	if err != nil {
 		fmt.Fprintln(stderr, "⚠ dev todo: the manager's question not read: "+err.Error())
 	}
+	markAsked(lists, as)
+}
+
+// markAsked marks each open ask of lists that as names, still reading what it asked and not replaced or reopened since (same Added).
+func markAsked(lists []bossList, as []inbox.Asking) {
 	for _, a := range as {
 		for _, bl := range lists {
 			if bl.Boss != a.Boss {
 				continue
 			}
 			for i, it := range bl.Items {
-				if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 && !bl.Closed {
+				if it.ID == a.ID && it.Text == a.Text && it.Added == a.Added && !it.Done && len(it.Options) > 0 && !bl.Closed {
 					bl.Items[i].Asking = true
 				}
 			}
