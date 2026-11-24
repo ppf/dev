@@ -311,3 +311,22 @@ func TestRemindFullHourly(t *testing.T) {
 		t.Errorf("after a start = %q, want the count line", got)
 	}
 }
+
+// A list emptied when the hourly full list is due still names what left it.
+func TestRemindEmptiedWhenDue(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "a", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Remind(read(t, s, now), nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(now); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(2 * time.Hour)
+	if got, _ := s.Remind(read(t, s, later), nil, "c1", later); got != "[dev todo] Your open to do list is empty now: #1 left it." {
+		t.Errorf("emptied when due = %q, want what left it", got)
+	}
+}

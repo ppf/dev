@@ -100,7 +100,11 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 		return text, nil
 	}
 	err = s.locked(func() error {
-		seen, full, readErr := s.readShown(conversation, now)
+		seen, full, due, readErr := s.readShown(conversation, now)
+		// Due for the full list, unless none is open: then the changes name what left
+		if n, _ := l.Open(); due && n > 0 {
+			seen = nil
+		}
 		if seen == nil {
 			full = now.Unix()
 		}
@@ -192,24 +196,24 @@ type shownFile struct {
 // turns gone) or a number reused once its list emptied can leave it without an item the changes alone don't name.
 const fullEvery = time.Hour
 
-// readShown is the lines its boss last got in conversation and when it last got the full list, nil for none: no
-// file, another conversation's, its full list due (fullEvery), or one that isn't JSON, which it removes and reports.
-func (s Store) readShown(conversation string, now time.Time) (map[int]string, int64, error) {
+// readShown is the lines its boss last got in conversation and when it last got the full list, due once that is
+// fullEvery old; nil for none: no file, another conversation's, or one that isn't JSON, which it removes and reports.
+func (s Store) readShown(conversation string, now time.Time) (lines map[int]string, full int64, due bool, err error) {
 	data, err := os.ReadFile(s.shownPath())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, 0, nil
+		return nil, 0, false, nil
 	case err != nil:
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 	var f shownFile
 	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, 0, errors.Join(fmt.Errorf("%s: %w: removed, the full list goes out", s.shownPath(), err), ignoreMissing(os.Remove(s.shownPath())))
+		return nil, 0, false, errors.Join(fmt.Errorf("%s: %w: removed, the full list goes out", s.shownPath(), err), ignoreMissing(os.Remove(s.shownPath())))
 	}
-	if f.Conversation != conversation || f.Lines == nil || now.Sub(time.Unix(f.Full, 0)) >= fullEvery {
-		return nil, 0, nil
+	if f.Conversation != conversation || f.Lines == nil {
+		return nil, 0, false, nil
 	}
-	return f.Lines, f.Full, nil
+	return f.Lines, f.Full, now.Sub(time.Unix(f.Full, 0)) >= fullEvery, nil
 }
 
 // writeShown keeps shown as the lines its boss last got in conversation, its full list last at full.
