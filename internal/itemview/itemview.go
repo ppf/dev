@@ -539,11 +539,7 @@ func (m Model) block(in int, now time.Time) []string {
 		if len(d.Over) > 0 {
 			out = append(out, row("over", strings.Join(d.OverLabels(), " · "))...)
 		}
-		why := d.Why
-		if d.By == todo.DecidedManager {
-			why = "the boss marked it obvious: " + why
-		}
-		return append(append(out, row("why", why)...), end)
+		return append(append(out, row("why", d.Why)...), end)
 	case it.Done && it.Result != "":
 		out := []string{rule("what was done", sidebar.Green+ticked(it, now)+reset)}
 		out = append(out, strings.Split(ansi.Wrap(it.Result, in, ""), "\n")...)

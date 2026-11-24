@@ -769,6 +769,38 @@ func TestCoordinatorArgv(t *testing.T) {
 	}
 }
 
+// Settling is the default for the boss and the manager: the line and both example lists in each prompt, the boss
+// recording it with --decided, the manager settling a boss's ask (unmarked with --why) and saying it in one line.
+func TestPromptSettleRule(t *testing.T) {
+	lists := "Settle: rebuild a local dev server, which test key a demo container uses, a workspace or a single file for tests, keep a draft for tomorrow, add the missing test in this PR, order of agreed work. " +
+		"Ask: a merge into someone else's repo, a force-push, a send to a person, a settings or secrets change, new scope, taste (looks, wording to people), real money or a large share of the usage limit, anything hard to undo. When unsure which side: ask."
+	for _, tt := range []struct {
+		name, prompt string
+		want         []string
+	}{
+		{"coordinatorPrompt", coordinatorPrompt, []string{
+			"Settle, don't ask, what is cheap, reversible and inside what the user already agreed (a picked contract, an earlier pick, a standing rule): take your recommended option, record it at once with `dev todo ask '<question?>' --option '<pick> | <effect> (Recommended)' --option '<other> | <effect>' --decided '<why it is easy>'` (ticked, under Done as \"decided for you\" with Overrule), never only as a line in your pane, and report it in one line (a worker's question with one clear answer needs only that report); permission prompts and dialogs, and the manager's hand-on gate, stay as they are. " + lists,
+			"note answers an ask the manager settled, marked obvious or not, as theirs",
+		}},
+		{"managerPrompt", managerPrompt, []string{
+			"Settle, don't ask, a boss's ask that is cheap, reversible and inside what the user already agreed (a picked contract, an earlier pick, a standing rule), when you see no trade-off the boss missed: `dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`, plus --why '<one line>' when its boss didn't mark it obvious (\"obvious: <why>\" in dev todo --all). " + lists,
+			`Say each in your reply to the user in one line: "<boss> #<n>: took <option> over <other>; overrule on the board".`,
+			"dev refuses it with no single recommended option, once answered or changed, unmarked without --why, and for a hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are.",
+		}},
+	} {
+		for _, want := range tt.want {
+			if !strings.Contains(tt.prompt, want) {
+				t.Errorf("%s: missing %q", tt.name, want)
+			}
+		}
+		for _, old := range []string{"An easy decision is yours", "Ask the user only for what stays theirs", "asks-stay", "settle no item on a boss's list", "(obvious: <why>)\""} {
+			if strings.Contains(tt.prompt, old) {
+				t.Errorf("%s: still has the old wording %q", tt.name, old)
+			}
+		}
+	}
+}
+
 // The prompts carry the skill's ask rules, and the manager's boss briefs use the skill's boss line verbatim.
 func TestPromptAskRules(t *testing.T) {
 	if !strings.Contains(skill.DevAgents, "> "+bossBriefAsk+"\n") {
@@ -785,7 +817,7 @@ func TestPromptAskRules(t *testing.T) {
 		name, prompt string
 		want         []string
 	}{
-		{"coordinatorPrompt", coordinatorPrompt, []string{"An easy decision is yours", "--decided '<why it is easy>'", "gets --obvious '<why>' (exactly one option recommended)", "settled by the manager with your recommended option", "start without a further ask unless their cost or scope changed since the pick", "probe it yourself with bounded retries", "File a run's outward asks",
+		{"coordinatorPrompt", coordinatorPrompt, []string{"--decided '<why it is easy>'", "gets --obvious '<why>' (exactly one option recommended)", "settled by the manager with your recommended option", "start without a further ask unless their cost or scope changed since the pick", "probe it yourself with bounded retries", "File a run's outward asks",
 			"never ask your own decisions with AskUserQuestion or only as chat text",
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
@@ -810,7 +842,7 @@ func TestPromptAskRules(t *testing.T) {
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
 			"Before handing on the user's own new idea or request", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
-			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list but an ask its boss marked obvious", "first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed", "dev todo answer <boss> <n> \"<recommended option>\" --recommended --question", "decided for you: <pick> (obvious: <why>)", "you decide yourself and report in one line",
+			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "you decide nothing for a project but the asks you settle (below)", "when you see no trade-off the boss missed", "dev todo answer <boss> <n> \"<recommended option>\" --recommended --question", "you decide yourself and report in one line",
 			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>",
 			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", `reads "per boss-<project>" or "per <list> at HH:MM", the time from date run in that turn, never your guess`, "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick), question", "dev agent handoffs",
 			"With an advisor tool in your session, call your advisor only before you assess the user's new idea or request", "before a boss is cleared or closed", "when a boss's report contradicts what its list or dev's state shows", "before you show the user a text meant for other people", "when you are unsure whether something is yours to settle or the user's", "manager advisor <why, 3-6 words>", "never on plain relays, state polls or list updates", "start that reply with [advisor]", "While the trial runs (from the restart, one week)", "~/.local/state/dev/design/trial/tally.log", "manager user-caught <what>", "manager bad-relay <what>", "No advisor tool: skip this"}},

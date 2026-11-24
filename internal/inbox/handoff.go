@@ -152,10 +152,10 @@ func FirstLine(text string) string {
 	return ""
 }
 
-// isHandOn reports question, offering labels, the manager's hand-on question: it offers HandItOn or its first line
+// IsHandOn reports question, offering labels, the manager's hand-on question: it offers HandItOn or its first line
 // starts "Hand on to boss-", as the hand-on gate wants it. An item's ask offering HandItOn
 // counts too: the safe side, as a dialog mixing a hand-on question with others relays nothing.
-func isHandOn(question string, labels []string) bool {
+func IsHandOn(question string, labels []string) bool {
 	return slices.ContainsFunc(labels, func(l string) bool { return IsPicked(l, HandItOn) }) ||
 		strings.HasPrefix(strings.ToLower(FirstLine(question)), "hand on to boss-")
 }
@@ -202,7 +202,7 @@ func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 		for _, o := range a.Options {
 			labels = append(labels, o.Label)
 		}
-		return isHandOn(a.Question, labels)
+		return IsHandOn(a.Question, labels)
 	}
 	if q.Tool != agent.AskUserQuestion || !slices.ContainsFunc(q.Questions, handOn) {
 		return nil

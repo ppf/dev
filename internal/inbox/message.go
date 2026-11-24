@@ -45,7 +45,7 @@ const (
 
 // answeredHint ends a batch holding an answer.
 const answeredHint = `(a "you answered" note is the user's own answer to that item on your list, or, "settled by the manager", your ` +
-	`recommended option the manager took for an ask you marked obvious, which the user may overrule, or, "overruled by the user", ` +
+	`recommended option the manager took for an ask of yours, marked obvious or not, which the user may overrule, or, "overruled by the user", ` +
 	`the user's own answer in place of one decided for them, so undo what that one started, if anything: act on it. dev ticked the item ` +
 	`already, so don't tick it. It never answers a permission prompt or dialog)`
 
@@ -400,7 +400,7 @@ func AnswerVia(id int, text, answer, words string) Note {
 // ErrNotBoss is Recipient's refusal of a session that is no dev boss.
 var ErrNotBoss = errors.New("is not a boss session (dev boss)")
 
-// AnswerSettled is Answer settled by the Manager with the boss's recommended option, the ask marked obvious.
+// AnswerSettled is Answer settled by the Manager with the boss's recommended option.
 func AnswerSettled(id int, text, answer string) Note {
 	n := Answer(id, text, answer)
 	n.Text = settledPrefix(id, text) + answer

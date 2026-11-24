@@ -105,8 +105,8 @@ func TestIsHandOn(t *testing.T) {
 		{"a #1: Hand on to boss-b?", item, false},
 		{"Should we hand on to boss-a?", item, false},
 	} {
-		if got := isHandOn(tt.q, tt.labels); got != tt.want {
-			t.Errorf("isHandOn(%q, %q) = %v, want %v", tt.q, tt.labels, got, tt.want)
+		if got := IsHandOn(tt.q, tt.labels); got != tt.want {
+			t.Errorf("IsHandOn(%q, %q) = %v, want %v", tt.q, tt.labels, got, tt.want)
 		}
 	}
 }

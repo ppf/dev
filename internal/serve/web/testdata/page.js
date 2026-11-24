@@ -580,7 +580,7 @@ const check = (name, ok) => { if (!ok) console.log(name); };
   s = await sheetOf([{ boss: 'boss-a', items: [], finished: [settled] }], "item('boss-a', 34, " + at + ')');
   const dec = cls(/^live decided$/)(s)[0], overs = cls(/^opt$/)(s);
   check('Done: an ask decided for you: who and when, the pick over the others and why, not "You answered": ' + textOf(dec || {}),
-    /^Decided for you(\w+ )?\d\d:\d\d · by managerPickedRe-run ★ recommendedOverLook firstWhyThe boss marked it obvious: known flake$/.test(textOf(dec || {})) && !/You answered/.test(s.map(textOf).join('')));
+    /^Decided for you(\w+ )?\d\d:\d\d · by managerPickedRe-run ★ recommendedOverLook firstWhyknown flake$/.test(textOf(dec || {})) && !/You answered/.test(s.map(textOf).join('')));
   check('Done: each other option an Overrule, in Reopen\'s place', overs.length === 1 && textOf(overs[0]) === 'Look firsta worker reads the log' && !reopenBtns(s).length
     && /Overrule with/.test(s.map(textOf).join('')) && /One tap: reopens #34 with this pick and tells boss-a\./.test(s.map(textOf).join('')));
   posts.length = 0;

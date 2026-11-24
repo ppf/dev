@@ -10,6 +10,77 @@ import (
 
 var obviousOptions = []string{"Re-run the job | known flake (Recommended)", "Look into it first | a worker reads the log"}
 
+func noHandOn(Item) bool { return false }
+
+// The manager settles an ask its boss didn't mark only with a why: decided by the manager for that why, the user
+// overrules it as any settled ask; refused without a why, a too long one, for no one recommended option, one option, a
+// hand-on question (marked too, before any why), a why on a marked ask and an answered item, changing nothing.
+func TestSettleUnmarked(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1_800_000_000, 0)
+	add := func(it Item) int {
+		t.Helper()
+		id, err := s.Add(it, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	handOn := func(it Item) bool { return it.Text == "Hand on to boss-dev?" }
+	ask := add(Item{Text: "Rebuild the dev server?", Options: obviousOptions})
+	none := add(Item{Text: "Which port?", Options: []string{"8080", "9090"}})
+	gate := add(Item{Text: "Hand on to boss-dev?", Options: []string{"Hand it on (Recommended)", "Drop it"}})
+	markedGate := add(Item{Text: "Hand on to boss-dev?", Options: []string{"Hand it on (Recommended)", "Drop it"}, Obvious: "agreed"})
+	marked := add(Item{Text: "Re-run CI?", Options: obviousOptions, Obvious: "known flake"})
+	two := add(Item{Text: "Which file?", Options: []string{"One (Recommended)", "Two (Recommended)"}})
+	lone := add(Item{Text: "Rebuild it?", Options: []string{"Rebuild (Recommended)"}})
+	answered := add(Item{Text: "Keep the draft?", Options: obviousOptions})
+	if _, err := s.Answer(answered, "Keep the draft?", "2", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, question, why string
+		id                  int
+		want                string
+	}{
+		{"no why", "Rebuild the dev server?", "", ask, "settle it with --why"},
+		{"long why", "Rebuild the dev server?", strings.Repeat("x", MaxResult+1), ask, "--why is"},
+		{"no recommended option", "Which port?", "local only", none, "no one recommended option"},
+		{"two recommended options", "Which file?", "local only", two, "no one recommended option"},
+		{"one option", "Rebuild it?", "local only", lone, "none to overrule it with"},
+		{"hand-on without a why", "Hand on to boss-dev?", "", gate, "is a hand-on question"},
+		{"hand-on", "Hand on to boss-dev?", "the user said so", gate, "is a hand-on question"},
+		{"marked hand-on", "Hand on to boss-dev?", "", markedGate, "is a hand-on question"},
+		{"marked with a why", "Re-run CI?", "cheap", marked, "leave out --why"},
+		{"answered", "Keep the draft?", "reversible", answered, `the user answered "Look into it first"`},
+	} {
+		if _, err := s.Settle(tt.id, tt.question, "1", tt.why, handOn, now); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
+		}
+	}
+	for _, it := range read(t, s, now).Items {
+		if it.Decided != nil || (it.Done && it.ID != answered) {
+			t.Errorf("a refused settle wrote: %+v", it)
+		}
+	}
+
+	it, err := s.Settle(ask, "Rebuild the dev server?", "Re-run the job", "local, rebuilt in a minute", handOn, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Decided{By: DecidedManager, Pick: obviousOptions[0], Over: obviousOptions[1:], Why: "local, rebuilt in a minute", At: now.Unix()}
+	if it.Answer != "Re-run the job" || it.Via != ViaManager || !reflect.DeepEqual(it.Decided, want) {
+		t.Fatalf("settled = %+v, decided %+v", it, it.Decided)
+	}
+	over, was, err := s.Overrule(ask, "Rebuild the dev server?", "2", "", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if over.Answer != "Look into it first" || over.Decided != nil || was.Why != "local, rebuilt in a minute" {
+		t.Errorf("overruled = %+v, was %+v", over, was)
+	}
+}
+
 // The manager settles an ask its boss marked obvious with its recommended option: ticked, answered, decided by the
 // manager with what it was picked over, why and when; shown so on the list and among the finished items.
 func TestSettle(t *testing.T) {
@@ -19,7 +90,7 @@ func TestSettle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	it, err := s.Settle(id, "Re-run CI on #301?", "1", now.Add(time.Minute))
+	it, err := s.Settle(id, "Re-run CI on #301?", "1", "", noHandOn, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,11 +109,11 @@ func TestSettle(t *testing.T) {
 	if _, err := s.Add(Item{Text: "next"}, now.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Settle(id, "Re-run CI on #301?", "1", now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "decided for the user by the manager") {
+	if _, err := s.Settle(id, "Re-run CI on #301?", "1", "", noHandOn, now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "decided for the user by the manager") {
 		t.Errorf("settle of a renumbered item: %v", err)
 	}
 	// Settled again or answered by the user once it left the list: refused, naming who decided
-	if _, err := s.Settle(id, "Re-run CI on #301?", "1", now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "decided for the user by the manager") {
+	if _, err := s.Settle(id, "Re-run CI on #301?", "1", "", noHandOn, now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "decided for the user by the manager") {
 		t.Errorf("settle after it left the list: %v", err)
 	}
 	if _, err := s.Answer(id, "Re-run CI on #301?", "2", 0, now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "decided for the user by the manager") {
@@ -67,7 +138,7 @@ func TestSettleRefused(t *testing.T) {
 	plain := add(Item{Text: "Review the plan"})
 	worker := add(Item{Text: "Pick a port?", Options: obviousOptions, Obvious: "only one free", On: "dev-x"})
 	marked := add(Item{Text: "Re-run CI?", Options: obviousOptions, Obvious: "known flake"})
-	if _, err := s.Settle(marked, "Re-run CI?", "1", now); err != nil {
+	if _, err := s.Settle(marked, "Re-run CI?", "1", "", noHandOn, now); err != nil {
 		t.Fatal(err)
 	}
 	// The user answered a marked ask first: the manager's settle is refused, naming their answer
@@ -75,7 +146,7 @@ func TestSettleRefused(t *testing.T) {
 	if _, err := s.Answer(answered, "Bump the dep?", "Look into it first", 0, now); err != nil {
 		t.Fatal(err)
 	}
-	if it, err := s.Settle(answered, "Bump the dep?", "1", now); err == nil || !strings.Contains(err.Error(), `the user answered "Look into it first"`) || it.Decided != nil {
+	if it, err := s.Settle(answered, "Bump the dep?", "1", "", noHandOn, now); err == nil || !strings.Contains(err.Error(), `the user answered "Look into it first"`) || it.Decided != nil {
 		t.Errorf("settle after the user's answer: %v", err)
 	}
 	for _, tt := range []struct {
@@ -92,7 +163,7 @@ func TestSettleRefused(t *testing.T) {
 		{"settled already", marked, "Re-run CI?", "decided for the user by the manager"},
 		{"no item", 9, "Merge #148?", "no open item 9"},
 	} {
-		if _, err := s.Settle(tt.id, tt.question, "1", now); err == nil || !strings.Contains(err.Error(), tt.want) {
+		if _, err := s.Settle(tt.id, tt.question, "1", "", noHandOn, now); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
 		}
 	}
@@ -101,7 +172,7 @@ func TestSettleRefused(t *testing.T) {
 	if _, err := s.ReplaceAsk(repicked, Item{Options: []string{"Re-run the job", "Look into it first (Recommended)"}, Obvious: "flake"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Settle(repicked, "Retry it?", "Re-run the job", now); err == nil || !strings.Contains(err.Error(), `recommended option is "Look into it first" now, not "Re-run the job"`) {
+	if _, err := s.Settle(repicked, "Retry it?", "Re-run the job", "", noHandOn, now); err == nil || !strings.Contains(err.Error(), `recommended option is "Look into it first" now, not "Re-run the job"`) {
 		t.Errorf("settle of a changed pick: %v", err)
 	}
 	if l := read(t, s, now); l.Items[len(l.Items)-1].Done || l.Items[len(l.Items)-1].Decided != nil {
@@ -209,7 +280,7 @@ func TestReopenSettled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Settle(id, "Re-run CI?", "1", now); err != nil {
+	if _, err := s.Settle(id, "Re-run CI?", "1", "", noHandOn, now); err != nil {
 		t.Fatal(err)
 	}
 	it, err := s.Reopen(id, "Re-run CI?", now.Add(time.Minute))
@@ -219,7 +290,7 @@ func TestReopenSettled(t *testing.T) {
 	if it.Obvious != "" || it.Decided != nil || it.Answer != "" || it.Done != 0 {
 		t.Errorf("reopened = %+v", it)
 	}
-	_, err = s.Settle(id, "Re-run CI?", "1", now.Add(2*time.Minute))
+	_, err = s.Settle(id, "Re-run CI?", "1", "", noHandOn, now.Add(2*time.Minute))
 	if err == nil || !strings.Contains(err.Error(), "isn't marked obvious") {
 		t.Errorf("settle after reopen: %v", err)
 	}
@@ -238,7 +309,7 @@ func TestOverrule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Settle(id, "Re-run CI?", "1", now); err != nil {
+	if _, err := s.Settle(id, "Re-run CI?", "1", "", noHandOn, now); err != nil {
 		t.Fatal(err)
 	}
 	it, was, err := s.Overrule(id, "Re-run CI?", "look into it first", ViaPage, now.Add(time.Minute))
@@ -302,7 +373,7 @@ func TestOverruleRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Settle(settled, "Re-run CI?", "1", now); err != nil {
+	if _, err := s.Settle(settled, "Re-run CI?", "1", "", noHandOn, now); err != nil {
 		t.Fatal(err)
 	}
 	answered, err := s.Add(Item{Text: "Merge?", Options: []string{"Merge", "Wait"}}, now)
