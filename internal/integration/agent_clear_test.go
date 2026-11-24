@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // clearStub is a Claude stand-in for dev agent clear: hooks like agentStub's (SessionStart's output kept in
@@ -138,6 +140,13 @@ func TestAgentClear(t *testing.T) {
 	s.T("set-option", "-pu", "-t", app, "@agent_context")
 	refused("context share unknown", manager, "boss-app", "its context share is unknown")
 	s.T("set-option", "-p", "-t", app, "@agent_context", "30")
+	s.T("new-session", "-d", "-s", "app-new", "sleep 600")
+	s.T("set-option", "-t", "=app-new:", "@dev_started_by", "boss-app")
+	refused("a worker with no agent registered", manager, "boss-app", "worker app-new has no hook state")
+	s.T("kill-session", "-t", "=app-new:")
+	s.T("set-option", "-p", "-t", app, "@dev_handoff", strconv.Itoa(os.Getpid())+" "+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)+" s0 /other.md")
+	refused("another clear running", manager, "boss-app", "another dev agent clear runs for boss-app")
+	s.T("set-option", "-pu", "-t", app, "@dev_handoff")
 	if _, e, st := runDev(env, "", "agent", "clear", "boss-app"); st == "0" || !strings.Contains(e, "cleared only by its manager's coordinator pane") {
 		t.Errorf("❌ a Claude session outside tmux: exit %s, %s", st, e)
 	}
@@ -217,13 +226,16 @@ func TestAgentClear(t *testing.T) {
 		write(dir, "save.md", handoff(dir))
 		write(dir, "proof.md", strings.Replace(proof, "## Roles", "## Who", 1))
 		write(dir, "proof-fix.md", strings.Replace(proof, "## Roles", "## Who", 1))
-		stopped(t, env, manager, "boss-lax", "s1", "still misses: sections missing: ## Roles", "the proof prompt to send by hand: [dev agent clear] Read ",
+		stopped(t, env, manager, "boss-lax", "s1", "still misses: sections missing: ## Roles", "the proof prompt to send by hand first", "command ends): [dev agent clear] Read ",
 			"old transcript "+filepath.Join(dir, "s0.jsonl"))
 	})
 
 	t.Run("cleared and proved", func(t *testing.T) {
-		write(appDir, "save.md", strings.Replace(good, "#2:", "Ask:", 1))
-		write(appDir, "fix.md", good)
+		// The caller's fact, copied in as key fact 3
+		carried := strings.Replace(good, "\n\n## Open asks", "\n3. The user leaves at 18:00. confirmed: said\n\n## Open asks", 1)
+		write(appDir, "save.md", strings.Replace(carried, "#2:", "Ask:", 1))
+		write(appDir, "fix.md", carried)
+		proof := strings.Replace(proof, "\n\n## Open asks", "\n3. Leaves at 18:00. confirmed: said\n\n## Open asks", 1)
 		write(appDir, "proof.md", strings.Replace(proof, "2. v2 ready. unconfirmed\n", "", 1))
 		write(appDir, "proof-fix.md", proof)
 		facts := filepath.Join(tmp, "facts.md")
@@ -254,7 +266,7 @@ func TestAgentClear(t *testing.T) {
 		if handoff == "" || proofPath == "" || factsCopy == "" {
 			t.Fatalf("❌ files %q", handoffs)
 		}
-		for _, want := range []string{"Cleared boss-app: 2 key facts restated", "handoff: " + handoff, "proof: " + proofPath, "old transcript: " + transcript} {
+		for _, want := range []string{"Cleared boss-app: 3 key facts restated", "handoff: " + handoff, "proof: " + proofPath, "old transcript: " + transcript} {
 			if !strings.Contains(out, want) {
 				t.Errorf("❌ output lacks %q: %s", want, out)
 			}

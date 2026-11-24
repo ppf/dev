@@ -3,6 +3,7 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -178,21 +179,25 @@ func TestBossHookListError(t *testing.T) {
 // deadPID is a pid no process has: a dev agent clear killed before it unset OptHandoff.
 const deadPID = "99999999"
 
+// soon is a time a running dev agent clear holds until.
+var soon = time.Now().Add(time.Hour)
+
 // A boss /clear'ed by a running dev agent clear (OptHandoff set for the conversation that ended, s0) gets its
 // handoff's path after its list; a start, resume or compaction doesn't, nor a clear without one, a leftover of a
 // killed run or one set for another conversation.
 func TestBossHookHandoff(t *testing.T) {
 	const path = "/s/dev/handoff/boss/2026-11-24 120000.md"
 	line := "Your handoff from before this /clear: " + path + ". Read it before acting; dev agent clear asks you for a proof of it next."
-	running := ClearValue("s0", path)
+	running := ClearValue("s0", path, soon)
 	for _, tt := range []struct {
 		source, handoff string
 		want            bool
 	}{
 		{"clear", running, true},
 		{"clear", "", false},
-		{"clear", deadPID + " s0 " + path, false},
-		{"clear", ClearValue("s7", path), false},
+		{"clear", deadPID + " " + strconv.FormatInt(soon.Unix(), 10) + " s0 " + path, false},
+		{"clear", ClearValue("s0", path, time.Now().Add(-time.Minute)), false},
+		{"clear", ClearValue("s7", path, soon), false},
 		{"startup", running, false},
 		{"resume", running, false},
 		{"compact", running, false},
@@ -236,8 +241,9 @@ func TestBossHookClearHold(t *testing.T) {
 		handoff string
 		held    bool
 	}{
-		{ClearValue("s0", "/h.md"), true},
-		{deadPID + " s0 /h.md", false},
+		{ClearValue("s0", "/h.md", soon), true},
+		{deadPID + " " + strconv.FormatInt(soon.Unix(), 10) + " s0 /h.md", false},
+		{ClearValue("s0", "/h.md", time.Now().Add(-time.Minute)), false},
 	} {
 		c := handoffTmux(t, "boss", "1", tt.handoff)
 		b, ok, err := Self(c, "%1")

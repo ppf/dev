@@ -108,7 +108,7 @@ Flaky test in CI.
 
 // A handoff passes with every section, 1-15 marked facts, every open item and the transcript; each miss is named.
 func TestVerifyHandoff(t *testing.T) {
-	h, miss := VerifyHandoff(goodHandoff, []int{3, 12}, transcript)
+	h, miss := VerifyHandoff(goodHandoff, []int{3, 12}, transcript, nil)
 	if len(miss) > 0 {
 		t.Fatalf("misses %q", miss)
 	}
@@ -149,10 +149,12 @@ func TestVerifyHandoff(t *testing.T) {
 		{"indented sub-list stays in its fact", strings.Replace(goodHandoff, fact3, "3. Staging works:\n   1. api\n   2. web\n   unconfirmed", 1), []int{3, 12}, ""},
 		{"open item not named", goodHandoff, []int{3, 12, 7}, "open items not named: #7"},
 		{"#12 doesn't name #1", goodHandoff, []int{1}, "open items not named: #1"},
+		{"PR #40 names no item #40", goodHandoff, []int{3, 40}, "open items not named: #40"},
+		{"bold and bulleted numbers", strings.Replace(strings.Replace(goodHandoff, "1. PR", "**1.** PR", 1), "2. The user", "- 2. The user", 1), []int{3, 12}, ""},
 		{"transcript missing", strings.Replace(goodHandoff, transcript, "lost", 1), []int{3, 12}, "the old transcript's path " + transcript},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, miss := VerifyHandoff(tt.text, tt.open, transcript)
+			_, miss := VerifyHandoff(tt.text, tt.open, transcript, nil)
 			got := strings.Join(miss, "; ")
 			if tt.want == "" && got != "" || !strings.Contains(got, tt.want) {
 				t.Errorf("misses = %q, want %q", got, tt.want)
@@ -176,7 +178,7 @@ The manager answers my workers' permission prompts and dialogs and relays my ask
 // A proof passes with each fact restated under its number and mark, each open ask, and roles; each miss is named,
 // a missing fact quoted.
 func TestVerifyProof(t *testing.T) {
-	h, miss := VerifyHandoff(goodHandoff, []int{3, 12}, transcript)
+	h, miss := VerifyHandoff(goodHandoff, []int{3, 12}, transcript, nil)
 	if len(miss) > 0 {
 		t.Fatal(miss)
 	}
@@ -229,5 +231,22 @@ func TestPrompts(t *testing.T) {
 		if strings.Contains(p, "\n") {
 			t.Errorf("prompt has a newline: %q", p)
 		}
+	}
+}
+
+// A --facts file's facts pass only when each is copied word for word (line breaks and emphasis aside) into a key fact.
+func TestVerifyHandoffCarried(t *testing.T) {
+	carried := readFacts("1. The user is away until Monday. confirmed: said\n\n2. Staging deploy works (unconfirmed)\n")
+	if len(carried) != 2 {
+		t.Fatalf("readFacts = %+v", carried)
+	}
+	copied := strings.Replace(goodHandoff, "## Open asks", "4. The user is away\n   until **Monday**. confirmed: said\n\n## Open asks", 1)
+	if _, miss := VerifyHandoff(copied, []int{3, 12}, transcript, carried); len(miss) > 0 {
+		t.Errorf("copied: misses %q", miss)
+	}
+	reworded := strings.Replace(goodHandoff, "## Open asks", "4. The user is out until Monday. confirmed: said\n\n## Open asks", 1)
+	_, miss := VerifyHandoff(reworded, []int{3, 12}, transcript, carried)
+	if got := strings.Join(miss, "; "); got != "the caller's fact not copied into a key fact word for word: The user is away until Monday. confirmed: said" {
+		t.Errorf("reworded: misses %q", got)
 	}
 }

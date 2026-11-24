@@ -50,9 +50,14 @@ type Boss struct {
 // with an empty input box, a worker of it works (or has no hook state) or waits on a decision, notes wait in its
 // inbox, a planned wait or rate-limit resume is ahead for it or a worker, or, without force, its context share is
 // unknown or under MinContext.
+// NotBoss is the refusal of session, no boss.
+func NotBoss(session string) error {
+	return fmt.Errorf("%s isn't a boss (dev boss): only a boss is cleared this way", session)
+}
+
 func Check(b Boss, workers []Pane, force bool) error {
 	if !b.IsBoss {
-		return fmt.Errorf("%s isn't a boss (dev boss): only a boss is cleared this way", b.Session)
+		return NotBoss(b.Session)
 	}
 	if b.Conversation == "" {
 		return fmt.Errorf("%s's hook records no session (Codex, Grok, or its agent exited): its /clear can't be confirmed", b.Session)
@@ -119,15 +124,16 @@ type Fact struct {
 
 var (
 	heading = regexp.MustCompile(`^#{2,}\s+(.+?)\s*#*\s*$`)
-	// At the line's start: an indented numbered line is part of the fact above
-	numbered = regexp.MustCompile(`^(\d+)[.)]\s+(.*)$`)
+	// At the line's start, maybe after a list bullet: an indented numbered line is part of the fact above
+	numbered = regexp.MustCompile(`^(?:[-*+] )?(\d+)[.)]\s+(.*)$`)
 	// A fact ends in "unconfirmed", or in a last clause "confirmed: <item number, PR or file>" (after a sentence's
 	// end, a comma, a dash or in parentheses, not "deploy confirmed: no"), maybe in emphasis
 	unconfirmed = regexp.MustCompile(`(?i)(?:^|[^a-z])unconfirmed$`)
 	confirmed   = regexp.MustCompile(`(?i)(?:^|[.;,(]\s*|\s[-–—]\s*)confirmed:\s*\S.*$`)
-	itemRef     = regexp.MustCompile(`#(\d+)\b`)
-	trailing    = " \t.)]*_`"
-	emphasis    = strings.NewReplacer("**", "", "__", "", "`", "")
+	// A PR's, MR's or issue's number names no item
+	itemRef  = regexp.MustCompile(`(?i)(\bPR\s*|\bMR\s*|pull/|issues/|merge_requests/)?#(\d+)\b`)
+	trailing = " \t.)]*_`"
+	emphasis = strings.NewReplacer("**", "", "__", "", "`", "")
 )
 
 // sections splits markdown text at its headings ("##" or deeper); a heading's key is its text without emphasis or a
@@ -163,7 +169,8 @@ func missing(secs map[string][]string, want []string) []string {
 func facts(lines []string) []Fact {
 	var out []Fact
 	for _, l := range lines {
-		if m := numbered.FindStringSubmatch(l); m != nil {
+		// "**1.** fact" too
+		if m := numbered.FindStringSubmatch(emphasis.Replace(l)); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			out = append(out, Fact{N: n, Text: strings.TrimSpace(m[2])})
 			continue
@@ -184,14 +191,26 @@ func facts(lines []string) []Fact {
 	return out
 }
 
-// refs is the item numbers (#n) text names.
+// readFacts is the numbered facts in markdown text, as a --facts file holds them.
+func readFacts(text string) []Fact {
+	return facts(strings.Split(text, "\n"))
+}
+
+// refs is the item numbers (#n, not a PR's "PR #n") text names.
 func refs(text string) map[int]bool {
 	out := map[int]bool{}
 	for _, m := range itemRef.FindAllStringSubmatch(text, -1) {
-		n, _ := strconv.Atoi(m[1])
-		out[n] = true
+		if m[1] == "" {
+			n, _ := strconv.Atoi(m[2])
+			out[n] = true
+		}
 	}
 	return out
+}
+
+// squashed is s's words, emphasis dropped, one space apart, for a fact copied with other line breaks.
+func squashed(s string) string {
+	return strings.Join(strings.Fields(emphasis.Replace(s)), " ")
 }
 
 // unnamed is the ids not in named.
@@ -233,8 +252,9 @@ type Handoff struct {
 
 // VerifyHandoff checks handoff text and returns its key facts, and every miss: a section missing, no key facts or more
 // than MaxFacts, a fact number used twice, a fact ending in neither "confirmed: …" nor "unconfirmed", an open item's
-// number (open) it doesn't name, or the old transcript's path (when known) it doesn't hold.
-func VerifyHandoff(text string, open []int, transcript string) (Handoff, []string) {
+// number (open) it doesn't name, the old transcript's path (when known) it doesn't hold, or a fact of the caller's
+// (carried) not copied word for word into a key fact.
+func VerifyHandoff(text string, open []int, transcript string, carried []Fact) (Handoff, []string) {
 	secs := sections(text)
 	var miss []string
 	if m := missing(secs, Sections); len(m) > 0 {
@@ -264,6 +284,11 @@ func VerifyHandoff(text string, open []int, transcript string) (Handoff, []strin
 	}
 	if transcript != "" && !strings.Contains(text, transcript) {
 		miss = append(miss, "the old transcript's path "+transcript+" isn't in it")
+	}
+	for _, cf := range carried {
+		if !slices.ContainsFunc(fs, func(f Fact) bool { return strings.Contains(squashed(f.Text), squashed(cf.Text)) }) {
+			miss = append(miss, "the caller's fact not copied into a key fact word for word: "+cf.Text)
+		}
 	}
 	return Handoff{Facts: fs}, miss
 }

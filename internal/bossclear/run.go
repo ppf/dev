@@ -1,12 +1,14 @@
 package bossclear
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -52,22 +55,52 @@ func Read(c *tmux.Client, a control.Agent, now time.Time) (Boss, []Pane, error) 
 			return b, nil, err
 		}
 	}
+	owned, err := startedBy(c, a)
+	if err != nil {
+		return b, nil, err
+	}
 	agents, err := control.List(c)
 	if err != nil {
 		return b, nil, err
 	}
 	var workers []Pane
-	for _, w := range agents {
-		if w.StartedBy != a.Session {
+	for _, name := range owned {
+		i := slices.IndexFunc(agents, func(w control.Agent) bool { return w.Session == name })
+		if i < 0 {
+			// No agent registered (yet): no hook state, so maybe working
+			workers = append(workers, Pane{Session: name})
 			continue
 		}
-		p, _, err := readPane(c, w, now)
+		p, _, err := readPane(c, agents[i], now)
 		if err != nil {
 			return b, nil, err
 		}
 		workers = append(workers, p)
 	}
 	return b, workers, nil
+}
+
+// startedBy is the sessions boss a started (@dev_started_by names it, by name or session id).
+func startedBy(c *tmux.Client, a control.Agent) ([]string, error) {
+	id, err := c.Run("display-message", "-p", "-t", a.Pane, "#{session_id}")
+	if err != nil {
+		return nil, err
+	}
+	type session struct {
+		Name      string `tmux:"session_name"`
+		StartedBy string `tmux:"@dev_started_by"`
+	}
+	sessions, err := tmux.Query[session](c, "list-sessions")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, s := range sessions {
+		if sidebar.Names(s.StartedBy, strings.TrimSpace(id), a.Session, true) {
+			out = append(out, s.Name)
+		}
+	}
+	return out, nil
 }
 
 // readPane reads a's state (its screen checked), planned wait and rate-limit resume, and its hook's session id.
@@ -111,13 +144,19 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 	if err := check(c, a, o.Force, clk.Now()); err != nil {
 		return r, err
 	}
+	if held, err := inbox.ClearHeld(c, a.Pane); held || err != nil {
+		return r, cmp.Or(err, fmt.Errorf("another dev agent clear runs for %s", a.Session))
+	}
 	var facts string
+	var carried []Fact
 	if o.Facts != "" {
 		data, err := os.ReadFile(o.Facts)
 		if err != nil {
 			return r, fmt.Errorf("--facts: %w", err)
 		}
-		facts = string(data)
+		if facts, carried = string(data), readFacts(string(data)); len(carried) == 0 {
+			return r, fmt.Errorf("--facts %s: no numbered facts (\"1. <fact> confirmed: <item, PR or file>\" or \"… unconfirmed\")", o.Facts)
+		}
 	}
 	out, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session}\t#{@agent_transcript}")
 	if err != nil {
@@ -158,12 +197,14 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		}
 	}
 
-	if _, err := c.Run("set-option", "-p", "-t", a.Pane, inbox.OptHandoff, inbox.ClearValue(conversation, r.Handoff)); err != nil {
+	// Past every turn this run may wait on: a pid reused after a kill holds the notes no longer
+	hold := inbox.ClearValue(conversation, r.Handoff, clk.Now().Add(5*(o.Timeout+o.Stall)+time.Minute))
+	if _, err := c.Run("set-option", "-p", "-t", a.Pane, inbox.OptHandoff, hold); err != nil {
 		return r, err
 	}
 	defer func() {
-		// Once this process ends the option holds nothing anyway (inbox.clearing)
-		if _, uerr := c.Run("set-option", "-pu", "-t", a.Pane, inbox.OptHandoff); uerr != nil {
+		// Only its own: once this process ends it holds nothing anyway (inbox.clearing)
+		if uerr := release(c, a.Pane, hold); uerr != nil {
 			err = errors.Join(err, fmt.Errorf("unsetting %s: %w", inbox.OptHandoff, uerr))
 		}
 	}()
@@ -171,7 +212,7 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 	if err := prompt(c, clk, a, SavePrompt(r.Handoff, r.Transcript, factsCopy), o); err != nil {
 		return r, fmt.Errorf("save: %w; nothing cleared", err)
 	}
-	h, miss, err := verifyHandoff(c, a, r)
+	h, miss, err := verifyHandoff(c, a, r, carried, clk.Now())
 	if err != nil {
 		return r, err
 	}
@@ -180,7 +221,7 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		if err := prompt(c, clk, a, FixPrompt(r.Handoff, miss), o); err != nil {
 			return r, fmt.Errorf("handoff fix: %w; nothing cleared", err)
 		}
-		if h, miss, err = verifyHandoff(c, a, r); err != nil {
+		if h, miss, err = verifyHandoff(c, a, r, carried, clk.Now()); err != nil {
 			return r, err
 		}
 		if len(miss) > 0 {
@@ -188,13 +229,21 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		}
 	}
 	fmt.Fprintf(o.Out, "Handoff verified: %d key facts\n", len(h.Facts))
+	saved, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session} #{@agent_prompts}")
+	if err != nil {
+		return r, err
+	}
 
 	// A worker may have started or a note come in during the save
 	if err := check(c, a, o.Force, clk.Now()); err != nil {
 		return r, fmt.Errorf("%w; nothing cleared, handoff %s kept", err, r.Handoff)
 	}
+	if err := unchanged(c, a, conversation, saved); err != nil {
+		return r, fmt.Errorf("%w; nothing cleared, handoff %s kept", err, r.Handoff)
+	}
 	proof := ProofPrompt(r.Handoff, r.Proof)
-	manual := fmt.Sprintf("handoff %s, old transcript %s; the proof prompt to send by hand: %s", r.Handoff, r.Transcript, proof)
+	manual := fmt.Sprintf("handoff %s, old transcript %s; the proof prompt to send by hand first (its held inbox notes reach it once this "+
+		"command ends): %s", r.Handoff, r.Transcript, proof)
 	if _, err := control.PromptWait(c, clk, a.Pane, "/clear", o.Stall, o.Timeout); err != nil {
 		return r, fmt.Errorf("/clear: %w; it may still clear: once dev agent read %s shows a fresh conversation, %s", err, a.Session, manual)
 	}
@@ -203,7 +252,7 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 	if err := prompt(c, clk, a, proof, o); err != nil {
 		return r, fmt.Errorf("proof: %w; %s", err, manual)
 	}
-	miss, err = verifyProof(c, a, r, h)
+	miss, err = verifyProof(c, a, r, h, clk.Now())
 	if err != nil {
 		return r, fmt.Errorf("%w; %s", err, manual)
 	}
@@ -212,7 +261,7 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		if err := prompt(c, clk, a, ProofFixPrompt(r.Handoff, r.Proof, miss), o); err != nil {
 			return r, fmt.Errorf("proof fix: %w; %s", err, manual)
 		}
-		if miss, err = verifyProof(c, a, r, h); err != nil {
+		if miss, err = verifyProof(c, a, r, h, clk.Now()); err != nil {
 			return r, fmt.Errorf("%w; %s", err, manual)
 		}
 		if len(miss) > 0 {
@@ -221,6 +270,44 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 	}
 	r.Facts = len(h.Facts)
 	return r, nil
+}
+
+// unchanged refuses the /clear unless boss a, right before it, still runs conversation and has had no turn since its
+// handoff passed (saved: its session and prompt count then), its input box is empty and no inbox note waits: a
+// check() reads every worker first, which takes a while.
+func unchanged(c *tmux.Client, a control.Agent, conversation, saved string) error {
+	now, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session} #{@agent_prompts}")
+	if err != nil {
+		return err
+	}
+	if session, _, _ := strings.Cut(strings.TrimSpace(now), " "); session != conversation {
+		return fmt.Errorf("%s runs another conversation than the one that wrote the handoff", a.Session)
+	}
+	if strings.TrimSpace(now) != strings.TrimSpace(saved) {
+		return fmt.Errorf("%s had a turn since its handoff passed", a.Session)
+	}
+	empty, err := inputEmpty(c, a.Pane)
+	if err != nil || !empty {
+		return cmp.Or(err, fmt.Errorf("%s's input box holds text, maybe the user's draft", a.Session))
+	}
+	box, ok, err := inbox.Coordinator(c, a.Pane)
+	if err != nil || !ok {
+		return err
+	}
+	if queued, err := box.Box.Pending(); err != nil || queued {
+		return cmp.Or(err, fmt.Errorf("inbox notes wait for %s", a.Session))
+	}
+	return nil
+}
+
+// release unsets pane's inbox.OptHandoff while it still holds hold, this run's value.
+func release(c *tmux.Client, pane, hold string) error {
+	v, err := c.Run("display-message", "-p", "-t", pane, "#{"+inbox.OptHandoff+"}")
+	if err != nil || strings.TrimSpace(v) != hold {
+		return err
+	}
+	_, err = c.Run("set-option", "-pu", "-t", pane, inbox.OptHandoff)
+	return err
 }
 
 // check reads boss a (found again: its wait may have changed) and its workers, and runs Check.
@@ -265,19 +352,19 @@ func inputEmpty(c *tmux.Client, pane string) (bool, error) {
 	return inbox.InputEmpty(shot), nil
 }
 
-// list is boss a's list as read now.
-func list(c *tmux.Client, a control.Agent) (todo.List, error) {
+// list is boss a's list as read at now.
+func list(c *tmux.Client, a control.Agent, now time.Time) (todo.List, error) {
 	s, err := todo.ForPane(c, a.Pane)
 	if err != nil {
 		return todo.List{}, err
 	}
-	return s.Read(time.Now())
+	return s.Read(now)
 }
 
 // verifyHandoff reads r's handoff and boss a's list and checks them: VerifyHandoff against its open items, and no
 // item of the user's or a person's without details.
-func verifyHandoff(c *tmux.Client, a control.Agent, r Result) (Handoff, []string, error) {
-	l, err := list(c, a)
+func verifyHandoff(c *tmux.Client, a control.Agent, r Result, carried []Fact, now time.Time) (Handoff, []string, error) {
+	l, err := list(c, a, now)
 	if err != nil {
 		return Handoff{}, nil, err
 	}
@@ -298,7 +385,7 @@ func verifyHandoff(c *tmux.Client, a control.Agent, r Result) (Handoff, []string
 			bare = append(bare, it.ID)
 		}
 	}
-	h, miss := VerifyHandoff(string(data), open, r.Transcript)
+	h, miss := VerifyHandoff(string(data), open, r.Transcript, carried)
 	if len(bare) > 0 {
 		miss = append(miss, "items of the user's or a person's without details on the list: "+numbers(bare))
 	}
@@ -306,8 +393,8 @@ func verifyHandoff(c *tmux.Client, a control.Agent, r Result) (Handoff, []string
 }
 
 // verifyProof reads r's proof and checks it against handoff h and boss a's open asks.
-func verifyProof(c *tmux.Client, a control.Agent, r Result, h Handoff) ([]string, error) {
-	l, err := list(c, a)
+func verifyProof(c *tmux.Client, a control.Agent, r Result, h Handoff, now time.Time) ([]string, error) {
+	l, err := list(c, a, now)
 	if err != nil {
 		return nil, err
 	}
@@ -341,14 +428,14 @@ func Headings(sections []string) string {
 func SavePrompt(path, transcript, facts string) string {
 	text := "[dev agent clear] Save for a clear of your context, in this order, without starting or prompting any worker " +
 		"and without ending on a question (write what you don't know as unconfirmed): 1. update your to do list: each " +
-		"item's status, and --details on every item the user or a person owes (dev todo add --replaces <n> --details '…'); " +
+		"item's status, and --details on every item the user or a person owes (dev todo add --replaces <n> --details '…'; an ask: dev todo ask --replaces <n> --details '…', which keeps its question's time); " +
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
 		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\". " +
 		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {
-		text += " Merge in the facts in " + facts + " (from whoever runs this clear) as key facts, each marked the same way."
+		text += " Copy each fact in " + facts + " (from whoever runs this clear) verbatim, its mark included, as one of your key facts, numbered on."
 	}
 	return text
 }
