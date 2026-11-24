@@ -57,7 +57,7 @@ checks one item.`,
 			}
 			if printOnly {
 				// As the text list marks it: --json's status has it, MarkGone's flag doesn't
-				it.Shown.Gone = it.Status == todo.StatusGone
+				it.Gone = it.Status == todo.StatusGone
 				printShown(cmd.OutOrStdout(), ofClosed(it.Shown, it.Closed), time.Now())
 				return nil
 			}
