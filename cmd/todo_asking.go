@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,7 +26,8 @@ the dialog (up to 4 pairs): the terminal board and the web board (the phone page
 so the user answers there or here, knowing. A mark goes once its item closes or its text changes, and all of them at
 the manager's next pick of any question (its PostToolUse hook), another asking, a /clear or restart of the manager, or
 30 minutes on (a dialog closed with Esc fires no hook). One --question per pair, in the same order, is that ask's text:
-refused unless open ask n still reads it, and its boss has its inbox on; one refused item marks none. Only from the manager's coordinator pane.`,
+refused unless open ask n still reads it, and its boss has its inbox on; one refused item marks none. Each mark's line
+prints the exact prefix that ask's question starts with ("<project> #<n>: "). Only from the manager's coordinator pane.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 || len(args)%2 != 0 || len(args) > 8 {
 				return fmt.Errorf("asking takes 1 to 4 pairs of <boss> <n>, got %d argument(s)", len(args))
@@ -79,7 +81,8 @@ refused unless open ask n still reads it, and its boss has its inbox on; one ref
 				return err
 			}
 			for _, a := range marks {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: asked in manager now\n", a.Boss, a.ID); err != nil {
+				prefix := fmt.Sprintf("%s #%d: ", strings.TrimPrefix(a.Boss, "boss-"), a.ID)
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: asked in manager now, question prefix %q\n", a.Boss, a.ID, prefix); err != nil {
 					return err
 				}
 			}

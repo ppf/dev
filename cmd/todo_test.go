@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1015,5 +1016,16 @@ func TestMarkAskedReopened(t *testing.T) {
 		if got := lists[0].Items[0].Asking; got != want {
 			t.Errorf("added at %d, marked reading 100: asking %v, want %v", added, got, want)
 		}
+	}
+}
+
+func TestTodoNoteCapDrops(t *testing.T) {
+	todoEnv(t)
+	for i := 1; i <= todo.MaxNotes; i++ {
+		run(t, "", "todo", "note", "risk", fmt.Sprintf("risk %d", i))
+	}
+	want := fmt.Sprintf("noted n%d\ndropped n1, the oldest at the cap: risk risk 1\n", todo.MaxNotes+1)
+	if got := run(t, "", "todo", "note", "risk", "one more"); got != want {
+		t.Errorf("note at the cap = %q, want %q", got, want)
 	}
 }

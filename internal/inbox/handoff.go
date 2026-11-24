@@ -32,6 +32,7 @@ var Kinds = []string{KindWork, KindQuestion, KindPick, KindOwn}
 const (
 	Dropped   = "dropped"   // the user picked DropIt
 	Corrected = "corrected" // the user typed under Other or picked another option
+	Refused   = "refused"   // the user picked HandItOn, but the gate refused the send
 )
 
 // The options of the manager's hand-on question.
@@ -41,7 +42,7 @@ const (
 )
 
 // Handoff is one thing the manager sent a boss (Kind one of Kinds), or a hand-on question that sent nothing (Kind
-// Dropped or Corrected, Line its question's first line). At is unix seconds.
+// Dropped, Corrected or Refused, Line its question's or the brief's first line). At is unix seconds.
 type Handoff struct {
 	Kind string `json:"kind"`
 	At   int64  `json:"at"`
@@ -76,7 +77,7 @@ func (s Handoffs) Add(h Handoff) error {
 	return writeJSON(s.path, append(all, h))
 }
 
-// List is every hand-on: ungated kinds first, then KindWork, then Dropped and Corrected, newest first in each.
+// List is every hand-on: ungated kinds first, then KindWork, then Dropped, Corrected and Refused, newest first in each.
 func (s Handoffs) List() ([]Handoff, error) {
 	lock, err := lockPath(s.path)
 	if err != nil {
@@ -91,7 +92,7 @@ func (s Handoffs) List() ([]Handoff, error) {
 		switch kind {
 		case KindWork:
 			return 1
-		case Dropped, Corrected:
+		case Dropped, Corrected, Refused:
 			return 2
 		}
 		return 0
@@ -119,7 +120,7 @@ func (s Handoffs) read() ([]Handoff, error) {
 	return all, nil
 }
 
-// Tally is the trial's counts of hs: "gated 2 · ungated: question 1, pick 0, own 0 · dropped 1 · corrected 0".
+// Tally is the trial's counts of hs: "gated 2 · ungated: question 1, pick 0, own 0 · dropped 1 · corrected 0 · refused 0".
 func Tally(hs []Handoff) string {
 	n := map[string]int{}
 	for _, h := range hs {
@@ -129,7 +130,7 @@ func Tally(hs []Handoff) string {
 	for _, k := range Kinds[1:] {
 		ungated = append(ungated, fmt.Sprintf("%s %d", k, n[k]))
 	}
-	return fmt.Sprintf("gated %d · ungated: %s · %s %d · %s %d", n[KindWork], strings.Join(ungated, ", "), Dropped, n[Dropped], Corrected, n[Corrected])
+	return fmt.Sprintf("gated %d · ungated: %s · %s %d · %s %d · %s %d", n[KindWork], strings.Join(ungated, ", "), Dropped, n[Dropped], Corrected, n[Corrected], Refused, n[Refused])
 }
 
 // IsPicked reports whether answer is option, in any case, also marked " (Recommended)".

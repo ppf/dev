@@ -102,7 +102,7 @@ func TestOnBossLinesAndChecks(t *testing.T) {
 	}
 }
 
-// A state note replaces the list's earlier one, also at the cap, under a new number; other kinds still stop there.
+// A state note replaces the list's earlier one, also at the cap, under a new number.
 func TestNoteState(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1_800_000_000, 0)
@@ -131,9 +131,6 @@ func TestNoteState(t *testing.T) {
 	}
 	if len(notes) != MaxNotes || !slices.Equal(states, []string{"7 fixes parked"}) || second <= first {
 		t.Errorf("%d notes, states %q, ids %d then %d; want %d, the new one only, a new number", len(notes), states, first, second, MaxNotes)
-	}
-	if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "one more"}, now); err == nil || !strings.Contains(err.Error(), "drop one first") {
-		t.Errorf("a risk at the cap: %v", err)
 	}
 	if got := NotesText(notes, now); !strings.Contains(got, " state: 7 fixes parked") {
 		t.Errorf("NotesText = %q", got)

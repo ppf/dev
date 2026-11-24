@@ -1,11 +1,14 @@
 package control
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -70,6 +73,9 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	if err != nil {
 		return done, err
 	}
+	if err := resultSaved(wt, a.Session); err != nil {
+		return done, err
+	}
 	if len(files) > 0 {
 		dir, err := config.StateDir()
 		if err != nil {
@@ -110,6 +116,37 @@ func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 		return done, fmt.Errorf("closed %s, but its archive record %s: %w", a.Session, dir, err)
 	}
 	return done, nil
+}
+
+const resultFile = "RESULT.md"
+
+// resultSaved refuses a RESULT.md in wt that git ignores, so Close wouldn't archive it, unless results/<session>/
+// holds the same text: removing the worktree would lose it.
+func resultSaved(wt, session string) error {
+	if ignored, err := worktree.Ignored(wt, resultFile); err != nil || !ignored {
+		return err
+	}
+	text, err := os.ReadFile(filepath.Join(wt, resultFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	state, err := config.StateDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(state, "results", session)
+	saved, err := os.ReadFile(filepath.Join(dir, resultFile))
+	switch {
+	case err == nil && bytes.Equal(saved, text):
+		return nil
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	return fmt.Errorf("%s holds a %s that git ignores and %s lacks: save it there first (mkdir -p %s && cp %s %s), then close again",
+		wt, resultFile, dir, dir, filepath.Join(wt, resultFile), filepath.Join(dir, resultFile))
 }
 
 // closable refuses a working, deciding or hookless worker, or a shared or dirty worktree, or one whose HEAD

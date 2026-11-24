@@ -157,12 +157,13 @@ func TestManagerHandOnGate(t *testing.T) {
 
 	out, stderr, err = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "", "agent", "handoffs")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if err != nil || len(lines) != 9 || lines[0] != "gated 3 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1" ||
+	if err != nil || len(lines) != 11 || lines[0] != "gated 3 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1 · refused 2" ||
 		!strings.HasSuffix(lines[1], " own boss-b: Yes, rebase it") || !strings.HasSuffix(lines[2], " question plain: status?") ||
 		!strings.HasSuffix(lines[3], " question boss-b: Is #150 merged?") || !strings.HasSuffix(lines[4], " work boss-a: Cache the CI builds.") ||
 		!strings.HasSuffix(lines[5], " work boss-a: Cache the CI builds.") || !strings.HasSuffix(lines[6], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[7], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
-		!strings.HasSuffix(lines[8], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
+		!strings.HasSuffix(lines[7], " refused boss-b: Cache the CI builds.") || !strings.HasSuffix(lines[8], " refused boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[9], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
+		!strings.HasSuffix(lines[10], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
 		t.Errorf("❌ dev agent handoffs = %q, %v %s", out, err, stderr)
 	}
 }

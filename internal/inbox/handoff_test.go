@@ -41,7 +41,7 @@ func TestHandoffsList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, k := range []string{Dropped, KindWork, KindQuestion, KindOwn, KindWork, Corrected} {
+	for i, k := range []string{Dropped, KindWork, KindQuestion, KindOwn, KindWork, Corrected, Refused} {
 		if err := s.Add(Handoff{Kind: k, At: int64(100 + i), Line: k}); err != nil {
 			t.Fatal(err)
 		}
@@ -54,10 +54,10 @@ func TestHandoffsList(t *testing.T) {
 	for _, h := range hs {
 		got = append(got, h.At)
 	}
-	if want := []int64{103, 102, 104, 101, 105, 100}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if want := []int64{103, 102, 104, 101, 106, 105, 100}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("order %v, want %v", got, want)
 	}
-	if got, want := Tally(hs), "gated 2 · ungated: question 1, pick 0, own 1 · dropped 1 · corrected 1"; got != want {
+	if got, want := Tally(hs), "gated 2 · ungated: question 1, pick 0, own 1 · dropped 1 · corrected 1 · refused 1"; got != want {
 		t.Errorf("Tally = %q, want %q", got, want)
 	}
 	if got := FirstLine("\n  Cache   the builds.\ncontract first"); got != "Cache the builds." {

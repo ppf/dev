@@ -879,7 +879,8 @@ func newTodoNoteCmd(boss *string) *cobra.Command {
 		Short: "Print the boss's notes: decisions with their why, what the user said, open risks",
 		Long: fmt.Sprintf(`Notes are short dated lines a boss keeps with its list, outliving its /clear and its session: dev todo note
 decided|said|risk|state "<text>" adds one, dev todo note drop <n> removes one, without a subcommand they are printed.
-At most %d notes of at most %d characters each. decided: a choice, --why says why; said: what the user told the boss
+At most %d notes of at most %d characters each; a new one at the cap drops the oldest whose item is done, else the
+oldest not a state note, and prints which. decided: a choice, --why says why; said: what the user told the boss
 that changes the work, it needs an end (--until or --item); risk: an open risk to watch; state: the boss's standing
 state, kept off the board ("6 fixes parked for after your testing"), one per list: a new one replaces it. Not actions (dev todo add), not
 standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
@@ -935,11 +936,14 @@ func newTodoNoteAddCmd(boss *string, kind string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := s.AddNote(n, now)
+			id, dropped, err := s.AddNoteDropping(n, now)
 			if err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "noted n%d\n", id)
+			if dropped != nil && err == nil {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "dropped n%d, the oldest at the cap: %s %s\n", dropped.ID, dropped.Kind, dropped.Text)
+			}
 			return err
 		},
 	}

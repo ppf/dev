@@ -155,6 +155,68 @@ func TestClearOffer(t *testing.T) {
 	check(t, "resting at Claude's idle reminder: one note", take(), note)
 }
 
+// The manager's offer also comes after QuietFor of rest at BigContext or more, not only after IdleLimit.
+func TestClearOfferManagerBig(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	stub := clearStub(t, filepath.Join(tmp, "bin"))
+	s.T("new-session", "-d", "-s", "manager", "-e", "STUB_DIR="+tmp, stub)
+	s.T("set-option", "-t", "=manager:", "@dev_herd", "1")
+	manager := s.T("display", "-t", "=manager:", "-p", "#{pane_id}")
+	s.T("set-option", "-p", "-t", manager, "@dev_boss_pane", "coordinator")
+	waitFor(t, "manager registered", func() bool { return s.T("display", "-t", manager, "-p", "#{@agent_session}") == "s0" })
+	round := func(context string, after time.Duration) []todo.Shown {
+		t.Helper()
+		s.T("set-option", "-p", "-t", manager, "@agent_context", context)
+		sec, err := strconv.ParseInt(s.T("display", "-t", manager, "-p", "#{@agent_since}"), 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clk := control.Clock{Now: func() time.Time { return time.Unix(sec, 0).Add(after) }, Sleep: time.Sleep}
+		if err := bossclear.Offer(s.tmux, clk, manager); err != nil {
+			t.Fatal(err)
+		}
+		st, err := todo.ForPane(s.tmux, manager)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := st.Read(time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l.Items
+	}
+	if items := round("45", bossclear.QuietFor-time.Minute); len(items) != 0 {
+		t.Fatalf("❌ a big context, rested too short: %+v", items)
+	}
+	if items := round("30", bossclear.QuietFor+time.Minute); len(items) != 0 {
+		t.Fatalf("❌ a context under %d%%, rested QuietFor: %+v", bossclear.BigContext, items)
+	}
+	items := round("45", bossclear.QuietFor+time.Minute)
+	if len(items) != 1 || items[0].Text != bossclear.OfferQuestion ||
+		!strings.Contains(strings.Join(items[0].Context, "\n"), "idle 3m, no worker running, context 45%") {
+		t.Fatalf("❌ a big context, quiet: manager's list = %+v", items)
+	}
+	// "Not now" closes the ask; the next stretch's early offer waits IdleLimit after the last
+	st, err := todo.ForPane(s.tmux, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Answer(items[0].ID, bossclear.OfferQuestion, "Not now", 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.T("set-option", "-pu", "-t", manager, bossclear.OptOffered)
+	if items := round("45", bossclear.QuietFor+time.Minute); len(items) != 1 {
+		t.Fatalf("❌ asked again at once after Not now: %+v", items)
+	}
+	t.Log("✅ the manager's clear is offered by size after a quiet moment")
+}
+
 // For the manager itself the offer is an ask on its own list, the user's (NEEDS YOU), once while it stays open.
 func TestClearOfferManager(t *testing.T) {
 	tmp, err := filepath.EvalSymlinks(t.TempDir())

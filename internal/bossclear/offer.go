@@ -18,11 +18,18 @@ import (
 const (
 	// IdleLimit is how long a boss rests before dev offers to clear it (Offer).
 	IdleLimit = 30 * time.Minute
+	// BigContext is the context share (percent) from which the manager is offered a clear after only QuietFor of rest.
+	BigContext = 40
+	// QuietFor is how long the manager rests, at BigContext or more, before dev offers its clear.
+	QuietFor = 2 * time.Minute
 	// OptOffered is the coordinator pane option holding the idle stretch (its @agent_since) a clear was last offered for.
 	OptOffered = "@dev_clear_offered"
 	// OptChecked is the coordinator pane option holding "<idle stretch> <unix time>" of the last offer refused by Check:
 	// the full read waits CheckEvery after it
 	OptChecked = "@dev_clear_checked"
+	// OptOfferedAt is the coordinator pane option holding the unix time of the last offer: the manager's early offer
+	// (QuietFor) waits IdleLimit after it, so a "Not now" isn't asked again after the next turn.
+	OptOfferedAt = "@dev_clear_offered_at"
 	// CheckEvery is how often a stretch Check refused is read again
 	CheckEvery = time.Minute
 	// OfferQuestion is the ask Offer puts on the manager's own list, for the user.
@@ -41,13 +48,15 @@ type offerRow struct {
 	Since      string `tmux:"@agent_since"`
 	Context    string `tmux:"@agent_context"`
 	Transcript string `tmux:"@agent_transcript"`
-	Offered    string `tmux:"@dev_clear_offered"` // OptOffered
-	Checked    string `tmux:"@dev_clear_checked"` // OptChecked
+	Offered    string `tmux:"@dev_clear_offered"`    // OptOffered
+	OfferedAt  string `tmux:"@dev_clear_offered_at"` // OptOfferedAt
+	Checked    string `tmux:"@dev_clear_checked"`    // OptChecked
 }
 
 // Offer, run by the watch loop of the boss session pane is in, offers once per idle stretch to clear its boss once it
-// has rested IdleLimit and Check passes without --force: a note to the manager that started or adopted it, or for the
-// manager itself an ask on its own list, which the user's NEEDS YOU shows (they run dev agent clear from a shell).
+// has rested IdleLimit (the manager at BigContext or more: QuietFor) and Check passes without --force: a note to the
+// manager that started or adopted it, or for the manager itself an ask on its own list, which the user's NEEDS YOU
+// shows (they run dev agent clear from a shell).
 // None for a boss without a live manager over it or a recorded transcript, or while a clear runs; a stretch is marked
 // offered only once told.
 func Offer(c *tmux.Client, clk control.Clock, pane string) error {
@@ -81,7 +90,12 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	}
 	idle := now.Sub(time.Unix(since, 0))
 	st := agent.Trusted(r.State, r.StateCmd, r.Command)
-	if idle < IdleLimit || used < MinContext || st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
+	manager := r.Session == sidebar.Manager
+	limit := IdleLimit
+	if at, err := strconv.ParseInt(r.OfferedAt, 10, 64); manager && used >= BigContext && (err != nil || now.Sub(time.Unix(at, 0)) >= IdleLimit) {
+		limit = QuietFor
+	}
+	if idle < limit || used < MinContext || st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
 		return nil
 	}
 	// Read captures every worker's screen: a stretch Check refused waits a while
@@ -90,7 +104,6 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 			return nil
 		}
 	}
-	manager := r.Session == sidebar.Manager
 	var m inbox.Boss
 	if !manager {
 		var ok bool
@@ -124,6 +137,9 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 		return err
 	}
 	// Marked once queued: a failed delivery leaves it queued for the next
+	if _, err := c.Run("set-option", "-p", "-t", r.Pane, OptOfferedAt, strconv.FormatInt(now.Unix(), 10)); err != nil {
+		return err
+	}
 	if _, err := c.Run("set-option", "-p", "-t", r.Pane, OptOffered, r.Since); err != nil || manager {
 		return err
 	}

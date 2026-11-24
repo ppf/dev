@@ -81,8 +81,13 @@ func TestNoteRefusals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "one more"}, now); err == nil || !strings.Contains(err.Error(), "drop one first") {
-		t.Errorf("13th note = %v, want drop one first", err)
+	// At the cap the oldest goes (the first risk, n1 being the 1st added, a "é" one), and is named
+	_, dropped, err := s.AddNoteDropping(Note{Kind: NoteRisk, Text: "one more"}, now)
+	if err != nil || dropped == nil || dropped.Text != strings.Repeat("é", MaxNote) {
+		t.Errorf("13th note: dropped %+v, %v; want the oldest dropped", dropped, err)
+	}
+	if notes, _ := s.Notes(now); len(notes) != MaxNotes || notes[len(notes)-1].Text != "one more" {
+		t.Errorf("%d notes after the 13th, want %d ending in it", len(notes), MaxNotes)
 	}
 }
 
@@ -270,5 +275,43 @@ func TestNotesTextStale(t *testing.T) {
 	got := NotesText([]Note{done, note(time.Hour)}, now)
 	if strings.Count(got, "still true?") != 1 || !strings.Contains(got, "oldest 8d") || !strings.Contains(got, "(item #4 done) (8d, still true?)\n") {
 		t.Errorf("mixed ages = %q, want only the 8d note marked, after its item flag", got)
+	}
+}
+
+// At the cap the oldest note whose item is done goes before an older one still open; a state note is never the one
+// dropped while another goes; a failed add drops nothing.
+func TestNoteCapDropsDelivered(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "Merge #4"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNote(Note{Kind: NoteState, Text: "state"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "old open"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNote(Note{Kind: NoteDecided, Text: "tied", Item: 1}, now); err != nil {
+		t.Fatal(err)
+	}
+	for i := 3; i < MaxNotes; i++ {
+		if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "r"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, d, err := s.AddNoteDropping(Note{Kind: NoteSaid, Text: "no end", Item: 99}, now); err == nil || d != nil {
+		t.Errorf("a note on no open item: dropped %+v, %v; want an error and nothing dropped", d, err)
+	}
+	_, d, err := s.AddNoteDropping(Note{Kind: NoteRisk, Text: "new"}, now)
+	if err != nil || d == nil || d.Text != "tied" {
+		t.Fatalf("dropped %+v, %v; want the note whose item is done", d, err)
+	}
+	_, d, err = s.AddNoteDropping(Note{Kind: NoteRisk, Text: "newer"}, now)
+	if err != nil || d == nil || d.Text != "old open" {
+		t.Fatalf("dropped %+v, %v; want the oldest not a state note", d, err)
 	}
 }

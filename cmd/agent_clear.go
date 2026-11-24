@@ -54,9 +54,9 @@ roles) and tell the user in one line. The files stay on disk.
 dev's watch loop offers it once per idle stretch: a boss resting %s with every check above passing (no --force) is
 noted to the manager that started or adopted it ("may be cleared: … clear it?"; none without a live one); the
 manager's own offer is an ask on its list for the user, who runs dev agent clear manager from a plain shell (a
-clear that passes answers it).`,
+clear that passes answers it); the manager's also comes after %s of rest at %d%% context or more.`,
 			bossclear.MinContext, bossclear.Headings(bossclear.Sections), bossclear.MaxFacts, bossclear.MaxFacts,
-			bossclear.Headings(bossclear.ProofSections), inbox.Span(bossclear.IdleLimit)),
+			bossclear.Headings(bossclear.ProofSections), inbox.Span(bossclear.IdleLimit), inbox.Span(bossclear.QuietFor), bossclear.BigContext),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
