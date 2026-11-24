@@ -95,6 +95,10 @@ const (
 	AgyAsk
 )
 
+// agyTerminationError is the terminationReason of a Stop ending a turn on an error: agy's enum
+// TERMINATION_REASON_ERROR, sent without its prefix as NO_TOOL_CALL is (only NO_TOOL_CALL was seen).
+const agyTerminationError = "ERROR"
+
 // AgyQuestionTool is agy's question tool.
 const AgyQuestionTool = "ask_question"
 
@@ -109,9 +113,10 @@ type AgyEvent struct {
 }
 
 // AgyHook reads an agy hook's input (camelCase fields, its own events): a turn starts at its first model call
-// (PreInvocation with invocationNum 0), recorded as a UserPromptSubmit with its prompt, and ends at Stop; a
-// question (PreToolUse of ask_question) is a permission_prompt Notification asking it, as Claude's questions are;
-// the conversation is the session. Malformed input is an error.
+// (PreInvocation with invocationNum 0), recorded as a UserPromptSubmit with its prompt, and ends at Stop (a
+// StopFailure when its error or terminationReason says it failed); a question (PreToolUse of ask_question) is a
+// permission_prompt Notification asking it, as Claude's questions are; the conversation is the session. Malformed
+// input is an error.
 func AgyHook(input []byte) (AgyEvent, error) {
 	var e struct {
 		Event        string `json:"hookEventName"`
@@ -120,6 +125,8 @@ func AgyHook(input []byte) (AgyEvent, error) {
 		Conversation string `json:"conversationId"`
 		Transcript   string `json:"transcriptPath"`
 		Cwd          string `json:"cwd"`
+		Err          string `json:"error"`
+		Termination  string `json:"terminationReason"`
 		Tool         struct {
 			Name string `json:"name"`
 			Args struct {
@@ -145,6 +152,10 @@ func AgyHook(input []byte) (AgyEvent, error) {
 	case e.Event == "Stop":
 		// agy's Stop carries no reply: its transcript has it, written before the hook runs
 		fields["last_assistant_message"], ev.ReplyErr = AgyLastReply(e.Transcript)
+		if e.Err != "" || e.Termination == agyTerminationError {
+			// A turn ended on an error, as Claude's StopFailure: its boss note says failed
+			fields["hook_event_name"], fields["error"] = "StopFailure", cmp.Or(e.Err, e.Termination)
+		}
 	case e.Event == "PreToolUse" && e.Tool.Name == AgyQuestionTool:
 		ev.Kind, ev.Question = AgyAsk, Question{Tool: AskUserQuestion}
 		for _, q := range e.Tool.Args.Questions {

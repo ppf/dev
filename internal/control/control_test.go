@@ -872,3 +872,32 @@ func TestReadCheckedAgy(t *testing.T) {
 		})
 	}
 }
+
+// A permission prompt agy draws between the paste and its Enter doesn't get the Enter: no hook tells it.
+func TestPromptAgyDialogBeforeEnter(t *testing.T) {
+	screen := func(name string) string {
+		raw, err := os.ReadFile("../screen/testdata/" + name + ".txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.ReplaceAll(string(raw), `\x1b`, "\x1b")
+	}
+	idle := Status{Command: "agy", State: "idle", StateCmd: "agy", Prompts: "1"}
+	for _, tt := range []struct {
+		name   string
+		screen string
+		enter  bool
+	}{
+		{"its input box still there: Enter", "agy-idle", true},
+		{"a permission prompt drawn meanwhile: no Enter", "agy-permission", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &promptRig{statuses: []Status{idle}, screens: []string{screen("agy-idle"), screen(tt.screen)}}
+			_, err := Prompt(r.client(), fakeClock(), "%1", "go on")
+			entered := slices.Contains(r.cmds, "send-keys -t %1 Enter")
+			if entered != tt.enter || (err == nil) != tt.enter || r.pasted != "go on" || err != nil && NotSent(err) {
+				t.Errorf("Prompt = %v, Enter %v, pasted %q; cmds %q", err, entered, r.pasted, r.cmds)
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -154,5 +155,44 @@ echo '{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"effort":"low"},
 func TestShellLine(t *testing.T) {
 	if got, want := shellLine([]string{"dev", "agent", "start", "My App", "fix", "--boss", "it's"}), `dev agent start 'My App' fix --boss 'it'\''s'`; got != want {
 		t.Errorf("shellLine = %s, want %s", got, want)
+	}
+}
+
+// Only an enabled dev state --agy hook counts, per event: a Stop alone would record no turn's start.
+func TestAgyStateHooks(t *testing.T) {
+	tests := []struct {
+		name, file string
+		want       []string
+	}{
+		{"start and end", `{"dev": {"PreInvocation": [{"type": "command", "command": "dev state --agy working"}],
+			"Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`, []string{"PreInvocation", "Stop"}},
+		{"in matchers", `{"dev": {"PreToolUse": [{"matcher": "*", "hooks": [{"command": "dev state --agy working"}]}]}}`, []string{"PreToolUse"}},
+		{"disabled hook", `{"dev": {"Stop": [{"command": "dev state --agy idle", "enabled": false}]}}`, nil},
+		{"disabled matcher", `{"dev": {"PreToolUse": [{"matcher": "*", "enabled": false, "hooks": [{"command": "dev state --agy working"}]}]}}`, nil},
+		{"another command", `{"log": {"Stop": [{"command": "logger stop"}]}}`, nil},
+		{"not JSON", `{"dev": `, nil},
+	}
+	for _, tt := range tests {
+		got := agyStateHooks([]byte(tt.file))
+		slices.Sort(got)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s: agyStateHooks = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(dir, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for file, want := range map[string]bool{
+		`{"dev": {"Stop": [{"command": "dev state --agy idle"}]}}`:                                                            false,
+		`{"dev": {"PreInvocation": [{"command": "dev state --agy working"}], "Stop": [{"command": "dev state --agy idle"}]}}`: true,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, ".agents", "hooks.json"), []byte(file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := agyHooked(dir); got != want {
+			t.Errorf("agyHooked(%s) = %v, want %v", file, got, want)
+		}
 	}
 }

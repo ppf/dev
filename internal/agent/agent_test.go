@@ -297,6 +297,12 @@ func TestAgyHook(t *testing.T) {
 			`{"cwd":"/w","hook_event_name":"Stop","last_assistant_message":"","prompt":"say ok",` + session + `}`},
 		{ask, AgyAsk, `{"cwd":"/w","hook_event_name":"Notification","message":"Do you prefer red or blue? ((Recommended) Red / Blue)",` +
 			`"notification_type":"permission_prompt","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"quota exceeded","terminationReason":"ERROR",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"quota exceeded","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"","terminationReason":"ERROR",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","error":"ERROR","hook_event_name":"StopFailure","last_assistant_message":"","prompt":"",` + session + `}`},
+		{`{"hookEventName":"Stop","error":"","terminationReason":"USER_CANCELED",` + ids + `}`, AgyTurn,
+			`{"cwd":"/w","hook_event_name":"Stop","last_assistant_message":"","prompt":"",` + session + `}`},
 		{`{"hookEventName":"PostToolUse","toolCall":{"name":"ask_question"},` + ids + `}`, AgyToolDone,
 			`{"cwd":"/w","hook_event_name":"PostToolUse","prompt":"",` + session + `}`},
 		{`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"},` + ids + `}`, AgyTool, ""},

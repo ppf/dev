@@ -531,18 +531,51 @@ func checkAgyModel(model string, timeout time.Duration) error {
 	return nil
 }
 
-// agyHooked reports a dev state --agy hook in agy's global hooks file or the workspace's at dir: dev only reads them.
+// agyHooked reports agy's global hooks file or the workspace's at dir running dev state --agy at a turn's start
+// (PreInvocation) and end (Stop), enabled: else no turn would count, and prompt --wait would stall. dev only reads them.
 func agyHooked(dir string) bool {
 	files := []string{filepath.Join(dir, ".agents", "hooks.json")}
 	if home, err := os.UserHomeDir(); err == nil {
 		files = append(files, filepath.Join(home, ".gemini", "config", "hooks.json"))
 	}
+	found := map[string]bool{}
 	for _, f := range files {
-		if raw, err := os.ReadFile(f); err == nil && strings.Contains(string(raw), "state --agy") {
-			return true
+		if raw, err := os.ReadFile(f); err == nil {
+			for _, event := range agyStateHooks(raw) {
+				found[event] = true
+			}
 		}
 	}
-	return false
+	return found["PreInvocation"] && found["Stop"]
+}
+
+// agyStateHooks are the events an agy hooks file (named groups of events, each a list of hooks or of matchers
+// holding hooks) runs an enabled dev state --agy hook for; none for a file that doesn't parse.
+func agyStateHooks(raw []byte) []string {
+	type hook struct {
+		Command string `json:"command"`
+		Enabled *bool  `json:"enabled"`
+		Hooks   []hook `json:"hooks"`
+	}
+	on := func(h hook) bool { return h.Enabled == nil || *h.Enabled }
+	var groups map[string]map[string][]hook
+	if json.Unmarshal(raw, &groups) != nil {
+		return nil
+	}
+	var events []string
+	for _, group := range groups {
+		for event, hooks := range group {
+			for _, h := range hooks {
+				if !on(h) {
+					continue
+				}
+				if slices.ContainsFunc(append(h.Hooks, h), func(h hook) bool { return on(h) && strings.Contains(h.Command, "state --agy") }) {
+					events = append(events, event)
+				}
+			}
+		}
+	}
+	return events
 }
 
 // worktreeMissing reports that project's worktree wt isn't on disk, so the start that follows makes it; false

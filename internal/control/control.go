@@ -591,7 +591,7 @@ func Prompt(c *tmux.Client, clk Clock, pane, text string) (queued bool, err erro
 			return false, notSent{errors.New("agent is working, but its screen shows no input box: a dialog may be open; read it and answer with send-keys")}
 		}
 	}
-	if err := paste(c, clk, pane, text); err != nil {
+	if err := paste(c, clk, pane, text, agent.AgyCommand(st.Command)); err != nil {
 		return false, err
 	}
 	if st.Trusted() == agent.Working || !claude || !isCommand(text) {
@@ -692,7 +692,8 @@ func NotSent(err error) bool {
 	return errors.As(err, &n)
 }
 
-func paste(c *tmux.Client, clk Clock, pane, text string) error {
+// paste pastes text into pane and presses Enter; an agy pane's (agy) only while its input box still shows.
+func paste(c *tmux.Client, clk Clock, pane, text string, agy bool) error {
 	if strings.TrimSpace(text) == "" {
 		return notSent{errors.New("empty prompt")}
 	}
@@ -719,6 +720,16 @@ func paste(c *tmux.Client, clk Clock, pane, text string) error {
 		return notSent{err}
 	}
 	clk.Sleep(enterDelay)
+	if agy {
+		// agy records no hook for a permission prompt: one drawn since checkAgyBox would take the Enter as its pick
+		capture, err := c.Run("capture-pane", "-p", "-t", pane)
+		if err != nil {
+			return fmt.Errorf("pasted, Enter not pressed: %w", err)
+		}
+		if !screen.AgyBox(capture) {
+			return errors.New("pasted, but agy's screen shows no input box now: a dialog may have opened, Enter not pressed; read it and answer with send-keys")
+		}
+	}
 	_, err = c.Run("send-keys", "-t", pane, "Enter")
 	return err
 }
@@ -757,7 +768,7 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 	if reset && (before.Session == "" || agent.AgyCommand(before.Command)) {
 		return before, notSent{errors.New("--wait confirms /clear by the new session its hook records, and this agent's hook records none at it (Codex, Grok, agy): send it without --wait")}
 	}
-	err = paste(c, clk, pane, text)
+	err = paste(c, clk, pane, text, agent.AgyCommand(before.Command))
 	if !NotSent(err) {
 		sent()
 	}

@@ -76,8 +76,13 @@ func TestStateAgy(t *testing.T) {
 	check(t, "a tool call's end with no input box on screen", opts(), "waiting agy 1 110c93f6-c88f "+transcript)
 	check(t, "turn end", agy("idle", `{"hookEventName":"Stop","fullyIdle":true,"terminationReason":"NO_TOOL_CALL",`+ids+`}`), "")
 	check(t, "turn end recorded", opts(), "idle agy 1 110c93f6-c88f "+transcript)
+	// A turn ended on an error: failed, not finished
+	check(t, "a failed turn's start", agy("working", `{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"go on",`+ids+`}`), "")
+	check(t, "its end", agy("idle", `{"hookEventName":"Stop","error":"quota exceeded","terminationReason":"ERROR",`+ids+`}`), "")
+	check(t, "a failed turn ends idle", opts(), "idle agy 2 110c93f6-c88f "+transcript)
+	check(t, "its boss note says failed", s.T("show-option", "-pqv", "-t", pane, "@dev_boss_note"), "failed: quota exceeded: ok")
 	check(t, "malformed input", agy("working", `{`), "❌ dev state: agent: hook input: unexpected end of JSON input\n")
-	check(t, "malformed input leaves the pane alone", opts(), "idle agy 1 110c93f6-c88f "+transcript)
+	check(t, "malformed input leaves the pane alone", opts(), "idle agy 2 110c93f6-c88f "+transcript)
 
 	// An agy -p another agent runs in its pane inherits that pane's TMUX_PANE: it isn't the pane's agent
 	s.T("set-option", "-p", "-t", boss, "@agent_state", "working")
@@ -91,7 +96,7 @@ func TestStateAgy(t *testing.T) {
 
 	// The worker's turn end queued a note for its boss, which the nested agy's hook on the boss's pane left there
 	out, _ = run(s.scriptEnv("TMUX_PANE="+boss), `{"hook_event_name":"Stop"}`, "idle")
-	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 2 worker update(s):\n- ag needs a decision: Red or blue? (Red / Blue)\n- ag finished: ok"}`+"\n")
+	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 3 worker update(s):\n- ag needs a decision: Red or blue? (Red / Blue)\n- ag finished: ok\n- ag failed: quota exceeded: ok"}`+"\n")
 }
 
 // agyStub builds a stand-in for agy into dir: agy models lists two slugs; otherwise it logs its argv to
@@ -177,6 +182,10 @@ func main() {
 		return
 	}
 	logf("agy " + strings.Join(os.Args[1:], " "))
+	// As agy, which draws a pasted draft in its input box: the tty's echo would print it under the footer
+	echo := exec.Command("stty", "-echo")
+	echo.Stdin = os.Stdin
+	_ = echo.Run()
 	wd, _ := os.Getwd()
 	dir, _ := filepath.EvalSymlinks(wd)
 	fmt.Print("\033[?1049h")
@@ -260,7 +269,7 @@ func TestAgentStartAgy(t *testing.T) {
 	agyStub(t, stubs)
 	repo := newRepo(t, "", "")
 	// The stub runs its hooks itself; dev only looks for them before it records a new agy pane idle
-	writeFile(t, filepath.Join(repo, ".agents/hooks.json"), `{"dev": {"Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`)
+	writeFile(t, filepath.Join(repo, ".agents/hooks.json"), `{"dev": {"PreInvocation": [{"type": "command", "command": "dev state --agy working"}], "Stop": [{"type": "command", "command": "dev state --agy idle"}]}}`)
 	git(t, repo, "add", ".agents")
 	git(t, repo, "commit", "-qm", "agy hooks")
 	git(t, repo, "push", "-q", "origin", "main")
@@ -301,7 +310,7 @@ func TestAgentStartAgy(t *testing.T) {
 	// A permission prompt, which no hook tells: its screen makes it a decision, approved it works on
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "ask", "--timeout", "30s")
 	check(t, "a permission prompt is waiting", status+" "+out+errOut, "0 waiting\n")
-	check(t, "its boss note says what it asks", note(), "needs a decision: allow Bash: echo hi")
+	waitFor(t, "its boss note says what it asks", func() bool { return note() == "needs a decision: allow Bash: echo hi" })
 	_, errOut, status = devAgent(env, "", "prompt", "repo-w1", "yes please")
 	check(t, "a prompt into its permission prompt refused", status+" "+errOut,
 		"1 ❌ agent is waiting for a decision (permission_prompt): read it and answer with send-keys\n")
@@ -320,7 +329,7 @@ func TestAgentStartAgy(t *testing.T) {
 	// A question: its hook records it, with its options for get --json
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "question", "--timeout", "30s")
 	check(t, "a question is waiting", status+" "+out+errOut, "0 waiting\n")
-	check(t, "its boss note asks it", note(), "needs a decision: Do you prefer red or blue? ((Recommended) Red / Blue)")
+	waitFor(t, "its boss note asks it", func() bool { return note() == "needs a decision: Do you prefer red or blue? ((Recommended) Red / Blue)" })
 	out, _, _ = devAgent(env, "", "get", "repo-w1", "--json")
 	var got struct {
 		State     string `json:"state"`
