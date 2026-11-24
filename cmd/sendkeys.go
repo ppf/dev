@@ -15,7 +15,7 @@ import (
 // in any pane but the manager's coordinator, until it is answered; the user in a shell is let through.
 func gateSendKeys(c *tmux.Client, a control.Agent) error {
 	// Only a decision can be handed over: keys to a working or idle agent (Esc) aren't looked into
-	if os.Getenv("CLAUDECODE") == "" && os.Getenv("T3CODE_THREAD_ID") == "" || a.State != agent.Waiting {
+	if os.Getenv("CLAUDECODE") == "" || a.State != agent.Waiting {
 		return nil
 	}
 	// A dialog closed without a hook (declined, Esc) holds no decision

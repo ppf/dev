@@ -139,30 +139,7 @@ func TestDelivered(t *testing.T) {
 		}
 	}
 	check("in base", inBase, Delivery{Delivered: true, Head: git(inBase, "rev-parse", "HEAD"), Reason: "in origin/main"})
-	// T3 Code's worktrees: under $T3CODE_HOME/worktrees, else ~/.t3/worktrees; not another home's
-	t3Home, home := filepath.Join(dir, "t3home"), filepath.Join(dir, "home")
-	t3 := func(wt string) string {
-		git(root, "worktree", "add", "-q", "--detach", wt, "origin/main")
-		return wt
-	}
-	inT3Home, inT3Default := t3(filepath.Join(t3Home, "worktrees", "repo", "feature-1")), t3(filepath.Join(home, ".t3", "worktrees", "repo", "feature-2"))
-	t.Setenv("HOME", home)
-	t.Setenv("T3CODE_HOME", t3Home)
-	check("T3 Code's home set", inT3Home, Delivery{Delivered: true, Head: git(inT3Home, "rev-parse", "HEAD"), Reason: "in origin/main"})
-	check("~/.t3 with T3 Code's home set elsewhere", inT3Default, Delivery{Reason: inT3Default + " isn't in a .claude/worktrees or T3 Code worktree"})
-	// A home that isn't a directory is an error, not "no T3 Code worktree"
-	t.Setenv("T3CODE_HOME", filepath.Join(inT3Home, "README"))
-	if err := os.WriteFile(filepath.Join(inT3Home, "README"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	check("T3 Code's home a file", inT3Default, Delivery{Reason: "T3 Code's worktrees: "})
-	t.Setenv("T3CODE_HOME", t3Home)
-	clone := filepath.Join(t3Home, "worktrees", "repo", "clone")
-	git(dir, "clone", "-q", origin, clone)
-	check("a clone in T3 Code's worktrees", clone, Delivery{Reason: clone + " isn't in a .claude/worktrees or T3 Code worktree"})
-	t.Setenv("T3CODE_HOME", "")
-	check("~/.t3", inT3Default, Delivery{Delivered: true, Head: git(inT3Default, "rev-parse", "HEAD"), Reason: "in origin/main"})
-	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees or T3 Code worktree"})
+	check("main checkout", root, Delivery{Reason: root + " isn't in a .claude/worktrees worktree"})
 	check("dirty", dirty, Delivery{Head: git(dirty, "rev-parse", "HEAD"), Reason: dirty + " has uncommitted changes to tracked files"})
 	check("ahead, local origin", ahead, Delivery{Head: head, Reason: "and no PR/MR open or merged at its HEAD: origin " + origin + " isn't a GitHub or GitLab repository"})
 

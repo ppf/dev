@@ -15,7 +15,7 @@ func TestDelivered(t *testing.T) {
 		t.Errorf("dev delivered = %v, want an argument error", err)
 	}
 	dir := t.TempDir()
-	want := dir + " isn't in a .claude/worktrees or T3 Code worktree"
+	want := dir + " isn't in a .claude/worktrees worktree"
 	if out, _, err := execute(t, "", "delivered", dir); err == nil || err.Error() != want || out != "" {
 		t.Errorf("dev delivered %s = %q, %v, want error %q", dir, out, err, want)
 	}

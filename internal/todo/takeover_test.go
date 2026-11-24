@@ -16,14 +16,14 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// t3Store is T3 Code thread id's list, its boss in dir (WithDir).
-func t3Store(t *testing.T, id, dir string) Store {
+// deskStore is desktop app session id's list.
+func deskStore(t *testing.T, id string) Store {
 	t.Helper()
-	s, err := T3(id)
+	s, err := Desktop(id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.WithDir(dir)
+	return s
 }
 
 // tmuxStore is tmux boss name's list on the server at /tmp/tmux-1/default.
@@ -56,7 +56,7 @@ func rawFile(t *testing.T, s Store) file {
 func TestTakeOverIntoEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "49f62c8e-old", "/p/dev"), t3Store(t, "5f1c2d90-new", "/p/dev")
+	from, to := deskStore(t, "local_49f62c8e"), deskStore(t, "local_5f1c2d90")
 	prURL := "https://github.com/o/r/pull/7"
 	full := Item{Text: "Build it", On: "branch-takeover", Session: &Session{ID: "branch-takeover", Name: "branch-takeover"}, Link: prURL,
 		Until: now.Add(time.Hour).Unix(), DoneOn: "merged", Context: []string{"/tmp/contract.md"},
@@ -111,20 +111,20 @@ func TestTakeOverIntoEmpty(t *testing.T) {
 	if notes, err := to.Notes(later); err != nil || len(notes) != 1 || notes[0].ID != 1 || notes[0].Why != "user said" {
 		t.Errorf("notes = %+v, %v", notes, err)
 	}
-	if f := rawFile(t, to); f.Dir != "/p/dev" || f.Boss != "" || f.MovedTo != "" || f.Next != 4 {
-		t.Errorf("destination file = %+v, want its own dir, next 4", f)
+	if f := rawFile(t, to); f.Boss != "" || f.MovedTo != "" || f.Next != 4 {
+		t.Errorf("destination file = %+v, want next 4", f)
 	}
 	marker := rawFile(t, from)
-	if len(marker.Items) != 0 || marker.MovedTo != "t3-5f1c2d90-new" || marker.MovedToName != "t3:5f1c2d90" || marker.MovedAt != later.Unix() {
+	if len(marker.Items) != 0 || marker.MovedTo != "desktop-local_5f1c2d90" || marker.MovedToName != "local_5f1c2d90" || marker.MovedAt != later.Unix() {
 		t.Errorf("marker = %+v", marker)
 	}
 	if _, err := os.Stat(from.checksPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("source checks left: %v", err)
 	}
-	if l := read(t, from, later); len(l.Items) != 0 || len(l.Finished) != 0 || l.Moved != "list moved to t3:5f1c2d90 at "+later.Format("15:04")+" (dev todo take-over)" {
+	if l := read(t, from, later); len(l.Items) != 0 || len(l.Finished) != 0 || l.Moved != "list moved to local_5f1c2d90 at "+later.Format("15:04")+" (dev todo take-over)" {
 		t.Errorf("source read = %+v", l)
 	}
-	if _, err := to.TakeOver(from, later); err == nil || !strings.Contains(err.Error(), "t3:49f62c8e moved to t3:5f1c2d90 at") {
+	if _, err := to.TakeOver(from, later); err == nil || !strings.Contains(err.Error(), "local_49f62c8e moved to local_5f1c2d90 at") {
 		t.Errorf("second take: %v, want moved", err)
 	}
 }
@@ -133,7 +133,7 @@ func TestTakeOverIntoEmpty(t *testing.T) {
 func TestTakeOverRefused(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to, empty := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev"), t3Store(t, "cccccccc-3", "/p/dev")
+	from, to, empty := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb"), deskStore(t, "local_cccccccc")
 	if _, err := from.Add(Item{Text: "theirs"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,10 @@ func TestTakeOverRefused(t *testing.T) {
 	if err := empty.Done([]int{1}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := to.TakeOver(to, now); err == nil || err.Error() != "t3:bbbbbbbb is this boss's own list" {
+	if _, err := to.TakeOver(to, now); err == nil || err.Error() != "local_bbbbbbbb is this boss's own list" {
 		t.Errorf("own: %v", err)
 	}
-	if _, err := to.TakeOver(empty, now.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "t3:cccccccc is empty (no open items, no notes)") {
+	if _, err := to.TakeOver(empty, now.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "local_cccccccc is empty (no open items, no notes)") {
 		t.Errorf("empty: %v", err)
 	}
 	if got := ids(read(t, from, now)); !slices.Equal(got, []string{"1 theirs"}) {
@@ -159,7 +159,7 @@ func TestTakeOverRefused(t *testing.T) {
 func TestMovedListRefusesWrites(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "5f1c2d90-new", "/p/dev")
+	from, to := tmuxStore(t, "boss-dev"), deskStore(t, "local_5f1c2d90")
 	if _, err := from.Add(Item{Text: "pick?", Options: []string{"A", "B"}}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestMovedListRefusesWrites(t *testing.T) {
 		"clear":   func() error { return from.Clear(now) },
 	} {
 		err := write()
-		want := "list moved to t3:5f1c2d90 at " + atTime(now.Unix(), time.Now()) + " (dev todo take-over): this boss's to do list is there now; take it back there with dev todo take-over t3:5f1c2d90"
+		want := "list moved to local_5f1c2d90 at " + atTime(now.Unix(), time.Now()) + " (dev todo take-over): this boss's to do list is there now; take it back there with dev todo take-over local_5f1c2d90"
 		if err == nil || err.Error() != want || !errors.As(err, new(Moved)) || !errors.As(err, new(Refused)) {
 			t.Errorf("%s: %v, want %q", name, err, want)
 		}
@@ -222,21 +222,27 @@ func TestMovedListRefusesWrites(t *testing.T) {
 	}
 }
 
-// Candidates: each kind's project (tmux by name, desktop by its folder, T3 Code by its dir), the boss's state, why
+// Candidates: each kind's project (tmux by name and desktop by its folder), the boss's state, why
 // one can't be taken; newest change first. The listing leaves out its own list, moved and empty ones; another
 // project's and one of no known project only with anyProject.
 func TestCandidates(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
 	at := func(m int) time.Time { return now.Add(time.Duration(m) * time.Minute) }
-	own := t3Store(t, "5f1c2d90-own", "/p/dev")
+	own := deskStore(t, "local_5f1c2d90")
+	dirs := map[string]string{"local_5f1c2d90": "/p/dev", "local_a6eb4b8b-773e": "/p/dev/sub"}
+	// desk is desktop app session id's list, its folder dir ("" none)
+	desk := func(id, dir string) Store {
+		dirs[id] = dir
+		return deskStore(t, id)
+	}
 	add := func(s Store, text string, when time.Time) {
 		t.Helper()
 		if _, err := s.Add(Item{Text: text}, when); err != nil {
 			t.Fatal(err)
 		}
 	}
-	old := t3Store(t, "49f62c8e-old", "/p/dev")
+	old := desk("local_49f62c8e", "/p/dev")
 	add(old, "a", at(1))
 	add(old, "b?", at(1))
 	if _, err := old.AddNote(Note{Kind: NoteRisk, Text: "r"}, at(9)); err != nil {
@@ -245,19 +251,18 @@ func TestCandidates(t *testing.T) {
 	add(tmuxStore(t, "boss-dev"), "running's", at(2))
 	add(tmuxStore(t, "boss-vitay"), "vitay's", at(3))
 	add(tmuxStore(t, sidebar.Manager), "manager's", at(4))
-	desk, _ := Desktop("local_a6eb4b8b-773e")
-	add(desk, "desktop's", at(5))
+	stopped, _ := Desktop("local_a6eb4b8b-773e")
+	add(stopped, "desktop's", at(5))
 	running, _ := Desktop("local_running1")
 	add(running, "busy", at(6))
-	noDir, _ := T3("0a8cec22-nodir")
-	add(noDir, "older dev's", at(7))
-	add(t3Store(t, "deadbeef-other", "/p/vitay"), "other project", at(8))
-	emptied := t3Store(t, "eeeeeeee-empty", "/p/dev")
+	add(desk("local_0a8cec22", ""), "older dev's", at(7))
+	add(desk("local_deadbeef", "/p/vitay"), "other project", at(8))
+	emptied := desk("local_eeeeeeee", "/p/dev")
 	add(emptied, "x", at(1))
 	if err := emptied.Done([]int{1}, at(1)); err != nil {
 		t.Fatal(err)
 	}
-	moved, into := t3Store(t, "11111111-moved", "/p/dev"), t3Store(t, "22222222-into", "/p/dev")
+	moved, into := desk("local_11111111", "/p/dev"), desk("local_22222222", "/p/dev")
 	add(moved, "taken", at(1))
 	if _, err := into.TakeOver(moved, at(1)); err != nil {
 		t.Fatal(err)
@@ -270,7 +275,11 @@ func TestCandidates(t *testing.T) {
 		Socket:   "/tmp/tmux-1/default",
 		Sessions: func() ([]string, error) { return []string{"boss-dev", "worker"}, nil },
 		Desktop: func(ids []string) (map[string]DesktopState, error) {
-			return map[string]DesktopState{"local_a6eb4b8b-773e": {Dir: "/p/dev/sub"}, "local_running1": {Dir: "/p/dev", Running: true}}, nil
+			states := map[string]DesktopState{"local_running1": {Dir: "/p/dev", Running: true}}
+			for id, dir := range dirs {
+				states[id] = DesktopState{Dir: dir}
+			}
+			return states, nil
 		},
 		Project: func(dir string) string { return strings.Split(strings.TrimPrefix(dir, "/p/"), "/")[0] },
 	}
@@ -297,20 +306,20 @@ func TestCandidates(t *testing.T) {
 	}
 	rows, others := got(false)
 	want := []row{
-		{"t3:49f62c8e", "t3", "dev", "unknown", ""},
+		{"local_49f62c8e", "desktop", "dev", "stopped", ""},
 		{"local_running1", "desktop", "dev", "running", "running: close it first"},
 		{"local_a6eb4b8b", "desktop", "dev", "stopped", ""},
 		{"boss-dev", "tmux", "dev", "running", "running: close it first"},
-		{"t3:22222222", "t3", "dev", "unknown", ""},
+		{"local_22222222", "desktop", "dev", "stopped", ""},
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %+v\nwant %+v", rows, want)
 	}
-	if want := []string{"t3:deadbeef", "t3:0a8cec22", "manager", "boss-vitay"}; !slices.Equal(others, want) {
+	if want := []string{"local_deadbeef", "local_0a8cec22", "manager", "boss-vitay"}; !slices.Equal(others, want) {
 		t.Errorf("others = %q, want %q", others, want)
 	}
 	rows, _ = got(true)
-	if len(rows) != 9 || rows[1] != (row{"t3:deadbeef", "t3", "vitay", "unknown", ""}) || rows[2] != (row{"t3:0a8cec22", "t3", "", "unknown", ""}) {
+	if len(rows) != 9 || rows[1] != (row{"local_deadbeef", "desktop", "vitay", "stopped", ""}) || rows[2] != (row{"local_0a8cec22", "desktop", "", "stopped", ""}) {
 		t.Errorf("any project rows = %+v", rows)
 	}
 
@@ -325,29 +334,29 @@ func TestCandidates(t *testing.T) {
 		}
 	}
 	for list, want := range map[string]string{
-		"t3:5f1c2d90":    "t3:5f1c2d90 is this boss's own list",
-		"t3:11111111":    "t3:11111111 moved to t3:22222222 at " + at(1).Format("15:04") + ": nothing left to take",
-		"t3:eeeeeeee":    "t3:eeeeeeee is empty (no open items, no notes): nothing to take",
+		"local_5f1c2d90": "local_5f1c2d90 is this boss's own list",
+		"local_11111111": "local_11111111 moved to local_22222222 at " + at(1).Format("15:04") + ": nothing left to take",
+		"local_eeeeeeee": "local_eeeeeeee is empty (no open items, no notes): nothing to take",
 		"boss-dev":       "boss-dev is running: close it first (its manager's ×, or /exit in it), then take it over",
 		"local_running1": "local_running1 is running: close it first (/exit in it), then take it over",
 		"boss-vitay":     "boss-vitay is project vitay, not dev: --any-project takes it",
-		"t3:0a8cec22":    "t3:0a8cec22 is of no known project, not dev: --any-project takes it",
+		"local_0a8cec22": "local_0a8cec22 is of no known project, not dev: --any-project takes it",
 		sidebar.Manager:  "manager is the manager's list, not dev's: --any-project takes it",
 	} {
 		if why[list] != want {
 			t.Errorf("%s refused %q, want %q", list, why[list], want)
 		}
 	}
-	if i := slices.IndexFunc(cands, func(c Candidate) bool { return c.List == "t3:49f62c8e" }); cands[i].Updated != at(9).Unix() || cands[i].Open != 2 || cands[i].Notes != 1 {
+	if i := slices.IndexFunc(cands, func(c Candidate) bool { return c.List == "local_49f62c8e" }); cands[i].Updated != at(9).Unix() || cands[i].Open != 2 || cands[i].Notes != 1 {
 		t.Errorf("old list = %+v, want its note's time as its change", cands[i])
 	}
 	// Its own list without a file yet is still known as its own
-	fresh := t3Store(t, "99999999-fresh", "/p/dev")
+	fresh := deskStore(t, "local_99999999")
 	cands, err = Candidates(fresh, "dev", looks, false, at(10))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i := slices.IndexFunc(cands, func(c Candidate) bool { return c.List == "t3:99999999" }); i < 0 || cands[i].WhyNot != "this boss's own list" {
+	if i := slices.IndexFunc(cands, func(c Candidate) bool { return c.List == "local_99999999" }); i < 0 || cands[i].WhyNot != "this boss's own list" {
 		t.Errorf("own list with no file missing: %+v", cands)
 	}
 }
@@ -357,7 +366,7 @@ func TestCandidates(t *testing.T) {
 func TestTakeOverEdges(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := tmuxStore(t, "boss-dev"), deskStore(t, "local_bbbbbbbb")
 	if _, err := from.Add(Item{Text: "legacy", On: "boss-dev"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -379,9 +388,6 @@ func TestTakeOverEdges(t *testing.T) {
 	if _, err := os.Stat(desk.path); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("adopting session got a file: %v", err)
 	}
-	if got := T3Name("mcp:0c638555-1111"); got != "t3:mcp_0c63" {
-		t.Errorf("T3Name of an mcp id = %q", got)
-	}
 }
 
 // A list not read is listed with why; a boss state not read refuses, listed; this boss's own list not empty refuses
@@ -389,7 +395,7 @@ func TestTakeOverEdges(t *testing.T) {
 func TestCandidatesRefusals(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	own := t3Store(t, "5f1c2d90-own", "/p/dev")
+	own := deskStore(t, "local_5f1c2d90")
 	if _, err := tmuxStore(t, "boss-dev").Add(Item{Text: "x"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +403,7 @@ func TestCandidatesRefusals(t *testing.T) {
 	if _, err := desk.Add(Item{Text: "y"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(own.path), "t3-broken.json"), []byte("{"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(filepath.Dir(own.path), "desktop-local_broken.json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	failing := errors.New("boom")
@@ -425,7 +431,7 @@ func TestCandidatesRefusals(t *testing.T) {
 		return out
 	}
 	got := why()
-	if got["boss-dev"] != "state not read: boom" || got["local_a"] != "state not read: boom" || !strings.HasPrefix(got["t3:broken"], "not read: ") {
+	if got["boss-dev"] != "state not read: boom" || got["local_a"] != "state not read: boom" || !strings.HasPrefix(got["local_broken"], "not read: ") {
 		t.Errorf("rows = %q", got)
 	}
 }
@@ -436,7 +442,7 @@ func TestCandidatesRefusals(t *testing.T) {
 func TestTakeOverMerge(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb")
 	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +512,10 @@ func TestTakeOverMerge(t *testing.T) {
 	if !slices.Equal(got, []string{"n2 my risk #0", "n3 b's way #3", "n4 their state #0"}) {
 		t.Errorf("notes = %q", got)
 	}
-	if f := rawFile(t, to); f.Next != 5 || f.NextNote != 5 || f.TakenFrom != "t3-aaaaaaaa-1" || f.TakenAt != later.Unix() {
+	if f := rawFile(t, to); f.Next != 5 || f.NextNote != 5 || f.TakenFrom != "desktop-local_aaaaaaaa" || f.TakenAt != later.Unix() {
 		t.Errorf("destination file = %+v", f)
 	}
-	if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" || len(f.Items) != 0 || len(f.Notes) != 0 {
+	if f := rawFile(t, from); f.MovedTo != "desktop-local_bbbbbbbb" || len(f.Items) != 0 || len(f.Notes) != 0 {
 		t.Errorf("marker = %+v", f)
 	}
 	for _, path := range []string{from.checksPath(), from.donePath()} {
@@ -527,7 +533,7 @@ func TestTakeOverMerge(t *testing.T) {
 func TestTakeOverMergeNoteCap(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb")
 	add := func(s Store, n int) {
 		for i := range n {
 			if _, err := s.AddNote(Note{Kind: NoteRisk, Text: "r" + strconv.Itoa(i)}, now); err != nil {
@@ -546,7 +552,7 @@ func TestTakeOverMergeNoteCap(t *testing.T) {
 		before = append(before, data)
 	}
 	_, err := to.TakeOver(from, now)
-	if err == nil || err.Error() != "taking t3:aaaaaaaa makes 13 notes, at most 12: drop 1 here first (dev todo note drop <n>); nothing moved" || !errors.As(err, new(Refused)) {
+	if err == nil || err.Error() != "taking local_aaaaaaaa makes 13 notes, at most 12: drop 1 here first (dev todo note drop <n>); nothing moved" || !errors.As(err, new(Refused)) {
 		t.Errorf("over the cap: %v", err)
 	}
 	for i, s := range []Store{from, to} {
@@ -576,7 +582,7 @@ func TestTakeOverRetry(t *testing.T) {
 	later := now.Add(time.Minute)
 	prURL := "https://github.com/o/r/pull/7"
 	for _, merge := range []bool{true, false} {
-		from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+		from, to := tmuxStore(t, "boss-dev"), deskStore(t, "local_bbbbbbbb")
 		for _, s := range []Store{from, to} {
 			if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				t.Fatal(err)
@@ -634,7 +640,7 @@ func TestTakeOverRetry(t *testing.T) {
 		if i := slices.IndexFunc(l.Items, func(it Shown) bool { return it.Text == "theirs" }); i < 0 || l.Items[i].PRState != "open" || len(l.Finished) != 1 || l.Finished[0].Text != "finished" {
 			t.Errorf("merge %v: destination = %+v, want the PR check and the finished item", merge, l)
 		}
-		if f := rawFile(t, from); f.MovedTo != "t3-bbbbbbbb-2" {
+		if f := rawFile(t, from); f.MovedTo != "desktop-local_bbbbbbbb" {
 			t.Errorf("merge %v: source = %+v, want the marker", merge, f)
 		}
 		for _, path := range []string{from.checksPath(), from.donePath()} {
@@ -645,7 +651,7 @@ func TestTakeOverRetry(t *testing.T) {
 	}
 
 	// Changed before its marker: refused, both kept
-	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := tmuxStore(t, "boss-dev"), deskStore(t, "local_bbbbbbbb")
 	// Its list as it was, the marker not written
 	f := rawFile(t, from)
 	f.movedMarker = movedMarker{}
@@ -686,7 +692,7 @@ func TestTakeOverRetry(t *testing.T) {
 func TestTakeOverMergeGoneItem(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb")
 	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +729,7 @@ func TestTakeOverMergeGoneItem(t *testing.T) {
 func TestEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb")
 	empty := func(s Store) bool {
 		t.Helper()
 		ok, err := s.Empty(now)
@@ -755,7 +761,7 @@ func TestTakeOverRetryChanged(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
 	later := now.Add(time.Minute)
-	from, to := tmuxStore(t, "boss-dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := tmuxStore(t, "boss-dev"), deskStore(t, "local_bbbbbbbb")
 	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -795,7 +801,7 @@ func TestTakeOverRetryChanged(t *testing.T) {
 func TestTakeOverMergeReusedNumber(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	now := time.Unix(1_800_000_000, 0)
-	from, to := t3Store(t, "aaaaaaaa-1", "/p/dev"), t3Store(t, "bbbbbbbb-2", "/p/dev")
+	from, to := deskStore(t, "local_aaaaaaaa"), deskStore(t, "local_bbbbbbbb")
 	if _, err := to.Add(Item{Text: "mine"}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -815,5 +821,25 @@ func TestTakeOverMergeReusedNumber(t *testing.T) {
 	}
 	if len(ticked) != 1 || ticked[0].ID != 0 || ticked[0].Text != "dated" {
 		t.Errorf("ticked = %+v, want dated with no number", ticked)
+	}
+}
+
+// A t3-*.json list left on disk by an earlier dev is no candidate and no error.
+func TestCandidatesIgnoreLegacyT3(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	own := deskStore(t, "local_5f1c2d90")
+	if err := os.MkdirAll(filepath.Dir(own.path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(own.path), "t3-49f62c8e-old.json"), []byte(`{"items":[{"id":1,"text":"x"}],"next":2,"updated":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	looks := Looks{Socket: "/tmp/tmux-1/default", Sessions: func() ([]string, error) { return nil, nil }, Project: filepath.Base}
+	cands, err := Candidates(own, "dev", looks, true, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || cands[0].List != "local_5f1c2d90" {
+		t.Errorf("candidates = %+v, want only the own list", cands)
 	}
 }

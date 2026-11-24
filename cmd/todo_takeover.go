@@ -26,23 +26,6 @@ import (
 // takeOverTmux is the tmux server whose bosses' lists take-over sees; tests replace it.
 var takeOverTmux = tmux.New
 
-// mainCheckout is the main checkout of the folder dev runs in (a worktree's too), the folder itself outside git: what
-// a T3 Code boss's list stores as its dir. Tests replace it.
-var mainCheckout = func() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	out, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if exit, ok := errors.AsType[*exec.ExitError](err); ok && strings.Contains(string(exit.Stderr), "not a git repository") {
-		return cwd, nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("the main checkout of %s: %w", cwd, err)
-	}
-	return filepath.Dir(strings.TrimSpace(string(out))), nil
-}
-
 func newTodoTakeOverCmd(boss *string) *cobra.Command {
 	var asJSON, anyProject bool
 	cmd := &cobra.Command{
@@ -53,11 +36,10 @@ context, doing, open asks), its notes, PR checks and finished items move to this
 numbers kept, else after its own items, renumbered. The old list is left as a marker: its boss's writes are refused, saying where the list
 went; a dev boss opened under its name after the move starts a fresh list.
 Without <list>, print the lists this boss could take, newest change first, and why one can't be taken.
-<list> is a dev boss's name (boss-dev), a desktop app session's local_… id, or t3:<thread id> (8 or more
-characters of it). Refused: this boss's own list, a dev boss or desktop app session still running (close it
+<list> is a dev boss's name (boss-dev) or a desktop app session's local_… id (8 or more
+characters of it do). Refused: this boss's own list, a dev boss or desktop app session still running (close it
 first), another project's list, the manager's or one of no known project (--any-project), a list moved or empty,
-over 12 notes together.
-A T3 Code thread's list is taken without a running check (dev can't see T3 Code's threads): archive that thread.`,
+over 12 notes together.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
@@ -87,7 +69,7 @@ A T3 Code thread's list is taken without a running check (dev can't see T3 Code'
 		},
 	}
 	cmd.Flags().BoolVar(&anyProject, "any-project", false, "lists of other projects, the manager's, and lists of no known project too")
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: without <list>, lists (each with list, kind: tmux, desktop or t3, project, state: running, closed, stopped or unknown, open, asks, notes, updated, takeable, why_not) and other_projects; with it, from, to ({list, kind, project} each), mode: move or merge, items and notes ({from, to} each), asks, on_workers, dropped_state_note ({id, kind, text} or null), warnings`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: without <list>, lists (each with list, kind: tmux or desktop, project, state: running, closed or stopped, open, asks, notes, updated, takeable, why_not) and other_projects; with it, from, to ({list, kind, project} each), mode: move or merge, items and notes ({from, to} each), asks, on_workers, dropped_state_note ({id, kind, text} or null), warnings`)
 	return cmd
 }
 
@@ -105,8 +87,8 @@ func takeOverCandidates(cmd *cobra.Command, anyProject bool, now time.Time) (tod
 	return own, ownProject, cands, err
 }
 
-// candidatesOf are the project ("" unknown) of own, the list of the boss in tmux pane, else of desktop app or T3 Code
-// session id, and every list beside it (todo.Candidates).
+// candidatesOf are the project ("" unknown) of own, the list of the boss in tmux pane, else of desktop app session id,
+// and every list beside it (todo.Candidates).
 func candidatesOf(cmd *cobra.Command, own todo.Store, pane, id string, anyProject bool, now time.Time) (string, []todo.Candidate, error) {
 	project, err := projectFinder(cmd)
 	if err != nil {
@@ -131,12 +113,6 @@ func candidatesOf(cmd *cobra.Command, own todo.Store, pane, id string, anyProjec
 		if own.Boss() != sidebar.Manager {
 			ownProject = strings.TrimPrefix(own.Boss(), "boss-")
 		}
-	case strings.HasPrefix(id, t3Boss):
-		dir, err := mainCheckout()
-		if err != nil {
-			return "", nil, err
-		}
-		ownProject = project(dir)
 	default:
 		states, err := desktopStates([]string{id})
 		if err != nil {
@@ -232,8 +208,7 @@ func projectFinder(cmd *cobra.Command) (func(dir string) string, error) {
 	}, nil
 }
 
-// findCandidate is the list arg names: its name, a desktop app session's local_… id or t3:<thread id>, either of 8
-// characters or more.
+// findCandidate is the list arg names: its name, or 8 or more characters of a desktop app session's local_… id.
 func findCandidate(cands []todo.Candidate, arg string) (todo.Candidate, error) {
 	var exact []todo.Candidate
 	for _, c := range cands {
@@ -248,25 +223,16 @@ func findCandidate(cands []todo.Candidate, arg string) (todo.Candidate, error) {
 	default:
 		return todo.Candidate{}, ambiguous(arg, exact)
 	}
-	var kind, id string
-	switch {
-	case strings.HasPrefix(arg, t3Boss):
-		kind, id = todo.KindT3, strings.TrimPrefix(arg, t3Boss)
-	case strings.HasPrefix(arg, "local_"):
-		kind, id = todo.KindDesktop, strings.TrimPrefix(arg, "local_")
-	default:
+	id, ok := strings.CutPrefix(arg, "local_")
+	if !ok {
 		return todo.Candidate{}, fmt.Errorf("no list %s: dev todo take-over lists those this boss can take", arg)
 	}
 	if len(id) < 8 {
 		return todo.Candidate{}, fmt.Errorf("%s: give 8 or more characters of its id", arg)
 	}
-	want := arg
-	if kind == todo.KindT3 {
-		want = todo.T3ID(id)
-	}
 	var found []todo.Candidate
 	for _, c := range cands {
-		if c.Kind == kind && strings.HasPrefix(c.ID(), want) {
+		if c.Kind == todo.KindDesktop && strings.HasPrefix(c.ID(), arg) {
 			found = append(found, c)
 		}
 	}
@@ -286,14 +252,6 @@ func ambiguous(arg string, found []todo.Candidate) error {
 		names[i] = c.ID()
 	}
 	return fmt.Errorf("%s matches %d lists (%s): give more of its id", arg, len(found), strings.Join(names, ", "))
-}
-
-// kindLabel is how the listing names a list's kind.
-func kindLabel(kind string) string {
-	if kind == todo.KindT3 {
-		return "T3 Code"
-	}
-	return kind
 }
 
 // ago is how long ago unix time at was, as the listing says it.
@@ -346,7 +304,7 @@ func printCandidates(out io.Writer, own todo.Store, ownProject string, cands []t
 		if c.Notes == 1 {
 			notes = "note"
 		}
-		line := fmt.Sprintf("  %-15s %-8s %-9s%-17s%-9s  %s", c.Short(), kindLabel(c.Kind), c.State, open, fmt.Sprintf("%2d %s", c.Notes, notes), ago(c.Updated, now))
+		line := fmt.Sprintf("  %-15s %-8s %-9s%-17s%-9s  %s", c.Short(), c.Kind, c.State, open, fmt.Sprintf("%2d %s", c.Notes, notes), ago(c.Updated, now))
 		if !c.Takeable {
 			line += "   ✗ " + c.WhyNot
 		}
@@ -390,12 +348,6 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 			}
 		}
 		warnings = append(warnings, fmt.Sprintf("%d on the old boss's workers (%s): re-check them (dev todo)", on, strings.Join(t.OnWorkers, ", ")))
-	}
-	if t.Asks > 0 && own.Kind() == todo.KindT3 {
-		warnings = append(warnings, todo.Plural(t.Asks, "open ask")+" among them: the boards can't answer a T3 Code boss's asks: name them in your next reply")
-	}
-	if c.Kind == todo.KindT3 {
-		warnings = append(warnings, "dev can't see T3 Code's threads: archive "+c.List+" in T3 Code; its dev todo writes are refused from now")
 	}
 	if t.DroppedState != nil {
 		warnings = append(warnings, fmt.Sprintf("older state note dropped (one per list): %s", t.DroppedState.Text))
@@ -446,7 +398,7 @@ func printTaken(out io.Writer, own todo.Store, ownProject string, c todo.Candida
 		}
 		after = ", after your " + strings.Join(yours, " and ")
 	}
-	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s%s\n", c.Short(), kindLabel(c.Kind), cmp.Or(c.Project, "no known project"), todo.Plural(len(t.Items), "item"), todo.Plural(len(t.Notes), "note"), after)
+	fmt.Fprintf(out, "✅ Took over %s (%s, %s): %s, %s%s\n", c.Short(), c.Kind, cmp.Or(c.Project, "no known project"), todo.Plural(len(t.Items), "item"), todo.Plural(len(t.Notes), "note"), after)
 	for _, it := range t.Items {
 		fmt.Fprintf(out, "  %-9s %s\n", fmt.Sprintf("#%d → #%d", it.From, it.ID), it.Text)
 	}
@@ -491,22 +443,6 @@ func hintLine(cmd *cobra.Command, own todo.Store, pane, id string, now time.Time
 	}
 	return fmt.Sprintf("[dev todo] An earlier boss's list for %s waits: %s (%s, %s, %s): dev todo take-over %s. dev todo take-over lists all.",
 		project, c.Short(), open, todo.Plural(c.Notes, "note"), ago(c.Updated, now), c.Short()), nil
-}
-
-// hintT3 prints takeOverHint on stderr for a T3 Code boss's own list s, which no hook gives it: each bare dev todo and
-// dev todo note, while s is empty.
-func hintT3(cmd *cobra.Command, boss string, s todo.Store, now time.Time) {
-	if boss != "" || s.Kind() != todo.KindT3 {
-		return
-	}
-	_, id, err := todoBoss("")
-	if err != nil {
-		noHint(cmd, err)
-		return
-	}
-	if line := takeOverHint(cmd, s, "", id, now); line != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), line)
-	}
 }
 
 // desktopHint is takeOverHint for desktop app session id's list s, only once s has a file: every app session runs the

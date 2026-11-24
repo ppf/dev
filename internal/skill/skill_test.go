@@ -265,7 +265,7 @@ func TestAnalysisRules(t *testing.T) {
 			`for i in $(seq 40); do out=$(gh pr checks <n> 2>&1); rc=$?; [ $rc = 8 ] || { [ $rc = 1 ] && [[ $out == *"no checks reported"* ]]; } || break; sleep 30; done; echo "$out"; echo "exit $rc"; (exit $rc)`,
 			"it waits until checks exist, then ends on all passed or on any failed check",
 			// P6: chained dev writes
-			"use `&&`, never `;`, and read the item back (`dev todo show --print <boss> <n>` for a tmux boss, `dev todo --json` for a desktop or T3 one) before you tell anyone it is written",
+			"use `&&`, never `;`, and read the item back (`dev todo show --print <boss> <n>` for a tmux boss, `dev todo --json` for a desktop one) before you tell anyone it is written",
 			// P7: drafts
 			"**A saved draft is `requested`,** never `replaced` or `sent`: re-read the thread in the same turn you save it, and save no draft while a pick on that item is open.",
 			// P11, P15: owed Codex reviews
