@@ -173,15 +173,15 @@ type Shown struct {
 	// StartLate is a start 10 minutes old (the StartLate duration) that no --replaces took up
 	StartLate bool `json:"start_late,omitempty"`
 	Gone      bool `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+	NoDetails bool `json:"no_details,omitempty"`
 	// Status and StatusOn are what Owner.Status says, once SetStatus ran
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
 	// Now is what its worker is doing now (its sidebar.Session.Doing), once SetStatus ran; "" for none
 	Now string `json:"now,omitempty"`
 	// Note is its worker's latest boss inbox note (sidebar.Session.Note), set with Now
-	Note      string `json:"note,omitempty"`
-	Quiet     bool   `json:"quiet,omitempty"`
-	NoDetails bool   `json:"no_details,omitempty"`
+	Note  string `json:"note,omitempty"`
+	Quiet bool   `json:"quiet,omitempty"`
 	// PRState is its linked GitHub PR's state at the last lookup: open, merged or closed; "" for none (not looked up,
 	// another link, ticked)
 	PRState string `json:"pr_state,omitempty"`
