@@ -158,9 +158,10 @@ func openList(c *tmux.Client, pane, conversation string) (string, error) {
 	return s.Remind(l, ticked, conversation, now)
 }
 
-// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, and after
-// a dev agent clear's /clear its handoff's line (handoffLine), also without a list; an error reading either still gives
-// the other, with why; "" otherwise.
+// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, after
+// a dev agent clear's /clear (or a compaction while one runs) its handoff's line (handoffLine), and after a compaction
+// first what it still owes (owedLines), also without a list; an error reading one still gives the others, with why; ""
+// otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
 func startList(c *tmux.Client, pane, source, session string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
@@ -168,35 +169,45 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
 		return "", err
 	}
+	var owed string
+	var oerr error
+	if source == "compact" {
+		if owed, oerr = compactOwed(c, pane, time.Now()); oerr != nil {
+			owed = "[dev] dev couldn't tell what you still owe from before the compaction (" + oerr.Error() + "): re-check the " +
+				"user's last picks and the items you marked asked (dev todo --all) before acting."
+		}
+	}
 	var handoff string
 	var herr error
-	if source == "clear" {
-		if handoff, herr = handoffLine(c, pane); herr != nil {
+	if source == "clear" || source == "compact" {
+		if handoff, herr = handoffLine(c, pane); herr != nil && source == "clear" {
 			// Its list still goes out, and the boss learns a handoff may wait
 			handoff = "dev couldn't tell whether a dev agent clear left you a handoff (" + herr.Error() + "): if one cleared " +
 				"you just now, its handoff is the newest file in $XDG_STATE_HOME/dev/handoff/<your boss session>/, written " +
 				"minutes ago; an older one isn't yours to act on."
 		}
 	}
-	out, err := listContext(c, pane, source, session, hint, handoff)
-	if err != nil && handoff != "" {
-		// The fresh boss still gets its handoff, and why its list is missing
-		data, jerr := json.Marshal(hookContext("SessionStart", handoff+"\ndev couldn't give your list and notes ("+err.Error()+
-			"): run dev todo and dev todo note."))
-		return string(data), errors.Join(herr, err, jerr)
+	out, err := listContext(c, pane, source, session, hint, owed, handoff)
+	if err != nil && (owed != "" || handoff != "") {
+		// The boss still gets what it owes and its handoff, and why its list is missing
+		data, jerr := json.Marshal(hookContext("SessionStart", strings.TrimSpace(owed+"\n"+handoff)+
+			"\ndev couldn't give your list and notes ("+err.Error()+"): run dev todo and dev todo note."))
+		return string(data), errors.Join(oerr, herr, err, jerr)
 	}
-	return out, errors.Join(herr, err)
+	return out, errors.Join(oerr, herr, err)
 }
 
-// listContext is startList's output from the boss's list and notes, with the handoff line (when any) after hint's.
-func listContext(c *tmux.Client, pane, source, session string, hint Hint, handoff string) (string, error) {
+// listContext is startList's output from the boss's list and notes, owed's lines (when any) first and the handoff line
+// (when any) after hint's.
+func listContext(c *tmux.Client, pane, source, session string, hint Hint, owed, handoff string) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if errors.Is(err, todo.ErrNotBoss) {
 		// A restored boss is marked one only after its coordinator starts
-		if handoff == "" {
+		text := strings.TrimSpace(owed + "\n" + handoff)
+		if text == "" {
 			return "", nil
 		}
-		data, err := json.Marshal(hookContext("SessionStart", handoff))
+		data, err := json.Marshal(hookContext("SessionStart", text))
 		return string(data), err
 	}
 	if err != nil {
@@ -206,7 +217,7 @@ func listContext(c *tmux.Client, pane, source, session string, hint Hint, handof
 		listHint := hint
 		hint = func(s todo.Store) string { return strings.TrimSpace(listHint(s) + "\n" + handoff) }
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, session, time.Now())
+	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, owed, source, session, time.Now())
 }
 
 // handoffLine is the start line naming the handoff of the dev agent clear that, still running, cleared pane's
@@ -227,13 +238,9 @@ func handoffLine(c *tmux.Client, pane string) (string, error) {
 // take-over), "" for none; it checks s and reports its own failures.
 type Hint func(s todo.Store) string
 
-// StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,
-// then hint's line; "" after a compaction, whose summary carries them, the next reminder then the full list.
-func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, source, conversation string, now time.Time) (string, error) {
-	if source == "compact" {
-		// The summary may not keep every item: the next reminder is the full list
-		return "", s.ForgetShown()
-	}
+// StartContext is the SessionStart hook output giving a boss lead's lines (when any), then list s's open items, gone
+// workers marked, then its notes, then hint's line; also after a compaction, as its summary may not keep them.
+func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hint, lead, source, conversation string, now time.Time) (string, error) {
 	l, err := s.Read(now)
 	if err != nil {
 		return "", err
@@ -256,7 +263,7 @@ func StartContext(s todo.Store, workers func() ([]todo.Session, error), hint Hin
 	}
 	// The list goes out even when what it named isn't kept
 	list, shownErr := s.StartRemind(l, source == "startup", age, ticked, conversation, now)
-	parts := []string{list, todo.NotesText(notes, now), hint(s)}
+	parts := []string{lead, list, todo.NotesText(notes, now), hint(s)}
 	text := strings.Join(slices.DeleteFunc(parts, func(t string) bool { return t == "" }), "\n")
 	if text == "" {
 		return "", shownErr

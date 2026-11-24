@@ -43,8 +43,11 @@ func TestStateSideSessionsTodoChanges(t *testing.T) {
 		t.Errorf("another conversation = %q, want the full list", got)
 	}
 	event = other
-	run(t, `{"hook_event_name":"SessionStart","session_id":"s1","source":"compact"}`, "state", "working")
-	if got := context(); !strings.Contains(got, "1. Merge PR #9 (no details)\n2. Ship v1 (no details)\n3. Tag v1") {
-		t.Errorf("after a compaction = %q, want the full list", got)
+	// A compaction's start hook gives the full list, the next reminder then the count
+	if got := run(t, `{"hook_event_name":"SessionStart","session_id":"s1","source":"compact"}`, "state", "working"); !strings.Contains(got, `1. Merge PR #9 (no details)\n2. Ship v1 (no details)\n3. Tag v1`) {
+		t.Errorf("compaction = %q, want the full list", got)
+	}
+	if got := context(); !strings.Contains(got, "3 open, none new or changed since the last one") {
+		t.Errorf("after a compaction = %q, want the count line", got)
 	}
 }

@@ -738,7 +738,7 @@ func aliasTaken(cmd *cobra.Command, c *tmux.Client, boss string) (bool, error) {
 }
 
 // leaveOpen is the option the manager adds beside an ask's only one: picked, the item stays open.
-const leaveOpen = "Leave it open"
+const leaveOpen = inbox.LeaveOpen
 
 func newTodoDoneCmd(boss *string) *cobra.Command {
 	var text, result, where string

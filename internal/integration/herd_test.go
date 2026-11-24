@@ -55,7 +55,8 @@ func TestHerd(t *testing.T) {
 	}
 	managerPanes := strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{pane_current_path} #{pane_start_command}"), "\n")
 	if len(managerPanes) != 2 || !strings.HasPrefix(managerPanes[0], managerDir+" ") ||
-		!strings.Contains(managerPanes[0], `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true}' '--append-system-prompt' 'You are the manager`) ||
+		!strings.Contains(managerPanes[0], `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
+		!strings.Contains(managerPanes[0], `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt' 'You are the manager`) ||
 		!strings.HasSuffix(managerPanes[0], `'--remote-control=manager'"`) || !strings.Contains(managerPanes[1], "boss --previews") {
 		t.Fatalf("manager panes: %q", managerPanes)
 	}
@@ -98,6 +99,26 @@ func TestHerd(t *testing.T) {
 	d.T("switch-client", "-t", "=boot:")
 	d.T("kill-session", "-t", "=boss-web:")
 	d.T("kill-session", "-t", "=manager:")
+	// manager_autocompact from projects.toml: under Claude Code's minimum refused, 0 starts it with no --autocompact
+	projects := filepath.Join(strings.TrimPrefix(xdg, "XDG_CONFIG_HOME="), "dev", "projects.toml")
+	listed, err := os.ReadFile(projects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range [][2]string{
+		{"300", "1 ❌ config: " + projects + ": manager_autocompact = 300: 0 (Claude Code's own window) or at least 100000 tokens\n"},
+		{"0", "0 manager running: dev goto manager\n"},
+	} {
+		writeFile(t, projects, "manager_autocompact = "+tt[0]+"\n\n"+string(listed))
+		bare := exec.Command(devBin, "boss")
+		bare.Env = env
+		out, err := bare.CombinedOutput()
+		check(t, "manager_autocompact = "+tt[0], errStatus(err)+" "+string(out), tt[1])
+	}
+	if start := d.T("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}"); strings.Contains(start, "--autocompact") || !strings.Contains(start, "You are the manager") {
+		t.Errorf("manager with manager_autocompact = 0: %q", start)
+	}
+	d.T("kill-session", "-t", "=manager:")
 
 	herd := exec.Command(devBin, "boss", "hq")
 	herd.Env = env
@@ -108,8 +129,9 @@ func TestHerd(t *testing.T) {
 	check(t, "herd option", d.T("show-option", "-qv", "-t", "=boss-hq:", "@dev_herd"), "1")
 	// Left to right: its sidebar, the coordinator, the previews
 	panes := strings.Split(d.T("list-panes", "-t", "=boss-hq:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
-	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], `-l -i -c "exec `) || !strings.Contains(panes[1], `'pty-wrap' '--' 'claude' '--append-system-prompt'`) ||
-		!strings.HasSuffix(panes[1], `'--remote-control=boss-hq'"`) ||
+	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], `-l -i -c "exec `) || !strings.Contains(panes[1], `'pty-wrap' '--' 'claude' '--settings' '{\"hooks\":`) ||
+		!strings.Contains(panes[1], `\"matcher\":\"compact\"}]}}' '--append-system-prompt'`) ||
+		!strings.HasSuffix(panes[1], `'--remote-control=boss-hq'"`) || strings.Contains(panes[1], "--autocompact") ||
 		!strings.Contains(panes[2], "boss --previews") {
 		t.Fatalf("boss panes: %q", panes)
 	}
@@ -127,8 +149,8 @@ func TestHerd(t *testing.T) {
 	_, errOut, status := devAgent(append(env, "TMUX_PANE="+coordinator), "", "start", "app", "--timeout", "30s")
 	check(t, "start from the coordinator", status+errOut, "0")
 	check(t, "started by the boss, by name", d.T("show-option", "-qv", "-t", "=app:", "@dev_started_by"), "boss-hq")
-	if args := agentArgs(t, d, "=app:1.2"); !strings.Contains(args, `pty-wrap --close-on-exit -- claude --settings {"remoteControlAtStartup":false}`) {
-		t.Errorf("worker's claude not started without Remote Control: %q", args)
+	if args := agentArgs(t, d, "=app:1.2"); !strings.Contains(args, `pty-wrap --close-on-exit -- claude --settings {"remoteControlAtStartup":false}`) || strings.Contains(args, "--autocompact") {
+		t.Errorf("worker's claude not started without Remote Control and the manager's window: %q", args)
 	}
 	_, errOut, status = devAgent(env, "", "prompt", "app", "--wait", "--timeout", "30s", "hello")
 	check(t, "prompt", status+errOut, "0")

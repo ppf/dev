@@ -158,7 +158,7 @@ func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conve
 	return text, err
 }
 
-// ForgetShown drops what the boss last got of its list, as a compaction may have dropped it: the next Remind is the full list.
+// ForgetShown drops what the boss last got of its list, which no longer says what it got: the next Remind is the full list.
 func (s Store) ForgetShown() error {
 	// None kept: no lock file for a list that may not exist
 	if _, err := os.Stat(s.shownPath()); errors.Is(err, fs.ErrNotExist) {

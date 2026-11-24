@@ -210,3 +210,27 @@ func TestNewDir(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerAutoCompact(t *testing.T) {
+	project := "[[project]]\nname = \"a\"\npath = \"/a\"\n"
+	for _, tt := range []struct {
+		name, content string
+		want          int
+		fails         bool
+	}{
+		{"unset", project, DefaultManagerAutoCompact, false},
+		{"set", "manager_autocompact = 400000\n" + project, 400000, false},
+		{"off", "manager_autocompact = 0\n" + project, 0, false},
+		{"under Claude Code's minimum", "manager_autocompact = 300\n" + project, 0, true},
+		{"under a project", project + "manager_autocompact = 0\n", 0, true},
+		{"not a number", "manager_autocompact = \"300k\"\n" + project, 0, true},
+	} {
+		got, err := ManagerAutoCompact(write(t, "projects.toml", tt.content))
+		if got != tt.want || (err != nil) != tt.fails {
+			t.Errorf("%s: %d, %v; want %d, fails %v", tt.name, got, err, tt.want, tt.fails)
+		}
+	}
+	if got, err := ManagerAutoCompact(filepath.Join(t.TempDir(), "projects.toml")); got != DefaultManagerAutoCompact || err != nil {
+		t.Errorf("no file: %d, %v", got, err)
+	}
+}

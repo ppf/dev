@@ -37,7 +37,7 @@ func TestResurrectBoss(t *testing.T) {
 
 	openBoss("new", "--model", "opus", "--effort", "medium")
 	coordinator := display("=boss-app:1.2", "#{pane_id}")
-	if start := display(coordinator, "#{pane_start_command}"); !strings.Contains(start, `'pty-wrap' '--' 'claude' '--model' 'opus' '--effort' 'medium' '--append-system-prompt'`) {
+	if start := display(coordinator, "#{pane_start_command}"); !strings.Contains(start, `'pty-wrap' '--' 'claude' '--model' 'opus' '--effort' 'medium' '--settings' '{\"hooks\":`) {
 		t.Errorf("coordinator not started with the model and effort: %q", start)
 	}
 	flagged := exec.Command(devBin, "boss", "app", "--effort", "low")
@@ -88,8 +88,9 @@ func TestResurrectBoss(t *testing.T) {
 		return strings.Contains(string(log), coordinator+" claude")
 	})
 	log, _ := os.ReadFile(d.stubLog)
-	if line := strings.TrimSpace(string(log)); !strings.HasPrefix(line, coordinator+" claude --resume b1 --effort medium --append-system-prompt You are the coordinator") ||
-		!strings.HasSuffix(line, "--remote-control=boss-app") {
+	// Its compaction hook runs this dev
+	if line := strings.TrimSpace(string(log)); !strings.HasPrefix(line, coordinator+" claude --resume b1 --effort medium --settings {\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"command\":\"'"+devBin+"' 'state' 'idle'\"") ||
+		!strings.Contains(line, `"matcher":"compact"}]}} --append-system-prompt You are the coordinator`) || !strings.HasSuffix(line, "--remote-control=boss-app") {
 		t.Errorf("coordinator command: %q", line)
 	}
 	waitFor(t, "previews restarted", func() bool { return display(previews, "#{pane_current_command}") == "dev" })
@@ -163,7 +164,8 @@ func TestResurrectManager(t *testing.T) {
 	out, err := again.Output()
 	check(t, "restored manager only printed", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
 	start, _ := d.Try("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}")
-	if !strings.Contains(start, `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true}' '--append-system-prompt' 'You are the manager`) ||
+	if !strings.Contains(start, `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
+		!strings.Contains(start, `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt' 'You are the manager`) ||
 		!strings.Contains(start, `'--remote-control=manager'`) {
 		t.Errorf("restored manager's coordinator: %q", start)
 	}
