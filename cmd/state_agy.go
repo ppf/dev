@@ -90,7 +90,7 @@ func startAgyDialog(pane string) error {
 	if err != nil {
 		return err
 	}
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 	bg := exec.Command(self, "agy-dialog", pane)
 	bg.Stderr = log
 	bg.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
