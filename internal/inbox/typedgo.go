@@ -10,25 +10,23 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // Go is the user's latest message in the manager's transcript, typed by them, which a --kind work send quotes.
 type Go struct {
 	UUID string
-	At   time.Time
 	Text string // its typed words, pasted blocks left out
 }
 
 // entry is the part of a Claude Code transcript line the typed go reads: Origin and PromptSource mark a prompt's
 // sender (human typed, peer, plugin, task-notification), ToolUseResult.answers an AskUserQuestion pick.
 type entry struct {
-	Type         string    `json:"type"`
-	UUID         string    `json:"uuid"`
-	Timestamp    time.Time `json:"timestamp"`
-	IsSidechain  bool      `json:"isSidechain"`
-	HookText     bool      `json:"hookText"`
-	PromptSource string    `json:"promptSource"`
+	Type         string `json:"type"`
+	UUID         string `json:"uuid"`
+	IsSidechain  bool   `json:"isSidechain"`
+	IsMeta       bool   `json:"isMeta"`
+	HookText     bool   `json:"hookText"`
+	PromptSource string `json:"promptSource"`
 	Origin       *struct {
 		Kind string `json:"kind"`
 	} `json:"origin"`
@@ -46,10 +44,16 @@ func (e entry) pick() bool {
 	return len(e.ToolUseResult) > 0 && e.ToolUseResult[0] == '{' && json.Unmarshal(e.ToolUseResult, &r) == nil && r.Answers != nil
 }
 
-// message reports e something said to the session: a prompt from anyone, a hook's text or a pick; not a plain tool
-// result or a prompt's companion row (an image, a skill's text).
+// message reports e something said to the session: a prompt from anyone, a hook's text, a pick or a user line dev
+// doesn't know (refused); not a tool result or a prompt's companion row (an image, a skill's text).
 func (e entry) message() bool {
-	return e.Type == "user" && !e.IsSidechain && (e.Origin != nil || e.HookText || e.pick())
+	if e.IsSidechain {
+		return false
+	}
+	if e.Origin != nil || e.HookText || e.pick() {
+		return true
+	}
+	return !e.IsMeta && len(e.ToolUseResult) == 0 && !bytes.Contains(e.Message.Content, []byte(`"type":"tool_result"`))
 }
 
 // text is e's message text, its text blocks joined.
@@ -88,8 +92,12 @@ const askAgain = `: ask with the hand-on question ("Hand it on" / "Drop it")`
 
 // LatestGo is the user's latest message in the transcript at path when they typed it themselves and it holds words:
 // refused when the latest message is anyone else's (an inbox batch, another session's, a plugin's, a task's end, a
-// hook's text, one dev typed), a pick, an accepted suggestion, only pasted text, or doesn't hold words.
+// hook's text, one dev typed, one dev can't read or doesn't know), a pick, an accepted suggestion, only pasted text,
+// doesn't hold words, or an AskUserQuestion was asked after it (even dismissed, it asked instead).
 func LatestGo(path, words string) (Go, error) {
+	if fold(words) == "" {
+		return Go{}, errors.New("--go: no words quoted" + askAgain)
+	}
 	if path == "" {
 		return Go{}, errors.New("--go: the manager's transcript is unknown" + askAgain)
 	}
@@ -99,14 +107,21 @@ func LatestGo(path, words string) (Go, error) {
 	}
 	defer func() { _ = f.Close() }()
 	var last entry
+	asked := false
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
-		if bytes.Contains(line, []byte(`"type":"user"`)) {
+		switch {
+		case bytes.Contains(line, []byte(`"type":"user"`)):
 			var e entry
-			if json.Unmarshal(line, &e) == nil && e.message() {
-				last = e
+			if uerr := json.Unmarshal(line, &e); uerr != nil {
+				return Go{}, fmt.Errorf("--go: a message in the manager's transcript can't be read: %w%s", uerr, askAgain)
 			}
+			if e.message() {
+				last, asked = e, false
+			}
+		case bytes.Contains(line, []byte(`"type":"assistant"`)) && bytes.Contains(line, []byte(`"name":"AskUserQuestion"`)):
+			asked = true
 		}
 		if errors.Is(err, io.EOF) {
 			break
@@ -121,10 +136,14 @@ func LatestGo(path, words string) (Go, error) {
 	switch {
 	case last.UUID == "":
 		why = "the user has said nothing here yet"
+	case asked:
+		why = "a question was asked after the user's latest message"
 	case last.pick():
 		why = "the user's latest words here are a pick, not a typed message"
 	case last.HookText && last.Origin == nil:
 		why = "the latest message here is a hook's text (an inbox batch), not the user's"
+	case last.Origin == nil:
+		why = "the latest message here is of a kind dev doesn't know"
 	case last.Origin.Kind == "peer":
 		why = "the latest message here is another session's (an inbox batch or a relayed message), not the user's"
 	case last.Origin.Kind == "plugin":
@@ -137,12 +156,17 @@ func LatestGo(path, words string) (Go, error) {
 		why = "the latest message here is one dev typed, not the user's"
 	case typed == "":
 		why = "the user's latest message is pasted text, not typed"
-	case !strings.Contains(fold(typed), fold(words)):
+	case !holds(fold(typed), fold(words)):
 		why = fmt.Sprintf("%q is not in the user's latest message", words)
 	default:
-		return Go{UUID: last.UUID, At: last.Timestamp, Text: typed}, nil
+		return Go{UUID: last.UUID, Text: typed}, nil
 	}
 	return Go{}, errors.New("--go: " + why + askAgain)
+}
+
+// holds reports words in text as whole words: "tak" is not in "takeover".
+func holds(text, words string) bool {
+	return regexp.MustCompile(`(^|[^\pL\pN])` + regexp.QuoteMeta(words) + `([^\pL\pN]|$)`).MatchString(text)
 }
 
 // fold is s in lower case with whitespace and quotes around words collapsed, for a quote's match.

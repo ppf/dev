@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Transcript lines as Claude Code writes them, by sender.
@@ -24,6 +23,9 @@ const (
 	linePasted    = `{"type":"user","uuid":"v1","timestamp":"2026-11-24T10:02:00.000Z","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"<pasted_content id=\"ab12\">\nTak ruszaj\n</pasted_content id=\"ab12\">"}}`
 	lineTypedOver = `{"type":"user","uuid":"v2","timestamp":"2026-11-24T10:02:00.000Z","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Tak ruszaj, see: <pasted_content id=\"cd34\">\nlog\n</pasted_content id=\"cd34\">"}}`
 	lineDev       = `{"type":"user","uuid":"d1","timestamp":"2026-11-24T10:02:00.000Z","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"[dev agent clear] Tak ruszaj"}}`
+	lineUnknown   = `{"type":"user","uuid":"n1","timestamp":"2026-11-24T10:02:00.000Z","message":{"content":"[Request interrupted by user]"}}`
+	lineBroken    = `{"type":"user","uuid":"b1","origin":"human","message":{"content":"Tak"}}`
+	lineAsk       = `{"type":"assistant","uuid":"a2","timestamp":"2026-11-24T10:02:00.000Z","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{}}]}}`
 	lineSide      = `{"type":"user","uuid":"x1","timestamp":"2026-11-24T10:02:00.000Z","isSidechain":true,"origin":{"kind":"human"},"promptSource":"typed","message":{"content":"Tak ruszaj"}}`
 )
 
@@ -56,6 +58,13 @@ func TestLatestGo(t *testing.T) {
 		{name: "accepted suggestion", words: "Tak", lines: []string{linePick, lineSuggested}, want: `came as "suggestion_accepted", not typed`},
 		{name: "pasted", words: "Tak", lines: []string{lineTyped, linePasted}, want: "pasted text, not typed"},
 		{name: "dev typed", words: "Tak", lines: []string{lineTyped, lineDev}, want: "one dev typed"},
+		{name: "a line of a kind dev doesn't know since", words: "Tak", lines: []string{lineTyped, lineUnknown}, want: "of a kind dev doesn't know"},
+		{name: "an unreadable line since", words: "Tak", lines: []string{lineTyped, lineBroken}, want: "can't be read"},
+		{name: "a question asked since", words: "Tak", lines: []string{lineTyped, lineAsk}, want: "a question was asked after the user's latest message"},
+		{name: "a question dismissed since", words: "Tak", lines: []string{lineTyped, lineAsk, lineTool}, want: "a question was asked after"},
+		{name: "a question before the go", words: "Tak", lines: []string{lineAsk, linePick, lineTyped}, uuid: "u1"},
+		{name: "part of a word", words: "dzi", lines: []string{lineTyped}, want: `"dzi" is not in the user's latest message`},
+		{name: "no words", words: ` „” `, lines: []string{lineTyped}, want: "no words quoted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, err := LatestGo(transcript(t, tc.lines...), tc.words)
@@ -77,7 +86,7 @@ func TestLatestGo(t *testing.T) {
 
 func TestClaimGo(t *testing.T) {
 	b := testBox(t)
-	g := Go{UUID: "u1", At: time.UnixMilli(1000)}
+	g := Go{UUID: "u1"}
 	if err := b.ClaimGo(g); err != nil {
 		t.Fatalf("❌ first claim: %v", err)
 	}
@@ -90,13 +99,7 @@ func TestClaimGo(t *testing.T) {
 	if err := b.ClaimGo(g); err != nil {
 		t.Errorf("❌ claim after unclaim: %v", err)
 	}
-	if err := b.DropPrompt(time.UnixMilli(2000)); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.ClaimGo(Go{UUID: "u2", At: time.UnixMilli(1500)}); err == nil || !strings.Contains(err.Error(), "hand-on question was asked after") {
-		t.Errorf("❌ claim of a go before a hand-on question: %v", err)
-	}
-	if err := b.ClaimGo(Go{UUID: "u3", At: time.UnixMilli(2500)}); err != nil {
-		t.Errorf("❌ claim of a go after a hand-on question: %v", err)
+	if err := b.ClaimGo(Go{UUID: "u2"}); err != nil {
+		t.Errorf("❌ claim of a newer go: %v", err)
 	}
 }

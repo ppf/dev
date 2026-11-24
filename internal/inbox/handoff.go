@@ -217,5 +217,5 @@ func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 	if err != nil || !ok || b.Name != Manager {
 		return err
 	}
-	return b.Box.DropPrompt(time.Now())
+	return b.Box.DropPrompt()
 }
