@@ -26,6 +26,18 @@ type Decided struct {
 	Over []string `json:"over,omitempty"`
 	Why  string   `json:"why"`
 	At   int64    `json:"at"`
+	// Unmarked: the manager settled an ask its boss hadn't marked obvious; false for a boss's decision and for older manager decisions (all marked)
+	Unmarked bool `json:"unmarked,omitempty"`
+}
+
+func (d Decided) kind() string {
+	switch {
+	case d.By == DecidedBoss:
+		return TallyBoss
+	case d.Unmarked:
+		return TallyManagerUnmarked
+	}
+	return TallyManagerMarked
 }
 
 // OverLabels is the labels of the options d was picked over.
@@ -142,9 +154,12 @@ func (s Store) Settle(id int, question, pick, why string, handOn func(Item) bool
 		if i := slices.IndexFunc(p.Options, func(o string) bool { return Split(o).Recommended }); i >= 0 && answerOf(p.Options, p.Options[i]) != want {
 			return fmt.Errorf("item %d's recommended option is %q now, not %q: look at the list again", id, answerOf(p.Options, p.Options[i]), want)
 		}
+		marked := p.Obvious != ""
 		if err := p.decide(DecidedManager, DecidedManager, cmp.Or(p.Obvious, why), now.Unix()); err != nil {
 			return err
 		}
+		p.Decided.Unmarked = !marked
+		f.note(s, *p, p.Decided.kind(), "", now)
 		p.Via = ViaManager
 		it = *p
 		return nil
@@ -178,6 +193,7 @@ func (s Store) Decide(it Item, why string, now time.Time) (int, error) {
 			return err
 		}
 		f.Items = append(f.Items, it)
+		f.note(s, it, TallyBoss, "", now)
 		f.Next, id = it.ID+1, it.ID
 		return nil
 	})
