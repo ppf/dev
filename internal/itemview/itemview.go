@@ -504,6 +504,13 @@ func (m Model) block(in int, now time.Time) []string {
 	}
 	end := sidebar.Faint + strings.Repeat("─", in) + reset
 	switch {
+	case it.Done && it.Decided != nil:
+		d := it.Decided
+		out := append([]string{rule("decided for you: "+d.By, sidebar.Green+ticked(it, now)+reset)}, row("picked", "★ "+todo.Split(d.Pick).Label)...)
+		if len(d.Over) > 0 {
+			out = append(out, row("over", strings.Join(d.OverLabels(), " · "))...)
+		}
+		return append(append(out, row("why", d.Why)...), end)
 	case it.Done && it.Result != "":
 		out := []string{rule("what was done", sidebar.Green+ticked(it, now)+reset)}
 		out = append(out, strings.Split(ansi.Wrap(it.Result, in, ""), "\n")...)

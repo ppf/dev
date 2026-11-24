@@ -151,7 +151,7 @@ func TestAskRules(t *testing.T) {
 			"Each option is `<label> | <detail>`",
 			"**A contract before a feature's workers.**",
 			"**A remark on a feature whose contract is picked**",
-			"**Scope gate:**", "**An easy decision is yours.**", "Decided myself: <pick> over <other>; tell me to overrule", "start without a further ask unless their cost or scope changed since the pick", "Decisions that belong together go in one `dev todo ask`",
+			"**Scope gate:**", "**An easy decision is yours.**", "--decided '<why it is easy>'", "start without a further ask unless their cost or scope changed since the pick", "Decisions that belong together go in one `dev todo ask`",
 			"**A mockup the user must see is opened for them.**",
 			`open -a "Google Chrome" <file>`,
 			"**A worker's question is answered in the same turn.**",
@@ -188,6 +188,13 @@ func TestAskRules(t *testing.T) {
 		"ending `the manager asks the user: leave it to the manager` is the manager's",
 		"**A worker's permission prompt or dialog under a boss of yours**",
 		"only the answer after the colon is theirs",
+		// Easy decisions part 2: the boss marks, the manager settles after its two checks
+		"gets `--obvious '<why>'` on its `dev todo ask` (exactly one option recommended)",
+		"`settled by the manager with your recommended option: <answer>` for an ask you marked obvious",
+		"settle no item on a boss's list but an ask its boss marked obvious",
+		"first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed. Either fails: put it to the user as any other ask",
+		"`dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`",
+		"`<project> #<n>: decided for you: <pick> (obvious: <why>)`",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

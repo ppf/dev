@@ -94,6 +94,8 @@ type Item struct {
 	For     int      `json:"for,omitempty"`     // an ask's: the open item that waits on its answer (dev todo ask --for)
 	Asked   int64    `json:"asked,omitempty"`   // an ask replaced with its question kept: when that question was put
 	Dropped []string `json:"dropped,omitempty"` // options its replaces removed or changed: a pick of one is refused (droppedPick)
+	Obvious string   `json:"obvious,omitempty"` // an ask's: why its boss marked it obvious (dev todo ask --obvious), for the manager to settle
+	Decided *Decided `json:"decided,omitempty"` // an ask settled for the user with its recommended option (Settle, Decide)
 }
 
 // Doing is what an item's doer said it does now, and since when, unix seconds.
@@ -185,6 +187,8 @@ type Shown struct {
 	For     int    `json:"for,omitempty"`
 	// WaitsOn is the newest open ask on no one whose For is this open item: its answer decides it
 	WaitsOn *WaitsOn `json:"waits_on,omitempty"`
+	Obvious string   `json:"obvious,omitempty"`
+	Decided *Decided `json:"decided,omitempty"`
 	Placement
 }
 
@@ -635,7 +639,7 @@ func (s Store) Read(now time.Time) (List, error) {
 		if it.PartOf == 0 {
 			it.PartOf = partner(f.Items, it.ID)
 		}
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf, For: it.For}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf, For: it.For, Obvious: it.Obvious, Decided: it.Decided}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
@@ -678,15 +682,10 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	if err := it.checkDoneOn(); err != nil {
 		return 0, err
 	}
-	if len(it.Options) > 0 {
-		if err := checkQuestion(it.Text); err != nil {
-			return 0, err
-		}
-		if err := checkLabels(it.Options); err != nil {
-			return 0, err
-		}
+	if err := checkAsk(it); err != nil {
+		return 0, err
 	}
-	if err := CheckDetails(it.Details); err != nil {
+	if err := CheckObvious(it.Obvious, it.Options); err != nil {
 		return 0, err
 	}
 	err = s.update(now, func(f *file) error {
@@ -711,6 +710,19 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 		return nil
 	})
 	return id, err
+}
+
+// checkAsk refuses an ask's question or labels over their limits, and details CheckDetails refuses.
+func checkAsk(it Item) error {
+	if len(it.Options) > 0 {
+		if err := checkQuestion(it.Text); err != nil {
+			return err
+		}
+		if err := checkLabels(it.Options); err != nil {
+			return err
+		}
+	}
+	return CheckDetails(it.Details)
 }
 
 // sameSession reports a and b linking the same session, or none.
@@ -771,6 +783,16 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 			it.Context = old.Context
 		}
 		it.Details = cmp.Or(it.Details, old.Details)
+		// A mark holds for the question and options it was given for: a new one of either drops it
+		switch {
+		case it.Obvious == NotObvious:
+			it.Obvious = ""
+		case it.Obvious == "" && it.Text == old.Text && slices.Equal(it.Options, old.Options):
+			it.Obvious = old.Obvious
+		}
+		if err := CheckObvious(it.Obvious, it.Options); err != nil {
+			return err
+		}
 		// Its doer goes on unless another one takes it or it becomes an ask
 		if it.On == old.On && sameSession(it.Session, old.Session) && !(len(old.Options) == 0 && len(it.Options) > 0) {
 			it.Doing = old.Doing
@@ -1048,7 +1070,10 @@ func (a Answered) Error() string {
 		where = "via manager"
 	}
 	msg := fmt.Sprintf("item %d is answered already: the user answered %q %s", a.Item.ID, a.Item.Answer, where)
-	if !a.Same {
+	if d := a.Item.Decided; d != nil {
+		msg = fmt.Sprintf("item %d is answered already: decided for the user by the %s, %q (the user overrules it with dev todo reopen, then answers)", a.Item.ID, d.By, a.Item.Answer)
+	}
+	if !a.Same && a.arg != "" {
 		msg += fmt.Sprintf(", not %q", a.arg)
 	}
 	return msg

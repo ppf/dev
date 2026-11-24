@@ -378,7 +378,7 @@ func (m Model) all() []card {
 		}
 		for _, f := range l.Finished {
 			it := todo.Shown{ID: f.ID, Text: f.Text, Link: f.Link, Answer: f.Answer, On: f.On, Quiet: f.Quiet, Done: true,
-				Context: f.Context, Details: f.Details, Result: f.Result, DoneBy: f.DoneBy,
+				Context: f.Context, Details: f.Details, Result: f.Result, DoneBy: f.DoneBy, Decided: f.Decided,
 				Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: f.Assignee}}
 			out = append(out, card{boss: l.Boss, closed: l.Closed, it: it, done: true, doneAt: f.DoneAt})
 		}

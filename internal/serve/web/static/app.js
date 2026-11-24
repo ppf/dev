@@ -889,7 +889,7 @@ function doneSheet(boss, id, at) {
       el('div', { class: 'lv-top' }, el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), el('span', { class: 'lv-who' }, 'What was done'), ticked && el('span', { class: 'lv-since' }, ticked)),
       el('p', { class: 'res' }, it.result)));
   }
-  if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, 'You answered'), el('span', null, it.answer)));
+  if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, it.decided ? 'Decided for you: ' + it.decided.by : 'You answered'), el('span', null, it.answer)));
   if (it.details) out.push(details(it.details));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));
   if (state.errors[k]) out.push(el('p', { class: 'err' }, state.errors[k]));
