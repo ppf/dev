@@ -840,7 +840,7 @@ func (b Box) unhand(worker string) error {
 func (b Box) DropPrompt() error {
 	return b.update(func(s *state) error {
 		s.Prompt = nil
-		if s.Pick != nil && isHandOn(s.Pick.Question, nil) {
+		if s.Pick != nil && strings.HasPrefix(strings.ToLower(FirstLine(s.Pick.Question)), "hand on to ") {
 			s.Pick = nil
 		}
 		return nil
