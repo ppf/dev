@@ -89,15 +89,20 @@ checks one item.`,
 	return cmd
 }
 
-// printShown prints it at now as dev todo show --print does: printItem, then its details indented.
+// printShown prints it at now as dev todo show --print does: its line (todoLine, with boss closed), an open one's
+// context and details, indented.
 func printShown(out io.Writer, it todo.Shown, closed bool, now time.Time) {
+	line := todoLine(it, now)
 	if closed {
 		// Its boss can't take an answer: dev todo answer refuses one
-		fmt.Fprintln(out, todoLine(it, now)+"\tboss closed")
-	} else {
-		printItem(out, "", it, now)
+		line += "\tboss closed"
 	}
-	// As printItem: a ticked one is its line alone
+	fmt.Fprintln(out, line)
+	if !it.Done {
+		for _, c := range it.Context {
+			fmt.Fprintln(out, "    - "+c)
+		}
+	}
 	if it.Details != "" && !it.Done {
 		for _, l := range strings.Split(it.Details, "\n") {
 			fmt.Fprintln(out, strings.TrimRight("    "+l, " "))
