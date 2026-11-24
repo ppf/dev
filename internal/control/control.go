@@ -60,7 +60,7 @@ type Agent struct {
 	Boss bool `json:"boss,omitempty"`
 	// Outside marks a worker a coordinator outside tmux started for StartedBy (dev agent start --boss).
 	Outside bool `json:"outside,omitempty"`
-	// Model and Effort are the --model and --effort its Claude was started with (dev agent start, dev boss), not
+	// Model and Effort are the --model and --effort its Claude or Codex was started with (dev agent start, dev boss), not
 	// a later /model or /effort; omitted when it started without that flag.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`

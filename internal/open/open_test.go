@@ -43,6 +43,15 @@ func TestAgentCommand(t *testing.T) {
 	if got, _ := agentCommand("agy", "dev-x", true, agent.Start{}); got != tmux.ShellJoin("agy") {
 		t.Errorf("agy without a model or effort = %q, want it bare", got)
 	}
+	if got, _ := agentCommand("codex", "dev-x", true, agent.Start{Model: "gpt-6-luna", Effort: "high"}); got != "codex '-m' 'gpt-6-luna' '-c' 'model_reasoning_effort=high'" {
+		t.Errorf("codex with a model and effort = %q", got)
+	}
+	if got, _ := agentCommand("codex", "dev-x", false, agent.Start{Effort: "xhigh"}); got != "codex '-c' 'model_reasoning_effort=xhigh'" {
+		t.Errorf("codex with an effort = %q", got)
+	}
+	if got, _ := agentCommand("grok", "dev-x", false, agent.Start{Model: "m"}); got != "grok" {
+		t.Errorf("grok = %q, want it as is", got)
+	}
 }
 
 func fixed(w, h string, ok bool) sizeSource {

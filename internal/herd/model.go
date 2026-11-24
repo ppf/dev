@@ -83,8 +83,8 @@ type tile struct {
 	note     string          // its latest boss inbox note (inbox.OptNote)
 	since    time.Time       // when its state began (@agent_since); zero when unknown
 	context  string          // @agent_context, its context window's use in whole percent; "" when unknown
-	model    string          // @dev_model, the --model its Claude started with; "" when none was passed
-	effort   string          // @dev_effort, the --effort its Claude started with
+	model    string          // @dev_model, the --model its Claude or Codex started with; "" when none was passed
+	effort   string          // @dev_effort, the --effort its Claude or Codex started with
 	tail     desktop.Tail    // its transcript's end; zero when not read this refresh (boss hidden), for an agent without one, or none written yet
 	tailErr  error           // why its transcript could not be read
 	ci       ci              // its open or draft PR's checks as last read; zero before a read, or when not looked up this refresh

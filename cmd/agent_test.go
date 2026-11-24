@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -67,10 +71,11 @@ func TestAgentArgs(t *testing.T) {
 		{[]string{"agent", "start", "app", "--model", ""}, `invalid --model "", want a model alias or id`},
 		{[]string{"agent", "start", "app", "--model", "son net"}, `invalid --model "son net", want a model alias or id`},
 		{[]string{"agent", "start", "app", "--model", "a\tb"}, `invalid --model "a\tb", want a model alias or id`},
-		{[]string{"agent", "start", "app", "--agent", "codex", "--model", "sonnet"}, "--model and --effort only apply to Claude and agy, not --agent codex"},
-		{[]string{"agent", "start", "app", "--agent", "grok", "--effort", "low"}, "--model and --effort only apply to Claude and agy, not --agent grok"},
 		{[]string{"agent", "start", "app", "--agent", "agy", "--effort", "ultra"}, `unknown --effort "ultra", want low, medium, high, xhigh, max`},
 		{[]string{"agent", "start", "--from", "app-fix", "--agent", "agy"}, "--from starts a fresh Claude, not --agent agy"},
+		{[]string{"agent", "start", "app", "--agent", "codex", "--effort", "minimal"}, `unknown --effort "minimal", want low, medium, high, xhigh, max, ultra`},
+		{[]string{"agent", "start", "app", "--agent", "codex", "--model", "-x"}, `invalid --model "-x", want a model alias or id`},
+		{[]string{"agent", "start", "app", "--agent", "grok", "--effort", "low"}, "--model and --effort only apply to Claude, Codex and agy, not --agent grok"},
 		{[]string{"agent", "start", "app", "--model", "a\x1bb"}, `invalid --model "a\x1bb", want a model alias or id`},
 		{[]string{"agent", "start", "app", "--model", "opus;"}, `invalid --model "opus;", want a model alias or id`},
 		{[]string{"agent", "start", "app", "--model=--resume"}, `invalid --model "--resume", want a model alias or id`},
@@ -101,9 +106,48 @@ func TestCheckStartAccepts(t *testing.T) {
 		if err := cmd.ParseFlags(args); err != nil {
 			t.Fatal(err)
 		}
-		if err := checkStart(cmd, start); err != nil {
+		if err := checkStart(cmd, start, agent.Efforts); err != nil {
 			t.Errorf("checkStart(%q) = %v, want none", args, err)
 		}
+	}
+}
+
+func TestCheckCodexStart(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":/bin:/usr/bin")
+	stub := func(script string) {
+		if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stub(`[ "$1 $2" = "debug models" ] || exit 9
+echo '{"models":[{"slug":"gpt-a","supported_reasoning_levels":[{"effort":"low"},{"effort":"ultra"}]},{"slug":"gpt-b","supported_reasoning_levels":[{"effort":"medium"}]},{"slug":"gpt-c","supported_reasoning_levels":[]}]}'`)
+	for _, tt := range []struct {
+		start agent.Start
+		err   string
+	}{
+		{agent.Start{Model: "gpt-a"}, ""},
+		{agent.Start{Model: "gpt-a", Effort: "ultra"}, ""},
+		{agent.Start{Model: "gpt-x", Effort: "low"}, `unknown --model "gpt-x" for codex, want one codex debug models lists: gpt-a, gpt-b, gpt-c`},
+		{agent.Start{Model: "gpt-c"}, ""},
+		{agent.Start{Model: "gpt-c", Effort: "low"}, "--model gpt-c takes no --effort"},
+		{agent.Start{Model: "gpt-b", Effort: "ultra"}, "--model gpt-b doesn't take --effort ultra, want medium"},
+	} {
+		if err := checkCodexStart(tt.start, time.Minute); fmt.Sprint(err) != cmp.Or(tt.err, "<nil>") {
+			t.Errorf("checkCodexStart(%+v) = %v, want %q", tt.start, err, tt.err)
+		}
+	}
+	stub("echo 'not logged in' >&2; exit 1")
+	if err := checkCodexStart(agent.Start{Model: "gpt-a"}, time.Minute); fmt.Sprint(err) != "checking --model and --effort: codex debug models: not logged in" {
+		t.Errorf("checkCodexStart with a failing catalog = %v, want its stderr", err)
+	}
+	stub("echo '{\"models\":[]}'")
+	if err := checkCodexStart(agent.Start{Model: "gpt-a"}, time.Minute); fmt.Sprint(err) != "agent: codex model catalog lists no models" {
+		t.Errorf("checkCodexStart with an empty catalog = %v, want an error", err)
+	}
+	stub("exec sleep 5")
+	if err := checkCodexStart(agent.Start{Model: "gpt-a"}, 100*time.Millisecond); fmt.Sprint(err) != "checking --model and --effort: codex debug models didn't answer within 100ms" {
+		t.Errorf("checkCodexStart with a stuck catalog = %v, want a timeout", err)
 	}
 }
 

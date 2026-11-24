@@ -261,8 +261,8 @@ func TestAgentStart(t *testing.T) {
 	check(t, "an effort for a session started without one", out+status+" "+errOut,
 		"1 ❌ session app was started without --effort, not with low: --model and --effort only apply to a new session\n")
 	env = d.scriptEnv(writeProjects(t, [2]string{"app", dir}, [2]string{"fl", tempDir(t)}))
-	out, errOut, status = devAgent(env, "", "start", "fl", "--agent", "codex", "--model", "sonnet", "--timeout", "30s")
-	check(t, "a model for codex", out+status+" "+errOut, "1 ❌ --model and --effort only apply to Claude and agy, not --agent codex\n")
+	out, errOut, status = devAgent(env, "", "start", "fl", "--agent", "grok", "--model", "sonnet", "--timeout", "30s")
+	check(t, "a model for grok", out+status+" "+errOut, "1 ❌ --model and --effort only apply to Claude, Codex and agy, not --agent grok\n")
 	if _, err := d.Try("has-session", "-t", "=fl:"); err == nil {
 		t.Error("❌ refused start opened fl")
 	}
@@ -313,6 +313,49 @@ func TestAgentStart(t *testing.T) {
 	check(t, "codex pane is the layout's agent pane", d.T("display", "-t", cx["pane"], "-p", "#{window_index}.#{pane_index}"), "1.2")
 	out, _, _ = devAgent(env, "", "list", "--mine")
 	check(t, "codex worker in --mine", strings.Split(out, "\t")[0], "cx")
+
+	// --agent codex with --model and --effort: checked against its model catalog, passed as -m and a config
+	// override, recorded on the session
+	if err := os.Rename(codexStub(t), filepath.Join(stubs, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	env = append(d.scriptEnv(writeProjects(t, [2]string{"cm", tempDir(t)})), "TMUX_PANE="+boss)
+	out, errOut, status = devAgent(env, "", "start", "cm", "--agent", "codex", "--model", "gpt-x", "--timeout", "30s")
+	check(t, "a model codex doesn't list", out+status+" "+errOut, "1 ❌ unknown --model \"gpt-x\" for codex, want one codex debug models lists: gpt-a, gpt-b\n")
+	out, errOut, status = devAgent(env, "", "start", "cm", "--agent", "codex", "--model", "gpt-b", "--effort", "ultra", "--timeout", "30s")
+	check(t, "an effort the model doesn't take", out+status+" "+errOut, "1 ❌ --model gpt-b doesn't take --effort ultra, want low, medium\n")
+	if _, err := d.Try("has-session", "-t", "=cm:"); err == nil {
+		t.Error("❌ refused codex start opened cm")
+	}
+	out, errOut, status = devAgent(env, "", "start", "cm", "--agent", "codex", "--model", "gpt-a", "--effort", "ultra", "--json", "--timeout", "30s")
+	var cm map[string]string
+	if err := json.Unmarshal([]byte(out), &cm); err != nil || status != "0" {
+		t.Fatalf("start codex with a model and effort: exit %s, %v: %q %q", status, err, out, errOut)
+	}
+	check(t, "codex start prints the model and effort", cm["agent"]+" "+cm["model"]+" "+cm["effort"], "Codex gpt-a ultra")
+	if args := agentArgs(t, d, cm["pane"]); !strings.Contains(args, "codex -m gpt-a -c model_reasoning_effort=ultra") {
+		t.Errorf("codex not started with the model and effort: %q", args)
+	}
+	out, _, _ = devAgent(env, "", "get", "cm", "--json")
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("get cm: %v: %q", err, out)
+	}
+	check(t, "codex get --json shows them", got["model"]+" "+got["effort"], "gpt-a ultra")
+	out, errOut, status = devAgent(env, "", "start", "cm", "--agent", "codex", "--effort", "low", "--timeout", "30s")
+	check(t, "another effort for the codex session", out+status+" "+errOut,
+		"1 ❌ session cm was started with --effort ultra, not low: --model and --effort only apply to a new session\n")
+	out, errOut, status = devAgent(env, "", "start", "cm", "--agent", "codex", "--model", "gpt-a", "--json", "--timeout", "30s")
+	if err := json.Unmarshal([]byte(out), &got); err != nil || status != "0" || got["pane"] != cm["pane"] {
+		t.Errorf("a retried codex start with the same model: exit %s, %v: %q %q, want the session reused", status, err, out, errOut)
+	}
+	env = append(d.scriptEnv(writeProjects(t, [2]string{"ce", tempDir(t)})), "TMUX_PANE="+boss)
+	out, errOut, status = devAgent(env, "", "start", "ce", "--agent", "codex", "--effort", "high", "--timeout", "30s")
+	check(t, "a new codex session's effort without a model", out+status+" "+errOut,
+		"1 ❌ --effort for --agent codex needs --model: each model takes its own efforts\n")
+	if _, err := d.Try("has-session", "-t", "=ce:"); err == nil {
+		t.Error("❌ refused codex start opened ce")
+	}
 
 	// --agent grok: like codex, registered once grok runs
 	if err := os.Rename(sleeper(t, "grok"), filepath.Join(stubs, "grok")); err != nil {
