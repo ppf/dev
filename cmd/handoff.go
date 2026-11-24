@@ -99,8 +99,10 @@ func handOnPick(p *inbox.Prompt, boss, text string) error {
 	switch {
 	case !p.Pick:
 		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q)", inbox.HandItOn, inbox.DropIt)
+	case p.HandOnMixed:
+		return errors.New("--kind work: the user's dialog held the hand-on question beside others: a hand-on question stays alone in its dialog: ask it again on its own")
 	case p.Question == "":
-		return errors.New("--kind work: the user's pick wasn't one question: ask one hand-on per question")
+		return errors.New("--kind work: the user's pick wasn't one question: a hand-on question stays alone in its dialog: ask it on its own")
 	case p.Typed:
 		return fmt.Errorf("--kind work: the user typed %q under Other: a correction: revise and ask again", p.Answer)
 	case inbox.IsPicked(p.Answer, inbox.DropIt):
@@ -131,7 +133,7 @@ func (g *handOn) done(sent bool, now time.Time) error {
 			return fmt.Errorf("sent to %s, not recorded in dev agent handoffs (don't resend): %w", g.h.Boss, err)
 		}
 	case g.pick != nil:
-		if err := g.box.Unclaim(*g.pick); err != nil {
+		if err := g.box.Unclaim(*g.pick, -1); err != nil {
 			return fmt.Errorf("not sent, and the user's pick couldn't be given back: ask them again: %w", err)
 		}
 	}

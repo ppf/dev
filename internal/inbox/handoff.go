@@ -151,7 +151,16 @@ func FirstLine(text string) string {
 	return ""
 }
 
-// handOnOutcome is Dropped or Corrected for a lone pick on the manager's hand-on question, "" for any other pick.
+// isHandOn reports question, offering labels, the manager's hand-on question: it offers HandItOn or, in a dialog of
+// several, its first line starts "Hand on to boss-", as the hand-on gate wants it. An item's ask offering HandItOn
+// counts too: the safe side, as a dialog mixing a hand-on question with others relays nothing.
+func isHandOn(question string, labels []string) bool {
+	return slices.ContainsFunc(labels, func(l string) bool { return IsPicked(l, HandItOn) }) ||
+		strings.HasPrefix(strings.ToLower(FirstLine(question)), "hand on to boss-")
+}
+
+// handOnOutcome is Dropped or Corrected for a lone pick on the manager's hand-on question, "" for any other pick: one
+// among others sends nothing whatever was picked, as it stays alone in its dialog, asked again.
 func handOnOutcome(picks []agent.Pick) string {
 	if len(picks) != 1 || !slices.ContainsFunc(picks[0].Labels, func(l string) bool { return IsPicked(l, HandItOn) }) {
 		return ""
@@ -188,7 +197,11 @@ func recordHandOn(c *tmux.Client, picks []agent.Pick, now time.Time) error {
 // leaves no earlier pick to hand on with; an item's pick not yet relayed stays (Box.DropPrompt).
 func AskingHandOn(c *tmux.Client, pane string, q agent.Question) error {
 	handOn := func(a agent.Ask) bool {
-		return slices.ContainsFunc(a.Options, func(o agent.Choice) bool { return IsPicked(o.Label, HandItOn) })
+		var labels []string
+		for _, o := range a.Options {
+			labels = append(labels, o.Label)
+		}
+		return isHandOn(a.Question, labels)
 	}
 	if q.Tool != agent.AskUserQuestion || !slices.ContainsFunc(q.Questions, handOn) {
 		return nil

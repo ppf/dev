@@ -1,52 +1,63 @@
 package inbox
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
 )
 
-// The question the manager has up holds AskingFor; another replaces it; its next pick and a new conversation clear it.
+// The items the manager's dialog has up hold AskingFor; another dialog's replace them; its next pick and a new
+// conversation clear them.
 func TestAsking(t *testing.T) {
 	b := testBox(t)
 	t0 := time.Unix(1700000000, 0)
-	set := func(id int) {
+	set := func(ids ...int) {
 		t.Helper()
-		if err := b.SetAsking(Asking{Boss: "boss-a", ID: id, Text: "Q?", At: t0.Unix()}); err != nil {
+		var as []Asking
+		for _, id := range ids {
+			as = append(as, Asking{Boss: "boss-a", ID: id, Text: "Q?", At: t0.Unix()})
+		}
+		if err := b.SetAsking(as); err != nil {
 			t.Fatal(err)
 		}
 	}
-	at := func(d time.Duration) *Asking {
+	at := func(d time.Duration) []int {
 		t.Helper()
-		a, err := b.Asking(t0.Add(d))
+		as, err := b.Asking(t0.Add(d))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return a
+		var ids []int
+		for _, a := range as {
+			ids = append(ids, a.ID)
+		}
+		return ids
 	}
 	set(1)
-	if a := at(29 * time.Minute); a == nil || a.ID != 1 {
-		t.Errorf("29m on: %+v, want #1", a)
+	if ids := at(29 * time.Minute); !slices.Equal(ids, []int{1}) {
+		t.Errorf("29m on: %v, want #1", ids)
 	}
-	if a := at(AskingFor); a != nil {
-		t.Errorf("%v on: %+v, want none", AskingFor, a)
+	if ids := at(AskingFor); len(ids) != 0 {
+		t.Errorf("%v on: %v, want none", AskingFor, ids)
 	}
-	set(2)
-	if a := at(0); a == nil || a.ID != 2 {
-		t.Errorf("another asking: %+v, want #2", a)
+	// A dialog of several marks each of its items, in place of the earlier ones
+	set(2, 4, 5)
+	if ids := at(0); !slices.Equal(ids, []int{2, 4, 5}) {
+		t.Errorf("another asking of three: %v, want #2 #4 #5", ids)
 	}
-	if err := b.Picked([]agent.Pick{{Question: "a #2: Q?", Answer: "A"}}, t0); err != nil {
+	if err := b.Picked([]agent.Pick{{Question: "a #2: Q?", Answer: "A"}, {Question: "a #4: Q?", Answer: "B"}}, t0); err != nil {
 		t.Fatal(err)
 	}
-	if a := at(0); a != nil {
-		t.Errorf("after the pick: %+v, want none", a)
+	if ids := at(0); len(ids) != 0 {
+		t.Errorf("after the pick: %v, want none", ids)
 	}
 	set(3)
 	if err := b.ForgetPrompt(); err != nil {
 		t.Fatal(err)
 	}
-	if a := at(0); a != nil {
-		t.Errorf("after a new conversation: %+v, want none", a)
+	if ids := at(0); len(ids) != 0 {
+		t.Errorf("after a new conversation: %v, want none", ids)
 	}
 }

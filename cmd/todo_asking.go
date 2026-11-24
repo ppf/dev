@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -15,54 +16,71 @@ import (
 )
 
 func newTodoAskingCmd(boss *string) *cobra.Command {
-	var question string
+	var questions []string
 	cmd := &cobra.Command{
-		Use:   "asking <boss> <n>",
-		Short: "Mark ask n of a dev boss's list as asked in the manager now, right before the manager's question about it (manager only)",
-		Long: `Run by the manager right before its AskUserQuestion about ask n of boss <boss>'s list: the terminal board and the web
-board (the phone page) show "asked in manager now" on it, so the user answers there or here, knowing. It goes once the
-item closes or its text changes, at the manager's next pick of any question (its PostToolUse hook), another asking, a
-/clear or restart of the manager, or 30 minutes on (a dialog closed with Esc fires no hook). --question is the ask's
-text: refused unless open ask n still reads it. Only from the manager's coordinator pane.`,
-		Args: cobra.ExactArgs(2),
+		Use:   "asking <boss> <n> [<boss> <n>]...",
+		Short: "Mark the asks of the manager's next dialog as asked in the manager now, right before it (manager only)",
+		Long: `Run by the manager right before its AskUserQuestion about ask n of boss <boss>'s list, one call naming every ask of
+the dialog (up to 4 pairs): the terminal board and the web board (the phone page) show "asked in manager now" on each,
+so the user answers there or here, knowing. A mark goes once its item closes or its text changes, and all of them at
+the manager's next pick of any question (its PostToolUse hook), another asking, a /clear or restart of the manager, or
+30 minutes on (a dialog closed with Esc fires no hook). One --question per pair, in the same order, is that ask's text:
+refused unless open ask n still reads it; one refused item marks none. Only from the manager's coordinator pane.`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 || len(args)%2 != 0 || len(args) > 8 {
+				return fmt.Errorf("asking takes 1 to 4 pairs of <boss> <n>, got %d argument(s)", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
 				return errors.New("the boss is asking's first argument: leave out --boss")
 			}
-			if question == "" {
-				return errors.New("asking needs --question with the ask's text")
-			}
-			name := args[0]
-			id, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("item number %q: %w", args[1], err)
+			if len(questions) != len(args)/2 {
+				return fmt.Errorf("asking needs one --question with the ask's text per <boss> <n>, in order: %d for %d", len(questions), len(args)/2)
 			}
 			c := tmux.New()
 			self, err := managerSelf(c, "dev todo asking")
 			if err != nil {
 				return err
 			}
-			it, err := showItem(c, cmd.ErrOrStderr(), name, id, question)
-			switch {
-			case err != nil:
-				return err
-			case it.Done:
-				return fmt.Errorf("%s #%d is closed already: don't ask it", name, id)
-			case len(it.Options) == 0:
-				return fmt.Errorf("%s #%d is no ask", name, id)
-			case it.Closed:
-				return fmt.Errorf("%s is closed: its #%d can't be answered", name, id)
-			case !todo.Own(it.On, it.Session, name):
-				return fmt.Errorf("%s #%d is on %s, not the user's", name, id, it.On)
+			now := time.Now().Unix()
+			var marks []inbox.Asking
+			for k := 0; k < len(args); k += 2 {
+				name := args[k]
+				id, err := strconv.Atoi(args[k+1])
+				if err != nil {
+					return fmt.Errorf("item number %q: %w", args[k+1], err)
+				}
+				it, err := showItem(c, cmd.ErrOrStderr(), name, id, questions[k/2])
+				switch {
+				case err != nil:
+					return err
+				case it.Done:
+					return fmt.Errorf("%s #%d is closed already: don't ask it", name, id)
+				case len(it.Options) == 0:
+					return fmt.Errorf("%s #%d is no ask", name, id)
+				case it.Closed:
+					return fmt.Errorf("%s is closed: its #%d can't be answered", name, id)
+				case !todo.Own(it.On, it.Session, name):
+					return fmt.Errorf("%s #%d is on %s, not the user's", name, id, it.On)
+				case slices.ContainsFunc(marks, func(a inbox.Asking) bool { return a.Boss == name && a.ID == id }):
+					return fmt.Errorf("%s #%d is named twice", name, id)
+				}
+				marks = append(marks, inbox.Asking{Boss: name, ID: id, Text: it.Text, At: now})
 			}
-			if err := self.Box.SetAsking(inbox.Asking{Boss: name, ID: id, Text: it.Text, At: time.Now().Unix()}); err != nil {
+			if err := self.Box.SetAsking(marks); err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: asked in manager now\n", name, id)
-			return err
+			for _, a := range marks {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: asked in manager now\n", a.Boss, a.ID); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
-	cmd.Flags().StringVar(&question, "question", "", "the ask's text: refuse when item n reads otherwise")
+	cmd.Flags().StringArrayVar(&questions, "question", nil, "an ask's text, one per <boss> <n> in order: refuse when item n reads otherwise")
 	return cmd
 }
 

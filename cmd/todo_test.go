@@ -638,6 +638,53 @@ func TestTodoAnswerRefused(t *testing.T) {
 func TestPickFor(t *testing.T) {
 	pick := func(q, a string) *inbox.Prompt { return &inbox.Prompt{Pick: true, Question: q, Answer: a} }
 	typed := &inbox.Prompt{Text: "dev #7: merge it"}
+	several := func(handOn bool, asks ...inbox.Asked) *inbox.Prompt {
+		return &inbox.Prompt{Pick: true, Text: "words", At: 1, Asks: asks, HandOnMixed: handOn}
+	}
+	ask := func(q, a string) inbox.Asked { return inbox.Asked{Question: q, Answer: a} }
+	// The index: of the question among several, -1 for a pick of one
+	if i, err := pickFor(several(false, ask("dev #6: Tag?", "Tag"), ask("dev #7: Merge #148?", "Merge")), "boss-dev", 7, "Merge #148?", true); i != 1 || err != nil {
+		t.Errorf("its question of several: %d, %v; want 1", i, err)
+	}
+	if i, err := pickFor(pick("dev #7: Merge #148?", "Merge"), "boss-dev", 7, "Merge #148?", true); i != -1 || err != nil {
+		t.Errorf("a pick of one: %d, %v; want -1", i, err)
+	}
+	// Projects app and boss-app (session boss-boss-app): boss-app names only the second, not app's boss
+	both := several(false, ask("boss-app #1: Merge?", "Wait"), ask("app #1: Merge?", "Merge"))
+	for boss, want := range map[string]int{"boss-app": 1, "boss-boss-app": 0} {
+		if i, err := pickFor(both, boss, 1, "Merge?", false); i != want || err != nil {
+			t.Errorf("%s from a dialog asking app and boss-app: %d, %v; want %d", boss, i, err, want)
+		}
+	}
+	if _, err := pickFor(pick("boss-app #1: Merge?", "Merge"), "boss-app", 1, "Merge?", false); err == nil || !strings.Contains(err.Error(), "not boss-app #1") {
+		t.Errorf("project boss-app's question relayed to app's boss: %v, want refused", err)
+	}
+	// Projects app and boss-app with boss-boss-app closed (the session's name an alias again): both name app's boss
+	if _, err := pickFor(both, "boss-app", 1, "Merge?", true); err == nil || !strings.Contains(err.Error(), "asked boss-app #1 twice") {
+		t.Errorf("boss-app with the alias on, from a dialog asking app and boss-app: %v, want refused", err)
+	}
+	// Projects app and App: each its own, by the name as written
+	cased := several(false, ask("App #1: Merge?", "Wait"), ask("app #1: Merge?", "Merge"))
+	for boss, want := range map[string]int{"boss-app": 1, "boss-App": 0} {
+		if i, err := pickFor(cased, boss, 1, "Merge?", true); i != want || err != nil {
+			t.Errorf("%s from a dialog asking app and App: %d, %v; want %d", boss, i, err, want)
+		}
+	}
+	// In a dialog of several only the project's or the session's name as written names it, the session's only when alias
+	for _, tt := range []struct {
+		q     string
+		alias bool
+		ok    bool
+	}{{"App #1: Merge?", true, false}, {"boss-app #1: Merge?", true, true}, {"boss-app #1: Merge?", false, false}, {"Boss-app #1: Merge?", true, false}} {
+		_, err := pickFor(several(false, ask(tt.q, "Merge"), ask("b #1: Tag?", "Tag")), "boss-app", 1, "Merge?", tt.alias)
+		if tt.ok != (err == nil) || err != nil && !strings.Contains(err.Error(), "first line is \"<project> #<n>: <item text>\" as written") {
+			t.Errorf("boss-app from a dialog asking %q, alias %v: %v, want accepted %v", tt.q, tt.alias, err, tt.ok)
+		}
+	}
+	// One item asked twice the same way: refused, the picks may differ
+	if _, err := pickFor(several(false, ask("dev #7: Merge #148?", "Merge"), ask("dev #7: Merge #148?\n\n- CI green", "Wait")), "boss-dev", 7, "Merge #148?", true); err == nil || !strings.Contains(err.Error(), "asked boss-dev #7 twice") {
+		t.Errorf("an item asked twice: %v, want refused", err)
+	}
 	for _, tt := range []struct {
 		name     string
 		pick     *inbox.Prompt
@@ -648,7 +695,19 @@ func TestPickFor(t *testing.T) {
 		{"its item", pick("dev #7: Merge #148? (CI green)", "Merge"), "Merge #148?", ""},
 		{"boss name", pick("boss-dev #7: Merge #148?", "Merge"), "Merge #148?", ""},
 		{"no --question", pick("dev #7: Merge #148?", "Merge"), "", "needs --question"},
-		{"several questions", pick("", ""), "Merge #148?", "wasn't one question"},
+		{"several questions, none kept", pick("", ""), "Merge #148?", "held no question"},
+		// A dialog of several: the question naming the item, each relayed on its own
+		{"its question of several", several(false, ask("dev #6: Tag?", "Tag"), ask("dev #7: Merge #148?", "Merge")), "Merge #148?", ""},
+		{"not in the dialog", several(false, ask("dev #6: Tag?", "Tag"), ask("dev #8: Ship?", "Ship")), "Merge #148?", `asked "dev #6: Tag?", "dev #8: Ship?", not "dev #7: Merge #148?"`},
+		{"left unanswered", several(false, ask("dev #6: Tag?", "Tag"), ask("dev #7: Merge #148?", "")), "Merge #148?", "left \"dev #7: Merge #148?\" unanswered: the item stays open"},
+		// A boss's own option of that label, recommended, is an answer
+		{"a boss's Leave it open (Recommended)", pick("dev #7: Merge #148?", "Leave it open (Recommended)"), "Merge #148?", ""},
+		{"left open in several", several(false, ask("dev #6: Tag?", "Tag"), ask("dev #7: Merge #148?", "Leave it open")), "Merge #148?", "the item stays open"},
+		{"asked twice", several(false, ask("dev #7: Merge #148?", "Merge"), ask("dev #7: Merge #148?\n\n- CI green", "Wait")), "Merge #148?", "asked boss-dev #7 twice"},
+		// Only the first line names the item: not the item's text within a longer one, nor in another's context
+		{"text within a longer question", several(false, ask("dev #7: Merge #148? Or wait for #150?", "Merge"), ask("dev #6: Tag?", "Tag")), "Merge #148?", "not \"dev #7: Merge #148?\""},
+		{"text in another question's context", several(false, ask("dev #7: Ship internally?\n\n- then Merge #148?", "Ship"), ask("dev #6: Tag?", "Tag")), "Merge #148?", "not \"dev #7: Merge #148?\""},
+		{"beside a hand-on question", several(true, ask("Hand on to boss-dev?", "Hand it on"), ask("dev #7: Merge #148?", "Merge")), "Merge #148?", "a hand-on question stays alone in its dialog"},
 		{"another item number", pick("dev #6: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"another boss", pick("terminal #7: Merge #148?", "Merge"), "Merge #148?", "not boss-dev #7"},
 		{"another text", pick("dev #7: Ship?", "Ship"), "Merge #148?", "not boss-dev #7"},
@@ -659,7 +718,7 @@ func TestPickFor(t *testing.T) {
 		{"assessment", pick("Hand on the user's idea to cache Merge #148? builds?", "Hand it on"), "Merge #148?", "not boss-dev #7"},
 		{"assessment, Other", pick("Merge #148? cache idea: hand it on?", "merge it and cache the builds"), "Merge #148?", "not boss-dev #7"},
 	} {
-		err := pickFor(tt.pick, "boss-dev", 7, tt.question)
+		_, err := pickFor(tt.pick, "boss-dev", 7, tt.question, true)
 		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
 			t.Errorf("%s: %v, want %q", tt.name, err, tt.want)
 		}

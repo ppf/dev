@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"slices"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
+	"github.com/ppf/dev/internal/herd"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
@@ -490,10 +493,12 @@ takes as the user's answer. Refused in a Claude Code session ($CLAUDECODE set), 
 and for a desktop app boss, which has no dev inbox: answer it in its chat. --question refuses the answer unless item n
 still reads that text (item numbers restart once a list empties). --via manager is the manager relaying what the user
 told it, only from their pick in the manager's AskUserQuestion: only in the manager's coordinator pane, for an item
-older than that pick, once; its one question must start "<project> #<n>: " and contain --question, the answer must be
-the option picked (or what they typed under Other), and the note quotes it: "you answered #<n> \"<question>\" via
-manager (\"<pick>\"): <answer>". The pick is the user's latest one, typed messages after it or not; a typed message
-is never the answer: ask the item as a question instead. An
+older than that pick; the dialog's question that starts "<project> #<n>: " and contains --question (one of up to 4,
+each relayed once; one left unanswered or "Leave it open" leaves its item open; none beside a hand-on question, which
+stays alone in its dialog), the answer must be the option picked there (or what they typed under Other), and the note
+quotes it: "you answered #<n> \"<question>\" via manager (\"<question> picked <pick>\"): <answer>". The pick is the
+user's latest dialog, typed messages after it or not; a typed message is never the answer: ask the item as a question
+instead. An
 item the user answered meanwhile elsewhere sends nothing, saying who answered what where: an error only for another
 answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").
 --recommended --via manager is the manager settling an ask its boss marked obvious (dev todo ask --obvious) with its
@@ -537,26 +542,38 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 				}
 				return settleAsk(c, cmd.OutOrStdout(), cmd.ErrOrStderr(), name, id, question, args[2])
 			}
-			var manager inbox.Boss
-			var said *inbox.Prompt
+			var said *inbox.Prompt // the pick's question naming the item, of a dialog's one or several
 			var before int64
-			if via != "" {
-				if manager, said, err = managerPrompt(c); err != nil {
-					return err
-				}
-				if err := pickFor(said, name, id, question); err != nil {
-					return err
-				}
-				before = said.At
-			}
 			var claim func() (string, func() error, error)
-			if said != nil {
-				// A pick answers one item, also with two answers relayed at once
+			if via != "" {
+				manager, pick, err := managerPrompt(c)
+				if err != nil {
+					return err
+				}
+				// The alias is looked up only when a question starts with the session's name
+				var taken bool
+				if questions := append([]inbox.Asked{{Question: pick.Question}}, pick.Asks...); pick.Pick && slices.ContainsFunc(questions, func(q inbox.Asked) bool {
+					return strings.HasPrefix(strings.ToLower(q.Question), strings.ToLower(name)+" #")
+				}) {
+					if taken, err = aliasTaken(cmd, c, name); err != nil {
+						return err
+					}
+				}
+				i, err := pickFor(pick, name, id, question, !taken)
+				if err != nil {
+					return err
+				}
+				said, before = pick, pick.At
+				if i >= 0 {
+					asked := pick.Ask(i)
+					said = &asked
+				}
+				// A pick, or a question of one of several, answers one item, also with two answers relayed at once
 				claim = func() (string, func() error, error) {
-					if err := manager.Box.ClaimPick(*said); err != nil {
+					if err := manager.Box.ClaimPick(*pick, i); err != nil {
 						return "", nil, fmt.Errorf("--via manager: %w", err)
 					}
-					return said.Answer, func() error { return manager.Box.Unclaim(*said) }, nil
+					return said.Answer, func() error { return manager.Box.Unclaim(*pick, i) }, nil
 				}
 			}
 			where := ""
@@ -629,25 +646,80 @@ func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	return self, p, nil
 }
 
-// pickFor refuses the user's latest pick to the manager (managerPrompt) unless it is one question asking item id of
-// boss, question, that didn't leave it open; a typed message, when they picked nothing, can't be tied to an item.
-func pickFor(pick *inbox.Prompt, boss string, id int, question string) error {
-	asked := strings.ToLower(pick.Question)
-	item := fmt.Sprintf(" #%d: ", id)
-	named := strings.HasPrefix(asked, strings.ToLower(boss)+item) || strings.HasPrefix(asked, strings.ToLower(strings.TrimPrefix(boss, "boss-"))+item)
+// pickFor refuses the user's latest pick to the manager unless one of its questions asks item id of boss, question,
+// answered other than "Leave it open"; i is that question of several (Prompt.Asks), -1 for a pick of one. A question
+// of several names it only by a first line "<project> #<n>: <question>" as written (the session's name when alias).
+func pickFor(pick *inbox.Prompt, boss string, id int, question string, alias bool) (i int, err error) {
 	switch {
 	case !pick.Pick:
-		return errors.New("--via manager: the user's latest words here are a typed message, not a pick: ask the item as a one-click question (AskUserQuestion; they can still type under Other)")
+		return -1, errors.New("--via manager: the user's latest words here are a typed message, not a pick: ask the item as a one-click question (AskUserQuestion; they can still type under Other)")
 	case question == "":
-		return errors.New("--via manager from a pick needs --question with the item's text")
-	case pick.Question == "":
-		return errors.New("--via manager: the user's pick wasn't one question: ask one item per question")
-	case !named || !strings.Contains(asked, strings.ToLower(question)):
-		return fmt.Errorf("--via manager: the user's pick was for %q, not %s #%d %q", pick.Question, boss, id, question)
-	case strings.EqualFold(pick.Answer, leaveOpen):
-		return fmt.Errorf("--via manager: the user picked %q: the item stays open", leaveOpen)
+		return -1, errors.New("--via manager from a pick needs --question with the item's text")
+	case pick.HandOnMixed:
+		return -1, errors.New("--via manager: the user's dialog held a hand-on question beside others: a hand-on question stays alone in its dialog: ask the items again, without it")
+	case len(pick.Asks) == 0 && pick.Question == "":
+		return -1, errors.New("--via manager: the user's pick held no question: ask the item again")
 	}
-	return nil
+	project := strings.TrimPrefix(boss, "boss-")
+	item := fmt.Sprintf(" #%d: ", id)
+	names := func(q string) bool {
+		asked := strings.ToLower(q)
+		named := strings.HasPrefix(asked, strings.ToLower(project)+item) || alias && strings.HasPrefix(asked, strings.ToLower(boss)+item)
+		return named && strings.Contains(asked, strings.ToLower(question))
+	}
+	p := *pick
+	i = -1
+	if len(pick.Asks) > 0 {
+		var asked []string
+		for j, q := range pick.Asks {
+			asked = append(asked, fmt.Sprintf("%q", inbox.FirstLine(q.Question)))
+			if line := inbox.FirstLine(q.Question); line != inbox.FirstLine(project+item+question) && (!alias || line != inbox.FirstLine(boss+item+question)) {
+				continue
+			}
+			if i >= 0 {
+				return -1, fmt.Errorf("--via manager: the user's dialog asked %s #%d twice: ask it again on its own", boss, id)
+			}
+			i = j
+		}
+		if i < 0 {
+			return -1, fmt.Errorf("--via manager: the user's dialog asked %s, not %q (in a dialog of several, a question's first line is \"<project> #<n>: <item text>\" as written, or the session's name for the project's)", strings.Join(asked, ", "), project+item+question)
+		}
+		p = pick.Ask(i)
+	}
+	switch {
+	case !names(p.Question):
+		return -1, fmt.Errorf("--via manager: the user's pick was for %q, not %s #%d %q", p.Question, boss, id, question)
+	case p.Answer == "":
+		return -1, fmt.Errorf("--via manager: the user left %q unanswered: the item stays open", p.Question)
+	case strings.EqualFold(p.Answer, leaveOpen):
+		return -1, fmt.Errorf("--via manager: the user picked %q: the item stays open", leaveOpen)
+	}
+	return i, nil
+}
+
+// aliasTaken reports boss's session name naming another project's boss in a question: a project of that name is
+// configured or its boss runs, so the name stops being an alias of boss's own project.
+func aliasTaken(cmd *cobra.Command, c *tmux.Client, boss string) (bool, error) {
+	path, err := config.DefaultPath()
+	if err != nil {
+		return false, err
+	}
+	projects, err := config.Load(path, reservedNames(cmd))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return false, err
+	case slices.ContainsFunc(projects, func(p config.Project) bool { return strings.EqualFold(p.Name, boss) }):
+		return true, nil
+	}
+	sessions, err := c.Run("list-sessions", "-F", "#{session_name}\t#{"+herd.OptHerd+"}")
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(strings.Split(strings.TrimSpace(sessions), "\n"), func(l string) bool {
+		session, mark, _ := strings.Cut(l, "\t")
+		return session == "boss-"+boss && mark != ""
+	}), nil
 }
 
 // leaveOpen is the option the manager adds beside an ask's only one: picked, the item stays open.
@@ -967,23 +1039,22 @@ func todoAll(c *tmux.Client, stderr io.Writer, now time.Time, asJSON, withNow, f
 	return lists, nil
 }
 
-// markAsking marks the open ask whose question the manager has up now (inbox.ManagerAsking), still reading what it
+// markAsking marks each open ask whose question the manager has up now (inbox.ManagerAsking), still reading what it
 // asked; a failure is only reported, the lists hold without it.
 func markAsking(c *tmux.Client, lists []bossList, now time.Time, stderr io.Writer) {
-	a, err := inbox.ManagerAsking(c, now)
+	as, err := inbox.ManagerAsking(c, now)
 	if err != nil {
 		fmt.Fprintln(stderr, "⚠ dev todo: the manager's question not read: "+err.Error())
 	}
-	if a == nil {
-		return
-	}
-	for _, bl := range lists {
-		if bl.Boss != a.Boss {
-			continue
-		}
-		for i, it := range bl.Items {
-			if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 && !bl.Closed {
-				bl.Items[i].Asking = true
+	for _, a := range as {
+		for _, bl := range lists {
+			if bl.Boss != a.Boss {
+				continue
+			}
+			for i, it := range bl.Items {
+				if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 && !bl.Closed {
+					bl.Items[i].Asking = true
+				}
 			}
 		}
 	}

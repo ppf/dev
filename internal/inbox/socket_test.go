@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -162,7 +164,7 @@ func TestPickedClaim(t *testing.T) {
 	}
 	pick, err := b.UserPrompt()
 	want := Prompt{Text: "boss-a #1: Merge #148? picked Merge", At: at.Unix(), Pick: true, Question: "boss-a #1: Merge #148?", Answer: "Merge"}
-	if err != nil || pick == nil || *pick != want {
+	if err != nil || pick == nil || !reflect.DeepEqual(*pick, want) {
 		t.Fatalf("UserPrompt = %+v, %v; want %+v", pick, err, want)
 	}
 	if err := b.Claim(*pick); err != nil {
@@ -183,6 +185,105 @@ func TestPickedClaim(t *testing.T) {
 	}
 	if p, err := b.UserPrompt(); err != nil || p == nil || p.Text != "A? picked x; B? picked y" || p.Question != "" {
 		t.Errorf("two picks: %+v, %v", p, err)
+	}
+}
+
+// A pick of several questions is claimed per question, once each, in both places it is kept; a hand-on question
+// among them marks the pick.
+func TestPickedSeveral(t *testing.T) {
+	b := testBox(t)
+	at := time.Unix(1700000000, 0)
+	picks := []agent.Pick{{Question: "a #1: A?", Answer: "x"}, {Question: "a #2: B?"}, {Question: "a #3: C?\n\n- its context", Answer: "Other words", Labels: []string{"z"}}}
+	if err := b.Picked(picks, at); err != nil {
+		t.Fatal(err)
+	}
+	p, err := b.LatestPick()
+	if err != nil || p == nil || len(p.Asks) != 3 || p.HandOnMixed || !p.Asks[2].Typed {
+		t.Fatalf("LatestPick = %+v, %v", p, err)
+	}
+	if got, want := p.Ask(2), (Prompt{Text: "a #3: C? picked Other words", At: at.Unix(), Pick: true, Question: "a #3: C?\n\n- its context", Answer: "Other words", Typed: true}); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ask(2) = %+v, want %+v", got, want)
+	}
+	if err := b.ClaimPick(*p, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*p, 0); err == nil || !strings.Contains(err.Error(), "pick on this question was used already") {
+		t.Errorf("second ClaimPick of question 1: %v, want refused", err)
+	}
+	if err := b.ClaimPick(*p, 2); err != nil {
+		t.Errorf("ClaimPick of question 3 after question 1: %v", err)
+	}
+	if err := b.Unclaim(*p, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*p, 2); err != nil {
+		t.Errorf("ClaimPick of question 3 after Unclaim: %v", err)
+	}
+	// A typed message since leaves the pick's other questions to relay; a question it hasn't, or the whole pick, is refused
+	if err := b.Arrived("and tag it", at.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range map[int]string{-1: "was of several questions", 3: "has no question 4"} {
+		if err := b.ClaimPick(*p, i); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ClaimPick(%d) of a pick of 3: %v, want %q", i, err, want)
+		}
+	}
+	if err := b.ClaimPick(*p, 1); err != nil {
+		t.Errorf("ClaimPick of question 2 after a typed message: %v", err)
+	}
+	if err := b.Unclaim(*p, 1); err != nil {
+		t.Fatal(err)
+	}
+	// Another dialog of the same second, words and size, differing in a question left unanswered, is not this one
+	other := *p
+	other.Asks = slices.Clone(p.Asks)
+	other.Asks[1].Question = "a #9: Z?"
+	if err := b.ClaimPick(other, 1); err == nil || !strings.Contains(err.Error(), "picked something since") {
+		t.Errorf("ClaimPick of a look-alike dialog: %v, want refused", err)
+	}
+	if err := b.Picked(picks, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*p, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*p, 2); err != nil {
+		t.Fatal(err)
+	}
+	// The same spend shows in the latest prompt the hand-on gate reads
+	if q, err := b.UserPrompt(); err != nil || q == nil || !q.Asks[0].Spent || q.Asks[1].Spent || !q.Asks[2].Spent || q.Spent {
+		t.Errorf("UserPrompt after the claims = %+v, %v", q, err)
+	}
+	// A new dialog's pick refuses the older one's questions
+	if err := b.Picked([]agent.Pick{{Question: "Hand on to boss-a?", Answer: HandItOn, Labels: []string{HandItOn, DropIt}}, {Question: "a #4: D?", Answer: "y"}}, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaimPick(*p, 1); err == nil || !strings.Contains(err.Error(), "picked something since") {
+		t.Errorf("ClaimPick of an older dialog's question: %v, want refused", err)
+	}
+	if q, err := b.LatestPick(); err != nil || q == nil || !q.HandOnMixed {
+		t.Errorf("a hand-on question beside an item: %+v, %v; want HandOnMixed", q, err)
+	}
+	// A hand-on question is known by its first line, whatever its options
+	if err := b.Picked([]agent.Pick{{Question: "Hand on to boss-a?\n\nCache.", Answer: "Proceed", Labels: []string{"Proceed", DropIt}}, {Question: "a #4: D?", Answer: "y"}}, at.Add(90*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := b.LatestPick(); err != nil || q == nil || !q.HandOnMixed {
+		t.Errorf("a hand-on question offering Proceed beside an item: %+v, %v; want HandOnMixed", q, err)
+	}
+	// So is one worded otherwise that offers Hand it on, when it isn't an item's ask
+	if err := b.Picked([]agent.Pick{{Question: "Send boss-api the brief?", Answer: HandItOn, Labels: []string{HandItOn, DropIt}}, {Question: "a #4: D?", Answer: "y"}}, at.Add(100*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := b.LatestPick(); err != nil || q == nil || !q.HandOnMixed {
+		t.Errorf("a hand-on question worded otherwise beside an item: %+v, %v; want HandOnMixed", q, err)
+	}
+	// An item's ask offering the label counts too: the safe side
+	if err := b.Picked([]agent.Pick{{Question: "a #5: Ship X?", Answer: "Keep it", Labels: []string{HandItOn, "Keep it"}}, {Question: "a #4: D?", Answer: "y"}}, at.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := b.LatestPick(); err != nil || q == nil || !q.HandOnMixed {
+		t.Errorf("an item offering %q beside another: %+v, %v; want HandOnMixed", HandItOn, q, err)
 	}
 }
 
@@ -210,19 +311,19 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Claim(p); err == nil || !strings.Contains(err.Error(), "said something since") {
 		t.Errorf("Claim after a typed prompt: %v, want refused", err)
 	}
-	if err := b.ClaimPick(p); err != nil {
+	if err := b.ClaimPick(p, -1); err != nil {
 		t.Fatalf("ClaimPick after a typed prompt: %v", err)
 	}
 	if err := b.Arrived("and rebase", at.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "pick was used already") {
+	if err := b.ClaimPick(p, -1); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("second ClaimPick: %v, want refused", err)
 	}
-	if err := b.Unclaim(p); err != nil {
+	if err := b.Unclaim(p, -1); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(p); err != nil {
+	if err := b.ClaimPick(p, -1); err != nil {
 		t.Errorf("ClaimPick after Unclaim: %v", err)
 	}
 
@@ -238,7 +339,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Arrived("ok", at.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(*latest); err == nil || !strings.Contains(err.Error(), "pick was used already") {
+	if err := b.ClaimPick(*latest, -1); err == nil || !strings.Contains(err.Error(), "pick was used already") {
 		t.Errorf("ClaimPick of a pick Claim spent: %v, want refused", err)
 	}
 
@@ -248,7 +349,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.Picked([]agent.Pick{{Question: "boss-a #2: Tag?", Answer: "Tag"}}, at.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.ClaimPick(p); err == nil || !strings.Contains(err.Error(), "picked something since") {
+	if err := b.ClaimPick(p, -1); err == nil || !strings.Contains(err.Error(), "picked something since") {
 		t.Errorf("ClaimPick of an older pick: %v, want refused", err)
 	}
 	if err := b.ForgetPrompt(); err != nil {
@@ -264,7 +365,7 @@ func TestLatestPick(t *testing.T) {
 	if err := b.DropPrompt(); err != nil {
 		t.Fatal(err)
 	}
-	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p) != nil {
+	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p, -1) != nil {
 		t.Errorf("after DropPrompt: latest %+v, %v; want none, the pick still claimable", latest, err)
 	}
 
@@ -276,7 +377,7 @@ func TestLatestPick(t *testing.T) {
 	if err := os.WriteFile(b.path, []byte(`{"notes":[],"last":{},"prompt":{"text":"x","at":1700000000,"pick":true,"question":"boss-a #1: Merge?","answer":"Merge"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := b.LatestPick(); err != nil || p == nil || b.ClaimPick(*p) != nil {
+	if p, err := b.LatestPick(); err != nil || p == nil || b.ClaimPick(*p, -1) != nil {
 		t.Errorf("LatestPick of an older file = %+v, %v; want it claimable", p, err)
 	}
 }
@@ -293,7 +394,7 @@ func TestArrivedUserPrompt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if p, err := b.UserPrompt(); err != nil || p == nil || *p != (Prompt{Text: "merge 148", At: at.Unix()}) {
+	if p, err := b.UserPrompt(); err != nil || p == nil || !reflect.DeepEqual(*p, Prompt{Text: "merge 148", At: at.Unix()}) {
 		t.Errorf("UserPrompt = %+v, %v; want merge 148 at %d", p, err, at.Unix())
 	}
 	// The user quoting a batch is still their prompt

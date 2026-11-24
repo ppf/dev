@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -19,11 +20,11 @@ type Asking struct {
 	At   int64  `json:"at"`
 }
 
-// SetAsking keeps a as the question the coordinator has up, in place of any earlier one; its next pick (Picked)
-// clears it.
-func (b Box) SetAsking(a Asking) error {
+// SetAsking keeps as, the items of the dialog the coordinator has up, in place of any earlier ones; its next pick
+// (Picked) clears them.
+func (b Box) SetAsking(as []Asking) error {
 	return b.update(func(s *state) error {
-		s.Asking = &a
+		s.Asking = as
 		return nil
 	})
 }
@@ -36,18 +37,19 @@ func (b Box) ClearAsking() error {
 	})
 }
 
-// Asking is the question the coordinator has up at now, nil for none: none set, picked since, or set AskingFor ago.
-func (b Box) Asking(now time.Time) (*Asking, error) {
+// Asking is the items whose questions the coordinator has up at now, none when none set, picked since, or set
+// AskingFor ago.
+func (b Box) Asking(now time.Time) ([]Asking, error) {
 	s, err := b.locked()
-	if err != nil || s.Asking == nil || now.Sub(time.Unix(s.Asking.At, 0)) >= AskingFor {
+	if err != nil {
 		return nil, err
 	}
-	return s.Asking, nil
+	return slices.DeleteFunc(s.Asking, func(a Asking) bool { return now.Sub(time.Unix(a.At, 0)) >= AskingFor }), nil
 }
 
-// ManagerAsking is the question the live Manager has up at now (Box.Asking), its inbox on or off: nil with no tmux
-// server or no Manager session.
-func ManagerAsking(c *tmux.Client, now time.Time) (*Asking, error) {
+// ManagerAsking is the items whose questions the live Manager has up at now (Box.Asking), its inbox on or off: none
+// with no tmux server or no Manager session.
+func ManagerAsking(c *tmux.Client, now time.Time) ([]Asking, error) {
 	// display-message prints nothing for a missing session, without failing
 	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(Manager)); err != nil {
 		if tmux.IsNoServer(err) || strings.Contains(err.Error(), "can't find session") {
