@@ -151,7 +151,7 @@ func TestAskRules(t *testing.T) {
 			"Each option is `<label> | <detail>`",
 			"**A contract before a feature's workers.**",
 			"**A remark on a feature whose contract is picked**",
-			"**Scope gate:**", "**An easy decision is yours.**", "--decided '<why it is easy>'", "start without a further ask unless their cost or scope changed since the pick", "Decisions that belong together go in one `dev todo ask`",
+			"**Scope gate:**", "--decided '<why it is easy>'", "start without a further ask unless their cost or scope changed since the pick", "Decisions that belong together go in one `dev todo ask`",
 			"**A mockup the user must see is opened for them.**",
 			`open -a "Google Chrome" <file>`,
 			"**A worker's question is answered in the same turn.**",
@@ -196,20 +196,17 @@ func TestAskRules(t *testing.T) {
 		"each option's detail (after ` | `) in its `description`",
 		"the item's context as `- ` lines",
 		"**Assess the user's ideas before handing them on.**", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
-		"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
+		"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "you decide yourself and report in one line",
 		"you decide nothing for a project",
 		"text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)",
 		"brief's first line stands word for word on a line of its own", "`message` or `reply` you send a boss carries `--kind`: `work` (new work, refused without that pick)", "prompt the boss (`--kind own`) with the missing fact", "`dev agent message --kind question` while it works", "`dev agent handoffs`", "--kind question \"…; answer with dev agent message manager\"",
 		"ending `the manager asks the user: leave it to the manager` is the manager's",
 		"**A worker's permission prompt or dialog under a boss of yours**",
 		"only the answer after the colon is theirs",
-		// Easy decisions part 2: the boss marks, the manager settles after its two checks
+		// The boss may mark an ask obvious; the manager settles a boss's ask, marked or not
 		"gets `--obvious '<why>'` on its `dev todo ask` (exactly one option recommended)",
-		"`settled by the manager with your recommended option: <answer>` for an ask you marked obvious",
-		"settle no item on a boss's list but an ask its boss marked obvious",
-		"first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed. Either fails: put it to the user as any other ask",
-		"`dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`",
-		"`<project> #<n>: decided for you: <pick> (obvious: <why>)`",
+		"`settled by the manager with your recommended option: <answer>` for an ask the manager settled, marked obvious or not",
+		"you decide nothing for a project but the asks you settle (below)",
 		// The clear's own prompts are dev's fixed text, not the manager's sends
 		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
 		"- **dev offers it:** once per idle stretch", "Run it then, in the background", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
@@ -251,6 +248,37 @@ func TestTodoNoteRule(t *testing.T) {
 			if strings.Contains(text, "dev todo") && !strings.Contains(text, want) {
 				t.Errorf("%s/SKILL.md: note rule missing %q", name, want)
 			}
+		}
+	}
+}
+
+// Settling is the default for a cheap, reversible ask inside what the user agreed: the line and both example lists in
+// every skill (shared block), the manager's settle with its one-line report in dev-agents; the old "may" wording gone.
+func TestSettleRule(t *testing.T) {
+	for name, text := range byName {
+		for _, want := range []string{
+			"- **Settle, don't ask, what is cheap, reversible and inside what the user already agreed** (a picked contract, an earlier pick, a standing rule): take your recommended option, record it at once with `dev todo ask '<question?>' --option '<pick> | <effect> (Recommended)' --option '<other> | <effect>' --decided '<why it is easy>'` (ticked, under Done as \"decided for you\" with Overrule), never only as a line in your pane, and report it in one line (a worker's question with one clear answer needs only the report above). Permission prompts and dialogs, and the manager's hand-on gate where there is one, stay as they are.",
+			"  - **Settle:** rebuild a local dev server, which test key a demo container uses, a workspace or a single file for tests, keep a draft for tomorrow, add the missing test in this PR, order of agreed work.",
+			"  - **Ask:** a merge into someone else's repo, a force-push, a send to a person, a settings or secrets change, new scope, taste (looks, wording to people), real money or a large share of the usage limit, anything hard to undo. When unsure which side: ask.",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s/SKILL.md: missing %q", name, want)
+			}
+		}
+		for _, old := range []string{"An easy decision is yours", "Ask the user only for what stays theirs", "asks-stay", "settle no item on a boss's list", "(obvious: <why>)`"} {
+			if strings.Contains(text, old) {
+				t.Errorf("%s/SKILL.md: still has the old wording %q", name, old)
+			}
+		}
+	}
+	for _, want := range []string{
+		"- **Settle, don't ask, a boss's ask that is cheap, reversible and inside what the user already agreed,** on the Settle and Ask lines of [Boss inbox](#boss-inbox), when you see no trade-off the boss missed: `dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`, plus `--why '<one line>'` when its boss didn't mark it obvious",
+		"Say each in your reply to the user in one line: `<boss> #<n>: took <option> over <other>; overrule on the board`.",
+		"dev refuses it with no single recommended option, once answered or changed, unmarked without `--why`, and for a hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are.",
+		"The manager may settle an unmarked ask too, when it is on the Settle side above.",
+	} {
+		if !strings.Contains(DevAgents, want) {
+			t.Errorf("dev-agents/SKILL.md: missing %q", want)
 		}
 	}
 }

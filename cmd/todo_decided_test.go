@@ -18,6 +18,7 @@ func TestTodoAnswerRecommendedRefused(t *testing.T) {
 		want string
 	}{
 		{[]string{"boss-dev", "1", "Merge", "--recommended", "--question", "Q?"}, "needs --via manager"},
+		{[]string{"boss-dev", "1", "Merge", "--why", "cheap", "--question", "Q?", "--via", "manager"}, "only with --recommended"},
 		{[]string{"boss-dev", "1", "--recommended", "--question", "Q?", "--via", "manager"}, "needs the recommended option you checked"},
 		{[]string{"boss-dev", "1", "Merge", "--recommended", "--via", "manager"}, "needs --question"},
 		{[]string{"boss-dev", "1", "1", "--recommended", "--question", "Q?", "--via", "manager"}, "by its label, not its number"},

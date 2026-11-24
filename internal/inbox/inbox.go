@@ -744,7 +744,7 @@ func (b Box) Picked(picks []agent.Pick, now time.Time) error {
 	if len(picks) > 1 {
 		for _, k := range picks {
 			p.Asks = append(p.Asks, Asked{Question: k.Question, Answer: k.Answer, Typed: k.Typed()})
-			p.HandOnMixed = p.HandOnMixed || isHandOn(k.Question, k.Labels)
+			p.HandOnMixed = p.HandOnMixed || IsHandOn(k.Question, k.Labels)
 		}
 	}
 	return b.update(func(s *state) error {

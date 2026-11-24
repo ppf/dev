@@ -11,9 +11,8 @@ import (
 	"testing"
 )
 
-// The manager settles an ask its boss marked obvious with dev todo answer --recommended --via manager: only from its
-// coordinator pane, never an unmarked ask, never a permission prompt; the item shows who decided and the boss gets
-// the note.
+// The manager settles a boss's ask with dev todo answer --recommended --via manager: only from its coordinator pane, an
+// unmarked ask only with --why, never a permission prompt; the item shows who decided and the boss gets the note.
 func TestTodoAnswerRecommended(t *testing.T) {
 	tmp := t.TempDir()
 	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+filepath.Join(tmp, "state"))
@@ -48,7 +47,7 @@ func TestTodoAnswerRecommended(t *testing.T) {
 	}
 	for _, ask := range [][]string{
 		{"todo", "ask", "Re-run CI on #301?", "--option", "Re-run | known flake (Recommended)", "--option", "Look first | read the log", "--obvious", "known flake, 2 of 10 runs", "--details", "x"},
-		{"todo", "ask", "Merge #148?", "--option", "Merge (Recommended)", "--option", "Wait", "--details", "x"},
+		{"todo", "ask", "Rebuild the dev server?", "--option", "Rebuild (Recommended)", "--option", "Wait", "--details", "x"},
 	} {
 		if _, stderr, err := dev(claude(pane["boss-a"]), "", ask...); err != nil {
 			t.Fatal(err, stderr)
@@ -59,7 +58,7 @@ func TestTodoAnswerRecommended(t *testing.T) {
 	if _, stderr, err := settle(pane["boss-a"], "boss-a", "1", "Re-run", "Re-run CI on #301?"); err == nil || !strings.Contains(stderr, "only in the manager's coordinator pane") {
 		t.Errorf("❌ from boss-a's pane: %v %q", err, stderr)
 	}
-	if _, stderr, err := settle(pane["manager"], "boss-a", "2", "Merge", "Merge #148?"); err == nil || !strings.Contains(stderr, "isn't marked obvious by its boss") {
+	if _, stderr, err := settle(pane["manager"], "boss-a", "2", "Rebuild", "Rebuild the dev server?"); err == nil || !strings.Contains(stderr, "isn't marked obvious by its boss") {
 		t.Errorf("❌ an unmarked ask: %v %q", err, stderr)
 	}
 	permission := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}`
@@ -155,5 +154,38 @@ func TestTodoAnswerRecommended(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(out), &hook) != nil || !strings.Contains(hook.Reason, `#3 "Retry the flaky test?" overruled by the user`) ||
 		strings.Contains(hook.Reason, `#3 "Retry the flaky test?" settled by the manager`) {
 		t.Errorf("❌ boss-a's notes after #3's overrule: %v %s %q", err, stderr, out)
+	}
+
+	// An unmarked ask: settled only with --why, never one with no recommended option or a hand-on question; the user
+	// overrules it as any settled ask
+	for _, ask := range [][]string{
+		{"todo", "ask", "Which port?", "--option", "Port a", "--option", "Port b", "--details", "x"},
+		{"todo", "ask", "Ship the parser?", "--option", "Hand it on (Recommended)", "--option", "Drop it", "--details", "x"},
+		{"todo", "ask", "Hand on to boss-b: the parser?", "--option", "Yes (Recommended)", "--option", "No", "--details", "x"},
+	} {
+		if _, stderr, err := dev(claude(pane["boss-a"]), "", ask...); err != nil {
+			t.Fatal(err, stderr)
+		}
+	}
+	settleWhy := func(n, pick, question, why string) (string, string, error) {
+		return dev(claude(pane["manager"]), "", "todo", "answer", "boss-a", n, pick, "--recommended", "--question", question, "--via", "manager", "--why", why)
+	}
+	for _, tt := range []struct{ n, pick, question, want string }{
+		{"4", "Port a", "Which port?", "no one recommended option"},
+		{"5", "Hand it on", "Ship the parser?", "is a hand-on question"},
+		{"6", "Yes", "Hand on to boss-b: the parser?", "is a hand-on question"},
+	} {
+		if _, stderr, err := settleWhy(tt.n, tt.pick, tt.question, "cheap"); err == nil || !strings.Contains(stderr, tt.want) {
+			t.Errorf("❌ settle #%s with --why: %v %q, want %q", tt.n, err, stderr, tt.want)
+		}
+	}
+	if out, stderr, err := settleWhy("2", "Rebuild", "Rebuild the dev server?", "local, rebuilt in a minute"); err != nil || out != "#2 settled with \"Rebuild\", sent to boss-a\n" {
+		t.Fatalf("❌ settle of unmarked #2 with --why: %q %v %s", out, err, stderr)
+	}
+	if list, stderr, err = dev(user, "", "todo", "--json", "--boss", "boss-a"); err != nil || !strings.Contains(list, `"why": "local, rebuilt in a minute"`) || !strings.Contains(list, `"by": "manager"`) {
+		t.Errorf("❌ #2 not decided by the manager with its why: %v %s\n%s", err, stderr, list)
+	}
+	if out, stderr, err := dev(user, "", "todo", "overrule", "boss-a", "2", "Wait", "--question", "Rebuild the dev server?"); err != nil || out != "#2 overruled with \"Wait\", sent to boss-a\n" {
+		t.Errorf("❌ overrule of #2: %q %v %s", out, err, stderr)
 	}
 }

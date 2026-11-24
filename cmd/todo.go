@@ -480,7 +480,7 @@ func detailsFlag(cmd *cobra.Command, raw string) (string, error) {
 const quietHelp = "a test item: a TEST tag on the boards, left out of their tallies and roll-ups (a column still lists it), the boss above not told; kept by --replaces"
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
-	var question, via string
+	var question, via, why string
 	var fromBoard, recommended bool
 	cmd := &cobra.Command{
 		Use:   "answer <boss> <n> <option|text>",
@@ -499,19 +499,23 @@ user's latest dialog, typed messages after it or not; a typed message is never t
 instead. An
 item the user answered meanwhile elsewhere sends nothing, saying who answered what where: an error only for another
 answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").
---recommended --via manager is the manager settling an ask its boss marked obvious (dev todo ask --obvious) with its
-recommended option, no pick needed: the answer names that option as the manager checked it, refused once it is no longer
-the recommended one; only from the manager's coordinator pane, never an unmarked ask, the manager's own, a permission
-prompt or a dialog. The item records it as decided for the user by the manager, and the
-boss's note says so: "you answered #<n> \"<question>\" settled by the manager with your recommended option: <answer>".`,
+--recommended --via manager is the manager settling a boss's ask with its one recommended option, no pick needed: one
+its boss marked obvious (dev todo ask --obvious), or an unmarked one with --why '<one line>' (why it is cheap,
+reversible and inside what the user agreed), never a hand-on question. The answer names that option as the manager
+checked it, refused once it is no longer the recommended one; only from the manager's coordinator pane, never the
+manager's own, a permission prompt or a dialog. The item records it as decided for the user by the manager, with the
+mark's why or --why, and the boss's note says so: "you answered #<n> \"<question>\" settled by the manager with your recommended option: <answer>".`,
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			why = todo.Clean(why)
 			switch {
 			case via != "" && via != inbox.Manager:
 				return fmt.Errorf("--via %s: only --via %s", via, inbox.Manager)
 			case recommended && via == "":
-				return errors.New("--recommended is the manager settling a marked ask: needs --via manager")
+				return errors.New("--recommended is the manager settling a boss's ask: needs --via manager")
+			case why != "" && !recommended:
+				return errors.New("--why is why the manager settles an unmarked ask: only with --recommended")
 			case len(args) == 2 && recommended:
 				return errors.New("--recommended needs the recommended option you checked as the answer")
 			case len(args) == 2:
@@ -519,7 +523,7 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 			case recommended && question == "":
 				return errors.New("--recommended needs --question with the item's text")
 			case recommended && name == inbox.Manager:
-				return errors.New("--recommended settles a boss's marked ask, never the manager's own: those are the user's")
+				return errors.New("--recommended settles a boss's ask, never the manager's own: those are the user's")
 			case os.Getenv("CLAUDECODE") != "" && !fromBoard && via == "":
 				return errors.New("refused in a Claude Code session: only the user answers (in a shell, the sidebar or a board)")
 			case fromBoard && question == "":
@@ -538,7 +542,7 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 				if _, err := strconv.Atoi(args[2]); err == nil {
 					return errors.New("--recommended: name the recommended option by its label, not its number (options may move)")
 				}
-				return settleAsk(c, cmd.OutOrStdout(), cmd.ErrOrStderr(), name, id, question, args[2])
+				return settleAsk(c, cmd.OutOrStdout(), cmd.ErrOrStderr(), name, id, question, args[2], why)
 			}
 			var said *inbox.Prompt // the pick's question naming the item, of a dialog's one or several
 			var before int64
@@ -602,7 +606,8 @@ boss's note says so: "you answered #<n> \"<question>\" settled by the manager wi
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button (needs --question): allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
 	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's pick in its AskUserQuestion (only in its coordinator pane)")
-	cmd.Flags().BoolVar(&recommended, "recommended", false, "with --via manager: settle an ask its boss marked obvious with its recommended option, as the manager")
+	cmd.Flags().BoolVar(&recommended, "recommended", false, "with --via manager: settle a boss's ask with its recommended option, as the manager (an unmarked one needs --why)")
+	cmd.Flags().StringVar(&why, "why", "", "with --recommended: why an ask its boss didn't mark obvious is cheap, reversible and inside what the user agreed, one line (refused for a marked one)")
 	return cmd
 }
 

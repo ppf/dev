@@ -11,7 +11,7 @@ import (
 
 // Who decided an ask for the user (Decided.By).
 const (
-	DecidedManager = "manager" // the manager settled an ask its boss marked obvious (Settle)
+	DecidedManager = "manager" // the manager settled a boss's ask (Settle)
 	DecidedBoss    = "boss"    // the list's boss settled it itself (Decide)
 )
 
@@ -81,11 +81,12 @@ func (it *Item) decide(by, doneBy, why string, at int64) error {
 	return nil
 }
 
-// Settle ticks the user's own open ask id, its boss having marked it obvious (Item.Obvious), with its recommended
-// option, decided for the user by the manager, and returns it. pick names the option the manager checked: refused
-// unless it is still the recommended one. It is also refused, changing nothing, for an item that isn't such an ask,
-// reads other than question (numbers restart), or was answered already (an Answered error).
-func (s Store) Settle(id int, question, pick string, now time.Time) (Item, error) {
+// Settle ticks the user's own open ask id with its recommended option, decided for the user by the manager for its
+// boss's obvious mark (Item.Obvious) or, unmarked, for why, and returns it. pick names the option the manager checked:
+// refused unless it is still the recommended one. It is also refused, changing nothing, for an item that isn't such an
+// ask, has no one recommended option or that handOn reports, an unmarked one with one option or without why, a marked
+// one with why, one reading other than question (numbers restart), or one answered already (an Answered error).
+func (s Store) Settle(id int, question, pick, why string, handOn func(Item) bool, now time.Time) (Item, error) {
 	if question == "" {
 		return Item{}, errors.New("settling an ask needs its text")
 	}
@@ -120,8 +121,19 @@ func (s Store) Settle(id int, question, pick string, now time.Time) (Item, error
 			return fmt.Errorf("item %d is no question (dev todo ask)", id)
 		case !Own(p.On, p.Session, s.boss):
 			return fmt.Errorf("item %d is on %s, not the user's to answer", id, p.On)
-		case p.Obvious == "":
-			return fmt.Errorf("item %d isn't marked obvious by its boss (dev todo ask --obvious): the user answers it", id)
+		case handOn(*p):
+			return fmt.Errorf("item %d is a hand-on question: the user answers it", id)
+		case recommended(p.Options) != 1:
+			return fmt.Errorf("item %d has no one recommended option: the user answers it", id)
+		case p.Obvious != "" && why != "":
+			return fmt.Errorf("item %d is marked obvious by its boss (%s): leave out --why", id, p.Obvious)
+		case p.Obvious != "":
+		case len(p.Options) < 2:
+			return fmt.Errorf("item %d has one option, none to overrule it with: the user answers it", id)
+		case why == "":
+			return fmt.Errorf("item %d isn't marked obvious by its boss (dev todo ask --obvious): settle it with --why '<one line>' only when it is cheap, reversible and inside what the user agreed, else the user answers it", id)
+		case utf8.RuneCountInString(why) > MaxResult:
+			return fmt.Errorf("--why is %d characters, at most %d: one line", utf8.RuneCountInString(why), MaxResult)
 		}
 		want, err := Pick(p.Options, pick)
 		if err != nil {
@@ -130,7 +142,7 @@ func (s Store) Settle(id int, question, pick string, now time.Time) (Item, error
 		if i := slices.IndexFunc(p.Options, func(o string) bool { return Split(o).Recommended }); i >= 0 && answerOf(p.Options, p.Options[i]) != want {
 			return fmt.Errorf("item %d's recommended option is %q now, not %q: look at the list again", id, answerOf(p.Options, p.Options[i]), want)
 		}
-		if err := p.decide(DecidedManager, DecidedManager, p.Obvious, now.Unix()); err != nil {
+		if err := p.decide(DecidedManager, DecidedManager, cmp.Or(p.Obvious, why), now.Unix()); err != nil {
 			return err
 		}
 		p.Via = ViaManager

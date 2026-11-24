@@ -185,7 +185,7 @@ func TestDecidedBlock(t *testing.T) {
 		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
 	v := ansi.Strip(New(it, Actions{}, false).View(Width, 50, now))
 	at := now.Add(-time.Hour).Format("15:04")
-	for _, want := range []string{"─ decided for you: manager ─", at + " · by manager ─", "picked  ★ Re-run the job", "over    Look into it first", "why     the boss marked it obvious: known flake, 2 of the last 10 runs"} {
+	for _, want := range []string{"─ decided for you: manager ─", at + " · by manager ─", "picked  ★ Re-run the job", "over    Look into it first", "why     known flake, 2 of the last 10 runs"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}

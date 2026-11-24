@@ -898,12 +898,11 @@ function doneSheet(boss, id, at) {
   }
   const d = it.decided;
   if (d) {
-    const why = d.by === 'manager' ? 'The boss marked it obvious: ' + d.why : d.why;
     out.push(el('section', { class: 'live decided', 'aria-label': 'Decided for you' },
       el('div', { class: 'lv-top' }, el('span', { class: 'lv-who' }, 'Decided for you'), ticked && el('span', { class: 'lv-since' }, ticked)),
       el('div', { class: 'lv-row' }, el('b', null, 'Picked'), el('span', null, el('i', null, option(d.pick).label), ' ', el('span', { class: 'star' }, '★ recommended'))),
       d.over?.length > 0 && el('div', { class: 'lv-row' }, el('b', null, 'Over'), el('span', null, d.over.map(o => option(o).label).join(' · '))),
-      el('div', { class: 'lv-row' }, el('b', null, 'Why'), el('span', null, why))));
+      el('div', { class: 'lv-row' }, el('b', null, 'Why'), el('span', null, d.why))));
   } else if (it.answer) out.push(el('div', { class: 'answer' }, el('b', null, 'You answered'), el('span', null, it.answer)));
   if (it.details) out.push(details(it.details));
   if (it.context?.length) out.push(el('ul', { class: 'context' }, it.context.map(c => el('li', null, c))));

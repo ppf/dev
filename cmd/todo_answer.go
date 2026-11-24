@@ -67,14 +67,14 @@ func tellAbove(c *tmux.Client, pane string, it todo.Item, note inbox.Note, warn 
 }
 
 // settleAsk settles ask id of boss name's list, reading question, with its recommended option pick as the manager
-// (todo.Store.Settle) and sends the boss the note; only from the manager's coordinator pane.
-func settleAsk(c *tmux.Client, out, stderr io.Writer, name string, id int, question, pick string) error {
+// (todo.Store.Settle; an unmarked ask needs why) and sends the boss the note; only from the manager's coordinator pane.
+func settleAsk(c *tmux.Client, out, stderr io.Writer, name string, id int, question, pick, why string) error {
 	if err := inManagerPane(c); err != nil {
 		return err
 	}
 	b, err := inbox.Recipient(c, name)
 	if errors.Is(err, inbox.ErrNotBoss) {
-		return fmt.Errorf("%w: --recommended settles only a marked ask on a boss's list, never a permission prompt or dialog", err)
+		return fmt.Errorf("%w: --recommended settles only an ask on a boss's list, never a permission prompt or dialog", err)
 	}
 	if err != nil {
 		return err
@@ -87,7 +87,14 @@ func settleAsk(c *tmux.Client, out, stderr io.Writer, name string, id int, quest
 	if err != nil {
 		return err
 	}
-	it, err := s.Settle(id, question, pick, time.Now())
+	handOn := func(it todo.Item) bool {
+		labels := make([]string, len(it.Options))
+		for i, o := range it.Options {
+			labels[i] = todo.Split(o).Label
+		}
+		return inbox.IsHandOn(it.Text, labels)
+	}
+	it, err := s.Settle(id, question, pick, why, handOn, time.Now())
 	if err != nil {
 		return err
 	}
