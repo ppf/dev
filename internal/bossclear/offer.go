@@ -34,14 +34,23 @@ type offerRow struct {
 	WaitingFor string `tmux:"@agent_waiting_for"`
 	Since      string `tmux:"@agent_since"`
 	Context    string `tmux:"@agent_context"`
-	Offered    string `tmux:"@dev_clear_offered"`
+	Transcript string `tmux:"@agent_transcript"`
+	Offered    string `tmux:"@dev_clear_offered"` // OptOffered
 }
 
 // Offer, run by the watch loop of the boss session pane is in, offers once per idle stretch to clear its boss once it
 // has rested IdleLimit and Check passes without --force: a note to the manager that started or adopted it, or for the
 // manager itself an ask on its own list, which the user's NEEDS YOU shows (they run dev agent clear from a shell).
-// None for a boss without a live manager over it, or while a clear runs; a stretch is marked offered only once told.
+// None for a boss without a live manager over it or a recorded transcript, or while a clear runs; a stretch is marked
+// offered only once told.
 func Offer(c *tmux.Client, clk control.Clock, pane string) error {
+	if err := offer(c, clk, pane); err != nil {
+		return fmt.Errorf("clear offer: %w", err)
+	}
+	return nil
+}
+
+func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	rows, err := tmux.Query[offerRow](c, "list-panes", "-s", "-t", pane)
 	if err != nil {
 		return err
@@ -51,13 +60,21 @@ func Offer(c *tmux.Client, clk control.Clock, pane string) error {
 		return nil
 	}
 	r, now := rows[i], clk.Now()
-	// Cheap checks first: this runs every watch round
-	st := agent.Trusted(r.State, r.StateCmd, r.Command)
-	since, serr := strconv.ParseInt(r.Since, 10, 64)
-	used, cerr := strconv.Atoi(r.Context)
+	// Cheap checks first: this runs every watch round. Unset: no hook yet, or no dev statusline
+	if r.Since == "" || r.Context == "" || r.Transcript == "" || r.Offered == r.Since {
+		return nil
+	}
+	since, err := strconv.ParseInt(r.Since, 10, 64)
+	if err != nil {
+		return fmt.Errorf("%s @agent_since: %w", r.Session, err)
+	}
+	used, err := strconv.Atoi(r.Context)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", r.Session, agent.OptContext, err)
+	}
 	idle := now.Sub(time.Unix(since, 0))
-	if serr != nil || cerr != nil || r.Offered == r.Since || idle < IdleLimit || used < MinContext ||
-		st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
+	st := agent.Trusted(r.State, r.StateCmd, r.Command)
+	if idle < IdleLimit || used < MinContext || st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
 		return nil
 	}
 	manager := r.Session == sidebar.Manager
@@ -86,7 +103,7 @@ func Offer(c *tmux.Client, clk control.Clock, pane string) error {
 	if manager {
 		err = offerUser(c, r.Pane, text, now)
 	} else {
-		err = inbox.ToManager(c, clk, m, inbox.Note{Worker: r.Session, Kind: inbox.ClearIt, Key: r.Since,
+		err = inbox.ToManager(c, clk, m, inbox.Note{Worker: r.Session, Kind: inbox.ClearIt, Key: inbox.ClearIt + "\x00" + r.Since,
 			Text: text + ": clear it? (dev agent clear " + r.Session + ", in the background)"})
 	}
 	if err != nil {
@@ -119,4 +136,24 @@ func offerUser(c *tmux.Client, pane, text string, now time.Time) error {
 			"Done when you cleared it or picked Not now.",
 	}, now)
 	return err
+}
+
+// answerOffer answers the open OfferQuestion on the manager's list (pane's) with "Clear it": the user just cleared it.
+func answerOffer(c *tmux.Client, pane string, now time.Time) error {
+	s, err := todo.ForPane(c, pane)
+	if err != nil {
+		return err
+	}
+	l, err := s.Read(now)
+	if err != nil {
+		return err
+	}
+	for _, it := range l.Items {
+		if !it.Done && it.Text == OfferQuestion {
+			if _, err := s.Answer(it.ID, OfferQuestion, "Clear it", 0, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

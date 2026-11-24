@@ -13,7 +13,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 )
 
-// Sections are a handoff file's "## " headings, in the order the save prompt asks for (only their presence is checked).
+// Sections are a handoff file's "## " headings, in the order the save prompt asks for.
 var Sections = []string{"Key facts", "Open asks", "Work in flight", "The user's standing words", "Roles", "Open risks", "Old transcript"}
 
 // ProofSections are a proof file's.
@@ -46,15 +46,15 @@ type Boss struct {
 	Queued       bool // inbox notes wait for it
 }
 
-// Check refuses a clear, naming every failed check: b isn't a boss whose hook records its session, it isn't idle
-// with an empty input box, a worker of it works (or has no hook state) or waits on a decision, notes wait in its
-// inbox, a planned wait or rate-limit resume is ahead for it or a worker, or, without force, its context share is
-// unknown or under MinContext.
 // NotBoss is the refusal of session, no boss.
 func NotBoss(session string) error {
 	return fmt.Errorf("%s isn't a boss (dev boss): only a boss is cleared this way", session)
 }
 
+// Check refuses a clear, naming every failed check: b isn't a boss whose hook records its session, it works or
+// waits on a decision or its input box holds text, a worker of it works (or has no hook state) or waits on a
+// decision, notes wait in its inbox, a planned wait or rate-limit resume is ahead for it or a worker, or, without
+// force, its context share is unknown or under MinContext.
 func Check(b Boss, workers []Pane, force bool) error {
 	if !b.IsBoss {
 		return NotBoss(b.Session)
@@ -136,7 +136,7 @@ var (
 	// A word saying work is done, and one hedging it: an unconfirmed fact with the first and none of the second is
 	// worded as done
 	doneWord = regexp.MustCompile(`(?i)\b(merged|released|shipped|deployed|fixed|done|finished|completed?|closed|pushed|tagged|passed|passing|green|resolved|live|sent|installed)\b`)
-	hedge    = regexp.MustCompile(`(?i)\b(reported|not|no|unchecked|unverified|said|says|claims?|according|supposedly|expected|should|would|will|may|might|maybe|probably|likely|if|whether|pending|waiting|yet|unknown)\b|n't|\?`)
+	hedge    = regexp.MustCompile(`(?i)\b(reported|not|no|nothing|never|none|unchecked|unverified|said|says|claims?|according|supposedly|expected|should|would|will|may|might|maybe|probably|likely|if|whether|pending|waiting|yet|unknown|must|needs?|wants?|wanted|asks?|asked|after|before|once|until|when|plans?|planned)\b|n't|\?`)
 	trailing = " \t.)]*_`"
 	emphasis = strings.NewReplacer("**", "", "__", "", "`", "")
 )
@@ -197,9 +197,9 @@ func facts(lines []string) []Fact {
 }
 
 // StatedDone is the miss of fs's unconfirmed facts worded as done ("PR #41 is merged. unconfirmed"), "" for none. By
-// words only: a done word (merged, released, fixed, …) with no hedge (reported, not, may, pending, a "?", …). It
-// misses a fact done in other words ("PR #41 is in main") or hedged elsewhere in it, and can't tell a confirmed
-// fact's source is real.
+// words only: a done word (merged, released, fixed, …) with no hedge (reported, not, may, pending, wants, until, a "?",
+// …). It misses a fact done in other words ("PR #41 is in main") or hedged elsewhere in it ("merged, no conflicts"),
+// may flag one that only mentions such a word unhedged, and can't tell a confirmed fact's source is real.
 func StatedDone(fs []Fact) string {
 	var nums, words []string
 	for _, f := range fs {
@@ -214,7 +214,7 @@ func StatedDone(fs []Fact) string {
 	if len(nums) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("key facts %s state as done what is unconfirmed (%s): word each as reported, not checked (\"reported merged, not checked\")",
+	return fmt.Sprintf("key facts %s state as done what is unconfirmed (%s): word each as not checked (\"reported merged, not checked\") or as what is wanted (\"wants it merged\")",
 		strings.Join(nums, ", "), strings.Join(slices.Compact(words), ", "))
 }
 

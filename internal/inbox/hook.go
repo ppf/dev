@@ -143,7 +143,8 @@ func openList(c *tmux.Client, pane string) (string, error) {
 }
 
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, and after
-// a dev agent clear's /clear its handoff's line (handoffLine), also when the list can't be read; "" otherwise.
+// a dev agent clear's /clear its handoff's line (handoffLine), also without a list; an error reading either still gives
+// the other, with why; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
 func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
@@ -152,9 +153,12 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 		return "", err
 	}
 	var handoff string
+	var herr error
 	if source == "clear" {
-		if handoff, err = handoffLine(c, pane); err != nil {
-			return "", err
+		if handoff, herr = handoffLine(c, pane); herr != nil {
+			// Its list still goes out, and the boss learns a handoff may wait
+			handoff = "dev couldn't tell whether a dev agent clear left you a handoff (" + herr.Error() +
+				"): look for the newest file in $XDG_STATE_HOME/dev/handoff/<your boss session>/ before acting."
 		}
 	}
 	out, err := listContext(c, pane, source, hint, handoff)
@@ -162,9 +166,9 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 		// The fresh boss still gets its handoff, and why its list is missing
 		data, jerr := json.Marshal(hookContext("SessionStart", handoff+"\ndev couldn't give your list and notes ("+err.Error()+
 			"): run dev todo and dev todo note."))
-		return string(data), errors.Join(err, jerr)
+		return string(data), errors.Join(herr, err, jerr)
 	}
-	return out, err
+	return out, errors.Join(herr, err)
 }
 
 // listContext is startList's output from the boss's list and notes, with the handoff line (when any) after hint's.
@@ -172,7 +176,11 @@ func listContext(c *tmux.Client, pane, source string, hint Hint, handoff string)
 	s, err := todo.ForPane(c, pane)
 	if errors.Is(err, todo.ErrNotBoss) {
 		// A restored boss is marked one only after its coordinator starts
-		return "", nil
+		if handoff == "" {
+			return "", nil
+		}
+		data, err := json.Marshal(hookContext("SessionStart", handoff))
+		return string(data), err
 	}
 	if err != nil {
 		return "", err
@@ -199,7 +207,7 @@ func handoffLine(c *tmux.Client, pane string) (string, error) {
 }
 
 // Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo
-// take-over), and after a dev agent clear its handoff's path; "" for none; it checks s and reports its own failures.
+// take-over), "" for none; it checks s and reports its own failures.
 type Hint func(s todo.Store) string
 
 // StartContext is the SessionStart hook output giving a boss list s's open items, gone workers marked, then its notes,

@@ -34,7 +34,7 @@ only into an empty input box, and a turn ending on a permission prompt or dialog
     and write the handoff $XDG_STATE_HOME/dev/handoff/<boss>/<time>.md with the sections %s:
     key facts numbered, at most %d, each ending "unconfirmed" or in a last clause "confirmed: <item, PR or file>";
     Roles: who answers its workers' permission prompts and dialogs, who relays its asks. --facts <file> (the
-    caller's own numbered facts, refused when one is worded as done below) is copied next to it as
+    caller's own numbered facts, refused when one is unmarked, worded as done below, numbered twice, or over 15) is copied next to it as
     <time>-facts.md for the boss to copy in.
  2. dev verifies it: the file was written with every section, something under Roles, 1-%d marked key facts each
     under its own number, no unconfirmed fact worded as done, every open item's #number, the old transcript's path
@@ -52,8 +52,9 @@ It prints the handoff, proof and old transcript paths; a failure after the /clea
 to send by hand. dev checks form, not meaning: compare the two files (an unconfirmed fact done in other words, the
 roles) and tell the user in one line. The files stay on disk.
 dev's watch loop offers it once per idle stretch: a boss resting %s with every check above passing (no --force) is
-noted to the manager over it ("may be cleared: … clear it?"); the manager's own offer is an ask on its list for the
-user, who runs dev agent clear manager from a plain shell.`,
+noted to the manager that started or adopted it ("may be cleared: … clear it?"; none without a live one); the
+manager's own offer is an ask on its list for the user, who runs dev agent clear manager from a plain shell (a
+clear that passes answers it).`,
 			bossclear.MinContext, bossclear.Headings(bossclear.Sections), bossclear.MaxFacts, bossclear.MaxFacts,
 			bossclear.Headings(bossclear.ProofSections), inbox.Span(bossclear.IdleLimit)),
 		Args: cobra.ExactArgs(1),

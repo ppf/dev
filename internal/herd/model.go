@@ -183,7 +183,7 @@ type lookups interface {
 
 type tickMsg struct{}
 
-// watchDueMsg runs the inbox watch (stuck workers, deferred delivery), every watchInterval.
+// watchDueMsg runs the inbox watch (stuck workers, deferred delivery) and the clear offer, every watchInterval.
 type watchDueMsg struct{}
 
 // watchMsg is the inbox watch's outcome.
@@ -238,7 +238,7 @@ func (m *Model) fit() {
 	}
 }
 
-// watchLater runs inbox.Watch after watchInterval.
+// watchLater runs inbox.Watch and bossclear.Offer after watchInterval.
 func (m Model) watchLater() tea.Cmd {
 	return tea.Tick(watchInterval, func(time.Time) tea.Msg { return watchDueMsg{} })
 }

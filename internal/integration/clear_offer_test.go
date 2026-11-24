@@ -98,6 +98,19 @@ func TestClearOffer(t *testing.T) {
 	round(bossclear.IdleLimit + time.Minute)
 	check(t, "no manager over it", take(), "")
 	s.T("set-option", "-t", "=boss-app:", "@dev_started_by", "manager")
+	s.T("set-option", "-p", "-t", app, "@agent_state", "waiting", ";", "set-option", "-p", "-t", app, "@agent_waiting_for", "permission_prompt")
+	round(bossclear.IdleLimit + time.Minute)
+	check(t, "on a permission prompt", take(), "")
+	s.T("set-option", "-p", "-t", app, "@agent_state", "idle", ";", "set-option", "-pu", "-t", app, "@agent_waiting_for")
+	s.T("set-option", "-p", "-t", app, "@dev_handoff", inbox.ClearValue("s0", "/h.md", time.Now().Add(time.Hour)))
+	round(bossclear.IdleLimit + time.Minute)
+	check(t, "a clear running", take(), "")
+	s.T("set-option", "-pu", "-t", app, "@dev_handoff")
+	transcript := opt(app, "@agent_transcript")
+	s.T("set-option", "-pu", "-t", app, "@agent_transcript")
+	round(bossclear.IdleLimit + time.Minute)
+	check(t, "no transcript recorded", take(), "")
+	s.T("set-option", "-p", "-t", app, "@agent_transcript", transcript)
 	if got := opt(app, bossclear.OptOffered); got != "" {
 		t.Fatalf("❌ a stretch marked offered without a note: %q", got)
 	}
@@ -126,6 +139,15 @@ func TestClearOffer(t *testing.T) {
 	round(bossclear.IdleLimit + time.Minute)
 	round(bossclear.IdleLimit + time.Minute)
 	check(t, "a new stretch: one note again", take(), note)
+
+	// Claude's idle reminder a minute in moves the stretch's start: a real boss rests there, and is offered once
+	second := opt(app, "@agent_since")
+	time.Sleep(1100 * time.Millisecond)
+	state(app, "waiting", `{"hook_event_name":"Notification","notification_type":"idle_prompt","session_id":"s0","transcript_path":"`+transcript+`"}`)
+	waitFor(t, "boss-app at its idle reminder", func() bool { return opt(app, "@agent_since") != second && opt(app, "@agent_state") == "waiting" })
+	round(bossclear.IdleLimit + time.Minute)
+	round(bossclear.IdleLimit + time.Minute)
+	check(t, "resting at Claude's idle reminder: one note", take(), note)
 }
 
 // For the manager itself the offer is an ask on its own list, the user's (NEEDS YOU), once while it stays open.
@@ -162,6 +184,8 @@ func TestClearOfferManager(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	check(t, "the manager's stretch marked offered", s.T("display", "-t", manager, "-p", "#{"+bossclear.OptOffered+"}"),
+		s.T("display", "-t", manager, "-p", "#{@agent_since}"))
 	// A new stretch with the ask still open adds none
 	s.T("set-option", "-pu", "-t", manager, bossclear.OptOffered)
 	if err := bossclear.Offer(s.tmux, clk, manager); err != nil {
@@ -189,5 +213,8 @@ func TestClearOfferManager(t *testing.T) {
 	if st != "0" || !strings.Contains(out, "Cleared manager: 1 key facts restated") {
 		t.Fatalf("❌ dev agent clear manager from a shell: exit %s: %s\n%s", st, e, out)
 	}
-	t.Log("✅ the user clears the manager from a shell")
+	if items := asks(); len(items) != 1 || !items[0].Done || items[0].Answer != "Clear it" {
+		t.Errorf("❌ the offer after the clear = %+v, want answered Clear it", items)
+	}
+	t.Log("✅ the user clears the manager from a shell; its offer is answered")
 }

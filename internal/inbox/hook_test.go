@@ -230,8 +230,17 @@ func TestBossHookHandoff(t *testing.T) {
 			t.Errorf("%s with handoff %q: context = %q, want the handoff line %v", tt.source, tt.handoff, got.Out.Context, tt.want)
 		}
 	}
-	if _, _, err := BossHook(handoffTmux(t, "boss", "1", path), "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint); err == nil {
+	// A malformed hold is reported, and the list still goes out with a line saying a handoff may wait
+	c := handoffTmux(t, "boss", "1", path)
+	if s, err := todo.ForPane(c, "%1"); err != nil || s.Set([]string{"a"}, time.Now()) != nil {
+		t.Fatal(err)
+	}
+	out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint)
+	if err == nil {
 		t.Error("a malformed handoff option passed")
+	}
+	if !strings.Contains(out, "couldn't tell whether a dev agent clear left you a handoff") || !strings.Contains(out, "1. a") {
+		t.Errorf("malformed hold: out %q, want the list and the handoff warning", out)
 	}
 }
 
