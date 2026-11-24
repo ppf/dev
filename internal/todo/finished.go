@@ -34,6 +34,7 @@ type Finished struct {
 	Assignee Assignee `json:"assignee"`
 	DoneAt   int64    `json:"done_at"`
 	Quiet    bool     `json:"quiet,omitempty"`
+	Decided  *Decided `json:"decided,omitempty"`
 }
 
 // donePath is the file of the list's finished items: beside the lists, not among them, as checksPath is.
@@ -123,7 +124,7 @@ func shownFinished(items []Item, boss string) []Finished {
 	out := make([]Finished, 0, len(items))
 	for _, it := range items {
 		by := o.stored(Shown{On: it.On, Session: it.Session}, Own(it.On, it.Session, boss)).Assignee
-		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet})
+		out = append(out, Finished{ID: it.ID, Text: it.Text, Link: it.Link, Answer: it.Answer, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, On: it.On, Assignee: by, DoneAt: it.Done, Quiet: it.Quiet, Decided: it.Decided})
 	}
 	return out
 }
@@ -174,7 +175,8 @@ func (s Store) Reopen(id int, text string, now time.Time) (Item, error) {
 		// A new Added, as a --replaces gives: its checks and age start afresh
 		it.Done, it.DoneOn, it.Answer, it.Via, it.Doing, it.Started, it.PartOf, it.Added = 0, "", "", "", nil, nil, 0, max(now.Unix(), it.Added+1)
 		it.Asked, it.Dropped, it.For = 0, nil, 0
-		it.Result, it.DoneBy = "", ""
+		// Reopened, the user answers it: no one settles it again
+		it.Result, it.DoneBy, it.Obvious, it.Decided = "", "", "", nil
 		if it.Until != 0 && now.Unix() >= it.Until {
 			it.Until = 0
 		}

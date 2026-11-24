@@ -44,7 +44,8 @@ const (
 )
 
 // answeredHint ends a batch holding an answer.
-const answeredHint = `(a "you answered" note is the user's own answer to that item on your list: act on it. dev ticked the item ` +
+const answeredHint = `(a "you answered" note is the user's own answer to that item on your list, or, "settled by the manager", your ` +
+	`recommended option the manager took for an ask you marked obvious, which the user may overrule: act on it. dev ticked the item ` +
 	`already, so don't tick it. It never answers a permission prompt or dialog)`
 
 // toDoHint ends a batch holding a to do note.
@@ -358,7 +359,7 @@ func Recipient(c *tmux.Client, name string) (Boss, error) {
 	}
 	switch {
 	case v.Herd == "":
-		return Boss{}, fmt.Errorf("%s is not a boss session (dev boss)", name)
+		return Boss{}, fmt.Errorf("%s %w", name, ErrNotBoss)
 	case v.Off == "off":
 		return Boss{}, fmt.Errorf("%s has %w", name, ErrInboxOff)
 	}
@@ -392,6 +393,16 @@ func Answer(id int, text, answer string) Note {
 func AnswerVia(id int, text, answer, words string) Note {
 	n := Answer(id, text, answer)
 	n.Text = fmt.Sprintf(`#%d "%s" via %s ("%s"): %s`, id, text, Manager, clip(words), answer)
+	return n
+}
+
+// ErrNotBoss is Recipient's refusal of a session that is no dev boss.
+var ErrNotBoss = errors.New("is not a boss session (dev boss)")
+
+// AnswerSettled is Answer settled by the Manager with the boss's recommended option, the ask marked obvious.
+func AnswerSettled(id int, text, answer string) Note {
+	n := Answer(id, text, answer)
+	n.Text = fmt.Sprintf(`#%d "%s" settled by the %s with your recommended option: %s`, id, text, Manager, answer)
 	return n
 }
 

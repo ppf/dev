@@ -785,7 +785,7 @@ func TestPromptAskRules(t *testing.T) {
 		name, prompt string
 		want         []string
 	}{
-		{"coordinatorPrompt", coordinatorPrompt, []string{"An easy decision is yours", "Decided myself: <pick> over <other>; tell me to overrule", "start without a further ask unless their cost or scope changed since the pick", "probe it yourself with bounded retries", "File a run's outward asks",
+		{"coordinatorPrompt", coordinatorPrompt, []string{"An easy decision is yours", "--decided '<why it is easy>'", "gets --obvious '<why>' (exactly one option recommended)", "settled by the manager with your recommended option", "start without a further ask unless their cost or scope changed since the pick", "probe it yourself with bounded retries", "File a run's outward asks",
 			"never ask your own decisions with AskUserQuestion or only as chat text",
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
@@ -801,7 +801,7 @@ func TestPromptAskRules(t *testing.T) {
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
 			"Before handing on the user's own new idea or request", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
-			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
+			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list but an ask its boss marked obvious", "first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed", "dev todo answer <boss> <n> \"<recommended option>\" --recommended --question", "decided for you: <pick> (obvious: <why>)", "you decide yourself and report in one line",
 			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>"}},
 	} {
 		for _, want := range tt.want {

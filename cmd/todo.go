@@ -76,7 +76,7 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
 	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss))
@@ -288,6 +288,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 func newTodoAskCmd(boss *string) *cobra.Command {
 	var it todo.Item
 	var replaces int
+	var decided string
 	cmd := &cobra.Command{
 		Use:   "ask [<question>]",
 		Short: "Put a decision on the list for the user, with the options to pick from; prints its number",
@@ -297,7 +298,11 @@ an option is "<label> | <detail>", its label at most 30 characters. The user ans
 ticks it and sends the boss "you answered #<n> \"<question>\": <answer>". --replaces <n> corrects open ask n in place,
 keeping its number: a pick the user made before it still answers it while the question and the option picked stay.
 --for <n> links it to open item n that waits on its answer: n's card and opened item show "waits on your answer to
-#<ask>" with its options, an answer there answering the ask; --replaces keeps the link.`,
+#<ask>" with its options, an answer there answering the ask; --replaces keeps the link.
+--obvious '<why>' marks an ask with one recommended option whose others make little sense, and that is no matter of
+money, the usage limit, scope, outward-facing, hard-to-undo steps, secrets or taste: the manager may settle it with
+that option (dev todo answer --recommended). --decided '<why>' is an easy decision the boss settles itself: the ask goes
+on the list ticked at once with its recommended option, decided for the user by the boss, for them to overrule.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			replace := cmd.Flags().Changed("replaces")
@@ -308,11 +313,30 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 			case !replace:
 				return errors.New("no question: only --replaces keeps the ask's question")
-			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && !cmd.Flags().Changed("for"):
-				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link, --for or --quiet")
+			case len(it.Options) == 0 && len(it.Context) == 0 && it.Link == "" && !it.Quiet && !cmd.Flags().Changed("details") && !cmd.Flags().Changed("for") && !cmd.Flags().Changed("obvious"):
+				return errors.New("--replaces: nothing to correct: give the question, --option, --context, --details, --link, --for, --quiet or --obvious")
 			}
 			if it.For < 0 {
 				return fmt.Errorf("--for %d: an item's number, or 0 to unlink", it.For)
+			}
+			markObvious, markDecided := cmd.Flags().Changed("obvious"), cmd.Flags().Changed("decided")
+			marks := markObvious || markDecided
+			switch {
+			case marks && *boss != "":
+				return errors.New("only the list's own boss marks or decides its asks: leave out --boss")
+			case markObvious && markDecided:
+				return errors.New("--obvious leaves the ask to the manager, --decided settles it now: give one")
+			case markDecided && (replace || cmd.Flags().Changed("for")):
+				return errors.New("--decided puts a new ask on the list ticked: no --replaces or --for")
+			}
+			it.Obvious, decided = todo.Clean(it.Obvious), todo.Clean(decided)
+			switch {
+			case markObvious && it.Obvious == todo.NotObvious && !replace:
+				return errors.New("--obvious - removes the mark of an ask: only with --replaces")
+			case markObvious && it.Obvious == "":
+				return errors.New("--obvious needs why the ask is obvious (with --replaces, - removes the mark)")
+			case markDecided && decided == "":
+				return errors.New("--decided needs why the decision is easy")
 			}
 			if replace && cmd.Flags().Changed("for") && it.For == 0 {
 				it.For = todo.NoFor
@@ -334,6 +358,12 @@ keeping its number: a pick the user made before it still answers it while the qu
 				}
 				labels, it.Options[i] = append(labels, c.Label), c.String()
 			}
+			// A replace keeping its options is checked against them in the store
+			if len(it.Options) > 0 && it.Obvious != todo.NotObvious {
+				if err := todo.CheckObvious(it.Obvious+decided, it.Options); err != nil {
+					return err
+				}
+			}
 			context, err := contextLines(it.Context)
 			if err != nil {
 				return err
@@ -343,6 +373,18 @@ keeping its number: a pick the user made before it still answers it while the qu
 				return err
 			}
 			now := time.Now()
+			if decided != "" {
+				s, err := todoStore(*boss, true, cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				id, err := s.Decide(it, decided, now)
+				if err != nil {
+					return err
+				}
+				baseline(s, cmd.ErrOrStderr())
+				return printCount(cmd.OutOrStdout(), s, "decided "+strconv.Itoa(id)+" · ", now)
+			}
 			// Only once all is checked: a desktop boss's first call takes over an earlier list
 			if replace || it.For != 0 {
 				if err := tryAdoptable(*boss, func(t todo.Store) error {
@@ -392,6 +434,8 @@ keeping its number: a pick the user made before it still answers it while the qu
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.For, "for", 0, "open item n of this list that waits on this answer: its card and opened item show the ask's options (with --replaces, links it anew; 0 unlinks it)")
+	cmd.Flags().StringVar(&it.Obvious, "obvious", "", "why the ask is obvious, one line: the manager may settle it with its one recommended option (kept by a --replaces that keeps the question and options; - removes it)")
+	cmd.Flags().StringVar(&decided, "decided", "", "why the ask is an easy decision, one line: settled now by the boss with its one recommended option, ticked")
 	return cmd
 }
 
@@ -430,7 +474,7 @@ const quietHelp = "a test item: a TEST tag on the boards, left out of their tall
 
 func newTodoAnswerCmd(boss *string) *cobra.Command {
 	var question, via string
-	var fromBoard bool
+	var fromBoard, recommended bool
 	cmd := &cobra.Command{
 		Use:   "answer <boss> <n> <option|text>",
 		Short: "Answer item n on a dev boss's list, as the user: ticks it and sends the boss what was answered",
@@ -444,13 +488,28 @@ older than that pick, once; its one question must start "<project> #<n>: " and c
 the option picked (or what they typed under Other), and the note quotes it: "you answered #<n> \"<question>\" via
 manager (\"<pick>\"): <answer>". A typed message to the manager is refused: ask the item as a question instead. An
 item the user answered meanwhile elsewhere sends nothing, saying who answered what where: an error only for another
-answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").`,
-		Args: cobra.ExactArgs(3),
+answer. Answered other than via manager, a boss under a boss tells the one above ("ask answered").
+--recommended --via manager is the manager settling an ask its boss marked obvious (dev todo ask --obvious) with its
+recommended option, no pick needed: the answer names that option as the manager checked it, refused once it is no longer
+the recommended one; only from the manager's coordinator pane, never an unmarked ask, the manager's own, a permission
+prompt or a dialog. The item records it as decided for the user by the manager, and the
+boss's note says so: "you answered #<n> \"<question>\" settled by the manager with your recommended option: <answer>".`,
+		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			switch {
 			case via != "" && via != inbox.Manager:
 				return fmt.Errorf("--via %s: only --via %s", via, inbox.Manager)
+			case recommended && via == "":
+				return errors.New("--recommended is the manager settling a marked ask: needs --via manager")
+			case len(args) == 2 && recommended:
+				return errors.New("--recommended needs the recommended option you checked as the answer")
+			case len(args) == 2:
+				return errors.New("no answer: give an option's number or label, or your own words")
+			case recommended && question == "":
+				return errors.New("--recommended needs --question with the item's text")
+			case recommended && name == inbox.Manager:
+				return errors.New("--recommended settles a boss's marked ask, never the manager's own: those are the user's")
 			case os.Getenv("CLAUDECODE") != "" && !fromBoard && via == "":
 				return errors.New("refused in a Claude Code session: only the user answers (in a shell, the sidebar or a board)")
 			case fromBoard && question == "":
@@ -465,6 +524,12 @@ answer. Answered other than via manager, a boss under a boss tells the one above
 				return fmt.Errorf("item number %q: %w", args[1], err)
 			}
 			c := tmux.New()
+			if recommended {
+				if _, err := strconv.Atoi(args[2]); err == nil {
+					return errors.New("--recommended: name the recommended option by its label, not its number (options may move)")
+				}
+				return settleAsk(c, cmd.OutOrStdout(), cmd.ErrOrStderr(), name, id, question, args[2])
+			}
 			var manager inbox.Boss
 			var said *inbox.Prompt
 			var before int64
@@ -524,6 +589,7 @@ answer. Answered other than via manager, a boss under a boss tells the one above
 	cmd.Flags().BoolVar(&fromBoard, "from-board", false, "a desktop board's button (needs --question): allowed in a Claude Code session, as the board runs inside one")
 	_ = cmd.Flags().MarkHidden("from-board")
 	cmd.Flags().StringVar(&via, "via", "", "manager: the manager relaying the user's pick in its AskUserQuestion (only in its coordinator pane)")
+	cmd.Flags().BoolVar(&recommended, "recommended", false, "with --via manager: settle an ask its boss marked obvious with its recommended option, as the manager")
 	return cmd
 }
 
@@ -1146,15 +1212,29 @@ func todoLine(it todo.Shown, now time.Time) string {
 		parts = append(parts, on)
 	}
 	switch {
+	case it.Decided != nil:
+		parts = append(parts, decidedLine(*it.Decided))
 	case it.Answer != "":
 		parts = append(parts, "answered: "+it.Answer)
 	case len(it.Options) > 0:
 		parts = append(parts, "options: "+strings.Join(it.Options, " · "))
 	}
+	if it.Obvious != "" && !it.Done {
+		parts = append(parts, "obvious: "+it.Obvious)
+	}
 	if it.Check != nil {
 		parts = append(parts, "⚠ "+it.Check.Long(now))
 	}
 	return strings.Join(parts, "\t")
+}
+
+// decidedLine is an ask decided for the user as text: "decided for you: manager, Merge over Wait · Hold at 14:32".
+func decidedLine(d todo.Decided) string {
+	line := "decided for you: " + d.By + ", " + todo.Split(d.Pick).Label
+	if len(d.Over) > 0 {
+		line += " over " + strings.Join(d.OverLabels(), " · ")
+	}
+	return line + " at " + time.Unix(d.At, 0).Format("15:04")
 }
 
 // contextLines is each --context line cleaned (todo.Clean); an empty one is an error.

@@ -175,3 +175,20 @@ func TestDoneBlock(t *testing.T) {
 		t.Errorf("no result:\n%s", v)
 	}
 }
+
+// An ask decided for the user: who decided and when, the pick (★) over the others and why, in place of what was done.
+func TestDecidedBlock(t *testing.T) {
+	it := Item{Boss: "boss-dev", DoneAt: now.Add(-time.Hour).Unix(), Shown: todo.Shown{ID: 34, Text: "Re-run CI on #301?", Done: true, DoneBy: todo.DecidedManager, Answer: "Re-run the job",
+		Decided:   &todo.Decided{By: todo.DecidedManager, Pick: "Re-run the job | known flake (Recommended)", Over: []string{"Look into it first | reads the log"}, Why: "known flake, 2 of the last 10 runs", At: now.Add(-time.Hour).Unix()},
+		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+	v := ansi.Strip(New(it, Actions{}, false).View(Width, 50, now))
+	at := now.Add(-time.Hour).Format("15:04")
+	for _, want := range []string{"─ decided for you: manager ─", at + " · by manager ─", "picked  ★ Re-run the job", "over    Look into it first", "why     known flake, 2 of the last 10 runs"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q missing:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "what was done") {
+		t.Errorf("a decided ask shows what was done:\n%s", v)
+	}
+}

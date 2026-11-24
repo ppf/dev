@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/ppf/dev/internal/control"
@@ -59,4 +62,54 @@ func tellAbove(c *tmux.Client, pane string, it todo.Item, note inbox.Note, warn 
 	case err != nil:
 		warn("the boss above wasn't told: " + err.Error())
 	}
+}
+
+// settleAsk settles ask id of boss name's list, reading question, with its recommended option pick as the manager
+// (todo.Store.Settle) and sends the boss the note; only from the manager's coordinator pane.
+func settleAsk(c *tmux.Client, out, stderr io.Writer, name string, id int, question, pick string) error {
+	if err := inManagerPane(c); err != nil {
+		return err
+	}
+	b, err := inbox.Recipient(c, name)
+	if errors.Is(err, inbox.ErrNotBoss) {
+		return fmt.Errorf("%w: --recommended settles only a marked ask on a boss's list, never a permission prompt or dialog", err)
+	}
+	if err != nil {
+		return err
+	}
+	pane, err := control.BossPane(c, name)
+	if err != nil {
+		return err
+	}
+	s, err := todo.ForPane(c, pane)
+	if err != nil {
+		return err
+	}
+	it, err := s.Settle(id, question, pick, time.Now())
+	if err != nil {
+		return err
+	}
+	queued, err := b.Send(c, control.RealClock, inbox.AnswerSettled(it.ID, it.Text, it.Answer))
+	switch {
+	case !queued:
+		return fmt.Errorf("#%d settled with %q and ticked, not sent to %s (tell it yourself): %w", id, it.Answer, name, err)
+	case err != nil:
+		fmt.Fprintf(stderr, "⚠ dev todo: #%d queued in %s's inbox, delivered when it next rests: %v\n", id, name, err)
+	}
+	_, err = fmt.Fprintf(out, "#%d settled with %q, sent to %s\n", id, it.Answer, name)
+	return err
+}
+
+// inManagerPane refuses a run outside the manager's coordinator pane.
+func inManagerPane(c *tmux.Client) error {
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		self, ok, err := inbox.Coordinator(c, pane)
+		if err != nil {
+			return err
+		}
+		if ok && self.Name == inbox.Manager {
+			return nil
+		}
+	}
+	return errors.New("--via manager runs only in the manager's coordinator pane")
 }
