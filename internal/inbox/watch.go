@@ -415,14 +415,12 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 			}
 			if agent.AgyCommand(r.Command) {
 				// agy fires no hook for its permission prompt: the check its tool call's hook started may have missed it
-				asked, err := AgyPermission(c, clk, r.Pane, control.Status{Since: r.Since, Prompts: r.Prompts}, shot)
-				if err != nil && strings.Contains(err.Error(), "can't find pane") {
-					continue
+				asked, err := AgyPermission(c, clk, r.Pane, control.Status{Since: r.Since, Prompts: r.Prompts, Active: r.Active}, shot)
+				if err != nil && !strings.Contains(err.Error(), "can't find pane") {
+					// Its note may be out: the other workers still get checked
+					errs = append(errs, err)
 				}
-				if err != nil {
-					return err
-				}
-				if asked != nil {
+				if asked || err != nil {
 					continue
 				}
 			}

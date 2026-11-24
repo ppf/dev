@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
-	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
 )
@@ -105,16 +103,19 @@ func startAgyDialog(pane string) error {
 const agyDialogLog = "agy-dialog.log"
 
 // agyDialogWindow is how long after a tool call's PreToolUse agy-dialog looks for its permission prompt, polling
-// every agyDialogPoll: agy draws one as soon as its hooks return.
+// every agyDialogPoll: agy draws one as soon as its hooks return. Once it recorded one, it reads the pane every
+// agyDialogCheck for up to agyDialogWatch, so an approved command shows working before its PostToolUse.
 const (
 	agyDialogWindow = 5 * time.Second
 	agyDialogPoll   = 250 * time.Millisecond
+	agyDialogCheck  = time.Second
+	agyDialogWatch  = time.Hour
 )
 
 func newAgyDialogCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "agy-dialog <pane>",
-		Short:  "agy hook helper: record a working agy pane waiting on the permission prompt its screen shows, and tell its boss",
+		Short:  "agy hook helper: record a working agy pane waiting on the permission prompt its screen shows, tell its boss, and watch it until answered",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -123,7 +124,8 @@ func newAgyDialogCmd() *cobra.Command {
 			logged := func(err error) error {
 				return fmt.Errorf("%s %s: %w", time.Now().Format(time.DateTime), pane, err)
 			}
-			for start := clk.Now(); clk.Now().Sub(start) < agyDialogWindow; clk.Sleep(agyDialogPoll) {
+			recorded := false
+			for start := clk.Now(); !recorded && clk.Now().Sub(start) < agyDialogWindow; clk.Sleep(agyDialogPoll) {
 				st, err := control.ReadStatus(c, pane)
 				if err != nil {
 					return logged(err)
@@ -133,17 +135,20 @@ func newAgyDialogCmd() *cobra.Command {
 					return nil
 				}
 				capture, err := c.Run("capture-pane", "-p", "-t", pane)
-				var input []byte
 				if err == nil {
-					input, err = inbox.AgyPermission(c, clk, pane, st, capture)
-				}
-				if input != nil {
-					err = errors.Join(err, notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")))
+					recorded, err = inbox.AgyPermission(c, clk, pane, st, capture)
 				}
 				if err != nil {
 					return logged(err)
 				}
-				if input != nil {
+			}
+			// Its screen settles it (control.ReadChecked): approved, agy runs the command before any hook fires
+			for start := clk.Now(); recorded && clk.Now().Sub(start) < agyDialogWatch; clk.Sleep(agyDialogCheck) {
+				st, err := control.ReadChecked(c, pane)
+				if err != nil {
+					return logged(err)
+				}
+				if !agent.Deciding(st.Trusted(), st.WaitingFor) {
 					return nil
 				}
 			}

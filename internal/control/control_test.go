@@ -824,6 +824,8 @@ func TestReadCheckedAgy(t *testing.T) {
 	stale := Status{Command: "agy", State: "waiting", StateCmd: "agy", Prompts: "2", WaitingFor: "permission_prompt", Since: "50"}
 	fresh := stale
 	fresh.Since = strconv.FormatInt(time.Now().Unix(), 10)
+	answered := stale
+	answered.Active = "60"
 	settle := "if-shell -F -t %1 #{&&:#{==:#{@agent_state},waiting},#{==:#{@agent_since},50}} set-option -p -t %1 @agent_state "
 	tests := []struct {
 		name     string
@@ -837,6 +839,7 @@ func TestReadCheckedAgy(t *testing.T) {
 		{"still open", stale, permission, "agy-permission", ""},
 		{"just recorded", fresh, permission, "agy-idle", ""},
 		{"a question: left to its hook", stale, question, "agy-idle", ""},
+		{"a question answered, its PostToolUse before agy's input box came back: working", answered, question, "agy-working", "working"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

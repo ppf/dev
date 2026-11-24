@@ -473,12 +473,14 @@ func AgyLastReply(path string) (string, error) {
 		return "", fmt.Errorf("agent: agy transcript: %w", err)
 	}
 	from := max(0, info.Size()-agyTail)
-	data := make([]byte, info.Size()-from)
-	if _, err := f.ReadAt(data, from); err != nil {
+	// One byte more: whether the tail starts a line
+	at := max(0, from-1)
+	data := make([]byte, info.Size()-at)
+	if _, err := f.ReadAt(data, at); err != nil {
 		return "", fmt.Errorf("agent: agy transcript: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if from > 0 {
+	lines := strings.Split(strings.TrimSpace(string(data[from-at:])), "\n")
+	if from > 0 && data[0] != '\n' {
 		// Its first line is cut
 		lines = lines[1:]
 	}
@@ -512,9 +514,10 @@ const agyTail = 1 << 20
 
 // AgyPermission records a working agy pane as waiting on the permission prompt its screen shows (agy fires no
 // hook for one; screen.AgyPermission reads its tool, what it asks to run and its title) and q, that question, unless
-// a hook moved it since: since and prompts are the @agent_since and @agent_prompts read with the working state.
-// recorded reports the pane now waits on it.
-func AgyPermission(c *tmux.Client, pane, since, prompts, tool, what, title string) (q Question, recorded bool, err error) {
+// a hook moved it since: since, prompts and active are the @agent_since, @agent_prompts and @agent_active read with
+// the working state (a tool call's end, once its prompt was approved, only stamps @agent_active). recorded reports the
+// pane now waits on it.
+func AgyPermission(c *tmux.Client, pane, since, prompts, active, tool, what, title string) (q Question, recorded bool, err error) {
 	q = Question{Tool: cmp.Or(tool, "command"), Command: cut(what), Description: cut(title)}
 	data, err := json.Marshal(q)
 	if err != nil {
@@ -523,7 +526,8 @@ func AgyPermission(c *tmux.Client, pane, since, prompts, tool, what, title strin
 	// The question in the same tmux command as the state, and optClaim marking this write: two checks
 	// reading the same prompt in one second (agy-dialog, the boss inbox) record and report it once
 	mark := "agy-dialog-" + strconv.FormatInt(now().UnixNano(), 10)
-	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{==:#{@agent_prompts}," + prompts + "}}}"
+	cond := "#{&&:#{==:#{@agent_state}," + Working + "},#{&&:#{==:#{@agent_since}," + since + "},#{&&:#{==:#{@agent_prompts}," + prompts +
+		"},#{==:#{" + OptActive + "}," + active + "}}}}"
 	set := strings.Join([]string{
 		"set-option -p -t " + pane + " @agent_state " + Waiting,
 		"set-option -p -t " + pane + " @agent_since " + strconv.FormatInt(now().Unix(), 10),

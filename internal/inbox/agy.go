@@ -2,29 +2,32 @@ package inbox
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
+	"github.com/ppf/dev/internal/notify"
 	"github.com/ppf/dev/internal/screen"
 	"github.com/ppf/dev/internal/tmux"
 )
 
 // AgyPermission records agy pane st, working, as waiting on the permission prompt its screen (capture) shows
-// (agent.AgyPermission) and gives its boss the needs-a-decision note that Claude's Notification hook would. input is
-// that Notification, for notify.Run; nil when the screen shows none or the pane moved on meanwhile.
-func AgyPermission(c *tmux.Client, clk control.Clock, pane string, st control.Status, capture string) (input []byte, err error) {
+// (agent.AgyPermission), and gives its boss the needs-a-decision note and the user the notification that Claude's
+// Notification hook would. recorded=false when the screen shows none or the pane moved on meanwhile.
+func AgyPermission(c *tmux.Client, clk control.Clock, pane string, st control.Status, capture string) (recorded bool, err error) {
 	tool, what, title, ok := screen.AgyPermission(capture)
 	if !ok {
-		return nil, nil
+		return false, nil
 	}
-	q, recorded, err := agent.AgyPermission(c, pane, st.Since, st.Prompts, tool, what, title)
+	q, recorded, err := agent.AgyPermission(c, pane, st.Since, st.Prompts, st.Active, tool, what, title)
 	if !recorded || err != nil {
-		return nil, err
+		return false, err
 	}
-	input, err = json.Marshal(map[string]string{"hook_event_name": "Notification", "notification_type": agent.PermissionPrompt,
+	input, err := json.Marshal(map[string]string{"hook_event_name": "Notification", "notification_type": agent.PermissionPrompt,
 		"title": "Needs approval", "message": q.Ask()})
 	if err != nil {
-		return nil, err
+		return true, err
 	}
-	return input, WorkerHook(c, clk, pane, input)
+	return true, errors.Join(WorkerHook(c, clk, pane, input), notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")))
 }

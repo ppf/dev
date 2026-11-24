@@ -182,11 +182,11 @@ func TestAgyPermission(t *testing.T) {
 			}
 			return "", nil
 		})
-		q, recorded, err := AgyPermission(c, "%1", "50", "7", "Bash", `echo "$HOME" \ x`, "Run this command?")
+		q, recorded, err := AgyPermission(c, "%1", "50", "7", "55", "Bash", `echo "$HOME" \ x`, "Run this command?")
 		if err != nil || recorded != (claim == "agy-dialog-100000000000") || q.Ask() != `allow Bash: echo "$HOME" \ x` {
 			t.Errorf("claim %s: AgyPermission = %+v, %v, %v", claim, q, recorded, err)
 		}
-		want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{==:#{@agent_prompts},7}}}",
+		want := []string{"if-shell", "-F", "-t", "%1", "#{&&:#{==:#{@agent_state},working},#{&&:#{==:#{@agent_since},50},#{&&:#{==:#{@agent_prompts},7},#{==:#{@agent_active},55}}}}",
 			"set-option -p -t %1 @agent_state waiting ; set-option -p -t %1 @agent_since 100 ; set-option -p -t %1 @agent_waiting_for permission_prompt ; " +
 				`set-option -p -t %1 @agent_question "{\"tool\":\"Bash\",\"command\":\"echo \\\"\$HOME\\\" \\\\ x\",\"description\":\"Run this command?\"}" ; ` +
 				"set-option -p -t %1 @agent_agy_claim agy-dialog-100000000000"}
@@ -194,7 +194,7 @@ func TestAgyPermission(t *testing.T) {
 			t.Errorf("calls = %q, want first: %q", calls, want)
 		}
 	}
-	if _, _, err := AgyPermission(tmux.NewFake(func([]string) (string, error) { return "", errors.New("boom") }), "%1", "50", "7", "", "ls", "?"); err == nil {
+	if _, _, err := AgyPermission(tmux.NewFake(func([]string) (string, error) { return "", errors.New("boom") }), "%1", "50", "7", "55", "", "ls", "?"); err == nil {
 		t.Error("a failed write: no error")
 	}
 }
@@ -367,6 +367,11 @@ func TestAgyLastReply(t *testing.T) {
 	long := `{"type":"GENERIC","content":"` + strings.Repeat("x", agyTail) + `"}`
 	if got, err := AgyLastReply(write(long, user, call, ran, reply)); err != nil || got != "hi" {
 		t.Errorf("a long transcript: AgyLastReply = %q, %v", got, err)
+	}
+	// A tail starting right on a line: that line is whole
+	exact := `{"source":"MODEL","type":"PLANNER_RESPONSE","content":"` + strings.Repeat("y", agyTail-len(`{"source":"MODEL","type":"PLANNER_RESPONSE","content":""}`)-1) + `"}`
+	if got, err := AgyLastReply(write(user, exact)); err != nil || !strings.HasPrefix(got, "yyy") {
+		t.Errorf("a tail starting on its line: AgyLastReply = %.10q, %v", got, err)
 	}
 	if _, err := AgyLastReply(write(user, long)); err == nil {
 		t.Error("a tail of one cut line: no error")

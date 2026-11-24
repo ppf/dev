@@ -395,7 +395,7 @@ func ReadStatus(c *tmux.Client, pane string) (Status, error) {
 
 // ReadChecked is ReadStatus, but a Claude or agy pane's decision (agent.Deciding) or working state is checked
 // against its screen first, as neither fires a hook when its permission prompt is declined or cancelled, or Esc
-// ends its turn (an agy question isn't: its PostToolUse settles it). For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
+// ends its turn (an agy question only after its PostToolUse). For a decision, its own input box back at the bottom (screen.ClaudeState, screen.AgyBox) means no dialog
 // is open; the state it shows, idle or working, is recorded and returned. A working pane showing its turn
 // interrupted (screen.ClaudeInterrupted, screen.AgyInterrupted) is recorded idle.
 func ReadChecked(c *tmux.Client, pane string) (Status, error) {
@@ -407,9 +407,11 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 		return checkInterrupted(c, pane, st, screen.AgyInterrupted)
 	}
 	if agent.AgyCommand(st.Command) && agent.Deciding(st.Trusted(), st.WaitingFor) {
-		// A declined or cancelled permission prompt fires no hook; a question's answer or skip does (PostToolUse),
-		// and its hook records it before agy draws it
-		if asks, err := agyAsks(c, pane); asks || err != nil {
+		// A declined or cancelled permission prompt fires no hook; a question's answer or skip does (PostToolUse), but
+		// its hook records it before agy draws it: its screen is read only once a hook ran since (an answer's
+		// PostToolUse that came before agy drew its input box again)
+		asks, err := agyAsks(c, pane)
+		if err != nil || asks && !hookSince(st) {
 			return st, err
 		}
 		return checkDialog(c, pane, st, func(capture string) string {
@@ -433,6 +435,13 @@ func ReadChecked(c *tmux.Client, pane string) (Status, error) {
 		return st, nil
 	}
 	return checkDialog(c, pane, st, screen.ClaudeState)
+}
+
+// hookSince reports a hook ran after st's decision was recorded: its @agent_active after its @agent_since.
+func hookSince(st Status) bool {
+	active, err := strconv.ParseInt(st.Active, 10, 64)
+	since, serr := strconv.ParseInt(st.Since, 10, 64)
+	return err == nil && serr == nil && active > since
 }
 
 // agyAsks reports an agy question (agent.AgyHook) recorded as pane's @agent_question.
