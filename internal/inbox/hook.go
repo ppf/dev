@@ -157,8 +157,9 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	if source == "clear" {
 		if handoff, herr = handoffLine(c, pane); herr != nil {
 			// Its list still goes out, and the boss learns a handoff may wait
-			handoff = "dev couldn't tell whether a dev agent clear left you a handoff (" + herr.Error() +
-				"): look for the newest file in $XDG_STATE_HOME/dev/handoff/<your boss session>/ before acting."
+			handoff = "dev couldn't tell whether a dev agent clear left you a handoff (" + herr.Error() + "): if one cleared " +
+				"you just now, its handoff is the newest file in $XDG_STATE_HOME/dev/handoff/<your boss session>/, written " +
+				"minutes ago; an older one isn't yours to act on."
 		}
 	}
 	out, err := listContext(c, pane, source, hint, handoff)
@@ -392,14 +393,6 @@ func HandedToManager(c *tmux.Client, pane, state string) (bool, error) {
 // ManagerOver is managerOver for the boss session named boss.
 func ManagerOver(c *tmux.Client, boss string) (Boss, bool, error) {
 	return managerOver(c, Boss{Name: boss})
-}
-
-// ToManager queues n in Manager m's inbox and delivers it.
-func ToManager(c *tmux.Client, clk control.Clock, m Boss, n Note) error {
-	if _, err := m.Box.Add(n, clk.Now()); err != nil {
-		return err
-	}
-	return Deliver(c, clk, m)
 }
 
 // managerOver is the Manager when it started or adopted boss b and is alive with its inbox on and its Claude running.

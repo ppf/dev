@@ -135,8 +135,8 @@ var (
 	itemRef = regexp.MustCompile(`(?i)(\bPR\s*|\bMR\s*|pull/|issues/|merge_requests/)?#(\d+)\b`)
 	// A word saying work is done, and one hedging it: an unconfirmed fact with the first and none of the second is
 	// worded as done
-	doneWord = regexp.MustCompile(`(?i)\b(merged|released|shipped|deployed|fixed|done|finished|completed?|closed|pushed|tagged|passed|passing|green|resolved|live|sent|installed)\b`)
-	hedge    = regexp.MustCompile(`(?i)\b(reported|not|no|nothing|never|none|unchecked|unverified|said|says|claims?|according|supposedly|expected|should|would|will|may|might|maybe|probably|likely|if|whether|pending|waiting|yet|unknown|must|needs?|wants?|wanted|asks?|asked|after|before|once|until|when|plans?|planned)\b|n't|\?`)
+	doneWord = regexp.MustCompile(`(?i)\b(merged|released|shipped|deployed|fixed|done|finished|completed?|tagged|passed|resolved|installed)\b`)
+	hedge    = regexp.MustCompile(`(?i)\b(reported|not|no|nothing|never|none|unchecked|unverified|said|says|claims?|according|supposedly|expected|should|would|will|may|might|maybe|probably|likely|if|whether|pending|waiting|yet|unknown|must|needs?|wants?|wanted|asks?|asked|after|before|once|until|when|plans?|planned)\b|n['’]t|\?`)
 	trailing = " \t.)]*_`"
 	emphasis = strings.NewReplacer("**", "", "__", "", "`", "")
 )

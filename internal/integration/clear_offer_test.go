@@ -79,7 +79,10 @@ func TestClearOffer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	const note = "[dev boss inbox] 1 worker update(s):\n- boss-app may be cleared: idle 31m, no worker running, context 30%: clear it? (dev agent clear boss-app, in the background)"
+	noteAt := func(idle string) string {
+		return "[dev boss inbox] 1 worker update(s):\n- boss-app may be cleared: idle " + idle + ", no worker running, context 30%: clear it? (dev agent clear boss-app, in the background)"
+	}
+	note := noteAt("31m")
 
 	round(bossclear.IdleLimit - time.Minute)
 	check(t, "too soon", take(), "")
@@ -94,6 +97,8 @@ func TestClearOffer(t *testing.T) {
 	round(bossclear.IdleLimit + time.Minute)
 	check(t, "a worker working", take(), "")
 	s.T("set-option", "-p", "-t", w, "@agent_state", "idle")
+	round(bossclear.IdleLimit + time.Minute + bossclear.CheckEvery/2)
+	check(t, "a stretch Check refused isn't read again within a minute", take(), "")
 	s.T("set-option", "-u", "-t", "=boss-app:", "@dev_started_by")
 	round(bossclear.IdleLimit + time.Minute)
 	check(t, "no manager over it", take(), "")
@@ -116,9 +121,9 @@ func TestClearOffer(t *testing.T) {
 	}
 
 	for range 3 {
-		round(bossclear.IdleLimit + time.Minute)
+		round(bossclear.IdleLimit + 2*time.Minute)
 	}
-	check(t, "idle past the limit: exactly one note", take(), note)
+	check(t, "idle past the limit: exactly one note", take(), noteAt("32m"))
 	m, _, err := inbox.ManagerOver(s.tmux, "boss-app")
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +132,7 @@ func TestClearOffer(t *testing.T) {
 	if _, err := m.Box.Add(inbox.Note{Worker: "boss-app", Kind: inbox.WaitsOnYou, Text: "#3 Ship v2?", Key: "x"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	round(bossclear.IdleLimit + 2*time.Minute)
+	round(bossclear.IdleLimit + 3*time.Minute)
 	check(t, "no second note in the stretch", take(), "[dev boss inbox] 1 worker update(s):\n- boss-app waits on you: #3 Ship v2?")
 	t.Log("✅ a test boss idle past the limit gets exactly one note")
 

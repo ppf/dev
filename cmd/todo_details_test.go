@@ -166,5 +166,11 @@ func TestTodoNoDetailsStored(t *testing.T) {
 		}
 	}
 	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")
-	run(t, "", "todo", "add", "--replaces", "1", "--details", "Ask about the fee; done when called.")
+	run(t, "", "todo", "add", "--replaces", "1", "Call the bank today")
+	if l, err = s.Read(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if it := l.Items[0]; it.NoDetails || it.Details != "Ask about the fee; done when called." || it.NeedsDetails() {
+		t.Errorf("after --details and a plain replace: %+v", it)
+	}
 }

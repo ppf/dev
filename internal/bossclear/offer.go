@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ppf/dev/internal/agent"
@@ -19,6 +20,11 @@ const (
 	IdleLimit = 30 * time.Minute
 	// OptOffered is the coordinator pane option holding the idle stretch (its @agent_since) a clear was last offered for.
 	OptOffered = "@dev_clear_offered"
+	// OptChecked is the coordinator pane option holding "<idle stretch> <unix time>" of the last offer refused by Check:
+	// the full read waits CheckEvery after it
+	OptChecked = "@dev_clear_checked"
+	// CheckEvery is how often a stretch Check refused is read again
+	CheckEvery = time.Minute
 	// OfferQuestion is the ask Offer puts on the manager's own list, for the user.
 	OfferQuestion = "Clear the manager's context?"
 )
@@ -36,6 +42,7 @@ type offerRow struct {
 	Context    string `tmux:"@agent_context"`
 	Transcript string `tmux:"@agent_transcript"`
 	Offered    string `tmux:"@dev_clear_offered"` // OptOffered
+	Checked    string `tmux:"@dev_clear_checked"` // OptChecked
 }
 
 // Offer, run by the watch loop of the boss session pane is in, offers once per idle stretch to clear its boss once it
@@ -77,6 +84,12 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	if idle < IdleLimit || used < MinContext || st != agent.Idle && (st != agent.Waiting || agent.Deciding(st, r.WaitingFor)) {
 		return nil
 	}
+	// Read captures every worker's screen: a stretch Check refused waits a while
+	if stretch, at, ok := strings.Cut(r.Checked, " "); ok && stretch == r.Since {
+		if t, err := strconv.ParseInt(at, 10, 64); err == nil && now.Sub(time.Unix(t, 0)) < CheckEvery {
+			return nil
+		}
+	}
 	manager := r.Session == sidebar.Manager
 	var m inbox.Boss
 	if !manager {
@@ -97,20 +110,32 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 		return err
 	}
 	if Check(b, workers, false) != nil {
-		return nil
+		_, err := c.Run("set-option", "-p", "-t", r.Pane, OptChecked, r.Since+" "+strconv.FormatInt(now.Unix(), 10))
+		return err
 	}
 	text := fmt.Sprintf("idle %s, no worker running, context %d%%", inbox.Span(idle), *b.Context)
 	if manager {
 		err = offerUser(c, r.Pane, text, now)
 	} else {
-		err = inbox.ToManager(c, clk, m, inbox.Note{Worker: r.Session, Kind: inbox.ClearIt, Key: inbox.ClearIt + "\x00" + r.Since,
-			Text: text + ": clear it? (dev agent clear " + r.Session + ", in the background)"})
+		_, err = m.Box.Add(inbox.Note{Worker: r.Session, Kind: inbox.ClearIt, Key: inbox.ClearIt + "\x00" + r.Since,
+			Text: text + ": clear it? (dev agent clear " + r.Session + ", in the background)"}, now)
 	}
 	if err != nil {
 		return err
 	}
-	_, err = c.Run("set-option", "-p", "-t", r.Pane, OptOffered, r.Since)
-	return err
+	// Marked once queued: a failed delivery leaves it queued for the next
+	if _, err := c.Run("set-option", "-p", "-t", r.Pane, OptOffered, r.Since); err != nil || manager {
+		return err
+	}
+	return inbox.Deliver(c, clk, m)
+}
+
+// offerOptions are OfferQuestion's options: with its text, they tell dev's offer from an ask someone wrote alike.
+var offerOptions = []string{"Clear it | you run dev agent clear manager in a plain shell (Recommended)", "Not now | the manager keeps its context"}
+
+// isOffer reports it is dev's open offer on the manager's list.
+func isOffer(it todo.Shown) bool {
+	return !it.Done && it.Text == OfferQuestion && slices.Equal(it.Options, offerOptions)
 }
 
 // offerUser puts OfferQuestion on the list of the manager's pane for the user, with why (text), unless it is open still.
@@ -123,13 +148,12 @@ func offerUser(c *tmux.Client, pane, text string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if slices.ContainsFunc(l.Items, func(it todo.Shown) bool { return !it.Done && it.Text == OfferQuestion }) {
+	if slices.ContainsFunc(l.Items, isOffer) {
 		return nil
 	}
 	_, err = s.Add(todo.Item{
-		Text: OfferQuestion,
-		Options: []string{"Clear it | you run dev agent clear manager in a plain shell (Recommended)",
-			"Not now | the manager keeps its context"},
+		Text:    OfferQuestion,
+		Options: offerOptions,
 		Context: []string{text, "In a plain shell (not a Claude session): dev agent clear manager; it takes minutes"},
 		Details: "dev offers this once per idle stretch (" + text + "). The clear saves a handoff, clears " +
 			"its context and checks a proof (dev agent clear --help); the manager never clears itself, so you run it. " +
@@ -149,7 +173,7 @@ func answerOffer(c *tmux.Client, pane string, now time.Time) error {
 		return err
 	}
 	for _, it := range l.Items {
-		if !it.Done && it.Text == OfferQuestion {
+		if isOffer(it) {
 			if _, err := s.Answer(it.ID, OfferQuestion, "Clear it", 0, now); err != nil {
 				return err
 			}

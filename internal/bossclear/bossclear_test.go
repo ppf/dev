@@ -265,6 +265,7 @@ func TestVerifyHandoffUnconfirmedDone(t *testing.T) {
 		{"3. PR #41 reported merged, not checked. unconfirmed", ""},
 		{"3. PR #41 may be merged by now. unconfirmed", ""},
 		{"3. Is PR #41 merged? unconfirmed", ""},
+		{"3. PR #41 isn’t merged. unconfirmed", ""},
 		{"3. PR #41 merged. confirmed: PR #41", ""},
 		// A wish, a plan or a rule is no claim of done
 		{"3. The user wants the flaky test fixed. unconfirmed", ""},

@@ -573,8 +573,8 @@ func (s *state) health(worker string) *health {
 
 func (s *state) add(n Note) bool {
 	// A message's sender, an answer's, a start's or a doing's user and a to do item are no worker of this boss: their
-	// key would spoil that worker's dedupe
-	if !workerless(n.Kind) {
+	// key would spoil that worker's dedupe; nor would a clear offer's (once per stretch by itself, bossclear.Offer)
+	if !workerless(n.Kind) && n.Kind != ClearIt {
 		if s.Last[n.Worker] == n.Key {
 			return false
 		}
