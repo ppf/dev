@@ -3,6 +3,7 @@
 package herd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/ptywrap"
@@ -217,6 +219,8 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
+	`Claude Code compacts your conversation by itself (at 300K tokens unless projects.toml manager_autocompact says otherwise): after a compaction, read ` +
+	`the re-injected list and notes before answering, and first do what its "[dev] Owed from before the compaction" lines name. ` +
 	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user; ` +
 	`it and "ask answered" name the item's number, mark and who it waits on as dev had them when the note went, "#<n> ☐ on you: …": relay a waits on you as written, its state as of then, re-checked before you ask it; an ask answered drops its question), ` +
 	`asks (its turn ended on a question), needs a decision (its own permission prompt or dialog, or its worker's), failed, stuck, and messages ` +
@@ -456,7 +460,21 @@ func coordinatorCmd(c *tmux.Client, session string, args ...string) ([]string, e
 	if !posixShell(shell) {
 		return nil, fmt.Errorf("tmux default-shell %q is not a POSIX shell (sh, bash, zsh, dash, ksh): dev boss can't start the coordinator through it: set default-shell to zsh or bash in tmux.conf", shell)
 	}
-	argv, err := ptywrap.Argv(coordinatorArgv(session, args...)...)
+	window := 0
+	if session == Manager {
+		path, err := config.DefaultPath()
+		if err != nil {
+			return nil, err
+		}
+		if window, err = config.ManagerAutoCompact(path); err != nil {
+			return nil, err
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	argv, err := ptywrap.Argv(coordinatorArgv(session, exe, window, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -472,15 +490,32 @@ func viaLoginShell(shell string, argv []string) []string {
 	return []string{shell, "-l", "-i", "-c", "exec " + tmux.ShellJoin(argv...)}
 }
 
-// managerSettings turns off the claude.ai connectors (Slack, mail, Linear…) for the manager: project sources are its bosses' to read.
-const managerSettings = `{"disableClaudeAiConnectors":true}`
+// coordinatorSettings is the coordinator's --settings: a SessionStart hook on a compaction running exe's dev state, which
+// gives it back its list, notes and what it owes (the user's own hooks match no compaction); for the manager also its
+// claude.ai connectors (Slack, mail, Linear…) off: project sources are its bosses' to read.
+func coordinatorSettings(exe string, manager bool) string {
+	hook := map[string]any{"type": "command", "command": tmux.ShellJoin(exe, "state", "idle"), "timeout": 5}
+	settings := map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"matcher": "compact", "hooks": []any{hook}}}}}
+	if manager {
+		settings["disableClaudeAiConnectors"] = true
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		panic(err) // maps of strings, bools and ints always marshal
+	}
+	return string(data)
+}
 
-// coordinatorArgv is the coordinator Claude's argv with args: the Manager's with managerPrompt and managerSettings.
-func coordinatorArgv(session string, args ...string) []string {
+// coordinatorArgv is the coordinator Claude's argv with args and coordinatorSettings for exe: the Manager's with
+// managerPrompt and its auto-compact window (config.ManagerAutoCompact; 0: Claude Code's own).
+func coordinatorArgv(session, exe string, window int, args ...string) []string {
 	prompt := coordinatorPrompt
+	args = append(slices.Clone(args), "--settings", coordinatorSettings(exe, session == Manager))
 	if session == Manager {
 		prompt = managerPrompt
-		args = append(args, "--settings", managerSettings)
+		if window > 0 {
+			args = append(args, "--autocompact", strconv.Itoa(window))
+		}
 	}
 	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", prompt)...)
 }

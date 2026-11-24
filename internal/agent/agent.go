@@ -263,6 +263,7 @@ type Hook struct {
 	PromptID         string `json:"promptId"` // Grok's turn id
 	Prompt           string `json:"prompt"`
 	PermissionMode   string `json:"permission_mode"`
+	Source           string `json:"source"` // how a SessionStart began: startup, resume, clear, compact
 	ToolInput        struct {
 		Command string `json:"command"` // a shell tool's command
 	} `json:"tool_input"`

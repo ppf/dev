@@ -165,6 +165,13 @@ func newStateCmd() *cobra.Command {
 					state = agent.Working
 				}
 			}
+			if claude && hook.Event == "SessionStart" && hook.Source == "compact" {
+				// A compaction, often mid-turn, changes no state: only its context goes out
+				if out != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), out)
+				}
+				return nil
+			}
 			if state == agent.Clear && claude {
 				// Before Record unsets the cost: the boss's total keeps the ended conversation's
 				if err := spent.Ended(c, pane, session.ID); err != nil {
@@ -229,7 +236,7 @@ func desktopBossTodo(cmd *cobra.Command, input []byte) (string, error) {
 			return "", err
 		}
 		hint := func(s todo.Store) string { return desktopHint(cmd, s, id) }
-		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, hint, e.Source, e.Session, time.Now())
+		return inbox.StartContext(s, func() ([]todo.Session, error) { return todoWorkers(id, stderr) }, hint, "", e.Source, e.Session, time.Now())
 	}
 	if e.Name != "UserPromptSubmit" || !strings.Contains(e.Prompt, "</side-sessions-event>") {
 		return "", nil

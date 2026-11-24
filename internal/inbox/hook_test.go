@@ -185,8 +185,8 @@ const deadPID = "99999999"
 var soon = time.Now().Add(time.Hour)
 
 // A boss /clear'ed by a running dev agent clear (OptHandoff set for the conversation that ended, s0) gets its
-// handoff's path after its list; a start, resume or compaction doesn't, nor a clear without one, a leftover of a
-// killed run or one set for another conversation.
+// handoff's path after its list, as does one compacted while it runs; a start or resume doesn't, nor a clear without
+// one, a leftover of a killed run or one set for another conversation.
 func TestBossHookHandoff(t *testing.T) {
 	const path = "/s/dev/handoff/boss/2026-11-24 120000.md"
 	line := "Your handoff from before this /clear: " + path + ". Read it before acting; dev agent clear asks you for a proof of it next."
@@ -202,7 +202,8 @@ func TestBossHookHandoff(t *testing.T) {
 		{"clear", ClearValue("s7", path, soon), false},
 		{"startup", running, false},
 		{"resume", running, false},
-		{"compact", running, false},
+		{"compact", running, true},
+		{"compact", "", false},
 	} {
 		c := handoffTmux(t, "boss", "1", tt.handoff)
 		s, err := todo.ForPane(c, "%1")
@@ -279,7 +280,7 @@ func TestBossHookClearHold(t *testing.T) {
 }
 
 // A coordinator starting, resumed or /clear'ed gets its open list, kept from an earlier session on a start;
-// nothing after a compaction, with no open item, or for another pane in the boss session.
+// a compaction too; nothing with no open item, or for another pane in the boss session.
 func TestBossHookStart(t *testing.T) {
 	check := "\nCheck each still holds: tick what's done (dev todo done <n>), update what changed (dev todo add --replaces <n> \"<new text>\")." + who + nodet
 	for _, tt := range []struct {
@@ -290,7 +291,7 @@ func TestBossHookStart(t *testing.T) {
 		{"startup", "startup", "%1", []string{"Mon: reply to Vince"}, "[dev todo] Your open to do list (kept from your last boss session, updated just now):\n1. Mon: reply to Vince (no details)" + check},
 		{"clear", "clear", "%1", []string{"a", "b"}, "[dev todo] Your open to do list (updated just now):\n1. a (no details)\n2. b (no details)" + check},
 		{"resume", "resume", "%1", []string{"a"}, "[dev todo] Your open to do list (updated just now):\n1. a (no details)" + check},
-		{"compact", "compact", "%1", []string{"a"}, ""},
+		{"compact", "compact", "%1", []string{"a"}, "[dev todo] Your open to do list (updated just now):\n1. a (no details)" + check},
 		{"empty list", "startup", "%1", nil, ""},
 		{"previews pane", "startup", "%2", []string{"a"}, ""},
 	} {
@@ -338,7 +339,7 @@ func TestStartContextAge(t *testing.T) {
 	if err := s.Set([]string{"a"}, then); err != nil {
 		t.Fatal(err)
 	}
-	out, err := StartContext(s, func() ([]todo.Session, error) { return nil, nil }, noHint, "startup", "c1", then.Add(49*time.Hour))
+	out, err := StartContext(s, func() ([]todo.Session, error) { return nil, nil }, noHint, "", "startup", "c1", then.Add(49*time.Hour))
 	if err != nil || !strings.Contains(out, "updated 49h ago):") {
 		t.Errorf("StartContext = %q, %v; want updated 49h ago", out, err)
 	}
@@ -398,7 +399,7 @@ func TestWorkerHookBossAsksUp(t *testing.T) {
 	}
 }
 
-// A start or /clear tells an --until tick once; a compaction leaves it, as do workers that can't be read.
+// A start, /clear or compaction tells an --until tick once; workers that can't be read leave it.
 func TestStartContextTicked(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	s, err := todo.Desktop("local_boss")
@@ -414,22 +415,19 @@ func TestStartContextTicked(t *testing.T) {
 	}
 	later := then.Add(2 * time.Hour)
 	none := func() ([]todo.Session, error) { return nil, nil }
-	if out, _ := StartContext(s, none, noHint, "compact", "c1", later); out != "" {
-		t.Errorf("compact = %q, want nothing", out)
-	}
-	if _, err := StartContext(s, func() ([]todo.Session, error) { return nil, errors.New("no workers") }, noHint, "clear", "c1", later); err == nil {
+	if _, err := StartContext(s, func() ([]todo.Session, error) { return nil, errors.New("no workers") }, noHint, "", "clear", "c1", later); err == nil {
 		t.Errorf("workers failing: no error")
 	}
 	tick := `#1 \"Sync\" ticked by itself: its --until time came`
-	if out, err := StartContext(s, none, noHint, "clear", "c1", later); err != nil || !strings.Contains(out, tick) {
-		t.Errorf("clear = %q, %v; want the tick", out, err)
+	if out, err := StartContext(s, none, noHint, "", "compact", "c1", later); err != nil || !strings.Contains(out, tick) {
+		t.Errorf("compact = %q, %v; want the tick", out, err)
 	}
-	if out, _ := StartContext(s, none, noHint, "clear", "c1", later); strings.Contains(out, "ticked by itself") {
+	if out, _ := StartContext(s, none, noHint, "", "clear", "c1", later); strings.Contains(out, "ticked by itself") {
 		t.Errorf("again = %q, want the tick told once", out)
 	}
 }
 
-// Notes follow the open list on every start but a compaction, alone when nothing is open; a tick goes out once, the notes each time.
+// Notes follow the open list on every start, a compaction too, alone when nothing is open; a tick goes out once, the notes each time.
 func TestStartContextNotes(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	s, err := todo.Desktop("local_boss")
@@ -438,14 +436,14 @@ func TestStartContextNotes(t *testing.T) {
 	}
 	then := time.Unix(1700000000, 0)
 	none := func() ([]todo.Session, error) { return nil, nil }
-	if out, _ := StartContext(s, none, noHint, "startup", "c1", then); out != "" {
+	if out, _ := StartContext(s, none, noHint, "", "startup", "c1", then); out != "" {
 		t.Errorf("no list, no notes = %q, want nothing", out)
 	}
 	if _, err := s.AddNote(todo.Note{Kind: todo.NoteDecided, Text: "CSV only", Why: "parser"}, then); err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []string{"startup", "clear", "resume"} {
-		out, err := StartContext(s, none, noHint, source, "c1", then.Add(8*24*time.Hour))
+	for _, source := range []string{"startup", "clear", "resume", "compact"} {
+		out, err := StartContext(s, none, noHint, "", source, "c1", then.Add(8*24*time.Hour))
 		if err != nil || !strings.Contains(out, "Your notes (1 of 12, oldest 8d)") || !strings.Contains(out, "CSV only (why: parser) (8d, still true?)") || strings.Contains(out, "open to do list") {
 			t.Errorf("%s, notes only = %q, %v", source, out, err)
 		}
@@ -453,31 +451,31 @@ func TestStartContextNotes(t *testing.T) {
 	if _, err := s.Add(todo.Item{Text: "Ship"}, then); err != nil {
 		t.Fatal(err)
 	}
-	out, err := StartContext(s, none, noHint, "clear", "c1", then.Add(time.Hour))
+	out, err := StartContext(s, none, noHint, "", "clear", "c1", then.Add(time.Hour))
 	list, notes := strings.Index(out, "Your open to do list"), strings.Index(out, "Your notes")
 	if err != nil || list < 0 || notes < list || strings.Contains(out, "still true?") {
 		t.Errorf("list and notes = %q, %v; want the list, then the notes, no 7d mark", out, err)
 	}
-	if out, _ := StartContext(s, none, noHint, "compact", "c1", then.Add(time.Hour)); out != "" {
-		t.Errorf("compact = %q, want nothing", out)
+	if out, _ := StartContext(s, none, noHint, "", "compact", "c1", then.Add(time.Hour)); !strings.Contains(out, "Your open to do list") || !strings.Contains(out, "Your notes") {
+		t.Errorf("compact = %q, want the list and notes", out)
 	}
 	if _, err := s.Add(todo.Item{Text: "Sync", Until: then.Add(time.Hour).Unix()}, then); err != nil {
 		t.Fatal(err)
 	}
 	later := then.Add(2 * time.Hour)
-	out, err = StartContext(s, none, noHint, "clear", "c1", later)
+	out, err = StartContext(s, none, noHint, "", "clear", "c1", later)
 	tick, notes := strings.Index(out, "ticked by itself"), strings.Index(out, "Your notes")
 	if err != nil || tick < 0 || notes < tick {
 		t.Errorf("tick and notes = %q, %v; want the tick, then the notes", out, err)
 	}
-	if out, _ := StartContext(s, none, noHint, "clear", "c1", later); strings.Contains(out, "ticked by itself") || !strings.Contains(out, "Your notes") {
+	if out, _ := StartContext(s, none, noHint, "", "clear", "c1", later); strings.Contains(out, "ticked by itself") || !strings.Contains(out, "Your notes") {
 		t.Errorf("again = %q, want the notes without the tick", out)
 	}
 }
 
 func noHint(todo.Store) string { return "" }
 
-// The take-over hint's line goes out after the list and notes, alone when they are empty; none after a compaction.
+// The take-over hint's line goes out after the list and notes, alone when they are empty; after a compaction too.
 func TestStartContextHint(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	s, err := todo.Desktop("local_boss")
@@ -487,16 +485,16 @@ func TestStartContextHint(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	none := func() ([]todo.Session, error) { return nil, nil }
 	hint := func(todo.Store) string { return "[dev todo] An earlier boss's list for dev waits" }
-	out, err := StartContext(s, none, hint, "startup", "c1", now)
+	out, err := StartContext(s, none, hint, "", "startup", "c1", now)
 	if err != nil || !strings.Contains(out, `"additionalContext":"[dev todo] An earlier boss's list for dev waits"`) {
 		t.Errorf("empty list: %q, %v, want the hint alone", out, err)
 	}
-	if out, _ := StartContext(s, none, hint, "compact", "c1", now); out != "" {
-		t.Errorf("compact: %q, want nothing", out)
+	if out, _ := StartContext(s, none, hint, "", "compact", "c1", now); !strings.Contains(out, "An earlier boss's list for dev waits") {
+		t.Errorf("compact: %q, want the hint", out)
 	}
 }
 
-// A start's list is what the next reminder compares against; a compaction makes the next one the full list again.
+// A start's list is what the next reminder compares against, a compaction's too.
 func TestStartContextShown(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	s, err := todo.Desktop("local_boss")
@@ -520,17 +518,17 @@ func TestStartContextShown(t *testing.T) {
 		}
 		return got
 	}
-	if _, err := StartContext(s, none, noHint, "clear", "c1", now); err != nil {
+	if _, err := StartContext(s, none, noHint, "", "clear", "c1", now); err != nil {
 		t.Fatal(err)
 	}
 	if got := remind(); !strings.Contains(got, "1 open, none new or changed") {
 		t.Errorf("after a start = %q, want the count line", got)
 	}
-	if _, err := StartContext(s, none, noHint, "compact", "c1", now); err != nil {
+	if _, err := StartContext(s, none, noHint, "", "compact", "c1", now); err != nil {
 		t.Fatal(err)
 	}
-	if got := remind(); !strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. Ship\n") {
-		t.Errorf("after a compaction = %q, want the full list", got)
+	if got := remind(); !strings.Contains(got, "1 open, none new or changed") {
+		t.Errorf("after a compaction = %q, want the count line", got)
 	}
 }
 

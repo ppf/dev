@@ -751,6 +751,18 @@ func TestBottomMessage(t *testing.T) {
 	}
 }
 
+// Every coordinator runs dev state on a compaction's SessionStart, which the user's hooks don't match; the manager has
+// its claude.ai connectors off.
+func TestCoordinatorSettings(t *testing.T) {
+	hook := `"hooks":{"SessionStart":[{"hooks":[{"command":"'/my dev' 'state' 'idle'","timeout":5,"type":"command"}],"matcher":"compact"}]}`
+	if got, want := coordinatorSettings("/my dev", false), "{"+hook+"}"; got != want {
+		t.Errorf("boss: %s, want %s", got, want)
+	}
+	if got, want := coordinatorSettings("/my dev", true), `{"disableClaudeAiConnectors":true,`+hook+"}"; got != want {
+		t.Errorf("manager: %s, want %s", got, want)
+	}
+}
+
 func TestCoordinatorArgv(t *testing.T) {
 	start := agent.Start{Model: "opus", Effort: "medium"}
 	for _, tt := range []struct {
@@ -762,9 +774,10 @@ func TestCoordinatorArgv(t *testing.T) {
 		{"new with a model and effort", start.Args(false), []string{"claude", "--model", "opus", "--effort", "medium"}},
 		{"resumed, the effort again", append([]string{"--resume", "b1"}, start.Args(true)...), []string{"claude", "--resume", "b1", "--effort", "medium"}},
 	} {
-		want := append(tt.want, "--append-system-prompt", coordinatorPrompt, "--remote-control=boss-p")
-		if got := coordinatorArgv("boss-p", tt.args...); !slices.Equal(got, want) {
-			t.Errorf("%s: %q, want %q", tt.name, got[:len(got)-3], tt.want)
+		want := append(tt.want, "--settings", coordinatorSettings("/bin/dev", false), "--append-system-prompt", coordinatorPrompt, "--remote-control=boss-p")
+		// A boss never gets the manager's window
+		if got := coordinatorArgv("boss-p", "/bin/dev", 300000, tt.args...); !slices.Equal(got, want) {
+			t.Errorf("%s: %q, want %q", tt.name, got[:len(got)-5], tt.want)
 		}
 	}
 }
@@ -849,7 +862,8 @@ func TestPromptAskRules(t *testing.T) {
 			"refused without that pick or a typed go",
 			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>",
 			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", `reads "per boss-<project>" or "per <list> at HH:MM", the time from date run in that turn, never your guess`, "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick or a typed go), question", "dev agent handoffs",
-			"With an advisor tool in your session, call your advisor only before you assess the user's new idea or request", "before a boss is cleared or closed", "when a boss's report contradicts what its list or dev's state shows", "before you show the user a text meant for other people", "when you are unsure whether something is yours to settle or the user's", "manager advisor <why, 3-6 words>", "never on plain relays, state polls or list updates", "start that reply with [advisor]", "While the trial runs (from the restart, one week)", "~/.local/state/dev/design/trial/tally.log", "manager user-caught <what>", "manager bad-relay <what>", "No advisor tool: skip this"}},
+			"With an advisor tool in your session, call your advisor only before you assess the user's new idea or request", "before a boss is cleared or closed", "when a boss's report contradicts what its list or dev's state shows", "before you show the user a text meant for other people", "when you are unsure whether something is yours to settle or the user's", "manager advisor <why, 3-6 words>", "never on plain relays, state polls or list updates", "start that reply with [advisor]", "While the trial runs (from the restart, one week)", "~/.local/state/dev/design/trial/tally.log", "manager user-caught <what>", "manager bad-relay <what>", "No advisor tool: skip this",
+			`after a compaction, read the re-injected list and notes before answering, and first do what its "[dev] Owed from before the compaction" lines name`}},
 	} {
 		for _, want := range tt.want {
 			if !strings.Contains(tt.prompt, want) {
@@ -859,13 +873,17 @@ func TestPromptAskRules(t *testing.T) {
 	}
 }
 
-// The manager's coordinator gets managerPrompt and its claude.ai connectors off, so a resurrect's Adopt restores it as
-// the manager; a new one runs on fable · medium where its start leaves them unset.
+// The manager's coordinator gets managerPrompt, its claude.ai connectors off and its auto-compact window (none for 0), so
+// a resurrect's Adopt restores it as the manager; a new one runs on fable · medium where its start leaves them unset.
 func TestManagerArgvAndStart(t *testing.T) {
-	want := []string{"claude", "--settings", `{"disableClaudeAiConnectors":true}`, "--append-system-prompt", managerPrompt,
-		"--remote-control=manager"}
-	if got := coordinatorArgv(Manager); !slices.Equal(got, want) {
+	want := []string{"claude", "--settings", coordinatorSettings("/bin/dev", true), "--autocompact", "300000",
+		"--append-system-prompt", managerPrompt, "--remote-control=manager"}
+	if got := coordinatorArgv(Manager, "/bin/dev", 300000); !slices.Equal(got, want) {
 		t.Errorf("manager argv %q, want %q", got, want)
+	}
+	off := slices.Delete(slices.Clone(want), 3, 5)
+	if got := coordinatorArgv(Manager, "/bin/dev", 0); !slices.Equal(got, off) {
+		t.Errorf("manager argv, window 0: %q, want %q", got, off)
 	}
 	for _, tt := range []struct{ start, want agent.Start }{
 		{agent.Start{}, agent.Start{Model: "fable", Effort: "medium"}},

@@ -22,7 +22,43 @@ type Project struct {
 }
 
 type file struct {
-	Project []Project `toml:"project"`
+	ManagerAutoCompact *int      `toml:"manager_autocompact"`
+	Project            []Project `toml:"project"`
+}
+
+// DefaultManagerAutoCompact is the manager's auto-compact window in tokens when projects.toml sets none.
+const DefaultManagerAutoCompact = 300000
+
+// ManagerAutoCompact is projects.toml's top-level manager_autocompact at path: the token count the manager's Claude
+// compacts its conversation at (claude --autocompact), 0 for Claude Code's own window; DefaultManagerAutoCompact when
+// unset or with no file. Claude Code takes no window under 100000 tokens.
+func ManagerAutoCompact(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return DefaultManagerAutoCompact, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("config: %w", err)
+	}
+	var f file
+	md, err := toml.Decode(string(data), &f)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s: %w", path, err)
+	}
+	for _, k := range md.Undecoded() {
+		// After a [[project]] header the key is that project's, never read
+		if k[len(k)-1] == "manager_autocompact" {
+			return 0, fmt.Errorf("config: %s: manager_autocompact goes at the top, before the first [[project]]", path)
+		}
+	}
+	switch n := f.ManagerAutoCompact; {
+	case n == nil:
+		return DefaultManagerAutoCompact, nil
+	case *n != 0 && *n < 100000:
+		return 0, fmt.Errorf("config: %s: manager_autocompact = %d: 0 (Claude Code's own window) or at least 100000 tokens", path, *n)
+	default:
+		return *n, nil
+	}
 }
 
 // DefaultPath is $XDG_CONFIG_HOME/dev/projects.toml, else ~/.config/dev/projects.toml.

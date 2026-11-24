@@ -10,7 +10,7 @@ import (
 )
 
 // After the full list, a boss's reminder lists only the items changed since, under a count line; items to re-check
-// always show, counted when newly to re-check; an item that left is named once; ForgetShown (a compaction) or another
+// always show, counted when newly to re-check; an item that left is named once; ForgetShown or another
 // conversation brings the full list back.
 func TestRemindChangesOnly(t *testing.T) {
 	s := store(t)

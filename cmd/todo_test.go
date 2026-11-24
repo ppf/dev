@@ -288,7 +288,7 @@ func TestTodoDesktopTakeOver(t *testing.T) {
 	if got := run(t, "", "todo", "--boss", "local_running"); got != "1\t☐\trunning's own\n" {
 		t.Errorf("running session's list: %q, want it kept", got)
 	}
-	for source, want := range map[string]string{"startup": "", "resume": "(updated just now):\n1. old open item", "clear": "(updated just now):\n1. old open item", "compact": ""} {
+	for source, want := range map[string]string{"startup": "", "resume": "(updated just now):\n1. old open item", "clear": "(updated just now):\n1. old open item", "compact": "(updated just now):\n1. old open item"} {
 		got := start(source)
 		var out struct {
 			Hook struct {

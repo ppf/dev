@@ -181,7 +181,7 @@ func TestAskRules(t *testing.T) {
 		"left unanswered in a call of several, or \"Leave it open\": the item stays open",
 		"name the item's number, mark and who it waits on as dev had them when the note went (`boss-<project> waits on you: #<n> ☐ on you: …`)",
 		"only the items changed since you last got it, under a count line",
-		"the full list again after a compaction and at least once an hour (a rewind or a reused item number",
+		"your start list again after a compaction (a `dev boss` coordinator), the full list at least once an hour (a rewind or a reused item number",
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
 		"a message the user typed here answers no item (dev refuses it): ask that item as a question",
