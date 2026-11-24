@@ -752,11 +752,15 @@ func parseState(data string) ([]entry, []agentEntry, []startedByEntry, []bossEnt
 
 var snapshotTimeout = time.Minute
 
+// snapshotPaneTimeout is added to snapshotTimeout per pane: save.sh runs a ps per pane, 0.6-0.9 s each with
+// about 1600 processes running.
+const snapshotPaneTimeout = 3 * time.Second
+
 // Snapshot runs tmux-resurrect's save.sh after dev closed a session for good, one at a time, each in its own
 // second: save.sh names a snapshot by its second, so a save started in the second of another still writing would
 // write that file too. A save that isn't dev's has written its file by its Save hook, which waits for this lock so
 // that it sees the last link this one made. snapshotTimeout keeps a hung save from holding the last session's
-// server up.
+// server up; it grows with the pane count, as save.sh's time does.
 func Snapshot(c *tmux.Client) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -766,13 +770,17 @@ func Snapshot(c *tmux.Client) error {
 	if _, err := os.Stat(save); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
+	// Before the lock, so a stalled tmux can't hold it. With no session left (the sidebar closed the last one)
+	// list-panes -a fails: no pane to wait for
+	panes, panesErr := c.Run("list-panes", "-a", "-F", "#{pane_id}")
+	timeout := snapshotTimeout + time.Duration(strings.Count(panes, "\n"))*snapshotPaneTimeout
 	lock, err := lockSnapshots()
 	if err != nil {
 		return fail(c, err.Error()+", snapshot not saved", nil)
 	}
 	defer func() { _ = lock.Close() }()
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
-	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, save, "quiet")
 	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
@@ -793,7 +801,10 @@ func Snapshot(c *tmux.Client) error {
 	}
 	what := "failed (" + err.Error() + ")"
 	if ctx.Err() != nil {
-		what = "timed out after " + snapshotTimeout.String()
+		what = "timed out after " + timeout.String()
+		if panesErr != nil {
+			what += " (no pane count: " + panesErr.Error() + ")"
+		}
 	}
 	return fail(c, strings.TrimSpace("save.sh "+what+": "+strings.TrimSpace(string(out))), err)
 }
