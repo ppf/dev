@@ -38,10 +38,11 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 			}
 		}
 	}
-	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %d changed since the last one", open, changed)
+	count := strconv.Itoa(changed)
 	if changed == 0 {
-		head = fmt.Sprintf("[dev todo] Your open to do list: %d open, none changed since the last one", open)
+		count = "none"
 	}
+	head := fmt.Sprintf("[dev todo] Your open to do list: %d open, %s changed since the last one", open, count)
 	var left []string
 	for _, id := range slices.Sorted(maps.Keys(seen)) {
 		if !isOpen[id] {

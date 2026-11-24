@@ -465,10 +465,11 @@ func itemState(c *tmux.Client, pane string, id int, now time.Time) (string, erro
 		return "", err
 	}
 	// The open one first: a ticked one may share its number (numbers restart)
-	if i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done }); i >= 0 {
-		return l.Items[i].State() + ": ", nil
+	i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id && !it.Done })
+	if i < 0 {
+		i = slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id })
 	}
-	if i := slices.IndexFunc(l.Items, func(it todo.Shown) bool { return it.ID == id }); i >= 0 {
+	if i >= 0 {
 		return l.Items[i].State() + ": ", nil
 	}
 	if i := slices.IndexFunc(l.Finished, func(f todo.Finished) bool { return f.ID == id }); i >= 0 {

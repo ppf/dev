@@ -25,7 +25,7 @@ const showGuard = "DEV_TODO_SHOW_IN_POPUP"
 
 func newTodoShowCmd(boss *string) *cobra.Command {
 	var client, question string
-	var print bool
+	var printOnly bool
 	cmd := &cobra.Command{
 		Use:   "show <boss> <n>",
 		Short: "Show item n of a dev boss's list in a popup, as the user: answer it, tick, start, mark it in progress, reopen it, open its link, go to its boss or worker",
@@ -54,7 +54,7 @@ dev todo has it (number, mark, text, who it waits on, answer), its context and d
 			if err != nil {
 				return err
 			}
-			if print {
+			if printOnly {
 				printShown(cmd.OutOrStdout(), it.Shown, time.Now())
 				return nil
 			}
@@ -82,7 +82,7 @@ dev todo has it (number, mark, text, who it waits on, answer), its context and d
 	}
 	cmd.Flags().StringVar(&client, "client", "", "the tmux client to show it on and switch: tmux's current one by default")
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
-	cmd.Flags().BoolVar(&print, "print", false, "print the item as text instead of the popup")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print the item as text instead of the popup")
 	return cmd
 }
 
