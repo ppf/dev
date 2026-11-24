@@ -32,6 +32,7 @@ func TestInputBox(t *testing.T) {
 		// A long suggestion wraps onto the row under its prompt row: still Claude Code's, never typed
 		// Dim text only under a blank prompt row is read as the user's: a pasted text's chip may be drawn dim
 		"dim under a blank row": {rule + "❯ \n  \x1b[2m[Pasted text #1 +12 lines]\x1b[0m\n" + rule, Input{Text: "[Pasted text #1 +12 lines]"}},
+		"pasted text chip":      {rule + "❯ \x1b[2m[Pasted text #1 +12 lines]\x1b[0m\n" + rule, Input{Text: "[Pasted text #1 +12 lines]"}},
 		"wrapped suggestion":    {rule + "❯ \x1b[2mrun the full suite\x1b[0m\n  \x1b[2mand report\x1b[0m\n" + rule, Input{Text: "run the full suite\n  and report", Suggestion: true}},
 	} {
 		if got, ok := InputBox(tt.screen); !ok || got != tt.want {

@@ -736,13 +736,19 @@ func Read(c *tmux.Client, pane string, lines int, claude bool) (string, error) {
 	if lines < 1 {
 		return "", fmt.Errorf("lines must be at least 1, got %d", lines)
 	}
-	out, err := c.Run("capture-pane", "-p", "-J", "-S", "-"+strconv.Itoa(lines), "-t", pane)
+	args := []string{"capture-pane", "-p", "-J", "-S", "-" + strconv.Itoa(lines), "-t", pane}
+	if claude {
+		// With its colours: the mark and the text from one capture, as the box may change between two
+		args = append(args, "-e")
+	}
+	out, err := c.Run(args...)
 	if err != nil {
 		return "", err
 	}
+	in, ok := screen.InputBox(out)
 	all := strings.Split(out, "\n")
 	for i, l := range all {
-		all[i] = strings.TrimRight(l, " ")
+		all[i] = strings.TrimRight(screen.Strip(l), " ")
 	}
 	for len(all) > 0 && all[len(all)-1] == "" {
 		all = all[:len(all)-1]
@@ -753,11 +759,8 @@ func Read(c *tmux.Client, pane string, lines int, claude bool) (string, error) {
 	if len(all) == 0 {
 		return "", nil
 	}
-	if !claude {
-		return strings.Join(all, "\n") + "\n", nil
-	}
-	if err := markSuggestion(c, pane, all); err != nil {
-		return "", err
+	if claude && ok && in.Suggestion {
+		markSuggestion(all, in)
 	}
 	return strings.Join(all, "\n") + "\n", nil
 }
@@ -765,25 +768,17 @@ func Read(c *tmux.Client, pane string, lines int, claude bool) (string, error) {
 // suggestionMark ends the input box's row in Read when Claude Code's dim suggestion fills it.
 const suggestionMark = "  [suggestion]"
 
-// markSuggestion ends with suggestionMark the last of lines that is pane's input row holding only Claude Code's dim
-// suggestion (screen.InputBox), as plain text can't tell it from the user's typing.
-func markSuggestion(c *tmux.Client, pane string, lines []string) error {
-	in, ok, err := inputBox(c, pane)
-	if err != nil && strings.Contains(err.Error(), "can't find pane") {
-		return nil // closed since the first capture: its screen as it was, no mark
-	}
-	if err != nil || !ok || !in.Suggestion {
-		return err
-	}
+// markSuggestion ends with suggestionMark the last of lines that is the prompt row of in, Claude Code's dim suggestion
+// (screen.InputBox), as plain text can't tell it from the user's typing.
+func markSuggestion(lines []string, in screen.Input) {
+	// Its prompt row: a long suggestion wraps onto the rows under it
+	first, _, _ := strings.Cut(in.Text, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		// Its prompt row: a long suggestion wraps onto the rows under it
-		first, _, _ := strings.Cut(in.Text, "\n")
 		if text, ok := screen.PromptRow(lines[i]); ok && strings.TrimSpace(text) == first {
 			lines[i] += suggestionMark
-			return nil
+			return
 		}
 	}
-	return nil
 }
 
 // keyNames maps send-keys names to tmux keys.

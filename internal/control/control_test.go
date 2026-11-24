@@ -171,8 +171,8 @@ func TestRead(t *testing.T) {
 	if err != nil || out != "\nthree\n" {
 		t.Errorf("Read = %q, %v; want %q", out, err, "\nthree\n")
 	}
-	if want := []string{"capture-pane", "-p", "-J", "-S", "-2", "-t", "%1"}; len(calls) == 0 || !slices.Equal(calls[0], want) {
-		t.Errorf("args = %q, want %q first", calls, want)
+	if want := []string{"capture-pane", "-p", "-J", "-S", "-2", "-t", "%1"}; len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("args = %q, want only %q", calls, want)
 	}
 	if _, err := Read(c, "%1", 0, false); err == nil {
 		t.Error("Read with 0 lines: want error")

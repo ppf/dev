@@ -48,10 +48,10 @@ func InputBox(capture string) (in Input, ok bool) {
 			if t := box(text); t != "" {
 				return Input{Text: t}, true
 			}
-			if dim := box(shown); dim != "" {
-				return Input{Text: dim, Suggestion: true}, true
-			}
-			return Input{}, true
+			dim := box(shown)
+			// A pasted text's or image's chip is the user's draft, drawn dim or not
+			chip := strings.HasPrefix(dim, "[Pasted text") || strings.HasPrefix(dim, "[Image")
+			return Input{Text: dim, Suggestion: dim != "" && !chip}, true
 		}
 		return Input{}, false
 	}
@@ -86,6 +86,9 @@ func edge(line string) bool {
 	p := strings.TrimSpace(plainLine(line))
 	return len([]rune(p)) >= MinRule && strings.Trim(p, "─━╌╍┄┅╭╮╰╯") == ""
 }
+
+// Strip is line without its escape sequences.
+func Strip(line string) string { return plainLine(line) }
 
 // plainLine drops all escape sequences.
 func plainLine(line string) string {

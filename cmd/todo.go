@@ -982,7 +982,7 @@ func markAsking(c *tmux.Client, lists []bossList, now time.Time, stderr io.Write
 			continue
 		}
 		for i, it := range bl.Items {
-			if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 {
+			if it.ID == a.ID && it.Text == a.Text && !it.Done && len(it.Options) > 0 && !bl.Closed {
 				bl.Items[i].Asking = true
 			}
 		}

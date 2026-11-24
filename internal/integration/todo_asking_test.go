@@ -102,6 +102,15 @@ func TestTodoAsking(t *testing.T) {
 		t.Errorf("❌ asking after the pick: %v, want none", got)
 	}
 
+	// A dialog closed without a pick (declined, skipped)
+	must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?")
+	none, _ := json.Marshal(map[string]any{"hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion",
+		"tool_input": map[string]any{"questions": []map[string]string{{"question": "a #1: Filter row?"}}}})
+	must([]string{"TMUX_PANE=" + manager}, string(none), "state", "working")
+	if got := asking(); len(got) != 0 {
+		t.Errorf("❌ asking after a dialog without a pick: %v, want none", got)
+	}
+
 	// A resumed manager has no dialog up
 	must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?")
 	must([]string{"TMUX_PANE=" + manager}, `{"hook_event_name":"SessionStart","source":"resume"}`, "state", "idle")
