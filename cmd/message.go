@@ -21,7 +21,7 @@ and there is no --boss. Caps: 6 messages per thread, 20 per hour per sender, no 
 
 func newAgentMessageCmd() *cobra.Command {
 	var fyi bool
-	var kind string
+	var kind, words string
 	cmd := &cobra.Command{
 		Use:   "message <boss> <text>",
 		Short: "Send another boss (or the manager, once it runs) a message, starting a thread; prints its id",
@@ -32,7 +32,7 @@ agent prompt.
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
-			return sendGated(cmd.OutOrStdout(), c, kind, args[1], func(s inbox.Messages, from string, now time.Time, gate func(string) error) (msg inbox.Msg, b inbox.Boss, err error) {
+			return sendGated(cmd.OutOrStdout(), c, kind, words, args[1], func(s inbox.Messages, from string, now time.Time, gate func(string) error) (msg inbox.Msg, b inbox.Boss, err error) {
 				// Before storing: a refusal doesn't count against the caps
 				if b, err = inbox.Recipient(c, args[0]); err != nil {
 					return msg, b, err
@@ -47,12 +47,13 @@ agent prompt.
 	}
 	cmd.Flags().BoolVar(&fyi, "fyi", false, "for information: it takes no reply")
 	cmd.Flags().StringVar(&kind, "kind", "", kindHelp)
+	cmd.Flags().StringVar(&words, "go", "", goHelp)
 	return cmd
 }
 
 func newAgentReplyCmd() *cobra.Command {
 	var done bool
-	var kind string
+	var kind, words string
 	cmd := &cobra.Command{
 		Use:   "reply <id> <text>",
 		Short: "Reply to a message (m12) in its thread, to the thread's other boss; prints the reply's id",
@@ -62,7 +63,7 @@ thread reply in it. --done ends the thread: no reply after it. From the manager 
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := tmux.New()
-			return sendGated(cmd.OutOrStdout(), c, kind, args[1], func(s inbox.Messages, from string, now time.Time, gate func(string) error) (msg inbox.Msg, b inbox.Boss, err error) {
+			return sendGated(cmd.OutOrStdout(), c, kind, words, args[1], func(s inbox.Messages, from string, now time.Time, gate func(string) error) (msg inbox.Msg, b inbox.Boss, err error) {
 				msg, err = s.Reply(from, args[0], args[1], done, now, func(to string) (err error) {
 					if b, err = inbox.Recipient(c, to); err != nil {
 						return err
@@ -75,6 +76,7 @@ thread reply in it. --done ends the thread: no reply after it. From the manager 
 	}
 	cmd.Flags().BoolVar(&done, "done", false, "end the thread: no reply after this one")
 	cmd.Flags().StringVar(&kind, "kind", "", kindHelp)
+	cmd.Flags().StringVar(&words, "go", "", goHelp)
 	return cmd
 }
 
@@ -107,10 +109,10 @@ func send(out io.Writer, c *tmux.Client, post func(s inbox.Messages, from string
 
 // sendGated is send with the manager's hand-on gate, which post calls with the boss once it knows it: a message that
 // reached the boss's inbox is recorded, else the pick the gate claimed goes back.
-func sendGated(out io.Writer, c *tmux.Client, kind, text string, post func(s inbox.Messages, from string, now time.Time, gate func(boss string) error) (inbox.Msg, inbox.Boss, error)) error {
+func sendGated(out io.Writer, c *tmux.Client, kind, words, text string, post func(s inbox.Messages, from string, now time.Time, gate func(boss string) error) (inbox.Msg, inbox.Boss, error)) error {
 	var g *handOn
 	gate := func(boss string) (err error) {
-		g, err = gateHandOn(c, kind, boss, text)
+		g, err = gateHandOn(c, kind, words, boss, text)
 		return err
 	}
 	queued, err := send(out, c, func(s inbox.Messages, from string, now time.Time) (inbox.Msg, inbox.Boss, error) {

@@ -57,7 +57,7 @@ func TestHandoffsList(t *testing.T) {
 	if want := []int64{103, 102, 104, 101, 106, 105, 100}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("order %v, want %v", got, want)
 	}
-	if got, want := Tally(hs), "gated 2 · ungated: question 1, pick 0, own 1 · dropped 1 · corrected 1 · refused 1"; got != want {
+	if got, want := Tally(hs), "gated 2 · typed go 0 · ungated: question 1, pick 0, own 1 · dropped 1 · corrected 1 · refused 1"; got != want {
 		t.Errorf("Tally = %q, want %q", got, want)
 	}
 	if got := FirstLine("\n  Cache   the builds.\ncontract first"); got != "Cache the builds." {

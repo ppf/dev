@@ -17,7 +17,9 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-const kindHelp = "the manager's label of what it sends, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question whose first line starts \"Hand on to <target>\" and that holds the brief's first line as a line of its own), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
+const kindHelp = "the manager's label of what it sends, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question whose first line starts \"Hand on to <target>\" and that holds the brief's first line as a line of its own, or with --go), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
+
+const goHelp = "with --kind work: the user's words, quoted, from their latest message here, typed by them (not an inbox batch, another session's or a plugin's prompt, pasted text or a pick) and not used for a send before; recorded as a typed go"
 
 // handOn is a send from the manager's pane to a boss, let through by gateHandOn; nil for any other pane.
 type handOn struct {
@@ -25,13 +27,19 @@ type handOn struct {
 	h     inbox.Handoff
 	box   inbox.Box
 	pick  *inbox.Prompt // the user's "Hand it on" pick claimed for a KindWork send
+	typed *inbox.Go     // or the user's typed go claimed for it
 }
 
-// gateHandOn needs kind only in the manager's pane (nil handOn elsewhere); KindWork passes only on a matching HandItOn pick, which it claims.
-func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
+// gateHandOn needs kind only in the manager's pane (nil handOn elsewhere); KindWork passes only on a matching HandItOn
+// pick, or with words (--go) on the user's latest message typed by them holding words, which it claims.
+func gateHandOn(c *tmux.Client, kind, words, boss, text string) (*handOn, error) {
+	if words != "" && kind != inbox.KindWork {
+		return nil, errors.New("--go goes with --kind work")
+	}
 	var self inbox.Boss
 	manager := false
-	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+	pane := os.Getenv("TMUX_PANE")
+	if pane != "" {
 		b, ok, err := inbox.Coordinator(c, pane)
 		switch {
 		case err == nil:
@@ -49,7 +57,7 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 	case !manager:
 		return nil, errors.New("--kind is the manager's: only in its coordinator pane")
 	case kind == "":
-		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
+		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick or their typed go (--go)", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
 	case !slices.Contains(inbox.Kinds, kind):
 		return nil, fmt.Errorf("--kind %s: one of %s", kind, strings.Join(inbox.Kinds, ", "))
 	}
@@ -63,6 +71,21 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 	}
 	g := &handOn{store: store, box: self.Box, h: inbox.Handoff{Kind: kind, Boss: boss, Line: inbox.FirstLine(text)}}
 	if kind != inbox.KindWork {
+		return g, nil
+	}
+	if words != "" {
+		transcript, err := c.Run("display-message", "-p", "-t", pane, "#{@agent_transcript}")
+		if err != nil {
+			return nil, err
+		}
+		typed, err := inbox.LatestGo(strings.TrimSpace(transcript), words)
+		if err != nil {
+			return nil, err
+		}
+		if err := self.Box.ClaimGo(typed); err != nil {
+			return nil, err
+		}
+		g.typed, g.h.Kind, g.h.Go = &typed, inbox.TypedGo, words
 		return g, nil
 	}
 	// The latest pick, typed messages since or not; no pick yet: the latest typed message, which handOnPick refuses
@@ -115,7 +138,7 @@ func handOnPick(p *inbox.Prompt, boss, text string) error {
 	line := strings.ToLower(inbox.FirstLine(text))
 	switch {
 	case !p.Pick:
-		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q)", inbox.HandItOn, inbox.DropIt)
+		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q), or, on their typed go, add --go '<their words>'", inbox.HandItOn, inbox.DropIt)
 	case p.HandOnMixed:
 		return errors.New("--kind work: the user's dialog held the hand-on question beside others: a hand-on question stays alone in its dialog: ask it again on its own")
 	case p.Question == "":
@@ -153,16 +176,20 @@ func (g *handOn) done(sent bool, now time.Time) error {
 		if err := g.box.Unclaim(*g.pick, -1); err != nil {
 			return fmt.Errorf("not sent, and the user's pick couldn't be given back: ask them again: %w", err)
 		}
+	case g.typed != nil:
+		if err := g.box.UnclaimGo(*g.typed); err != nil {
+			return fmt.Errorf("not sent, and the user's go couldn't be given back: ask them again: %w", err)
+		}
 	}
 	return nil
 }
 
-// typed is err from a send whose text reached the pane anyway, saying so for a gated one: its pick is used.
-func (g *handOn) typed(err error) error {
-	if err == nil || g == nil || g.pick == nil || control.NotSent(err) {
+// reached is err from a send whose text reached the pane anyway, saying so for a gated one: its pick or go is used.
+func (g *handOn) reached(err error) error {
+	if err == nil || g == nil || (g.pick == nil && g.typed == nil) || control.NotSent(err) {
 		return err
 	}
-	return fmt.Errorf("%w (the brief reached %s's pane: recorded in dev agent handoffs, the user's pick is used; read the pane)", err, g.h.Boss)
+	return fmt.Errorf("%w (the brief reached %s's pane: recorded in dev agent handoffs, the user's pick or go is used; read the pane)", err, g.h.Boss)
 }
 
 func newAgentHandoffsCmd() *cobra.Command {
@@ -171,10 +198,11 @@ func newAgentHandoffsCmd() *cobra.Command {
 		Use:   "handoffs",
 		Short: "List what the manager sent its bosses by --kind, ungated ones first, with the trial's counts",
 		Long: `List what the manager sent its bosses with dev agent prompt/message/reply --kind, ungated kinds (question, pick, own)
-first so a mislabel shows, then work (each on the user's "Hand it on" pick), then hand-on questions that sent nothing
+first so a mislabel shows, then work (each on the user's "Hand it on" pick) and typed go (work on the user's typed words,
+--go, shown after the brief), then hand-on questions that sent nothing
 (dropped: "Drop it" picked; corrected: typed under Other or another option picked), then the user's "Hand it on" clicks the gate
 refused (refused); newest first in each. The first line counts them. A
-dismissed question is not seen. --json prints [{kind, at, boss?, line}], at in unix seconds.`,
+dismissed question is not seen. --json prints [{kind, at, boss?, line, go?}], at in unix seconds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			socket, err := inbox.Socket(tmux.New())
@@ -200,14 +228,18 @@ dismissed question is not seen. --json prints [{kind, at, boss?, line}], at in u
 	return cmd
 }
 
-// printHandoffs prints the counts, then a line per hand-on: "11-24 15:04 question boss-dev: <first line>".
+// printHandoffs prints the counts, then a line per hand-on: "11-24 15:04 question boss-dev: <first line>", a typed
+// go's words after it: ` (go: "Tak ruszaj")`.
 func printHandoffs(out io.Writer, hs []inbox.Handoff) {
 	fmt.Fprintln(out, inbox.Tally(hs))
 	for _, h := range hs {
-		to := ""
+		to, words := "", ""
 		if h.Boss != "" {
 			to = " " + h.Boss
 		}
-		fmt.Fprintf(out, "%s %s%s: %s\n", time.Unix(h.At, 0).Format("01-02 15:04"), h.Kind, to, h.Line)
+		if h.Go != "" {
+			words = fmt.Sprintf(" (go: %q)", h.Go)
+		}
+		fmt.Fprintf(out, "%s %s%s: %s%s\n", time.Unix(h.At, 0).Format("01-02 15:04"), h.Kind, to, h.Line, words)
 	}
 }

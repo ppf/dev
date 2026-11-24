@@ -231,7 +231,7 @@ func typeInto(c *tmux.Client, target string) (control.Agent, error) {
 
 func newAgentPromptCmd() *cobra.Command {
 	var wait bool
-	var kind string
+	var kind, words string
 	var stall, timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "prompt <target> [text...]",
@@ -251,7 +251,10 @@ agent's new conversation started (its hook recorded a new session).
 
 From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
 latest pick there, typed messages since or not, being "Hand it on" on one question whose first line starts "Hand on to <target>"
-and that holds the brief's first line as a line of its own, once per pick; a new hand-on question drops it.`,
+and that holds the brief's first line as a line of its own, once per pick; a new hand-on question drops it. Or, with
+--go '<the user's words>', on their latest message there when they typed it themselves (by the transcript: not an inbox
+batch, another session's or a plugin's prompt, an accepted suggestion, pasted text or a pick) and it holds the words, once
+per message, listed as a typed go.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -267,7 +270,7 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 			if err != nil {
 				return err
 			}
-			g, err := gateHandOn(c, kind, a.Session, text)
+			g, err := gateHandOn(c, kind, words, a.Session, text)
 			if err != nil {
 				return err
 			}
@@ -276,7 +279,7 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 				if queued {
 					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
 				}
-				return errors.Join(g.typed(err), g.done(!control.NotSent(err), time.Now()))
+				return errors.Join(g.reached(err), g.done(!control.NotSent(err), time.Now()))
 			}
 			// Recorded once typed: the wait may run long or be cut off
 			var gerr error
@@ -290,7 +293,7 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 				err = timedOut(cmd, st, err, timeout)
 			}
 			if err != nil || gerr != nil {
-				return errors.Join(g.typed(err), gerr)
+				return errors.Join(g.reached(err), gerr)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), st.Trusted())
 			return nil
@@ -298,6 +301,7 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 	}
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the agent finished its turn")
 	cmd.Flags().StringVar(&kind, "kind", "", kindHelp)
+	cmd.Flags().StringVar(&words, "go", "", goHelp)
 	cmd.Flags().DurationVar(&stall, "stall", 10*time.Second, "with --wait: give up when the prompt isn't picked up within this")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "with --wait: give up after this")
 	return cmd
