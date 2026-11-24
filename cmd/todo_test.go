@@ -986,3 +986,34 @@ func TestTodoNoDetailsWarning(t *testing.T) {
 		t.Errorf("ask --replaces of a bare ask: err %v, stderr %q, want the warning", err, errOut)
 	}
 }
+
+// A malformed projects.toml blocks only a pick that needs the alias lookup: the project's own question still relays.
+func TestPickIndexConfigError(t *testing.T) {
+	withConfig(t, "[[project\n")
+	cmd := newRootCmd()
+	own := &inbox.Prompt{Pick: true, Question: "manager #1: Merge?", Answer: "Merge"}
+	if i, err := pickIndex(cmd, nil, own, "manager", 1, "Merge?"); i != -1 || err != nil {
+		t.Errorf("a pick naming the manager: %d, %v; want relayed", i, err)
+	}
+	alias := &inbox.Prompt{Pick: true, Question: "boss-app #1: Merge?", Answer: "Merge"}
+	if _, err := pickIndex(cmd, nil, alias, "boss-app", 1, "Merge?"); err == nil {
+		t.Error("a pick naming the session over a malformed projects.toml: want the config error")
+	}
+	// Both names in one dialog: the alias may make them one item asked twice, which a lost lookup can't rule out
+	both := &inbox.Prompt{Pick: true, Asks: []inbox.Asked{{Question: "boss-app #1: Merge?", Answer: "Wait"}, {Question: "app #1: Merge?", Answer: "Merge"}}}
+	if _, err := pickIndex(cmd, nil, both, "boss-app", 1, "Merge?"); err == nil {
+		t.Error("an app and boss-app question over a malformed projects.toml: want refused")
+	}
+}
+
+// An ask answered and reopened with the same id and text is a new ask: the mark set before is not its.
+func TestMarkAskedReopened(t *testing.T) {
+	asked := inbox.Asking{Boss: "boss-a", ID: 1, Text: "Ship?", Added: 100, At: 100}
+	for added, want := range map[int64]bool{100: true, 101: false, 99: false} {
+		lists := []bossList{{Boss: "boss-a", List: todo.List{Items: []todo.Shown{{ID: 1, Text: "Ship?", Options: []string{"Ship"}, Added: added}}}}}
+		markAsked(lists, []inbox.Asking{asked})
+		if got := lists[0].Items[0].Asking; got != want {
+			t.Errorf("added at %d, marked reading 100: asking %v, want %v", added, got, want)
+		}
+	}
+}

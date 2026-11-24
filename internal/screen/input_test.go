@@ -39,6 +39,14 @@ func TestInputBox(t *testing.T) {
 			t.Errorf("%s: %+v %v, want %+v", name, got, ok, tt.want)
 		}
 	}
+	// A dialog drawn between two rules: its numbered option is no draft
+	if got, ok := InputBox(rule + "❯ 1. Yes\n  2. No\n" + rule); ok {
+		t.Errorf("a numbered dialog option between rules: %+v, want no box", got)
+	}
+	// A draft that starts like a list item is still the user's
+	if got, ok := InputBox(rule + "❯ 1. fix the login\n" + rule); !ok || got.Text != "1. fix the login" {
+		t.Errorf("a numbered draft: %+v %v, want it read", got, ok)
+	}
 	if _, ok := InputBox("Do you want to proceed?\n❯ 1. Yes\n  2. No\n"); ok {
 		t.Error("a dialog: want no box")
 	}

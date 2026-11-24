@@ -91,6 +91,15 @@ func TestTodoAsking(t *testing.T) {
 	if got := asking(); len(got) != 0 {
 		t.Fatalf("❌ asking before: %v", got)
 	}
+	// A boss with its inbox off can't get the answer via the manager: refused, none marked
+	s.T("set-option", "-t", "=boss-a:", inbox.OptOff, "off")
+	if _, stderr, err := dev(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"); err == nil || !strings.Contains(stderr, "its inbox off") {
+		t.Errorf("❌ asking a boss with its inbox off: %v %q, want refused", err, stderr)
+	}
+	if got := asking(); len(got) != 0 {
+		t.Errorf("❌ asking after the refusal: %v, want none", got)
+	}
+	s.T("set-option", "-t", "=boss-a:", "-u", inbox.OptOff)
 	check(t, "asking", must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?"), "boss-a #1: asked in manager now\n")
 	if got := asking(); len(got) != 1 || got[0] != 1 {
 		t.Errorf("❌ asking after the mark: %v, want [1]", got)

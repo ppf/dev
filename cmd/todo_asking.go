@@ -25,7 +25,7 @@ the dialog (up to 4 pairs): the terminal board and the web board (the phone page
 so the user answers there or here, knowing. A mark goes once its item closes or its text changes, and all of them at
 the manager's next pick of any question (its PostToolUse hook), another asking, a /clear or restart of the manager, or
 30 minutes on (a dialog closed with Esc fires no hook). One --question per pair, in the same order, is that ask's text:
-refused unless open ask n still reads it; one refused item marks none. Only from the manager's coordinator pane.`,
+refused unless open ask n still reads it, and its boss has its inbox on; one refused item marks none. Only from the manager's coordinator pane.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 || len(args)%2 != 0 || len(args) > 8 {
 				return fmt.Errorf("asking takes 1 to 4 pairs of <boss> <n>, got %d argument(s)", len(args))
@@ -70,7 +70,10 @@ refused unless open ask n still reads it; one refused item marks none. Only from
 				case slices.ContainsFunc(marks, func(a inbox.Asking) bool { return a.Boss == name && a.ID == id }):
 					return fmt.Errorf("%s #%d is named twice", name, id)
 				}
-				marks = append(marks, inbox.Asking{Boss: name, ID: id, Text: it.Text, At: now})
+				if _, err := inbox.Recipient(c, name); errors.Is(err, inbox.ErrInboxOff) {
+					return fmt.Errorf("%s #%d can't be answered via the manager: %w", name, id, err)
+				}
+				marks = append(marks, inbox.Asking{Boss: name, ID: id, Text: it.Text, Added: it.Added, At: now})
 			}
 			if err := self.Box.SetAsking(marks); err != nil {
 				return err
