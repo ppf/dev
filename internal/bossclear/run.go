@@ -138,8 +138,9 @@ type Result struct {
 // a person's without details), the checks again, /clear confirmed by the new session (its start hook names the
 // handoff), then a proof prompt and VerifyProof. A failed verify prompts the boss once with what it missed and
 // verifies again. From the save on, inbox.OptHandoff holds the boss's inbox notes back (a note that came in refuses
-// the clear at the second check). Nothing is cleared before the handoff passes; the handoff, facts copy and
-// transcript stay.
+// the clear at the second check). A --facts fact the boss couldn't fix (carriedMisses) is refused before anything is
+// sent; nothing is cleared before the handoff passes; the handoff, facts copy and transcript stay. A cleared manager's
+// open offer (OfferQuestion) is answered "Clear it".
 func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Result, err error) {
 	if err := check(c, a, o.Force, clk.Now()); err != nil {
 		return r, err
@@ -156,6 +157,10 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		}
 		if facts, carried = string(data), readFacts(string(data)); len(carried) == 0 {
 			return r, fmt.Errorf("--facts %s: no numbered facts (\"1. <fact> confirmed: <item, PR or file>\" or \"… unconfirmed\")", o.Facts)
+		}
+		// The boss copies them word for word: it couldn't fix one
+		if bad := carriedMisses(carried); len(bad) > 0 {
+			return r, fmt.Errorf("--facts %s: %s; nothing sent", o.Facts, strings.Join(bad, "; "))
 		}
 	}
 	out, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session}\t#{@agent_transcript}")
@@ -269,7 +274,33 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		}
 	}
 	r.Facts = len(h.Facts)
+	if a.Session == sidebar.Manager {
+		if err := answerOffer(c, a.Pane, clk.Now()); err != nil {
+			fmt.Fprintf(o.Out, "⚠ %q left open on the manager's list: %v\n", OfferQuestion, err)
+		}
+	}
 	return r, nil
+}
+
+// carriedMisses is what the boss couldn't fix in the caller's facts it must copy word for word: a fact unmarked or
+// worded as done while unconfirmed, a number used twice, more than MaxFacts.
+func carriedMisses(fs []Fact) []string {
+	var miss []string
+	if len(fs) > MaxFacts {
+		miss = append(miss, fmt.Sprintf("%d facts, at most %d", len(fs), MaxFacts))
+	}
+	if r := repeated(fs); len(r) > 0 {
+		miss = append(miss, "fact numbers used twice: "+strings.Join(r, ", "))
+	}
+	for _, f := range fs {
+		if f.Mark == "" {
+			miss = append(miss, fmt.Sprintf("fact %d ends in neither \"confirmed: <item, PR or file>\" nor \"unconfirmed\"", f.N))
+		}
+	}
+	if done := StatedDone(fs); done != "" {
+		miss = append(miss, done)
+	}
+	return miss
 }
 
 // unchanged refuses the /clear unless boss a, right before it, still runs conversation and has had no turn since its
@@ -432,7 +463,7 @@ func SavePrompt(path, transcript, facts string) string {
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
 		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\"; an unconfirmed fact is never worded as done (not \"is merged\", but \"reported merged, not checked\"). " +
-		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
+		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Roles: who answers your workers' permission prompts and dialogs, and who relays your asks to the user. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {
 		text += " Copy each fact in " + facts + " (from whoever runs this clear) verbatim, its mark included, as one of your key facts, numbered on."

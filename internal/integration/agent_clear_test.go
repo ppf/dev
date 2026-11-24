@@ -158,6 +158,8 @@ func TestAgentClear(t *testing.T) {
 	refused("--facts unreadable", manager, "boss-app", "--facts: open "+filepath.Join(tmp, "none.md"), "--facts", filepath.Join(tmp, "none.md"))
 	writeFile(t, filepath.Join(tmp, "plain.md"), "the user is away\n")
 	refused("--facts without numbered facts", manager, "boss-app", "no numbered facts", "--facts", filepath.Join(tmp, "plain.md"))
+	writeFile(t, filepath.Join(tmp, "done.md"), "1. PR #41 is merged. unconfirmed\n")
+	refused("--facts with an unconfirmed fact worded as done", manager, "boss-app", `key facts 1 state as done what is unconfirmed ("merged")`, "--facts", filepath.Join(tmp, "done.md"))
 
 	// A running clear's hold: a worker's note to an idle boss with an empty box stays queued, not pasted
 	held, _ := boss("boss-held")
@@ -188,7 +190,8 @@ func TestAgentClear(t *testing.T) {
 	// handoff is a passing handoff of the boss whose files are in dir
 	handoff := func(dir string) string {
 		return "## Key facts\n1. The mail goes Friday. confirmed: #1\n2. v2 is ready. unconfirmed\n\n## Open asks\n#2: Ship starts the release, Wait parks it.\n\n" +
-			"## Work in flight\nNone.\n\n## The user's standing words\nMerge after green CI.\n\n## Open risks\nNone.\n\n## Old transcript\n" + filepath.Join(dir, "s0.jsonl") + "\n"
+			"## Work in flight\nNone.\n\n## The user's standing words\nMerge after green CI.\n\n## Roles\nThe manager answers my workers' prompts and relays my asks.\n\n" +
+			"## Open risks\nNone.\n\n## Old transcript\n" + filepath.Join(dir, "s0.jsonl") + "\n"
 	}
 	transcript, good := filepath.Join(appDir, "s0.jsonl"), handoff(appDir)
 	proof := "## Key facts\n1. Mail on Friday. confirmed: #1\n2. v2 ready. unconfirmed\n\n## Open asks\n#2: Ship → release worker; Wait → park.\n\n" +
@@ -209,7 +212,7 @@ func TestAgentClear(t *testing.T) {
 
 	t.Run("handoff missing twice, from the user's shell: not cleared", func(t *testing.T) {
 		web, webDir := boss("boss-web")
-		todo(web, "add", "Bare item", "--no-details")
+		todo(web, "add", "Bare item", "--waiting-for", "anna")
 		write(webDir, "save.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
 		write(webDir, "fix.md", strings.Replace(handoff(webDir), "## Open risks", "## Risks", 1))
 		shell := slices.DeleteFunc(slices.Clone(env), func(v string) bool { return strings.HasPrefix(v, "CLAUDECODE=") })
@@ -222,6 +225,14 @@ func TestAgentClear(t *testing.T) {
 			t.Errorf("❌ boss-web was cleared")
 		}
 		t.Log("✅ two misses stop before the clear")
+	})
+
+	t.Run("an unconfirmed fact worded as done twice: not cleared", func(t *testing.T) {
+		_, dir := boss("boss-sure")
+		done := strings.Replace(handoff(dir), "2. v2 is ready. unconfirmed", "2. PR #41 is merged. unconfirmed", 1)
+		write(dir, "save.md", done)
+		write(dir, "fix.md", done)
+		stopped(t, env, nil, manager, "boss-sure", "s0", `still misses: key facts 2 state as done what is unconfirmed ("merged")`, "nothing cleared")
 	})
 
 	t.Run("handoff never written: not cleared", func(t *testing.T) {
