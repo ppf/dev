@@ -47,7 +47,7 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 	told := func(id int) bool {
 		// The very item the boss got: a number may have been reused since
 		return slices.ContainsFunc(ticked, func(t Ticked) bool {
-			return t.ID == id && strings.HasPrefix(seen[id], fmt.Sprintf("%d. %s", t.ID, t.Text))
+			return t.ID == id && seenText(seen[id]) == t.Text
 		})
 	}
 	var left []string
@@ -98,9 +98,9 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 		seen, readErr := s.readShown(conversation)
 		var shown map[int]string
 		text, shown = l.reminder(ticked, seen, now)
-		// An open item not named again is as the boss last got it
+		// An item not named again is as the boss last got it; a ticked one still listed stays, to be named when it leaves
 		for _, it := range l.Items {
-			if line, ok := seen[it.ID]; ok && !it.Done && shown[it.ID] == "" {
+			if line, ok := seen[it.ID]; ok && shown[it.ID] == "" {
 				shown[it.ID] = line
 			}
 		}

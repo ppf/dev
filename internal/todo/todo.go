@@ -1438,8 +1438,8 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 	return b.String(), shown
 }
 
-// seenAs is how a boss's list keeps the item it named: its line and revision (Added), so a replace or reopen that
-// leaves the line as it was still counts; for an item to re-check, whose line changes with its age, that it is one.
+// seenAs is how a boss's list keeps the item it named: its text, then its line and revision (Added), so a replace or
+// reopen that leaves the line as it was still counts; for an item to re-check, whose line changes with its age, why.
 func (it Shown) seenAs(now time.Time) string {
 	line := it.line(now)
 	if it.Flagged() {
@@ -1452,7 +1452,13 @@ func (it Shown) seenAs(now time.Time) string {
 			line += " " + it.Check.Kind
 		}
 	}
-	return line + "\x00" + strconv.FormatInt(it.Added, 10)
+	return it.Text + "\x01" + line + "\x00" + strconv.FormatInt(it.Added, 10)
+}
+
+// seenText is the text of an item kept as seenAs has it.
+func seenText(kept string) string {
+	text, _, _ := strings.Cut(kept, "\x01")
+	return text
 }
 
 // line is the open item as a boss's list names it: number, text, who does it and the rest it needs to know at now.

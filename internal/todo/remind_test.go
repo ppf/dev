@@ -225,4 +225,29 @@ func TestRemindNoConversationAndTickedStill(t *testing.T) {
 	if got, _ := s.Remind(read(t, s, now), nil, "c1", now); strings.Contains(got, "left it") {
 		t.Errorf("ticked, still listed = %q, want no left it", got)
 	}
+	if got, _ := s.Remind(read(t, s, now.Add(time.Minute)), nil, "c1", now); !strings.Contains(got, "#1 left it") {
+		t.Errorf("once it left = %q, want #1 left it", got)
+	}
+}
+
+// A tick names the item it ticked by its exact text: one whose text another's starts with isn't it.
+func TestRemindTickedExactText(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "Review PR follow-up", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "keep", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Remind(read(t, s, now), nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Remind(read(t, s, now.Add(time.Minute)), []Ticked{{ID: 1, Text: "Review PR"}}, "c1", now)
+	if !strings.Contains(got, "#1 left it") {
+		t.Errorf("another text ticked = %q, want #1 left it", got)
+	}
 }
