@@ -49,6 +49,8 @@ const (
 	AskAnswered = "ask answered"
 	// ToDo is an item on the boss's own list that may be out of date, or ticked by itself (todo.Nudge, todo.Ticked)
 	ToDo = "to do"
+	// ClearIt is to the manager: a boss of its rested long enough to be cleared (bossclear.Offer)
+	ClearIt = "may be cleared"
 )
 
 // workerless reports a kind of note about no worker of the boss's: its line has no worker, its key no dedupe.
@@ -571,8 +573,8 @@ func (s *state) health(worker string) *health {
 
 func (s *state) add(n Note) bool {
 	// A message's sender, an answer's, a start's or a doing's user and a to do item are no worker of this boss: their
-	// key would spoil that worker's dedupe
-	if !workerless(n.Kind) {
+	// key would spoil that worker's dedupe; nor would a clear offer's (once per stretch by itself, bossclear.Offer)
+	if !workerless(n.Kind) && n.Kind != ClearIt {
 		if s.Last[n.Worker] == n.Key {
 			return false
 		}

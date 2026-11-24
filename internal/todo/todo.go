@@ -71,31 +71,32 @@ type Session struct {
 // set, ticks it by itself at that time, unix seconds. An ask (dev todo ask) has the Options the user picks from;
 // Answer is what the user answered (dev todo answer), set as it ticks.
 type Item struct {
-	ID      int      `json:"id"`
-	Text    string   `json:"text"`
-	On      string   `json:"on,omitempty"`      // who does it, when not the user: a worker's name or a person
-	Session *Session `json:"session,omitempty"` // the worker On names, when it named one at add
-	Link    string   `json:"link,omitempty"`
-	Done    int64    `json:"done,omitempty"`
-	Until   int64    `json:"until,omitempty"`
-	Options []string `json:"options,omitempty"`
-	Context []string `json:"context,omitempty"` // an ask's lines under its question
-	Details string   `json:"details,omitempty"` // its longer text (--details): paragraphs, "- " lines
-	Result  string   `json:"result,omitempty"`  // what was done, said as it was ticked (dev todo done --result)
-	DoneBy  string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name or Boss, DoneByUntil or DoneByPR
-	Answer  string   `json:"answer,omitempty"`
-	Via     string   `json:"via,omitempty"`     // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
-	Added   int64    `json:"added,omitempty"`   // when it was added or last replaced, unix seconds
-	DoneOn  string   `json:"done_on,omitempty"` // the state of its linked PR that ticks it by itself (DoneOns)
-	Started *Started `json:"started,omitempty"` // the user asked to start it (dev todo start), until a --replaces or set
-	Quiet   bool     `json:"quiet,omitempty"`   // a test item (--quiet): counted nowhere, the boss above not told
-	Doing   *Doing   `json:"doing,omitempty"`   // someone works on it now: the user on their own, the boss on its own
-	PartOf  int      `json:"part_of,omitempty"` // the id of its other half, a task split between two assignees
-	For     int      `json:"for,omitempty"`     // an ask's: the open item that waits on its answer (dev todo ask --for)
-	Asked   int64    `json:"asked,omitempty"`   // an ask replaced with its question kept: when that question was put
-	Dropped []string `json:"dropped,omitempty"` // options its replaces removed or changed: a pick of one is refused (droppedPick)
-	Obvious string   `json:"obvious,omitempty"` // an ask's: why its boss marked it obvious (dev todo ask --obvious), for the manager to settle
-	Decided *Decided `json:"decided,omitempty"` // an ask settled for the user with its recommended option (Settle, Decide)
+	ID        int      `json:"id"`
+	Text      string   `json:"text"`
+	On        string   `json:"on,omitempty"`      // who does it, when not the user: a worker's name or a person
+	Session   *Session `json:"session,omitempty"` // the worker On names, when it named one at add
+	Link      string   `json:"link,omitempty"`
+	Done      int64    `json:"done,omitempty"`
+	Until     int64    `json:"until,omitempty"`
+	Options   []string `json:"options,omitempty"`
+	Context   []string `json:"context,omitempty"` // an ask's lines under its question
+	Details   string   `json:"details,omitempty"` // its longer text (--details): paragraphs, "- " lines
+	Result    string   `json:"result,omitempty"`  // what was done, said as it was ticked (dev todo done --result)
+	DoneBy    string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name or Boss, DoneByUntil or DoneByPR
+	Answer    string   `json:"answer,omitempty"`
+	Via       string   `json:"via,omitempty"`        // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
+	Added     int64    `json:"added,omitempty"`      // when it was added or last replaced, unix seconds
+	DoneOn    string   `json:"done_on,omitempty"`    // the state of its linked PR that ticks it by itself (DoneOns)
+	Started   *Started `json:"started,omitempty"`    // the user asked to start it (dev todo start), until a --replaces or set
+	Quiet     bool     `json:"quiet,omitempty"`      // a test item (--quiet): counted nowhere, the boss above not told
+	NoDetails bool     `json:"no_details,omitempty"` // the user's own bare item needing none (--no-details): set only through ownBare
+	Doing     *Doing   `json:"doing,omitempty"`      // someone works on it now: the user on their own, the boss on its own
+	PartOf    int      `json:"part_of,omitempty"`    // the id of its other half, a task split between two assignees
+	For       int      `json:"for,omitempty"`        // an ask's: the open item that waits on its answer (dev todo ask --for)
+	Asked     int64    `json:"asked,omitempty"`      // an ask replaced with its question kept: when that question was put
+	Dropped   []string `json:"dropped,omitempty"`    // options its replaces removed or changed: a pick of one is refused (droppedPick)
+	Obvious   string   `json:"obvious,omitempty"`    // an ask's: why its boss marked it obvious (dev todo ask --obvious), for the manager to settle
+	Decided   *Decided `json:"decided,omitempty"`    // an ask settled for the user with its recommended option (Settle, Decide)
 }
 
 // Doing is what an item's doer said it does now, and since when, unix seconds.
@@ -171,6 +172,7 @@ type Shown struct {
 	// StartLate is a start 10 minutes old (the StartLate duration) that no --replaces took up
 	StartLate bool `json:"start_late,omitempty"`
 	Gone      bool `json:"-"` // its Session isn't among the boss's workers (MarkGone); boards work it out themselves
+	NoDetails bool `json:"no_details,omitempty"`
 	// Status and StatusOn are what Owner.Status says, once SetStatus ran
 	Status   string `json:"status,omitempty"`
 	StatusOn string `json:"status_on,omitempty"`
@@ -258,7 +260,7 @@ func (s Store) WithResult(result string) Store {
 	return s
 }
 
-// NeedDetails is s refusing, on Add and Replace, an item the user does without details (ErrNoDetails), unless quiet.
+// NeedDetails is s refusing, on Add and Replace, an item the user does without details (ErrNoDetails), unless quiet or NoDetails.
 func (s Store) NeedDetails() Store {
 	s.details = true
 	return s
@@ -267,9 +269,15 @@ func (s Store) NeedDetails() Store {
 // ErrNoDetails is NeedDetails' refusal.
 var ErrNoDetails = errors.New("an item the user does needs --details (what it is and why, where it stands, what done looks like), or --no-details when it needs none")
 
-// checkDetails is ErrNoDetails for it, as stored, when s NeedDetails and the user does it (no --on, no session, no ask) without any.
+// ownBare is it.NoDetails as kept: only on an item the user does (no --on, no session, no ask) without details.
+func ownBare(it Item) bool {
+	return it.NoDetails && it.On == "" && it.Session == nil && len(it.Options) == 0 && it.Details == ""
+}
+
+// checkDetails is ErrNoDetails for it, as stored, when s NeedDetails and the user does it (no --on, no session, no ask) without any,
+// neither quiet nor NoDetails.
 func (s Store) checkDetails(it Item) error {
-	if s.details && !it.Quiet && it.On == "" && it.Session == nil && it.Details == "" && len(it.Options) == 0 {
+	if s.details && !it.Quiet && !it.NoDetails && it.On == "" && it.Session == nil && it.Details == "" && len(it.Options) == 0 {
 		return ErrNoDetails
 	}
 	return nil
@@ -657,7 +665,7 @@ func (s Store) Read(now time.Time) (List, error) {
 		if it.PartOf == 0 {
 			it.PartOf = partner(f.Items, it.ID)
 		}
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, Doing: it.Doing, PartOf: it.PartOf, For: it.For, Obvious: it.Obvious, Decided: it.Decided}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, NoDetails: it.NoDetails, Doing: it.Doing, PartOf: it.PartOf, For: it.For, Obvious: it.Obvious, Decided: it.Decided}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
@@ -723,6 +731,7 @@ func (s Store) Add(it Item, now time.Time) (id int, err error) {
 		if it.On == Me {
 			it.On, it.Session = "", nil
 		}
+		it.NoDetails = ownBare(it)
 		if err := s.checkDetails(it); err != nil {
 			return err
 		}
@@ -752,7 +761,7 @@ func sameSession(a, b *Session) bool {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn, Context and PartOf it doesn't set, Quiet once set, and Doing while On stays; On Me gives it back to the user, On Boss
+// DoneOn, Context, Details and PartOf it doesn't set, Quiet once set, NoDetails while ownBare holds, and Doing while On stays; On Me gives it back to the user, On Boss
 // without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a new PartOf
 // checkPartOf refuses (one restated is kept as it is).
 func (s Store) Replace(id int, it Item, now time.Time) error {
@@ -804,6 +813,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 			it.Context = old.Context
 		}
 		it.Details = cmp.Or(it.Details, old.Details)
+		it.NoDetails = it.NoDetails || old.NoDetails
 		// A mark holds for the question and options it was given for: a new one of either drops it
 		switch {
 		case it.Obvious == NotObvious:
@@ -856,6 +866,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 				}
 			}
 		}
+		it.NoDetails = ownBare(it)
 		if err := s.checkDetails(it); err != nil {
 			return err
 		}
@@ -1502,9 +1513,10 @@ func (it Shown) line(now time.Time) string {
 const detailsMark = " (no details)"
 
 // NeedsDetails reports an open item without details that the user does or a person owes: not one on a worker session
-// (or the boss itself), a --quiet test item, or one with a pending start (its --replaces takes the details).
+// (or the boss itself), a --quiet test item, one marked --no-details (NoDetails), or one with a pending start (its
+// --replaces takes the details).
 func (it Shown) NeedsDetails() bool {
-	return !it.Done && !it.Quiet && it.Details == "" && it.Started == nil && it.Session == nil && !it.Gone && it.On != Boss
+	return !it.Done && !it.Quiet && !it.NoDetails && it.Details == "" && it.Started == nil && it.Session == nil && !it.Gone && it.On != Boss
 }
 
 // detailsLine asks a boss to fill the items marked "(no details)" in items, the list lines it shows.

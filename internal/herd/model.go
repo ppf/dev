@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/ppf/dev/internal/agent"
+	"github.com/ppf/dev/internal/bossclear"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/desktop"
 	"github.com/ppf/dev/internal/inbox"
@@ -182,7 +183,7 @@ type lookups interface {
 
 type tickMsg struct{}
 
-// watchDueMsg runs the inbox watch (stuck workers, deferred delivery), every watchInterval.
+// watchDueMsg runs the inbox watch (stuck workers, deferred delivery) and the clear offer, every watchInterval.
 type watchDueMsg struct{}
 
 // watchMsg is the inbox watch's outcome.
@@ -237,7 +238,7 @@ func (m *Model) fit() {
 	}
 }
 
-// watchLater runs inbox.Watch after watchInterval.
+// watchLater runs inbox.Watch and bossclear.Offer after watchInterval.
 func (m Model) watchLater() tea.Cmd {
 	return tea.Tick(watchInterval, func(time.Time) tea.Msg { return watchDueMsg{} })
 }
@@ -364,7 +365,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case watchDueMsg:
 		c, pane := m.c, m.pane
-		return m, m.reload.Busy.Run(func() tea.Msg { return watchMsg{err: inbox.Watch(c, control.RealClock, pane)} })
+		return m, m.reload.Busy.Run(func() tea.Msg {
+			return watchMsg{err: errors.Join(inbox.Watch(c, control.RealClock, pane), bossclear.Offer(c, control.RealClock, pane))}
+		})
 	case watchMsg:
 		if msg.err != nil {
 			m.msg = alert("❌ inbox: " + msg.err.Error())

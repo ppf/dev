@@ -205,6 +205,9 @@ func TestAskRules(t *testing.T) {
 		"first that it is none of the asks-stay kinds", "then that you see no trade-off the boss missed. Either fails: put it to the user as any other ask",
 		"`dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`",
 		"`<project> #<n>: decided for you: <pick> (obvious: <why>)`",
+		// The clear's own prompts are dev's fixed text, not the manager's sends
+		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
+		"- **dev offers it:** once per idle stretch", "Run it then, in the background", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)

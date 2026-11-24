@@ -99,6 +99,9 @@ None.
 ## The user's standing words
 Merge only after CI is green.
 
+## Roles
+The manager answers my workers' permission prompts and dialogs and relays my asks.
+
 ## Open risks
 Flaky test in CI.
 
@@ -248,5 +251,88 @@ func TestVerifyHandoffCarried(t *testing.T) {
 	_, miss := VerifyHandoff(reworded, []int{3, 12}, transcript, carried)
 	if got := strings.Join(miss, "; "); got != "the caller's fact not copied into a key fact word for word: The user is away until Monday. confirmed: said" {
 		t.Errorf("reworded: misses %q", got)
+	}
+}
+
+// An unconfirmed key fact worded as done (merged, released, fixed, …) is a miss, in the handoff and in --facts; one
+// that says it was only reported, not checked, passes, as does a confirmed one.
+func TestVerifyHandoffUnconfirmedDone(t *testing.T) {
+	fact3 := "3. Staging deploy works (unconfirmed)"
+	for _, tt := range []struct{ fact, want string }{
+		{"3. PR #41 is merged. unconfirmed", `key facts 3 state as done what is unconfirmed ("merged")`},
+		{"3. v2 released and live (unconfirmed)", `key facts 3 state as done what is unconfirmed ("released")`},
+		{"3. **The flaky test is fixed.** unconfirmed", `("fixed")`},
+		{"3. PR #41 reported merged, not checked. unconfirmed", ""},
+		{"3. PR #41 may be merged by now. unconfirmed", ""},
+		{"3. Is PR #41 merged? unconfirmed", ""},
+		{"3. PR #41 isn’t merged. unconfirmed", ""},
+		{"3. PR #41 merged. confirmed: PR #41", ""},
+		// A wish, a plan or a rule is no claim of done
+		{"3. The user wants the flaky test fixed. unconfirmed", ""},
+		{"3. Keep PR #41 open until released. unconfirmed", ""},
+		{"3. Retry once CI is green. unconfirmed", ""},
+		{"3. Nothing is pushed to main directly. unconfirmed", ""},
+		{"3. The batch must be done tonight. unconfirmed", ""},
+		// Known limit: a hedge elsewhere in the fact passes it
+		{"3. PR #41 merged, no conflicts. unconfirmed", ""},
+	} {
+		_, miss := VerifyHandoff(strings.Replace(goodHandoff, fact3, tt.fact, 1), []int{3, 12}, transcript, nil)
+		if got := strings.Join(miss, "; "); tt.want == "" && got != "" || !strings.Contains(got, tt.want) {
+			t.Errorf("%q: misses = %q, want %q", tt.fact, got, tt.want)
+		}
+	}
+	if got := StatedDone(readFacts("1. The user is away. confirmed: said\n2. PR #41 is merged. unconfirmed\n")); got != `key facts 2 state as done what is unconfirmed ("merged"): word each as not checked ("reported merged, not checked") or as what is wanted ("wants it merged")` {
+		t.Errorf("StatedDone = %q", got)
+	}
+}
+
+// The handoff holds a ## Roles section with something under it.
+func TestVerifyHandoffRoles(t *testing.T) {
+	roles := "## Roles\nThe manager answers my workers' permission prompts and dialogs and relays my asks.\n\n"
+	for _, tt := range []struct{ name, text, want string }{
+		{"no roles section", strings.Replace(goodHandoff, roles, "", 1), "sections missing: ## Roles"},
+		{"empty roles", strings.Replace(goodHandoff, roles, "## Roles\n\n", 1), "nothing under ## Roles"},
+	} {
+		_, miss := VerifyHandoff(tt.text, []int{3, 12}, transcript, nil)
+		if got := strings.Join(miss, "; "); !strings.Contains(got, tt.want) {
+			t.Errorf("%s: misses = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	if !strings.Contains(SavePrompt("/s/h.md", transcript, ""), "Under ## Roles: who answers your workers' permission prompts and dialogs") {
+		t.Error("save prompt doesn't say what goes under ## Roles")
+	}
+}
+
+// "1.fact" with no space is read as fact 1; a wrapped line starting "2.5x" or "0.82.0" stays in the fact above.
+func TestFactsNoSpace(t *testing.T) {
+	fs := readFacts("1.The user is away. confirmed: said\n2)Deploy pending unconfirmed\n3. Build got\n2.5x faster since 0.81.\n0.82.0 is out. unconfirmed\n")
+	var got []string
+	for _, f := range fs {
+		got = append(got, strconv.Itoa(f.N)+":"+f.Text+":"+f.Mark)
+	}
+	want := []string{"1:The user is away. confirmed: said:confirmed", "2:Deploy pending unconfirmed:unconfirmed", "3:Build got 2.5x faster since 0.81. 0.82.0 is out. unconfirmed:unconfirmed"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("facts = %q, want %q", got, want)
+	}
+}
+
+// The caller's facts the boss can't fix are refused up front: unmarked, worded as done, a number twice, too many.
+func TestCarriedMisses(t *testing.T) {
+	if got := carriedMisses(readFacts("1. The user is away. confirmed: said\n2. Deploy pending unconfirmed\n")); len(got) > 0 {
+		t.Errorf("good facts: %q", got)
+	}
+	var many strings.Builder
+	for i := range MaxFacts + 1 {
+		many.WriteString(strconv.Itoa(i+1) + ". fact unconfirmed\n")
+	}
+	for _, tt := range []struct{ text, want string }{
+		{"1. The user is away.\n", `fact 1 ends in neither`},
+		{"1. PR #41 is merged. unconfirmed\n", `key facts 1 state as done`},
+		{"1. a unconfirmed\n1. b unconfirmed\n", "fact numbers used twice: 1"},
+		{many.String(), "16 facts, at most 15"},
+	} {
+		if got := strings.Join(carriedMisses(readFacts(tt.text)), "; "); !strings.Contains(got, tt.want) {
+			t.Errorf("%q: %q, want %q", tt.text, got, tt.want)
+		}
 	}
 }

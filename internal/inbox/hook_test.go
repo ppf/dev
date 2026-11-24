@@ -3,6 +3,8 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -228,8 +230,17 @@ func TestBossHookHandoff(t *testing.T) {
 			t.Errorf("%s with handoff %q: context = %q, want the handoff line %v", tt.source, tt.handoff, got.Out.Context, tt.want)
 		}
 	}
-	if _, _, err := BossHook(handoffTmux(t, "boss", "1", path), "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint); err == nil {
+	// A malformed hold is reported, and the list still goes out with a line saying a handoff may wait
+	c := handoffTmux(t, "boss", "1", path)
+	if s, err := todo.ForPane(c, "%1"); err != nil || s.Set([]string{"a"}, time.Now()) != nil {
+		t.Fatal(err)
+	}
+	out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint)
+	if err == nil {
 		t.Error("a malformed handoff option passed")
+	}
+	if !strings.Contains(out, "couldn't tell whether a dev agent clear left you a handoff") || !strings.Contains(out, "1. a") {
+		t.Errorf("malformed hold: out %q, want the list and the handoff warning", out)
 	}
 }
 
@@ -520,5 +531,45 @@ func TestStartContextShown(t *testing.T) {
 	}
 	if got := remind(); !strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. Ship\n") {
 		t.Errorf("after a compaction = %q, want the full list", got)
+	}
+}
+
+// After a dev agent clear's /clear, a start hook that can't read the list still gives the handoff's line, with why
+// the list is missing, and reports the error: the fresh boss isn't left without it.
+func TestBossHookHandoffListError(t *testing.T) {
+	const path = "/s/dev/handoff/boss/2026-11-24-120000.md"
+	c := handoffTmux(t, "boss", "1", ClearValue("s0", path, soon))
+	s, err := todo.ForPane(c, "%1")
+	if err == nil {
+		err = s.Set([]string{"a"}, time.Now())
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	lists, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev", "todo", "*"))
+	if err != nil || len(lists) == 0 {
+		t.Fatalf("no list file: %v", err)
+	}
+	for _, l := range lists {
+		if err := os.WriteFile(l, []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), noHint)
+	if err == nil {
+		t.Error("the list's error isn't reported")
+	}
+	var got struct {
+		Out struct {
+			Context string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+		t.Fatalf("out %q: %v", out, jerr)
+	}
+	for _, want := range []string{"Your handoff from before this /clear: " + path, "dev couldn't give your list and notes", "run dev todo and dev todo note"} {
+		if !strings.Contains(got.Out.Context, want) {
+			t.Errorf("context = %q, want %q in it", got.Out.Context, want)
+		}
 	}
 }
