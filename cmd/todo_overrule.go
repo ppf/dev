@@ -62,7 +62,7 @@ reopen is.`,
 
 // overruleItem answers ask id of boss name's list, decided for the user and reading question, with pick in its place
 // (todo.Store.Overrule), given via, and tells the boss; resolving the boss first, so one that can't be found changes
-// nothing. A manager's settled note of the item still queued is withdrawn before the boss is told.
+// nothing. A manager's settled note of the item still queued goes in the write that queues the overrule.
 func overruleItem(c *tmux.Client, stderr io.Writer, name string, id int, question, pick, via string) (todo.Item, error) {
 	b, err := inbox.Recipient(c, name)
 	if err != nil {
@@ -83,12 +83,8 @@ func overruleItem(c *tmux.Client, stderr io.Writer, name string, id int, questio
 	} else if err != nil {
 		return it, err
 	}
-	if was.By == todo.DecidedManager {
-		if err := b.Box.WithdrawSettled(id, question); err != nil {
-			fmt.Fprintf(stderr, "⚠ dev todo: the manager's settled note of #%d may still reach %s: %v\n", id, name, err)
-		}
-	}
-	queued, err := b.Send(c, control.RealClock, inbox.AnswerOverruled(it.ID, it.Text, it.Answer, todo.Split(was.Pick).Label, was.By))
+	note := inbox.AnswerOverruled(it.ID, it.Text, it.Answer, todo.Split(was.Pick).Label, was.By)
+	queued, err := b.SendOverruled(c, control.RealClock, note, id, question)
 	switch {
 	case !queued:
 		return it, notTold{fmt.Errorf("#%d overruled with %q, not sent to %s (tell it yourself): %w", id, it.Answer, name, err)}

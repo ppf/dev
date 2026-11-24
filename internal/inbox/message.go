@@ -424,15 +424,39 @@ func AnswerOverruled(id int, text, answer, was, by string) Note {
 	return n
 }
 
-// WithdrawSettled drops a queued AnswerSettled note of item id, text, as the user reopened or overruled it: none queued
-// is no error.
+// WithdrawSettled drops the newest queued AnswerSettled note of item id, text, as the user reopened it: none queued is
+// no error.
 func (b Box) WithdrawSettled(id int, text string) error {
 	return b.update(func(s *state) error {
-		s.Notes = slices.DeleteFunc(s.Notes, func(q Note) bool {
-			return q.Kind == Answered && strings.HasPrefix(q.Text, settledPrefix(id, text))
-		})
+		s.withdrawSettled(id, text)
 		return nil
 	})
+}
+
+// withdrawSettled drops the newest queued AnswerSettled note of item id, text: an older one with both (numbers restart)
+// is another item's.
+func (s *state) withdrawSettled(id int, text string) {
+	for i := len(s.Notes) - 1; i >= 0; i-- {
+		if q := s.Notes[i]; q.Kind == Answered && strings.HasPrefix(q.Text, settledPrefix(id, text)) {
+			s.Notes = slices.Delete(s.Notes, i, i+1)
+			return
+		}
+	}
+}
+
+// SendOverruled is Send of n, the user's overrule of item id, text, queued in the same write that withdraws the
+// newest AnswerSettled note of it still queued: the boss never gets the settle without the overrule.
+func (b Boss) SendOverruled(c *tmux.Client, clk control.Clock, n Note, id int, text string) (queued bool, err error) {
+	if err := b.Box.update(func(s *state) error {
+		s.withdrawSettled(id, text)
+		s.add(n)
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	// A failed lookup keeps its note, and isn't this send's failure: Watch and the hooks report it
+	_ = b.Box.WithdrawTicked(listItem(c, clk.Now()))
+	return true, deliver(c, clk, b)
 }
 
 // AnswerPage is Answer given on the phone page (dev serve).

@@ -912,12 +912,14 @@ func TestObserveUnsentQuestion(t *testing.T) {
 	}
 }
 
-// Reopened or overruled, an item's queued settled note goes; the user's own answer to it and another item's stay.
+// Reopened, an item's newest queued settled note goes; the user's own answer to it and other items' stay.
 func TestWithdrawSettled(t *testing.T) {
 	b := testBox(t)
+	// An older note with the same number and text is an earlier item's (numbers restart): only the newest goes
+	older := AnswerSettled(4, "Re-run CI?", "Retry")
 	settled := AnswerSettled(4, "Re-run CI?", "Re-run")
-	keep := []Note{Answer(4, "Re-run CI?", "Look first"), AnswerSettled(4, "Other?", "Yes"), AnswerSettled(5, "Re-run CI?", "Re-run")}
-	for _, n := range append([]Note{settled}, keep...) {
+	keep := []Note{older, Answer(4, "Re-run CI?", "Look first"), AnswerSettled(4, "Other?", "Yes"), AnswerSettled(5, "Re-run CI?", "Re-run")}
+	for _, n := range []Note{older, settled, keep[1], keep[2], keep[3]} {
 		if _, err := b.Add(n, time.Time{}); err != nil {
 			t.Fatal(err)
 		}
@@ -926,7 +928,7 @@ func TestWithdrawSettled(t *testing.T) {
 		t.Fatal(err)
 	}
 	bt, _ := b.Take()
-	if len(bt.Notes) != len(keep) || bt.Notes[0] != keep[0] {
+	if !slices.Equal(bt.Notes, keep) {
 		t.Errorf("left = %+v, want %+v", bt.Notes, keep)
 	}
 	n := AnswerOverruled(4, "Re-run CI?", "Look first", "Re-run", "manager")
