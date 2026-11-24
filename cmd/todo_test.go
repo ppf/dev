@@ -880,8 +880,9 @@ func TestTodoNoDetailsWarning(t *testing.T) {
 	if _, _, err := execute(t, "", "todo", "add", "Both", "--details", "x", "--no-details"); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Errorf("--details and --no-details: %v, want refused", err)
 	}
-	if _, _, err := execute(t, "", "todo", "add", "Reply from Ola", "--waiting-for", "Ola", "--no-details"); err == nil || !strings.Contains(err.Error(), "a waiting item gets --details") {
-		t.Errorf("--no-details --waiting-for: %v, want refused", err)
+	// --no-details is for an item the user does: a waiting one still warns
+	if _, errOut, err := execute(t, "", "todo", "add", "Reply from Ola", "--waiting-for", "Ola", "--no-details"); err != nil || !strings.Contains(errOut, warn) {
+		t.Errorf("--no-details --waiting-for: err %v, stderr %q, want the warning", err, errOut)
 	}
 	// An ask without details only warns, also when add --replaces changes it
 	if _, errOut, err := execute(t, "", "todo", "add", "--replaces", "7", "--link", "https://example.com/pr/1"); err != nil || !strings.Contains(errOut, warn) {

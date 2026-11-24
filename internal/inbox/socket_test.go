@@ -258,6 +258,16 @@ func TestLatestPick(t *testing.T) {
 		t.Errorf("LatestPick after ForgetPrompt = %+v, %v", p, err)
 	}
 
+	// A hand-on question drops the latest prompt, not an item's pick waiting for its relay
+	b = testBox(t)
+	p = picked(b)
+	if err := b.DropPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if latest, err := b.UserPrompt(); latest != nil || err != nil || b.ClaimPick(p) != nil {
+		t.Errorf("after DropPrompt: latest %+v, %v; want none, the pick still claimable", latest, err)
+	}
+
 	// A file from before the pick slot: its latest prompt, a pick, is claimed as the latest pick
 	b = testBox(t)
 	if err := os.MkdirAll(filepath.Dir(b.path), 0o700); err != nil {

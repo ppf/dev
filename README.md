@@ -211,7 +211,7 @@ dev todo set "Answer Vince in Slack" "Approve PR #84"   # replace the list (no a
 dev todo add "Staging access" --on "Marek (Ops)"       # add one; --on: who does it (a person, or a worker below), --link: e.g. its PR
 dev todo add "Rework companion" --on companion-1000   # on a session this boss started, worker or boss (name or local_… id): its board shows its state
 dev todo add --replaces 4 --on me                     # give item 4 back to you, keeping its text (and details: none there, add --details)
-dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00"  # ticks itself then; --until 15:30 (today), 2026-11-16 (that day's end)
+dev todo add "Pt 10:00 sync" --until "2026-11-16 10:00" --no-details  # ticks itself then; --until 15:30 (today), 2026-11-16 (that day's end)
 dev todo add "Approve PR #85" --replaces 2            # in place of open item 2: keeps its number, --on, --link, --until, --done-on
 dev todo add "Approve PR #85" --on Ana --link <PR url> --done-on approved  # ticks itself once the PR is approved (merged|approved|green)
 dev todo ask "Merge #148?" --option "Merge (Recommended)" --option "Wait"  # a decision for you, up to 9 options

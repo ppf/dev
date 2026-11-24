@@ -124,14 +124,15 @@ func warnLong(stderr io.Writer, text string) {
 	}
 }
 
-func warnNoDetails(s todo.Store, stderr io.Writer, id int, now time.Time) {
+func warnNoDetails(s todo.Store, stderr io.Writer, id int, noDetails bool, now time.Time) {
 	l, err := s.Read(now)
 	if err != nil {
 		fmt.Fprintf(stderr, "⚠ details not checked: %v\n", err)
 		return
 	}
 	for _, it := range l.Items {
-		if it.ID == id && it.NeedsDetails() {
+		// --no-details: an item the user does needs none
+		if it.ID == id && it.NeedsDetails() && !(noDetails && it.On == "") {
 			fmt.Fprintln(stderr, "⚠ no details: add them with --details (what it is and why, where it stands, what done looks like; for a waiting item who, what was asked, when and where)")
 		}
 	}
@@ -195,11 +196,8 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 			if it.Details, err = detailsFlag(cmd, it.Details); err != nil {
 				return err
 			}
-			switch {
-			case noDetails && it.Details != "":
+			if noDetails && it.Details != "" {
 				return errors.New("--details or --no-details, not both")
-			case noDetails && waiting:
-				return errors.New("--no-details is for an item the user does: a waiting item gets --details")
 			}
 			stderr := cmd.ErrOrStderr()
 			// A desktop app boss's list has no name: its own is its session id
@@ -267,9 +265,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 					return err
 				}
 				warnLong(cmd.ErrOrStderr(), it.Text)
-				if !noDetails {
-					warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
-				}
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, noDetails, now)
 				if it.On == todo.Me || it.Text != "" {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
 				}
@@ -281,9 +277,7 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 				return err
 			}
 			warnLong(cmd.ErrOrStderr(), it.Text)
-			if !noDetails {
-				warnNoDetails(s, cmd.ErrOrStderr(), id, now)
-			}
+			warnNoDetails(s, cmd.ErrOrStderr(), id, noDetails, now)
 			if !it.Quiet && (it.On == "" || it.On == todo.Me) {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, nil)
 			}
@@ -427,7 +421,7 @@ on the list ticked at once with its recommended option, decided for the user by 
 				if err != nil {
 					return err
 				}
-				warnNoDetails(s, cmd.ErrOrStderr(), replaces, now)
+				warnNoDetails(s, cmd.ErrOrStderr(), replaces, false, now)
 				// Only a new question is news to the boss above: it reads the rest from the list
 				if renamed {
 					replacedWaits(s, *boss, cmd.ErrOrStderr(), replaces, now)
@@ -439,7 +433,7 @@ on the list ticked at once with its recommended option, decided for the user by 
 			if err != nil {
 				return err
 			}
-			warnNoDetails(s, cmd.ErrOrStderr(), id, now)
+			warnNoDetails(s, cmd.ErrOrStderr(), id, false, now)
 			if !it.Quiet {
 				waitsOnYou(*boss, cmd.ErrOrStderr(), id, it.Text, it.Options)
 			}
@@ -629,20 +623,18 @@ func managerPrompt(c *tmux.Client) (inbox.Boss, *inbox.Prompt, error) {
 	case !ok || self.Name != inbox.Manager:
 		return self, nil, notHere
 	}
+	pick, err := self.Box.LatestPick()
+	if err != nil || pick != nil {
+		return self, pick, err
+	}
 	p, err := self.Box.UserPrompt()
 	switch {
 	case err != nil:
 		return self, nil, err
 	case p == nil:
 		return self, nil, errors.New("--via manager: the user hasn't prompted the manager yet")
-	case p.Pick:
-		return self, p, nil
 	}
-	pick, err := self.Box.LatestPick()
-	if err != nil || pick == nil {
-		return self, p, err
-	}
-	return self, pick, nil
+	return self, p, nil
 }
 
 // pickFor refuses the user's latest pick to the manager (managerPrompt) unless it is one question asking item id of

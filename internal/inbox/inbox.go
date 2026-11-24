@@ -775,6 +775,14 @@ func (p *Prompt) is(q Prompt) bool {
 	return now == q
 }
 
+// DropPrompt drops the user's latest prompt (Arrived), keeping their latest pick for an item's relay (ClaimPick).
+func (b Box) DropPrompt() error {
+	return b.update(func(s *state) error {
+		s.Prompt = nil
+		return nil
+	})
+}
+
 // ForgetPrompt drops the user's latest prompt (Arrived) and pick (Picked), for a new conversation.
 func (b Box) ForgetPrompt() error {
 	return b.update(func(s *state) error {
