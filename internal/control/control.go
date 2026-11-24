@@ -172,14 +172,21 @@ func (a *Agent) ReadInput(c *tmux.Client) error {
 	if a.Label != "Claude" {
 		return nil
 	}
-	capture, err := c.Run("capture-pane", "-p", "-e", "-t", a.Pane)
-	if err != nil {
-		return err
-	}
-	if in, ok := screen.InputBox(capture); ok {
+	in, ok, err := inputBox(c, a.Pane)
+	if ok {
 		a.Input = &in
 	}
-	return nil
+	return err
+}
+
+// inputBox is pane's Claude input box (screen.InputBox), read from its screen with colours.
+func inputBox(c *tmux.Client, pane string) (screen.Input, bool, error) {
+	capture, err := c.Run("capture-pane", "-p", "-e", "-t", pane)
+	if err != nil {
+		return screen.Input{}, false, err
+	}
+	in, ok := screen.InputBox(capture)
+	return in, ok, nil
 }
 
 // list is List without the branches and queued prompts, which cost a git run or a capture per agent.
@@ -754,13 +761,9 @@ const suggestionMark = "  [suggestion]"
 // markSuggestion ends with suggestionMark the last of lines that is pane's input row holding only Claude Code's dim
 // suggestion (screen.InputBox), as plain text can't tell it from the user's typing.
 func markSuggestion(c *tmux.Client, pane string, lines []string) error {
-	capture, err := c.Run("capture-pane", "-p", "-e", "-t", pane)
-	if err != nil {
+	in, ok, err := inputBox(c, pane)
+	if err != nil || !ok || !in.Suggestion {
 		return err
-	}
-	in, ok := screen.InputBox(capture)
-	if !ok || !in.Suggestion {
-		return nil
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		if text, ok := screen.PromptRow(lines[i]); ok && strings.TrimSpace(text) == in.Text {
