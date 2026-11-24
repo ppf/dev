@@ -41,16 +41,15 @@ func BossHook(c *tmux.Client, pane string, input []byte, hint Hint) (out string,
 		return "", false, nil
 	}
 	if e.Name == "SessionStart" {
+		var ferr error
 		if e.Source == "clear" || e.Source == "startup" {
 			// A new conversation never saw the user's earlier words
 			if b, ok, err := Coordinator(c, pane); ok && err == nil {
-				if err := b.Box.ForgetPrompt(); err != nil {
-					return "", false, err
-				}
+				ferr = b.Box.ForgetPrompt()
 			}
 		}
 		out, err = startList(c, pane, e.Source, hint)
-		return out, false, err
+		return out, false, errors.Join(ferr, err)
 	}
 	if e.Name == "PostToolUse" && e.Tool == agent.AskUserQuestion {
 		picks := agent.HookPick(input)
@@ -143,7 +142,8 @@ func openList(c *tmux.Client, pane string) (string, error) {
 	return l.Reminder(ticked, now), gone
 }
 
-// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes; "" otherwise.
+// startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, and after
+// a dev agent clear's /clear its handoff's line (handoffLine), also when the list can't be read; "" otherwise.
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
 func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
@@ -151,33 +151,48 @@ func startList(c *tmux.Client, pane, source string, hint Hint) (string, error) {
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
 		return "", err
 	}
-	s, err := todo.ForPane(c, pane)
-	if errors.Is(err, todo.ErrNotBoss) {
-		// A restored boss is marked one only after its coordinator starts
-		return "", nil
+	var handoff string
+	if source == "clear" {
+		if handoff, err = handoffLine(c, pane); err != nil {
+			return "", err
+		}
 	}
-	if err != nil {
+	out, err := func() (string, error) {
+		s, err := todo.ForPane(c, pane)
+		if errors.Is(err, todo.ErrNotBoss) {
+			// A restored boss is marked one only after its coordinator starts
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if handoff != "" {
+			listHint := hint
+			hint = func(s todo.Store) string { return strings.TrimSpace(listHint(s) + "\n" + handoff) }
+		}
+		return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
+	}()
+	if err != nil && handoff != "" {
+		// The fresh boss still gets its handoff, and why its list is missing
+		data, jerr := json.Marshal(hookContext("SessionStart", handoff+"\ndev couldn't give your list and notes ("+err.Error()+
+			"): run dev todo and dev todo note."))
+		return string(data), errors.Join(err, jerr)
+	}
+	return out, err
+}
+
+// handoffLine is the start line naming the handoff of the dev agent clear that, still running, cleared pane's
+// conversation (never a leftover's); "" for none.
+func handoffLine(c *tmux.Client, pane string) (string, error) {
+	conversation, path, held, err := clearing(c, pane)
+	if err != nil || !held {
 		return "", err
 	}
-	if source == "clear" {
-		conversation, path, held, err := clearing(c, pane)
-		if err != nil {
-			return "", err
-		}
-		// Only for the conversation that dev agent clear, still running, cleared: never a leftover's
-		ended, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptEndedSession+"}")
-		if err != nil {
-			return "", err
-		}
-		if held && conversation == strings.TrimSpace(ended) {
-			listHint := hint
-			hint = func(s todo.Store) string {
-				return strings.TrimSpace(listHint(s) + "\nYour handoff from before this /clear: " + path +
-					". Read it before acting; dev agent clear asks you for a proof of it next.")
-			}
-		}
+	ended, err := c.Run("display-message", "-p", "-t", pane, "#{"+agent.OptEndedSession+"}")
+	if err != nil || conversation != strings.TrimSpace(ended) {
+		return "", err
 	}
-	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, source, time.Now())
+	return "Your handoff from before this /clear: " + path + ". Read it before acting; dev agent clear asks you for a proof of it next.", nil
 }
 
 // Hint is the line telling the boss of list s, when s is empty, that an earlier boss's list waits (dev todo

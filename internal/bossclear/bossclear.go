@@ -14,7 +14,7 @@ import (
 )
 
 // Sections are a handoff file's "## " headings, in the order the save prompt asks for (only their presence is checked).
-var Sections = []string{"Key facts", "Open asks", "Work in flight", "The user's standing words", "Open risks", "Old transcript"}
+var Sections = []string{"Key facts", "Open asks", "Work in flight", "The user's standing words", "Roles", "Open risks", "Old transcript"}
 
 // ProofSections are a proof file's.
 var ProofSections = []string{"Key facts", "Open asks", "Roles"}
@@ -124,14 +124,19 @@ type Fact struct {
 
 var (
 	heading = regexp.MustCompile(`^#{2,}\s+(.+?)\s*#*\s*$`)
-	// At the line's start, maybe after a list bullet: an indented numbered line is part of the fact above
-	numbered = regexp.MustCompile(`^(?:[-*+] )?(\d+)[.)]\s+(.*)$`)
+	// At the line's start, maybe after a list bullet: an indented numbered line is part of the fact above. "1.fact"
+	// too, but not "2.5x" or "0.82.0", a wrapped line of the fact above
+	numbered = regexp.MustCompile(`^(?:[-*+] )?(\d+)[.)](?:\s+(.*)|([^\d\s].*))$`)
 	// A fact ends in "unconfirmed", or in a last clause "confirmed: <item number, PR or file>" (after a sentence's
 	// end, a comma, a dash or in parentheses, not "deploy confirmed: no"), maybe in emphasis
 	unconfirmed = regexp.MustCompile(`(?i)(?:^|[^a-z])unconfirmed$`)
 	confirmed   = regexp.MustCompile(`(?i)(?:^|[.;,(]\s*|\s[-–—]\s*)confirmed:\s*\S.*$`)
 	// A PR's, MR's or issue's number names no item
-	itemRef  = regexp.MustCompile(`(?i)(\bPR\s*|\bMR\s*|pull/|issues/|merge_requests/)?#(\d+)\b`)
+	itemRef = regexp.MustCompile(`(?i)(\bPR\s*|\bMR\s*|pull/|issues/|merge_requests/)?#(\d+)\b`)
+	// A word saying work is done, and one hedging it: an unconfirmed fact with the first and none of the second is
+	// worded as done
+	doneWord = regexp.MustCompile(`(?i)\b(merged|released|shipped|deployed|fixed|done|finished|completed?|closed|pushed|tagged|passed|passing|green|resolved|live|sent|installed)\b`)
+	hedge    = regexp.MustCompile(`(?i)\b(reported|not|no|unchecked|unverified|said|says|claims?|according|supposedly|expected|should|would|will|may|might|maybe|probably|likely|if|whether|pending|waiting|yet|unknown)\b|n't|\?`)
 	trailing = " \t.)]*_`"
 	emphasis = strings.NewReplacer("**", "", "__", "", "`", "")
 )
@@ -172,7 +177,7 @@ func facts(lines []string) []Fact {
 		// "**1.** fact" too
 		if m := numbered.FindStringSubmatch(emphasis.Replace(l)); m != nil {
 			n, _ := strconv.Atoi(m[1])
-			out = append(out, Fact{N: n, Text: strings.TrimSpace(m[2])})
+			out = append(out, Fact{N: n, Text: strings.TrimSpace(m[2] + m[3])})
 			continue
 		}
 		if t := strings.TrimSpace(l); t != "" && len(out) > 0 {
@@ -189,6 +194,25 @@ func facts(lines []string) []Fact {
 		}
 	}
 	return out
+}
+
+// StatedDone is the miss of fs's unconfirmed facts worded as done ("PR #41 is merged. unconfirmed"), "" for none. By
+// words only: a done word (merged, released, fixed, …) with no hedge (reported, not, may, pending, a "?", …). It
+// misses a fact done in other words ("PR #41 is in main") or hedged elsewhere in it, and can't tell a confirmed
+// fact's source is real.
+func StatedDone(fs []Fact) string {
+	var nums, words []string
+	for _, f := range fs {
+		text := emphasis.Replace(f.Text)
+		if w := doneWord.FindString(text); f.Mark == "unconfirmed" && w != "" && !hedge.MatchString(text) {
+			nums, words = append(nums, strconv.Itoa(f.N)), append(words, strconv.Quote(strings.ToLower(w)))
+		}
+	}
+	if len(nums) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("key facts %s state as done what is unconfirmed (%s): word each as reported, not checked (\"reported merged, not checked\")",
+		strings.Join(nums, ", "), strings.Join(slices.Compact(words), ", "))
 }
 
 // readFacts is the numbered facts in markdown text, as a --facts file holds them.
@@ -251,7 +275,8 @@ type Handoff struct {
 }
 
 // VerifyHandoff checks handoff text and returns its key facts, and every miss: a section missing, no key facts or more
-// than MaxFacts, a fact number used twice, a fact ending in neither "confirmed: …" nor "unconfirmed", an open item's
+// than MaxFacts, a fact number used twice, a fact ending in neither "confirmed: …" nor "unconfirmed", an unconfirmed
+// fact worded as done (StatedDone), nothing under ## Roles, an open item's
 // number (open) it doesn't name, the old transcript's path (when known) it doesn't hold, or a fact of the caller's
 // (carried) not copied word for word into a key fact.
 func VerifyHandoff(text string, open []int, transcript string, carried []Fact) (Handoff, []string) {
@@ -278,6 +303,12 @@ func VerifyHandoff(text string, open []int, transcript string, carried []Fact) (
 	}
 	if len(unmarked) > 0 {
 		miss = append(miss, "key facts "+strings.Join(unmarked, ", ")+" end in neither \"confirmed: <item number, PR or file>\" nor \"unconfirmed\"")
+	}
+	if done := StatedDone(fs); done != "" {
+		miss = append(miss, done)
+	}
+	if nothingUnder(secs, "roles") {
+		miss = append(miss, "nothing under ## Roles")
 	}
 	if ids := unnamed(open, refs(text)); len(ids) > 0 {
 		miss = append(miss, "open items not named: "+numbers(ids))
@@ -325,8 +356,14 @@ func VerifyProof(proof string, h Handoff, asks []int) []string {
 	if ids := unnamed(asks, refs(strings.Join(secs["open asks"], "\n"))); len(ids) > 0 {
 		miss = append(miss, "open asks not under ## Open asks: "+numbers(ids))
 	}
-	if r, ok := secs["roles"]; ok && !slices.ContainsFunc(r, func(l string) bool { return strings.TrimSpace(l) != "" }) {
+	if nothingUnder(secs, "roles") {
 		miss = append(miss, "nothing under ## Roles")
 	}
 	return miss
+}
+
+// nothingUnder reports section key there with only blank lines under it.
+func nothingUnder(secs map[string][]string, key string) bool {
+	r, ok := secs[key]
+	return ok && !slices.ContainsFunc(r, func(l string) bool { return strings.TrimSpace(l) != "" })
 }

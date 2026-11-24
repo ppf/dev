@@ -31,11 +31,16 @@ From the save on, the boss's inbox notes are held back (@dev_handoff) until the 
 only into an empty input box, and a turn ending on a permission prompt or dialog stopping it:
  1. dev prompts the boss to update its list (statuses, --details on every item the user or a person owes) and notes,
     and write the handoff $XDG_STATE_HOME/dev/handoff/<boss>/<time>.md with the sections %s:
-    key facts numbered, at most %d, each ending "unconfirmed" or in a last clause "confirmed: <item, PR or file>".
-    --facts <file> (the caller's own numbered facts) is copied next to it as <time>-facts.md for the boss to copy in.
- 2. dev verifies it: the file was written with every section, 1-%d marked key facts each under its own number, every
-    open item's #number, the old transcript's path and each --facts fact word for word, and no item of the user's or
-    a person's on the list without details. A miss prompts the boss once to fix it; a second stops, nothing cleared.
+    key facts numbered, at most %d, each ending "unconfirmed" or in a last clause "confirmed: <item, PR or file>";
+    Roles: who answers its workers' permission prompts and dialogs, who relays its asks. --facts <file> (the
+    caller's own numbered facts, refused when one is worded as done below) is copied next to it as
+    <time>-facts.md for the boss to copy in.
+ 2. dev verifies it: the file was written with every section, something under Roles, 1-%d marked key facts each
+    under its own number, no unconfirmed fact worded as done, every open item's #number, the old transcript's path
+    and each --facts fact word for word, and no item of the user's or a person's on the list without details. A
+    miss prompts the boss once to fix it; a second stops, nothing cleared. "Worded as done" is by words only: a done
+    word (merged, released, fixed, …) and no hedge (reported, not, may, pending, "?", …); "PR #41 is in main" or a
+    hedge elsewhere in the fact passes, and a confirmed fact's source isn't checked.
  3. The checks again (a note that came in during the save refuses it), and right before the /clear: still the
     conversation that saved, no turn since, its box empty. /clear is confirmed by the new session, whose start hook
     gives it its list, notes and the handoff's path.
@@ -43,8 +48,8 @@ only into an empty input box, and a turn ending on a permission prompt or dialog
     every section, each key fact restated under its number with its mark, no more facts than the handoff's, each
     open ask's number under Open asks and something under Roles; a miss prompts it once with what it missed.
 It prints the handoff, proof and old transcript paths; a failure after the /clear prints them with the proof prompt
-to send by hand. dev checks form, not meaning: compare the two files (an unconfirmed fact stated as done, the roles)
-and tell the user in one line. The files stay on disk.`,
+to send by hand. dev checks form, not meaning: compare the two files (an unconfirmed fact done in other words, the
+roles) and tell the user in one line. The files stay on disk.`,
 			bossclear.MinContext, bossclear.Headings(bossclear.Sections), bossclear.MaxFacts, bossclear.MaxFacts,
 			bossclear.Headings(bossclear.ProofSections)),
 		Args: cobra.ExactArgs(1),

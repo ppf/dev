@@ -157,6 +157,10 @@ func Run(c *tmux.Client, clk control.Clock, a control.Agent, o Options) (r Resul
 		if facts, carried = string(data), readFacts(string(data)); len(carried) == 0 {
 			return r, fmt.Errorf("--facts %s: no numbered facts (\"1. <fact> confirmed: <item, PR or file>\" or \"… unconfirmed\")", o.Facts)
 		}
+		// The boss copies them word for word: it couldn't fix one
+		if done := StatedDone(carried); done != "" {
+			return r, fmt.Errorf("--facts %s: %s; nothing sent", o.Facts, done)
+		}
 	}
 	out, err := c.Run("display-message", "-p", "-t", a.Pane, "#{@agent_session}\t#{@agent_transcript}")
 	if err != nil {
@@ -432,7 +436,7 @@ func SavePrompt(path, transcript, facts string) string {
 		"2. your notes (dev todo note): decisions, what the user said, open risks; 3. write the handoff file " + path +
 		" with exactly these sections as markdown headings: " + Headings(Sections) + ". Under ## Key facts: numbered, at " +
 		"most " + strconv.Itoa(MaxFacts) + ", the facts you must not lose, each ending \"unconfirmed\" or, after a full stop, \"confirmed: <item number, PR or file>\"; an unconfirmed fact is never worded as done (not \"is merged\", but \"reported merged, not checked\"). " +
-		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Old transcript: " +
+		"Under ## Open asks: each open ask by its #number and what each pick starts. Under ## Roles: who answers your workers' permission prompts and dialogs, and who relays your asks to the user. Under ## Old transcript: " +
 		transcript + ". Name every open item of your list by its #number somewhere in the file. No secrets in it."
 	if facts != "" {
 		text += " Copy each fact in " + facts + " (from whoever runs this clear) verbatim, its mark included, as one of your key facts, numbered on."
