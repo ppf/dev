@@ -184,7 +184,7 @@ func TestAskRules(t *testing.T) {
 		"**Assess the user's ideas before handing them on.**", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
 		"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "settle no item on a boss's list", "you decide yourself and report in one line",
 		"you decide nothing for a project",
-		"text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious)",
+		"text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)",
 		"ending `the manager asks the user: leave it to the manager` is the manager's",
 		"**A worker's permission prompt or dialog under a boss of yours**",
 		"only the answer after the colon is theirs",
