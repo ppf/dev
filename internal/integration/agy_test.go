@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,9 +79,17 @@ func TestStateAgy(t *testing.T) {
 	check(t, "turn end recorded", opts(), "idle agy 1 110c93f6-c88f "+transcript)
 	// A turn ended on an error: failed, not finished
 	check(t, "a failed turn's start", agy("working", `{"hookEventName":"PreInvocation","invocationNum":0,"lastUserInput":"go on",`+ids+`}`), "")
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"source":"USER_EXPLICIT","type":"USER_INPUT","content":"go on"}` + "\n")
+	if err := errors.Join(err, f.Close()); err != nil {
+		t.Fatal(err)
+	}
 	check(t, "its end", agy("idle", `{"hookEventName":"Stop","error":"quota exceeded","terminationReason":"ERROR",`+ids+`}`), "")
 	check(t, "a failed turn ends idle", opts(), "idle agy 2 110c93f6-c88f "+transcript)
-	check(t, "its boss note says failed", s.T("show-option", "-pqv", "-t", pane, "@dev_boss_note"), "failed: quota exceeded: ok")
+	check(t, "its boss note says failed", s.T("show-option", "-pqv", "-t", pane, "@dev_boss_note"), "failed: quota exceeded")
 	check(t, "malformed input", agy("working", `{`), "❌ dev state: agent: hook input: unexpected end of JSON input\n")
 	check(t, "malformed input leaves the pane alone", opts(), "idle agy 2 110c93f6-c88f "+transcript)
 
@@ -96,7 +105,7 @@ func TestStateAgy(t *testing.T) {
 
 	// The worker's turn end queued a note for its boss, which the nested agy's hook on the boss's pane left there
 	out, _ = run(s.scriptEnv("TMUX_PANE="+boss), `{"hook_event_name":"Stop"}`, "idle")
-	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 3 worker update(s):\n- ag needs a decision: Red or blue? (Red / Blue)\n- ag finished: ok\n- ag failed: quota exceeded: ok"}`+"\n")
+	check(t, "the worker's turn end reached its boss", out, `{"decision":"block","reason":"[dev boss inbox] 3 worker update(s):\n- ag needs a decision: Red or blue? (Red / Blue)\n- ag finished: ok\n- ag failed: quota exceeded"}`+"\n")
 }
 
 // agyStub builds a stand-in for agy into dir: agy models lists two slugs; otherwise it logs its argv to
@@ -329,7 +338,9 @@ func TestAgentStartAgy(t *testing.T) {
 	// A question: its hook records it, with its options for get --json
 	out, errOut, status = devAgent(env, "", "prompt", "repo-w1", "--wait", "question", "--timeout", "30s")
 	check(t, "a question is waiting", status+" "+out+errOut, "0 waiting\n")
-	waitFor(t, "its boss note asks it", func() bool { return note() == "needs a decision: Do you prefer red or blue? ((Recommended) Red / Blue)" })
+	waitFor(t, "its boss note asks it", func() bool {
+		return note() == "needs a decision: Do you prefer red or blue? ((Recommended) Red / Blue)"
+	})
 	out, _, _ = devAgent(env, "", "get", "repo-w1", "--json")
 	var got struct {
 		State     string `json:"state"`

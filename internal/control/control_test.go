@@ -895,7 +895,7 @@ func TestPromptAgyDialogBeforeEnter(t *testing.T) {
 			r := &promptRig{statuses: []Status{idle}, screens: []string{screen("agy-idle"), screen(tt.screen)}}
 			_, err := Prompt(r.client(), fakeClock(), "%1", "go on")
 			entered := slices.Contains(r.cmds, "send-keys -t %1 Enter")
-			if entered != tt.enter || (err == nil) != tt.enter || r.pasted != "go on" || err != nil && NotSent(err) {
+			if entered != tt.enter || (err == nil) != tt.enter || r.pasted != "go on" || err != nil && (NotSent(err) || !NotSubmitted(err)) {
 				t.Errorf("Prompt = %v, Enter %v, pasted %q; cmds %q", err, entered, r.pasted, r.cmds)
 			}
 		})

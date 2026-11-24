@@ -170,14 +170,20 @@ func TestAgyStateHooks(t *testing.T) {
 		{"disabled hook", `{"dev": {"Stop": [{"command": "dev state --agy idle", "enabled": false}]}}`, nil},
 		{"disabled matcher", `{"dev": {"PreToolUse": [{"matcher": "*", "enabled": false, "hooks": [{"command": "dev state --agy working"}]}]}}`, nil},
 		{"another command", `{"log": {"Stop": [{"command": "logger stop"}]}}`, nil},
-		{"not JSON", `{"dev": `, nil},
+		{"a schema key and a hook of another shape", `{"$schema": "x", "dev": {"PreInvocation": [{"command": 1}, {"command": "dev state --agy working"}]}}`, []string{"PreInvocation"}},
+		{"a group's enabled flag beside its events", `{"dev": {"enabled": true, "Stop": [{"command": "dev state --agy idle"}]},
+			"old": {"enabled": false, "Stop": [{"command": "dev state --agy idle"}]}}`, []string{"Stop"}},
+		{"a disabled group", `{"dev": {"enabled": false, "Stop": [{"command": "dev state --agy idle"}]}}`, nil},
 	}
 	for _, tt := range tests {
-		got := agyStateHooks([]byte(tt.file))
+		got, err := agyStateHooks([]byte(tt.file))
 		slices.Sort(got)
-		if !slices.Equal(got, tt.want) {
-			t.Errorf("%s: agyStateHooks = %q, want %q", tt.name, got, tt.want)
+		if err != nil || !slices.Equal(got, tt.want) {
+			t.Errorf("%s: agyStateHooks = %q, %v; want %q", tt.name, got, err, tt.want)
 		}
+	}
+	if _, err := agyStateHooks([]byte(`{"dev": `)); err == nil {
+		t.Error("a file that isn't JSON: no error")
 	}
 	dir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
@@ -191,8 +197,22 @@ func TestAgyStateHooks(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, ".agents", "hooks.json"), []byte(file), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got := agyHooked(dir); got != want {
-			t.Errorf("agyHooked(%s) = %v, want %v", file, got, want)
+		if got, err := agyHooked(dir); got != want || err != nil {
+			t.Errorf("agyHooked(%s) = %v, %v; want %v", file, got, err, want)
 		}
+	}
+}
+
+func TestAgyHookedBroken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(dir, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".agents", "hooks.json"), []byte("// a comment\n{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if hooked, err := agyHooked(dir); hooked || err == nil || !strings.Contains(err.Error(), "hooks.json") {
+		t.Errorf("agyHooked(a broken file) = %v, %v; want false and why", hooked, err)
 	}
 }

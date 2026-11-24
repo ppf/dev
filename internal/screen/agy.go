@@ -25,11 +25,21 @@ func AgyBoxAt(plain []string) (top, bottom int, ok bool) {
 	if bottom < 0 {
 		return 0, 0, false
 	}
-	top = lastRule(plain, bottom-1, MaxBoxLines+1, isRule)
-	if top < 0 || top == bottom-1 || !strings.HasPrefix(plain[top+1], ">") {
-		return 0, 0, false
+	// The rule over its > row: a draft may hold a rule of its own
+	for top = bottom - 2; top >= 0 && top > bottom-MaxBoxLines-2; top-- {
+		if isRule(plain[top]) && strings.HasPrefix(plain[top+1], ">") {
+			return top, bottom, true
+		}
 	}
-	return top, bottom, true
+	return 0, 0, false
+}
+
+// AgyDialog reports a dialog agy draws in its input box's place: its footer "esc to cancel" with no box rule right
+// above it (working, the rule sits there). A draft of any height doesn't count.
+func AgyDialog(capture string) bool {
+	plain := plainScreen(capture)
+	n := len(plain)
+	return n > 1 && strings.HasPrefix(plain[n-1], "esc to cancel") && !isRule(plain[n-2])
 }
 
 // AgyBox reports agy's input box at the bottom of its captured screen, idle or working: no dialog in its place.

@@ -266,12 +266,12 @@ and that holds the brief's first line as a line of its own, once per pick; a new
 				if queued {
 					fmt.Fprintf(cmd.OutOrStdout(), "queued: %s is working; it reads the prompt at its turn's next step\n", a.Session)
 				}
-				return errors.Join(g.typed(err), g.done(!control.NotSent(err), time.Now()))
+				return errors.Join(g.typed(err), g.done(!control.NotSent(err) && !control.NotSubmitted(err), time.Now()))
 			}
 			// Recorded once typed: the wait may run long or be cut off
 			var gerr error
 			st, err := control.PromptWaitSent(c, control.RealClock, a.Pane, text, stall, timeout, func() { gerr = g.done(true, time.Now()) })
-			if control.NotSent(err) {
+			if control.NotSent(err) || control.NotSubmitted(err) {
 				gerr = g.done(false, time.Now())
 			}
 			if err != nil || gerr != nil {
@@ -486,7 +486,12 @@ Prints the agent like get (with --from, --json adds took_over: session, worktree
 			}
 			// Also a reused agy session that got no state yet: its start left a screen to the user
 			if a.Label == "Agy" && a.State == "" {
-				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, agyHooked(a.Path), timeout)
+				hooked, herr := agyHooked(a.Path)
+				if herr != nil {
+					// Read as no hooks: its start records nothing, and says so
+					fmt.Fprintln(cmd.ErrOrStderr(), "⚠ "+herr.Error())
+				}
+				left, err := control.AgyReady(c, control.RealClock, a.Pane, made, hooked, timeout)
 				if err != nil {
 					return err
 				}
@@ -532,50 +537,74 @@ func checkAgyModel(model string, timeout time.Duration) error {
 }
 
 // agyHooked reports agy's global hooks file or the workspace's at dir running dev state --agy at a turn's start
-// (PreInvocation) and end (Stop), enabled: else no turn would count, and prompt --wait would stall. dev only reads them.
-func agyHooked(dir string) bool {
+// (PreInvocation) and end (Stop), enabled: else no turn would count, and prompt --wait would stall. dev only reads
+// them; one it can't read or parse is err, the other still read.
+func agyHooked(dir string) (hooked bool, err error) {
 	files := []string{filepath.Join(dir, ".agents", "hooks.json")}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, herr := os.UserHomeDir(); herr == nil {
 		files = append(files, filepath.Join(home, ".gemini", "config", "hooks.json"))
 	}
 	found := map[string]bool{}
 	for _, f := range files {
-		if raw, err := os.ReadFile(f); err == nil {
-			for _, event := range agyStateHooks(raw) {
-				found[event] = true
-			}
+		raw, rerr := os.ReadFile(f)
+		if errors.Is(rerr, fs.ErrNotExist) {
+			continue
+		}
+		events, perr := agyStateHooks(raw)
+		if perr = cmp.Or(rerr, perr); perr != nil {
+			err = errors.Join(err, fmt.Errorf("agy hooks file %s: %w", f, perr))
+		}
+		for _, event := range events {
+			found[event] = true
 		}
 	}
-	return found["PreInvocation"] && found["Stop"]
+	return found["PreInvocation"] && found["Stop"], err
 }
 
 // agyStateHooks are the events an agy hooks file (named groups of events, each a list of hooks or of matchers
-// holding hooks) runs an enabled dev state --agy hook for; none for a file that doesn't parse.
-func agyStateHooks(raw []byte) []string {
+// holding hooks) runs an enabled dev state --agy hook for; a group, matcher or hook "enabled": false runs none.
+// Other keys and values that aren't such lists are skipped; a file that isn't a JSON object is an error.
+func agyStateHooks(raw []byte) ([]string, error) {
 	type hook struct {
-		Command string `json:"command"`
-		Enabled *bool  `json:"enabled"`
-		Hooks   []hook `json:"hooks"`
+		Command string          `json:"command"`
+		Enabled json.RawMessage `json:"enabled"`
+		Hooks   json.RawMessage `json:"hooks"`
 	}
-	on := func(h hook) bool { return h.Enabled == nil || *h.Enabled }
-	var groups map[string]map[string][]hook
-	if json.Unmarshal(raw, &groups) != nil {
-		return nil
+	on := func(enabled json.RawMessage) bool { return string(enabled) != "false" }
+	// The entries of a list that are hooks; none for a value that isn't a list
+	hooks := func(list json.RawMessage) []hook {
+		var raws []json.RawMessage
+		_ = json.Unmarshal(list, &raws)
+		var hs []hook
+		for _, raw := range raws {
+			var h hook
+			if json.Unmarshal(raw, &h) == nil {
+				hs = append(hs, h)
+			}
+		}
+		return hs
+	}
+	var groups map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &groups); err != nil {
+		return nil, err
 	}
 	var events []string
-	for _, group := range groups {
-		for event, hooks := range group {
-			for _, h := range hooks {
-				if !on(h) {
-					continue
-				}
-				if slices.ContainsFunc(append(h.Hooks, h), func(h hook) bool { return on(h) && strings.Contains(h.Command, "state --agy") }) {
-					events = append(events, event)
-				}
+	for _, rawGroup := range groups {
+		var group map[string]json.RawMessage
+		if json.Unmarshal(rawGroup, &group) != nil || !on(group["enabled"]) {
+			continue
+		}
+		for event, list := range group {
+			if slices.ContainsFunc(hooks(list), func(h hook) bool {
+				return on(h.Enabled) && slices.ContainsFunc(append(hooks(h.Hooks), h), func(h hook) bool {
+					return on(h.Enabled) && strings.Contains(h.Command, "state --agy")
+				})
+			}) {
+				events = append(events, event)
 			}
 		}
 	}
-	return events
+	return events, nil
 }
 
 // worktreeMissing reports that project's worktree wt isn't on disk, so the start that follows makes it; false

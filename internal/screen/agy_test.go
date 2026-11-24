@@ -44,6 +44,9 @@ func TestAgyScreensGolden(t *testing.T) {
 			if dir, yes, ok := AgyTrust(capture); dir != tt.trusts || yes != (tt.trusts != "") || ok != (tt.trusts != "") {
 				t.Errorf("AgyTrust = %q, %v, %v; want %q", dir, yes, ok, tt.trusts)
 			}
+			if got, want := AgyDialog(capture), tt.file == "agy-permission" || tt.file == "agy-permission-narrow" || tt.file == "agy-question"; got != want {
+				t.Errorf("AgyDialog = %v, want %v", got, want)
+			}
 			want := ""
 			if tt.file == "agy-permission" || tt.file == "agy-permission-narrow" {
 				want = "Bash|echo hi|Run this command?|true"
@@ -101,6 +104,26 @@ func TestAgyInterrupted(t *testing.T) {
 				t.Errorf("AgyInterrupted = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A draft holding a rule of its own: the box is still the rules around its > row
+func TestAgyBoxDraftRule(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	capture := strings.Join([]string{"  ok", rule, "> notes", "  " + strings.Repeat("─", 12), "  more", rule, "? for shortcuts", ""}, "\n")
+	if top, bottom, ok := AgyBoxAt(plainScreen(capture)); !ok || top != 1 || bottom != 5 {
+		t.Errorf("AgyBoxAt = %d, %d, %v; want 1, 5", top, bottom, ok)
+	}
+	if !AgyIdle(capture) {
+		t.Error("AgyIdle = false")
+	}
+	// A draft past the box's usual height, while agy works: no dialog
+	long := []string{rule, "> " + strings.Repeat("word ", 10)}
+	for range 30 {
+		long = append(long, "  "+strings.Repeat("word ", 10))
+	}
+	if AgyDialog(strings.Join(append(long, rule, "esc to cancel     auto · Gemini 3.8 Flash · low"), "\n")) {
+		t.Error("AgyDialog(a long draft) = true")
 	}
 }
 
