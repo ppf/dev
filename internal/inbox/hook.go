@@ -449,15 +449,18 @@ func WaitsOn(c *tmux.Client, clk control.Clock, pane string, id int, text string
 		text += " (options: " + strings.Join(options, " / ") + ")"
 	}
 	// The state outside the clip: it never cuts the options
-	text = fmt.Sprintf("#%d %s", id, clean(state)) + clean(text)
+	if state != "" {
+		state = clean(state) + ": "
+	}
+	text = fmt.Sprintf("#%d %s", id, state) + clean(text)
 	// Each its own: an item given back with the same text is news again
 	key := WaitsOnYou + "\x00" + strconv.FormatInt(clk.Now().UnixNano(), 10)
 	queued, err = b.Send(c, clk, Note{Worker: w.Session, Kind: WaitsOnYou, Text: text, Key: key, Outside: w.Outside != ""})
 	return queued, noState, err
 }
 
-// itemState is the mark and who it waits on (todo.List.ItemState) of item id reading text on the list of the boss session pane is in, then
-// ": ", so a note about it names them as dev has them; "" with the error when the list can't say.
+// itemState is the mark and who it waits on (todo.List.ItemState) of item id reading text on the list of the boss
+// session pane is in, so a note about it names them as dev has them; "" with the error when the list can't say.
 func itemState(c *tmux.Client, pane string, id int, text string, now time.Time) (string, error) {
 	s, err := todo.ForPane(c, pane)
 	if err != nil {
@@ -471,7 +474,7 @@ func itemState(c *tmux.Client, pane string, id int, text string, now time.Time) 
 	if !ok {
 		return "", fmt.Errorf("#%d %q left the list", id, text)
 	}
-	return state + ": ", nil
+	return state, nil
 }
 
 // AnsweredUp tells the boss above, as WaitsOn, that the user answered ask it of the boss session pane is in, answer

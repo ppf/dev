@@ -81,6 +81,11 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 // else only the items new or changed since under a count line. What it names is kept for the next one. The text holds
 // even with err: the shown file not read (it is then the full list) or not written (it is then dropped).
 func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
+	// No list and none kept: no files for it
+	if _, err := os.Stat(s.shownPath()); len(l.Items) == 0 && errors.Is(err, fs.ErrNotExist) {
+		text, _ = l.reminder(ticked, nil, now)
+		return text, nil
+	}
 	err = s.locked(func() error {
 		seen, readErr := s.readShown(conversation)
 		var shown map[int]string

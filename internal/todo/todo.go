@@ -1443,7 +1443,11 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 func (it Shown) seenAs(now time.Time) string {
 	line := it.line(now)
 	if it.Flagged() {
-		line = "re-check"
+		// Why, without its age
+		line = "re-check gone"
+		if it.Check != nil {
+			line = "re-check " + it.Check.Kind
+		}
 	}
 	return line + "\x00" + strconv.FormatInt(it.Added, 10)
 }

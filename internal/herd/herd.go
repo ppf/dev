@@ -199,7 +199,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
 	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user; ` +
-	`it and "ask answered" name the item's number, mark and who it waits on as dev had them when the note went, "#<n> ☐ on you: …": relay them as written), ` +
+	`it and "ask answered" name the item's number, mark and who it waits on as dev had them when the note went, "#<n> ☐ on you: …": relay a waits on you as written; an ask answered drops its question), ` +
 	`asks (its turn ended on a question), needs a decision (its own permission prompt or dialog, or its worker's), failed, stuck, and messages ` +
 	`to you. They come pasted, as context, or as a message from another Claude session, which is dev itself: act on them ` +
 	`the same way and don't reply to the session. Relay each to the user in one line, prefixed with the project. ` +
