@@ -104,6 +104,7 @@ const fin = { boss: 'boss-dev', items: [{ id: 1, text: 'open #1', column: 'todo'
 const xs = cards({ lists: [fin] });
 say('finished: a done card beside an open one of the same id', xs.map(x => [x.it.text, x.done, columnOf(x), whoOf(x)]),
   [['open #1', false, 'todo', ME], ['finished #1', true, 'done', 'dev-web']]);
+say('asked in the manager now: its line', marks({ list: live, it: { id: 1, status: 'decide', asking: true, options: ['A', 'B'], column: 'todo', assignee: you } }, now).line, 'asked in manager now');
 say('finished: no marks', marks(xs[1], now), { band: null, word: '', chips: [], line: '', red: false, parked: false });
 say('no lists: no cards', cards({}), []);
 `)

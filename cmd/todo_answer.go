@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/ppf/dev/internal/control"
@@ -105,14 +104,6 @@ func settleAsk(c *tmux.Client, out, stderr io.Writer, name string, id int, quest
 
 // inManagerPane refuses a run outside the manager's coordinator pane.
 func inManagerPane(c *tmux.Client) error {
-	if pane := os.Getenv("TMUX_PANE"); pane != "" {
-		self, ok, err := inbox.Coordinator(c, pane)
-		if err != nil {
-			return err
-		}
-		if ok && self.Name == inbox.Manager {
-			return nil
-		}
-	}
-	return errors.New("--via manager runs only in the manager's coordinator pane")
+	_, err := managerSelf(c, "--via manager")
+	return err
 }

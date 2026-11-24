@@ -208,6 +208,7 @@ func TestAskRules(t *testing.T) {
 		// The clear's own prompts are dev's fixed text, not the manager's sends
 		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
 		"- **dev offers it:** once per idle stretch", "Run it then, in the background", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
+		"- **Mark it asked, right before the dialog:** `dev todo asking <boss> <n> --question \"<item text>\"`",
 		// Claude Code's dim suggestion is never the user's draft
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",
 	} {
