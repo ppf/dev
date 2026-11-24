@@ -167,14 +167,14 @@ func TestRead(t *testing.T) {
 		calls = append(calls, args)
 		return "one\ntwo  \n\nthree\n\n   \n\n", nil
 	})
-	out, err := Read(c, "%1", 2)
+	out, err := Read(c, "%1", 2, false)
 	if err != nil || out != "\nthree\n" {
 		t.Errorf("Read = %q, %v; want %q", out, err, "\nthree\n")
 	}
 	if want := []string{"capture-pane", "-p", "-J", "-S", "-2", "-t", "%1"}; len(calls) == 0 || !slices.Equal(calls[0], want) {
 		t.Errorf("args = %q, want %q first", calls, want)
 	}
-	if _, err := Read(c, "%1", 0); err == nil {
+	if _, err := Read(c, "%1", 0, false); err == nil {
 		t.Error("Read with 0 lines: want error")
 	}
 }
@@ -196,9 +196,13 @@ func TestReadSuggestion(t *testing.T) {
 			}
 			return screen, nil
 		})
-		out, err := Read(c, "%1", 10)
+		out, err := Read(c, "%1", 10, true)
 		if err != nil || !strings.Contains(out, "\n"+tt.want+"\n") {
 			t.Errorf("%q: Read = %q, %v; want a line %q", tt.row, out, err, tt.want)
+		}
+		// Not a Claude pane: its screen as it is
+		if out, err := Read(c, "%1", 10, false); err != nil || strings.Contains(out, "[suggestion]") {
+			t.Errorf("%q: Read of another agent = %q, %v; want no mark", tt.row, out, err)
 		}
 	}
 }

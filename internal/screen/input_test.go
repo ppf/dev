@@ -12,6 +12,10 @@ func TestInputBox(t *testing.T) {
 		{"claude-input-suggestion", Input{Text: "run it", Suggestion: true}},
 		{"claude-input-typed", Input{Text: "run it"}},
 		{"claude-input-placeholder", Input{Text: `Try "fix typecheck errors"`, Suggestion: true}},
+		// Older captures: a dim hint, placeholder or suggestion is Claude Code's, never the user's
+		{"claude-queued", Input{Text: "Press up to edit queued messages", Suggestion: true}},
+		{"claude-notice", Input{Text: `Try "create a util logging.py that..."`, Suggestion: true}},
+		{"claude-asks", Input{Text: "yes", Suggestion: true}},
 	} {
 		if got, ok := InputBox(golden(t, "testdata/"+tt.file+".txt")); !ok || got != tt.want {
 			t.Errorf("%s: %+v %v, want %+v", tt.file, got, ok, tt.want)

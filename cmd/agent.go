@@ -163,7 +163,7 @@ func newAgentReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			text, err := control.Read(c, a.Pane, lines)
+			text, err := control.Read(c, a.Pane, lines, a.Label == "Claude")
 			if err != nil {
 				return err
 			}

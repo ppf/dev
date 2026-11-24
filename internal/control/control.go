@@ -727,8 +727,9 @@ func PromptWaitSent(c *tmux.Client, clk Clock, pane, text string, stall, timeout
 }
 
 // Read returns the last lines of pane's history and screen, trailing spaces and blank lines trimmed.
-// An agent drawing on the alternate screen (Claude Code's full-screen UI, Codex) has only that screen.
-func Read(c *tmux.Client, pane string, lines int) (string, error) {
+// An agent drawing on the alternate screen (Claude Code's full-screen UI, Codex) has only that screen. A claude pane's
+// input row holding only Claude Code's dim text ends with suggestionMark.
+func Read(c *tmux.Client, pane string, lines int, claude bool) (string, error) {
 	if lines < 1 {
 		return "", fmt.Errorf("lines must be at least 1, got %d", lines)
 	}
@@ -748,6 +749,9 @@ func Read(c *tmux.Client, pane string, lines int) (string, error) {
 	}
 	if len(all) == 0 {
 		return "", nil
+	}
+	if !claude {
+		return strings.Join(all, "\n") + "\n", nil
 	}
 	if err := markSuggestion(c, pane, all); err != nil {
 		return "", err
