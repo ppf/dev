@@ -248,6 +248,7 @@ In `dev boss`, you hear of your workers without polling: a prompt, extra context
   - **Run `dev todo` as its own command,** not chained with others: auto mode judges a chain as a whole, and the user may allow `Bash(dev todo:*)`, which covers only a command that is `dev todo` alone.
 <!-- /boss-core:rollup -->
 - **A start-of-session `[dev todo] An earlier boss's list … waits` line:** ask the user `Take over <list>?` with `dev todo ask` (Take it (Recommended) / Leave it); on Take it, `dev todo take-over <list>` and re-check what it says to. `dev todo take-over` lists every list you could take.
+- **Asked to save for a clear** (by the manager), write the handoff file with exactly the sections it names, after updating your list and notes, and never end that turn on a question: write what you don't know as `unconfirmed`.
 
 ## Manager
 
@@ -269,11 +270,14 @@ Unlike a boss (this overrides "Never wait on a decision" above), you put what wa
 - **A boss's permission prompt or dialog** (`needs a decision`) you relay the same way, as [Boss inbox](#boss-inbox) says for a worker's: read it (a dialog's questions: `dev agent get boss-<project> --json`), its options as it shows them, read it again and `send-keys` only the user's pick. Skipped: tell the user to go to that boss (`dev goto boss-<project>`). Never answer one, nor an item, on your own.
 - **A worker's permission prompt or dialog under a boss of yours** (`<worker> (boss-<project>'s worker) needs a decision`) is yours alone: its boss leaves it to you. Relay it the same way, reading and sending keys to that worker directly (`dev agent read`, `get <worker> --json`, `send-keys <worker>`), never through its boss: whoever sends the keys saw the user's pick. Skipped: tell the user to go to it (`dev goto <worker>`).
 
-A long-lived boss re-reads its whole context on every turn, so a large one makes each turn expensive. A boss can't clear its own context; you do it for bosses you started or adopted, only at a quiet point:
+A long-lived boss re-reads its whole context on every turn, so a large one makes each turn expensive. A boss never clears itself; you clear a boss you started or adopted, by hand, in this order:
 
-- **When:** the boss is idle with an empty input box (text there may be the user's draft), none of its workers waits on a decision, and its context is past about 200k tokens (20% of a 1M window). `dev agent read boss-<project>` shows the share only if the user's status line prints it; with no share shown, leave the boss alone.
-- **How:** first `dev agent prompt boss-<project> --wait "Put your open state on your list with dev todo: what you wait on, what's next; and decisions, what the user told you and open risks with dev todo note."`, then `dev agent prompt boss-<project> --wait /clear`.
-- **What is lost:** its new conversation starts with its open list and its notes and nothing else: worker details, and what is neither on its list nor in its notes.
+- **When:** the boss is idle with an empty input box (text there may be the user's draft), none of its workers is working or waits on a decision, nothing is queued for it, and its context is past about 200k tokens (20% of a 1M window). Open asks to the user don't block it. `dev agent read boss-<project>` shows the share only if the user's status line prints it; with no share shown, leave the boss alone.
+- **Save:** `dev agent prompt boss-<project> --wait` it to update its list first (statuses; `--details` on every item the user or a person owes), its notes (`dev todo note`), and to write a handoff file `~/.local/state/dev/handoff/<boss>/<date-time>.md` with these sections: Key facts (numbered, at most 15, each ending `confirmed: <item number, PR or file>` or `unconfirmed`), Open asks and what each pick starts, Work in flight, The user's standing words, Open risks, Old transcript path. Pass your own numbered list of facts for it to merge in, if you hold any, each marked the same way. No secrets in the file.
+- **Verify before the clear,** reading only dev's own state and the handoff: the file exists with every section; it names every open item number; every key fact ends `confirmed: …` or `unconfirmed`, and none that is `unconfirmed` is stated as done; no item of the user's or a person's shows "(no details)"; the boss is idle again with an empty box. If not, prompt the boss to fix it and don't clear.
+- **Clear:** `dev agent prompt boss-<project> --wait /clear` (confirmed by the new session; its start list brings the open list and notes).
+- **Proof, before the boss starts or prompts any worker:** prompt the fresh boss: "Read <handoff path>. Before touching any worker, write <handoff path without .md>-proof.md: 1. each key fact restated, with its confirmed or unconfirmed mark; 2. per open ask, what you do on each pick; 3. who answers your workers' permission prompts and dialogs, and who relays asks." Compare the proof with the handoff, and answer 3 with this skill's rules for a boss under a manager (its workers' prompts and dialogs are yours). On a miss or a wrong role, prompt the boss with the missing facts or the right rule and have it fix the proof. Then tell the user in one line: cleared, N facts held, the two paths.
+- **What is lost:** everything that is not on its list, in its notes or in the handoff.
 
 ## Messages between bosses
 
