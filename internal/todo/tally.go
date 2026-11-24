@@ -92,7 +92,7 @@ func ReadEvents() ([]Event, error) {
 	if err != nil {
 		return nil, ignoreMissing(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var events []Event
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
