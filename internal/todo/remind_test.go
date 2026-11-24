@@ -251,3 +251,37 @@ func TestRemindTickedExactText(t *testing.T) {
 		t.Errorf("another text ticked = %q, want #1 left it", got)
 	}
 }
+
+// An item ticked by itself and told while still listed isn't named again as it leaves; a re-check item's new doing
+// line counts.
+func TestRemindTickedOnceAndFlaggedDoing(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "a", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "b", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Remind(read(t, s, now), nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Remind(read(t, s, now), []Ticked{{ID: 1, Text: "a"}}, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Remind(read(t, s, now.Add(time.Minute)), nil, "c1", now); strings.Contains(got, "left it") {
+		t.Errorf("after its tick = %q, want it not named again", got)
+	}
+	l := read(t, s, now)
+	l.Items[1].Gone, l.Items[1].On, l.Items[1].Session = true, "w", &Session{ID: "w", Name: "w"}
+	if _, err := s.Remind(l, nil, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	l.Items[1].Doing = &Doing{Text: "on it", At: now.Unix()}
+	if got, _ := s.Remind(l, nil, "c1", now); !strings.Contains(got, "1 new or changed") {
+		t.Errorf("flagged with a new doing line = %q, want it counted", got)
+	}
+}

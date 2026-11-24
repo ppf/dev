@@ -92,15 +92,21 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 	// No list and none kept: no files for it. No conversation (a hook without session_id) can't tell its own: the full list
 	if _, err := os.Stat(s.shownPath()); conversation == "" || len(l.Items) == 0 && errors.Is(err, fs.ErrNotExist) {
 		text, _ = l.reminder(ticked, nil, now)
+		if conversation == "" {
+			// What was kept no longer says what the boss got
+			return text, s.ForgetShown()
+		}
 		return text, nil
 	}
 	err = s.locked(func() error {
 		seen, readErr := s.readShown(conversation)
 		var shown map[int]string
 		text, shown = l.reminder(ticked, seen, now)
-		// An item not named again is as the boss last got it; a ticked one still listed stays, to be named when it leaves
+		// An item not named again is as the boss last got it; a ticked one still listed stays, to be named when it
+		// leaves, unless the ticked lines name it now
 		for _, it := range l.Items {
-			if line, ok := seen[it.ID]; ok && shown[it.ID] == "" {
+			told := it.Done && slices.ContainsFunc(ticked, func(t Ticked) bool { return t.ID == it.ID && t.Text == it.Text })
+			if line, ok := seen[it.ID]; ok && shown[it.ID] == "" && !told {
 				shown[it.ID] = line
 			}
 		}

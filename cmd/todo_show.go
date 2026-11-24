@@ -58,7 +58,7 @@ checks one item.`,
 			if printOnly {
 				// As the text list marks it: --json's status has it, MarkGone's flag doesn't
 				it.Gone = it.Status == todo.StatusGone
-				printShown(cmd.OutOrStdout(), ofClosed(it.Shown, it.Closed), time.Now())
+				printShown(cmd.OutOrStdout(), ofClosed(it.Shown, it.Closed), it.Closed, time.Now())
 				return nil
 			}
 			if client == "" {
@@ -90,8 +90,13 @@ checks one item.`,
 }
 
 // printShown prints it at now as dev todo show --print does: printItem, then its details indented.
-func printShown(out io.Writer, it todo.Shown, now time.Time) {
-	printItem(out, "", it, now)
+func printShown(out io.Writer, it todo.Shown, closed bool, now time.Time) {
+	if closed {
+		// Its boss can't take an answer: dev todo answer refuses one
+		fmt.Fprintln(out, todoLine(it, now)+"\tboss closed")
+	} else {
+		printItem(out, "", it, now)
+	}
 	// As printItem: a ticked one is its line alone
 	if it.Details != "" && !it.Done {
 		for _, l := range strings.Split(it.Details, "\n") {

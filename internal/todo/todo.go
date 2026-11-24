@@ -1439,18 +1439,11 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 }
 
 // seenAs is how a boss's list keeps the item it named: its text, then its line and revision (Added), so a replace or
-// reopen that leaves the line as it was still counts; for an item to re-check, whose line changes with its age, why.
+// reopen that leaves the line as it was still counts; a re-check's age left out, as it changes by itself.
 func (it Shown) seenAs(now time.Time) string {
 	line := it.line(now)
-	if it.Flagged() {
-		// Why, without its age
-		line = "re-check"
-		if it.Gone {
-			line += " gone"
-		}
-		if it.Check != nil {
-			line += " " + it.Check.Kind
-		}
+	if it.Check != nil {
+		line = strings.Replace(line, " ⚠ "+it.Check.Long(now), " ⚠ "+it.Check.Kind, 1)
 	}
 	return it.Text + "\x01" + line + "\x00" + strconv.FormatInt(it.Added, 10)
 }
