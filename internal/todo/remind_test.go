@@ -285,3 +285,29 @@ func TestRemindTickedOnceAndFlaggedDoing(t *testing.T) {
 		t.Errorf("flagged with a new doing line = %q, want it counted", got)
 	}
 }
+
+// The full list comes again once an hour in a conversation, whatever changed (fullEvery).
+func TestRemindFullHourly(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "a", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		after time.Duration
+		full  bool
+	}{{0, true}, {30 * time.Minute, false}, {59 * time.Minute, false}, {61 * time.Minute, true}, {90 * time.Minute, false}, {121 * time.Minute, true}} {
+		at := now.Add(tt.after)
+		got, err := s.Remind(read(t, s, at), nil, "c1", at)
+		if full := strings.HasPrefix(got, "[dev todo] Your open to do list:\n1. a\n"); err != nil || full != tt.full {
+			t.Errorf("after %v = %q, %v; want full %v", tt.after, got, err, tt.full)
+		}
+	}
+	// A start's list counts as the full one
+	if _, err := s.StartRemind(read(t, s, now), false, "now", nil, "c2", now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Remind(read(t, s, now), nil, "c2", now.Add(3*time.Hour+time.Minute)); !strings.Contains(got, "none new or changed") {
+		t.Errorf("after a start = %q, want the count line", got)
+	}
+}

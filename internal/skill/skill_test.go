@@ -177,6 +177,7 @@ func TestAskRules(t *testing.T) {
 		"**One question per call, in order.** Re-check its item right before each with `dev todo show --print <boss> <n> --question \"<item text>\"`",
 		"name the item's number, mark and who it waits on as dev had them when the note went (`boss-<project> waits on you: #<n> ☐ on you: …`)",
 		"only the items changed since you last got it, under a count line",
+		"the full list again after a compaction and at least once an hour (a rewind or a reused item number",
 		"--question \"<item text>\" --via manager",
 		"Never a boss's note, a recommended option you chose or a suggestion text.",
 		"a message the user typed here answers no item (dev refuses it): ask that item as a question",

@@ -85,9 +85,10 @@ func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (str
 }
 
 // Remind is l's reminder for its boss reading worker notes at now in conversation (its Claude session id): the full
-// list (Reminder) when none is kept for that conversation (StartRemind or an earlier Remind in it; ForgetShown drops it),
-// else only the items new or changed since under a count line. What it names is kept for the next one. The text holds
-// even with err: the shown file not read (it is then the full list) or not written (it is then dropped).
+// list (Reminder) when none is kept for that conversation (StartRemind or an earlier Remind in it; ForgetShown drops it)
+// or its last full list is fullEvery old, else only the items new or changed since under a count line. What it names is
+// kept for the next one. The text holds even with err: the shown file not read (it is then the full list) or not
+// written (it is then dropped).
 func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
 	// No list and none kept: no files for it. No conversation (a hook without session_id) can't tell its own: the full list
 	if _, err := os.Stat(s.shownPath()); conversation == "" || len(l.Items) == 0 && errors.Is(err, fs.ErrNotExist) {
@@ -99,7 +100,10 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 		return text, nil
 	}
 	err = s.locked(func() error {
-		seen, readErr := s.readShown(conversation)
+		seen, full, readErr := s.readShown(conversation, now)
+		if seen == nil {
+			full = now.Unix()
+		}
 		var shown map[int]string
 		text, shown = l.reminder(ticked, seen, now)
 		// An item not named again is as the boss last got it; a ticked one still listed stays, to be named when it
@@ -110,7 +114,7 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 				shown[it.ID] = line
 			}
 		}
-		return errors.Join(readErr, s.keepShown(conversation, shown))
+		return errors.Join(readErr, s.keepShown(conversation, shown, full))
 	})
 	if text == "" && err != nil {
 		// Not locked: the full list, ticked lines too, which TakeTicked already took
@@ -123,7 +127,11 @@ func (s Store) Remind(l List, ticked []Ticked, conversation string, now time.Tim
 // holds even with err, the shown file not written.
 func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conversation string, now time.Time) (text string, err error) {
 	if _, err := os.Stat(s.shownPath()); conversation == "" || len(l.Items) == 0 && errors.Is(err, fs.ErrNotExist) {
-		return l.startReminder(kept, age, ticked, now), nil
+		text = l.startReminder(kept, age, ticked, now)
+		if conversation == "" {
+			return text, s.ForgetShown()
+		}
+		return text, nil
 	}
 	err = s.locked(func() error {
 		text = l.startReminder(kept, age, ticked, now)
@@ -138,7 +146,7 @@ func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conve
 				shown[it.ID] = ""
 			}
 		}
-		return s.keepShown(conversation, shown)
+		return s.keepShown(conversation, shown, now.Unix())
 	})
 	if text == "" && err != nil {
 		text = l.startReminder(kept, age, ticked, now)
@@ -158,10 +166,10 @@ func (s Store) ForgetShown() error {
 // forgetShown is ForgetShown under the list's lock, held by its caller.
 func (s Store) forgetShown() error { return ignoreMissing(os.Remove(s.shownPath())) }
 
-// keepShown writes shown as what the boss last got in conversation; one not written drops the earlier, which no longer
+// keepShown writes shown as what the boss last got in conversation, its full list last at full; one not written drops the earlier, which no longer
 // says what the boss got.
-func (s Store) keepShown(conversation string, shown map[int]string) error {
-	if err := s.writeShown(conversation, shown); err != nil {
+func (s Store) keepShown(conversation string, shown map[int]string, full int64) error {
+	if err := s.writeShown(conversation, shown, full); err != nil {
 		return errors.Join(err, s.forgetShown())
 	}
 	return nil
@@ -176,35 +184,41 @@ func (s Store) shownPath() string {
 type shownFile struct {
 	Conversation string         `json:"conversation"`
 	Lines        map[int]string `json:"lines"`
+	// Full is when the boss last got its full list in the conversation, unix seconds
+	Full int64 `json:"full"`
 }
 
-// readShown is the lines its boss last got in conversation, nil for none: no file, another conversation's, or one
-// that isn't JSON, which it removes and reports.
-func (s Store) readShown(conversation string) (map[int]string, error) {
+// fullEvery is how often a boss gets its full list in a conversation all the same: a rewind (same session_id, later
+// turns gone) or a number reused once its list emptied can leave it without an item the changes alone don't name.
+const fullEvery = time.Hour
+
+// readShown is the lines its boss last got in conversation and when it last got the full list, nil for none: no
+// file, another conversation's, its full list due (fullEvery), or one that isn't JSON, which it removes and reports.
+func (s Store) readShown(conversation string, now time.Time) (map[int]string, int64, error) {
 	data, err := os.ReadFile(s.shownPath())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, nil
+		return nil, 0, nil
 	case err != nil:
-		return nil, err
+		return nil, 0, err
 	}
 	var f shownFile
 	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, errors.Join(fmt.Errorf("%s: %w: removed, the full list goes out", s.shownPath(), err), ignoreMissing(os.Remove(s.shownPath())))
+		return nil, 0, errors.Join(fmt.Errorf("%s: %w: removed, the full list goes out", s.shownPath(), err), ignoreMissing(os.Remove(s.shownPath())))
 	}
-	if f.Conversation != conversation || f.Lines == nil {
-		return nil, nil
+	if f.Conversation != conversation || f.Lines == nil || now.Sub(time.Unix(f.Full, 0)) >= fullEvery {
+		return nil, 0, nil
 	}
-	return f.Lines, nil
+	return f.Lines, f.Full, nil
 }
 
-// writeShown keeps shown as the lines its boss last got in conversation.
-func (s Store) writeShown(conversation string, shown map[int]string) error {
+// writeShown keeps shown as the lines its boss last got in conversation, its full list last at full.
+func (s Store) writeShown(conversation string, shown map[int]string, full int64) error {
 	path := s.shownPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.Marshal(shownFile{Conversation: conversation, Lines: shown})
+	data, err := json.Marshal(shownFile{Conversation: conversation, Lines: shown, Full: full})
 	if err != nil {
 		return err
 	}
