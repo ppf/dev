@@ -34,10 +34,16 @@ func InputBox(capture string) (in Input, ok bool) {
 			if typed == nil || all == nil {
 				return Input{}, false
 			}
-			// Its rows under the prompt row too: a long draft or suggestion wraps
+			// Its rows under the prompt row too: a long draft or suggestion wraps. Their dim text is a suggestion's only
+			// when one starts on the prompt row; else it counts as the user's (a pasted text's chip may be drawn dim)
+			wraps := strings.TrimSpace(typed[1]) == "" && strings.TrimSpace(all[1]) != ""
 			text, shown := []string{typed[1]}, []string{all[1]}
 			for _, l := range lines[j+2 : i] {
-				text, shown = append(text, undimmed(l)), append(shown, plainLine(l))
+				row := plainLine(l)
+				if wraps {
+					row = undimmed(l)
+				}
+				text, shown = append(text, row), append(shown, plainLine(l))
 			}
 			if t := box(text); t != "" {
 				return Input{Text: t}, true

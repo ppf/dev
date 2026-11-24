@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/tmux"
 )
 
@@ -29,6 +28,14 @@ func (b Box) SetAsking(a Asking) error {
 	})
 }
 
+// ClearAsking drops the question the coordinator had up, as its dialog is gone (a resumed session).
+func (b Box) ClearAsking() error {
+	return b.update(func(s *state) error {
+		s.Asking = nil
+		return nil
+	})
+}
+
 // Asking is the question the coordinator has up at now, nil for none: none set, picked since, or set AskingFor ago.
 func (b Box) Asking(now time.Time) (*Asking, error) {
 	s, err := b.locked()
@@ -39,16 +46,22 @@ func (b Box) Asking(now time.Time) (*Asking, error) {
 }
 
 // ManagerAsking is the question the live Manager has up at now (Box.Asking), its inbox on or off: nil with no tmux
-// server, no Manager session or no agent in it.
+// server or no Manager session.
 func ManagerAsking(c *tmux.Client, now time.Time) (*Asking, error) {
-	a, err := control.Resolve(c, Manager)
-	switch {
-	case control.NoAgent(err), tmux.IsNoServer(err), err != nil && strings.Contains(err.Error(), "no session"):
-		return nil, nil
-	case err != nil:
+	// display-message prints nothing for a missing session, without failing
+	if _, err := c.Run("has-session", "-t", tmux.SessionTarget(Manager)); err != nil {
+		if tmux.IsNoServer(err) || strings.Contains(err.Error(), "can't find session") {
+			return nil, nil
+		}
 		return nil, err
 	}
-	m, ok, err := Coordinator(c, a.Pane)
+	v, err := view(c, tmux.SessionTarget(Manager))
+	if err != nil {
+		return nil, err
+	}
+	// Its inbox off too: dev todo asking writes it all the same
+	v.Off = ""
+	m, ok, err := v.boss()
 	if !ok || err != nil {
 		return nil, err
 	}

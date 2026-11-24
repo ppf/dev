@@ -102,6 +102,13 @@ func TestTodoAsking(t *testing.T) {
 		t.Errorf("❌ asking after the pick: %v, want none", got)
 	}
 
+	// A resumed manager has no dialog up
+	must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?")
+	must([]string{"TMUX_PANE=" + manager}, `{"hook_event_name":"SessionStart","source":"resume"}`, "state", "idle")
+	if got := asking(); len(got) != 0 {
+		t.Errorf("❌ asking after a resume: %v, want none", got)
+	}
+
 	// With the manager's inbox off it still shows; answered on a board meanwhile, it goes, and isn't asked again
 	s.T("set-option", "-t", "=manager:", inbox.OptOff, "off")
 	must(inManager, "", "todo", "asking", "boss-a", "1", "--question", "Filter row?")

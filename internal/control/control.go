@@ -173,6 +173,9 @@ func (a *Agent) ReadInput(c *tmux.Client) error {
 		return nil
 	}
 	in, ok, err := inputBox(c, a.Pane)
+	if err != nil && strings.Contains(err.Error(), "can't find pane") {
+		return nil // closed since list-panes: no box
+	}
 	if ok {
 		a.Input = &in
 	}
@@ -766,6 +769,9 @@ const suggestionMark = "  [suggestion]"
 // suggestion (screen.InputBox), as plain text can't tell it from the user's typing.
 func markSuggestion(c *tmux.Client, pane string, lines []string) error {
 	in, ok, err := inputBox(c, pane)
+	if err != nil && strings.Contains(err.Error(), "can't find pane") {
+		return nil // closed since the first capture: its screen as it was, no mark
+	}
 	if err != nil || !ok || !in.Suggestion {
 		return err
 	}

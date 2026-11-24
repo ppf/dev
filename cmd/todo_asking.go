@@ -11,6 +11,7 @@ import (
 
 	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/tmux"
+	"github.com/ppf/dev/internal/todo"
 )
 
 func newTodoAskingCmd(boss *string) *cobra.Command {
@@ -49,6 +50,10 @@ text: refused unless open ask n still reads it. Only from the manager's coordina
 				return fmt.Errorf("%s #%d is closed already: don't ask it", name, id)
 			case len(it.Options) == 0:
 				return fmt.Errorf("%s #%d is no ask", name, id)
+			case it.Closed:
+				return fmt.Errorf("%s is closed: its #%d can't be answered", name, id)
+			case !todo.Own(it.On, it.Session, name):
+				return fmt.Errorf("%s #%d is on %s, not the user's", name, id, it.On)
 			}
 			if err := self.Box.SetAsking(inbox.Asking{Boss: name, ID: id, Text: it.Text, At: time.Now().Unix()}); err != nil {
 				return err
