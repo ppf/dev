@@ -120,10 +120,13 @@ func newAgyDialogCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, pane := tmux.New(), args[0]
 			clk := control.RealClock
+			logged := func(err error) error {
+				return fmt.Errorf("%s %s: %w", time.Now().Format(time.DateTime), pane, err)
+			}
 			for start := clk.Now(); clk.Now().Sub(start) < agyDialogWindow; clk.Sleep(agyDialogPoll) {
 				st, err := control.ReadStatus(c, pane)
 				if err != nil {
-					return fmt.Errorf("%s %s: %w", time.Now().Format(time.DateTime), pane, err)
+					return logged(err)
 				}
 				if st.Trusted() != agent.Working {
 					// Moved on: a hook, or the turn ended
@@ -138,7 +141,7 @@ func newAgyDialogCmd() *cobra.Command {
 					err = errors.Join(err, notify.Run(c, pane, input, os.Getenv("__CFBundleIdentifier")))
 				}
 				if err != nil {
-					return fmt.Errorf("%s %s: %w", time.Now().Format(time.DateTime), pane, err)
+					return logged(err)
 				}
 				if input != nil {
 					return nil
