@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-const kindHelp = "the manager's label of what it sends a boss, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question holding the boss and the brief's first line), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
+const kindHelp = "the manager's label of what it sends, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question whose first line names the target and that holds the brief's first line as a line of its own), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
 
 // handOn is a send from the manager's pane to a boss, let through by gateHandOn; nil for any other pane.
 type handOn struct {
@@ -32,8 +33,8 @@ func gateHandOn(c *tmux.Client, kind, boss, text string) (*handOn, error) {
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
 		b, ok, err := inbox.Coordinator(c, pane)
 		switch {
-		// A pane this tmux server can't read (TMUX_PANE from another server) is no manager's
-		case err != nil && kind != "":
+		// A pane this tmux server can't find (TMUX_PANE from another server) is no manager's
+		case err != nil && !strings.Contains(err.Error(), "can't find pane"):
 			return nil, fmt.Errorf("checking for the manager's pane: %w", err)
 		case err == nil:
 			self, manager = b, ok && b.Name == inbox.Manager
@@ -107,23 +108,7 @@ func handOnPick(p *inbox.Prompt, boss, text string) error {
 
 // names reports whether s holds name as a whole word: boss-dev isn't in "boss-devops".
 func names(s, name string) bool {
-	for i := strings.Index(s, name); i >= 0; {
-		end := i + len(name)
-		if (i == 0 || !nameRune(s[i-1])) && (end == len(s) || !nameRune(s[end])) {
-			return true
-		}
-		next := strings.Index(s[i+1:], name)
-		if next < 0 {
-			break
-		}
-		i += 1 + next
-	}
-	return false
-}
-
-// nameRune reports a byte that may be part of a session name.
-func nameRune(b byte) bool {
-	return b == '-' || b == '_' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
+	return regexp.MustCompile(`(^|[^a-z0-9_-])` + regexp.QuoteMeta(name) + `([^a-z0-9_-]|$)`).MatchString(s)
 }
 
 // done records the send, or gives back its claimed pick when nothing reached the boss.
@@ -149,9 +134,9 @@ func newAgentHandoffsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "handoffs",
 		Short: "List what the manager sent its bosses by --kind, ungated ones first, with the trial's counts",
-		Long: `List what the manager sent its bosses with dev agent prompt/message --kind, ungated kinds (question, pick, own)
+		Long: `List what the manager sent its bosses with dev agent prompt/message/reply --kind, ungated kinds (question, pick, own)
 first so a mislabel shows, then work (each on the user's "Hand it on" pick), then hand-on questions that sent nothing
-(dropped: "Drop it" picked; corrected: typed under Other); newest first in each. The first line counts them. A
+(dropped: "Drop it" picked; corrected: typed under Other or another option picked); newest first in each. The first line counts them. A
 dismissed question is not seen. --json prints [{kind, at, boss?, line}], at in unix seconds.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

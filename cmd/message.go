@@ -113,13 +113,10 @@ func sendGated(out io.Writer, c *tmux.Client, kind, text string, post func(s inb
 		g, err = gateHandOn(c, kind, boss, text)
 		return err
 	}
-	stored := false
 	queued, err := send(out, c, func(s inbox.Messages, from string, now time.Time) (inbox.Msg, inbox.Boss, error) {
-		msg, b, err := post(s, from, now, gate)
-		stored = err == nil
-		return msg, b, err
+		return post(s, from, now, gate)
 	})
-	return errors.Join(err, g.done(stored && queued, time.Now()))
+	return errors.Join(err, g.done(queued, time.Now()))
 }
 
 func newAgentMessagesCmd() *cobra.Command {

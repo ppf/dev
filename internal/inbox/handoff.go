@@ -17,7 +17,7 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// The manager's labels of what it sends a boss (dev agent prompt/message --kind): only KindWork is gated.
+// The manager's labels of what it sends a boss (dev agent prompt/message/reply --kind): only KindWork is gated.
 const (
 	KindWork     = "work"     // new work, sent on the user's "Hand it on" pick
 	KindQuestion = "question" // a question about state or a fact: starts no work
@@ -31,7 +31,7 @@ var Kinds = []string{KindWork, KindQuestion, KindPick, KindOwn}
 // The outcomes of the manager's hand-on question that send nothing, seen in its AskUserQuestion pick.
 const (
 	Dropped   = "dropped"   // the user picked DropIt
-	Corrected = "corrected" // the user typed under Other
+	Corrected = "corrected" // the user typed under Other or picked another option
 )
 
 // The options of the manager's hand-on question.

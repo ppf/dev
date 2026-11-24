@@ -231,8 +231,8 @@ read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: 
 agent's new conversation started (its hook recorded a new session).
 
 From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
-latest prompt there being a pick of "Hand it on" on one question that names the boss and holds the brief's first
-line, once per pick.`,
+latest prompt there being a pick of "Hand it on" on one question whose first line names the target and that holds
+the brief's first line as a line of its own, once per pick.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -248,14 +248,9 @@ line, once per pick.`,
 			if err != nil {
 				return err
 			}
-			var g *handOn
-			switch boss := herd.IsBossPane(c, a.Pane); {
-			case boss:
-				if g, err = gateHandOn(c, kind, a.Session, text); err != nil {
-					return err
-				}
-			case kind != "":
-				return fmt.Errorf("--kind: %s is no boss", a.Session)
+			g, err := gateHandOn(c, kind, a.Session, text)
+			if err != nil {
+				return err
 			}
 			if !wait {
 				queued, err := control.Prompt(c, control.RealClock, a.Pane, text)

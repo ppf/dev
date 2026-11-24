@@ -94,7 +94,7 @@ type Pick struct {
 
 // Typed reports an answer typed under Other: none of p's options' labels, when it has any.
 func (p Pick) Typed() bool {
-	return len(p.Labels) > 0 && !slices.Contains(p.Labels, p.Answer)
+	return p.Answer != "" && len(p.Labels) > 0 && !slices.ContainsFunc(p.Labels, func(l string) bool { return strings.TrimSpace(l) == p.Answer })
 }
 
 // String is p as the user's words: "<question> picked <answer>".

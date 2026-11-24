@@ -30,9 +30,11 @@ func TestManagerHandOnGate(t *testing.T) {
 		return string(out), stderr.String(), err
 	}
 	pane := map[string]string{}
-	for _, name := range []string{"boss-a", "boss-b", "manager"} {
+	for _, name := range []string{"boss-a", "boss-b", "manager", "plain"} {
 		s.T("new-session", "-d", "-s", name, "bash", script, "", filepath.Join(tmp, name+".log"))
-		s.T("set-option", "-t", "="+name+":", "@dev_herd", "1")
+		if name != "plain" {
+			s.T("set-option", "-t", "="+name+":", "@dev_herd", "1")
+		}
 		pane[name] = s.T("display", "-t", "="+name+":", "-p", "#{pane_id}")
 		if _, stderr, err := dev([]string{"TMUX_PANE=" + pane[name]}, `{"hook_event_name":"SessionStart"}`, "state", "idle"); err != nil {
 			t.Fatalf("❌ register %s: %v %s", name, err, stderr)
@@ -105,11 +107,18 @@ func TestManagerHandOnGate(t *testing.T) {
 	typed("wait, not yet")
 	refused("work on a typed message after the pick", "a typed message, not a pick", "agent", "prompt", "boss-a", "--kind", "work", brief)
 	ask(question, "Hand it on")
+	// A message refused after the gate gives the pick back
+	refused("work as a too-long message", "too long", "agent", "message", "boss-a", "--kind", "work", brief+strings.Repeat("x", 1001))
 	if out, stderr, err := dev(manager, "", "agent", "message", "boss-a", "--kind", "work", brief); err != nil {
 		t.Fatalf("❌ work as a message on the pick: %q %v %s", out, err, stderr)
 	}
 	if out, stderr, err := dev(manager, "", "agent", "message", "boss-b", "--kind", "question", "Is #150 merged?"); err != nil {
 		t.Fatalf("❌ an ungated question: %q %v %s", out, err, stderr)
+	}
+	// Every send from the manager's pane is labelled, a session that is no boss's too
+	refused("prompt to a non-boss without --kind", "need --kind", "agent", "prompt", "plain", "status?")
+	if out, stderr, err := dev(manager, "", "agent", "prompt", "plain", "--kind", "question", "status?"); err != nil {
+		t.Fatalf("❌ a question to a non-boss: %q %v %s", out, err, stderr)
 	}
 
 	// A boss sends as before, and --kind is the manager's
@@ -134,12 +143,12 @@ func TestManagerHandOnGate(t *testing.T) {
 
 	out, stderr, err = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "", "agent", "handoffs")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if err != nil || len(lines) != 7 || lines[0] != "gated 2 · ungated: question 1, pick 0, own 1 · dropped 1 · corrected 1" ||
-		!strings.HasSuffix(lines[1], " own boss-b: Yes, rebase it") ||
-		!strings.HasSuffix(lines[2], " question boss-b: Is #150 merged?") || !strings.HasSuffix(lines[3], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[4], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[5], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
-		!strings.HasSuffix(lines[6], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
+	if err != nil || len(lines) != 8 || lines[0] != "gated 2 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1" ||
+		!strings.HasSuffix(lines[1], " own boss-b: Yes, rebase it") || !strings.HasSuffix(lines[2], " question plain: status?") ||
+		!strings.HasSuffix(lines[3], " question boss-b: Is #150 merged?") || !strings.HasSuffix(lines[4], " work boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[5], " work boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[6], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
+		!strings.HasSuffix(lines[7], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
 		t.Errorf("❌ dev agent handoffs = %q, %v %s", out, err, stderr)
 	}
 }

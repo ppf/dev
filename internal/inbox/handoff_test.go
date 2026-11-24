@@ -3,6 +3,7 @@ package inbox
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/ppf/dev/internal/agent"
 )
@@ -59,5 +60,27 @@ func TestHandoffsList(t *testing.T) {
 	}
 	if got := FirstLine("\n  Cache   the builds.\ncontract first"); got != "Cache the builds." {
 		t.Errorf("FirstLine = %q", got)
+	}
+}
+
+// A pick off the question's options is typed under Other; without options in the payload it never reads as one.
+func TestPickedTyped(t *testing.T) {
+	b := testBox(t)
+	at := time.Unix(1700000000, 0)
+	for _, tt := range []struct {
+		labels []string
+		answer string
+		want   bool
+	}{
+		{[]string{HandItOn, DropIt}, "only the release builds", true},
+		{[]string{" Hand it on ", DropIt}, HandItOn, false},
+		{nil, "only the release builds", false},
+	} {
+		if err := b.Picked([]agent.Pick{{Question: "Hand on?", Answer: tt.answer, Labels: tt.labels}}, at); err != nil {
+			t.Fatal(err)
+		}
+		if p, err := b.UserPrompt(); err != nil || p == nil || p.Typed != tt.want {
+			t.Errorf("%q of %q: %+v, %v; want typed %v", tt.answer, tt.labels, p, err, tt.want)
+		}
 	}
 }
