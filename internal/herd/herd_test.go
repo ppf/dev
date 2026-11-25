@@ -880,7 +880,7 @@ func TestPromptAskRules(t *testing.T) {
 }
 
 // The manager's coordinator gets managerPrompt, its claude.ai connectors off and its auto-compact window (none for 0), so
-// a resurrect's Adopt restores it as the manager; a new one runs on fable · medium where its start leaves them unset.
+// a resurrect's Adopt restores it as the manager; a new one runs on opus · medium where its start leaves them unset.
 func TestManagerArgvAndStart(t *testing.T) {
 	want := []string{"claude", "--settings", coordinatorSettings("/bin/dev", true), "--autocompact", "300000",
 		"--append-system-prompt", managerPrompt, "--remote-control=manager"}
@@ -892,9 +892,9 @@ func TestManagerArgvAndStart(t *testing.T) {
 		t.Errorf("manager argv, window 0: %q, want %q", got, off)
 	}
 	for _, tt := range []struct{ start, want agent.Start }{
-		{agent.Start{}, agent.Start{Model: "fable", Effort: "medium"}},
-		{agent.Start{Model: "opus"}, agent.Start{Model: "opus", Effort: "medium"}},
-		{agent.Start{Effort: "high"}, agent.Start{Model: "fable", Effort: "high"}},
+		{agent.Start{}, agent.Start{Model: "opus", Effort: "medium"}},
+		{agent.Start{Model: "sonnet"}, agent.Start{Model: "sonnet", Effort: "medium"}},
+		{agent.Start{Effort: "high"}, agent.Start{Model: "opus", Effort: "high"}},
 	} {
 		if got := managerStart(tt.start); got != tt.want {
 			t.Errorf("managerStart(%+v) = %+v, want %+v", tt.start, got, tt.want)
