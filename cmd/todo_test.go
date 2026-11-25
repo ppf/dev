@@ -1003,3 +1003,36 @@ func TestTodoNoteCapRefusesSaid(t *testing.T) {
 		t.Errorf("risk note with only said notes = %v, want a refusal naming 12 notes", err)
 	}
 }
+
+// list is dev todo by another name; show refuses a wrong argument with its usage; a note over the limit is refused
+// before anything is written, and the limits are in --help.
+func TestTodoCLIShape(t *testing.T) {
+	todoEnv(t)
+	run(t, "", "todo", "set", "a")
+	if got, want := run(t, "", "todo", "list"), run(t, "", "todo"); got != want || got != "1\t☐\ta\n" {
+		t.Errorf("todo list = %q, want %q", got, want)
+	}
+	if got := run(t, "", "todo", "list", "--json"); !strings.Contains(got, `"items"`) {
+		t.Errorf("todo list --json = %q, want the JSON object", got)
+	}
+	for _, args := range [][]string{{"todo", "list", "extra"}, {"todo", "list", "--all", "--boss", "x"}} {
+		if _, _, err := execute(t, "", args...); err == nil {
+			t.Errorf("dev %s: want an error", strings.Join(args, " "))
+		}
+	}
+	for _, args := range [][]string{{"todo", "show"}, {"todo", "show", "boss-a"}, {"todo", "show", "boss-a", "x"}} {
+		if _, _, err := execute(t, "", args...); err == nil || !strings.Contains(err.Error(), "usage: dev todo show <boss> <n>") {
+			t.Errorf("dev %s: err = %v, want show's usage", strings.Join(args, " "), err)
+		}
+	}
+	long := strings.Repeat("x", todo.MaxNote+1)
+	if _, _, err := execute(t, "", "todo", "note", "decided", long); err == nil || !strings.Contains(err.Error(), "at most 200") {
+		t.Errorf("long note: err = %v, want the limit", err)
+	}
+	if got := run(t, "", "todo", "note"); got != "no notes\n" {
+		t.Errorf("notes after a refused one = %q, want none", got)
+	}
+	if help := run(t, "", "todo", "note", "decided", "--help"); !strings.Contains(help, "at most 200 characters") {
+		t.Errorf("note help lacks the limit: %q", help)
+	}
+}

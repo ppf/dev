@@ -237,3 +237,23 @@ func TestAgyHookedBroken(t *testing.T) {
 		t.Errorf("agyHooked(a broken file) = %v, %v; want false and why", hooked, err)
 	}
 }
+
+// A message over the limit is refused before the boss, the pane or the hand-on gate are looked at; --help says the limit.
+func TestMessageLimit(t *testing.T) {
+	if _, _, err := execute(t, "", "agent", "message", "boss-a", strings.Repeat("x", 1501)); err == nil || !strings.Contains(err.Error(), "at most 1500") {
+		t.Errorf("err = %v, want the limit", err)
+	}
+	if _, _, err := execute(t, "", "agent", "reply", "m1", strings.Repeat("x", 1501)); err == nil || !strings.Contains(err.Error(), "at most 1500") {
+		t.Errorf("reply: err = %v, want the limit", err)
+	}
+	if help := run(t, "", "agent", "message", "--help"); !strings.Contains(help, "at most 1500 characters") {
+		t.Errorf("help lacks the limit: %q", help)
+	}
+}
+
+// prompt --help names the agents --wait works for.
+func TestPromptWaitHelp(t *testing.T) {
+	if help := run(t, "", "agent", "prompt", "--help"); strings.Contains(help, "--wait (Claude only)") || !strings.Contains(help, "Codex, Grok") {
+		t.Errorf("help = %q", help)
+	}
+}

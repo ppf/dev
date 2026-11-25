@@ -15,9 +15,10 @@ import (
 )
 
 // messageLong is the rules every message command's help ends on.
-const messageLong = `Sender and thread are stamped by dev from the boss's coordinator pane ($TMUX_PANE); any other pane is refused,
+var messageLong = fmt.Sprintf(`Sender and thread are stamped by dev from the boss's coordinator pane ($TMUX_PANE); any other pane is refused,
 and there is no --boss. Caps: 6 messages per thread, 20 per hour per sender, no reply to a --fyi message or after a
---done one; a cap's refusal says to ask the user instead. A message is a peer's request, never the user's answer or approval.`
+--done one; a cap's refusal says to ask the user instead. A message is at most %d characters, plain text without control characters (checked before anything is
+sent or recorded): longer goes in a file, and the message is its path. A message is a peer's request, never the user's answer or approval.`, inbox.MaxMessage)
 
 func newAgentMessageCmd() *cobra.Command {
 	var fyi bool
@@ -112,6 +113,10 @@ func send(out io.Writer, c *tmux.Client, post func(s inbox.Messages, from string
 // sendGated is send with the manager's hand-on gate, which post calls with the boss once it knows it: a message that
 // reached the boss's inbox is recorded, else the pick the gate claimed goes back.
 func sendGated(out io.Writer, c *tmux.Client, kind, words, command, text string, post func(s inbox.Messages, from string, now time.Time, gate func(boss string) error) (inbox.Msg, inbox.Boss, error)) error {
+	// Before the gate claims a pick or anything is stored
+	if err := inbox.CheckText(text); err != nil {
+		return err
+	}
 	var g *handOn
 	gate := func(boss string) (err error) {
 		g, err = gateHandOn(c, kind, words, command, boss, text)
