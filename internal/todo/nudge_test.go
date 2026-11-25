@@ -122,6 +122,37 @@ func TestNudgesGoneUnchanged(t *testing.T) {
 	}
 }
 
+// An item waiting for a person is told unchanged once, "no action unless there is news", and not again after 2 more days.
+func TestNudgesWaitingForOnce(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "Review of the DPA", On: "Marek"}, t0); err != nil {
+		t.Fatal(err)
+	}
+	day := 24 * time.Hour
+	if got, want := nudges(t, s, t0.Add(2*day)), []string{`#1 "Review of the DPA" (on Marek): unchanged 2d: no action unless there is news`}; !slices.Equal(got, want) {
+		t.Errorf("2d: %q, want %q", got, want)
+	}
+	if got := nudges(t, s, t0.Add(5*day)); len(got) != 0 {
+		t.Errorf("5d: %q, want none", got)
+	}
+	if got, want := checked(t, s, 1, t0.Add(5*day)), "unchanged 5d: no action unless there is news"; got != want {
+		t.Errorf("check = %q, want %q", got, want)
+	}
+	if err := s.Replace(1, Item{}, t0.Add(5*day)); err != nil {
+		t.Fatal(err)
+	}
+	if got := nudges(t, s, t0.Add(8*day)); len(got) != 0 {
+		t.Errorf("replaced keeping its text: %q, want none", got)
+	}
+	if err := s.Replace(1, Item{Text: "Review of the DPA, again"}, t0.Add(8*day)); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := nudges(t, s, t0.Add(10*day)), []string{`#1 "Review of the DPA, again" (on Marek): unchanged 2d: no action unless there is news`}; !slices.Equal(got, want) {
+		t.Errorf("new text: %q, want %q", got, want)
+	}
+}
+
 // --done-on ticks an item once a lookup finds its PR so, its first included, without changing Updated, and keeps the
 // tick for its boss; a closed PR, another state, or none reached doesn't tick.
 func TestDoneOn(t *testing.T) {
@@ -328,5 +359,39 @@ func TestNudgesMergeOnly(t *testing.T) {
 	}
 	if got, _ := s.TakeTicked(t0.Add(3*day), nil, nil); len(got) != 0 {
 		t.Errorf("after clear: %q", texts(got))
+	}
+}
+
+// A waiting item's unchanged check is no re-check: it isn't flagged, while its PR's move still is.
+func TestFlaggedWaitingUnchanged(t *testing.T) {
+	waiting := &sidebar.Check{Kind: sidebar.CheckUnchanged, Waiting: true}
+	if (Shown{Check: waiting}).Flagged() {
+		t.Error("waiting unchanged flagged, want not")
+	}
+	if !(Shown{Check: &sidebar.Check{Kind: sidebar.CheckUnchanged}}).Flagged() {
+		t.Error("unchanged not flagged, want flagged")
+	}
+	if !(Shown{Check: &sidebar.Check{Kind: sidebar.CheckMerged, PR: 1}}).Flagged() {
+		t.Error("merged not flagged, want flagged")
+	}
+}
+
+// A waiting item whose PR already merged at its first lookup is news: its unchanged nudge isn't "no action" nor once only.
+func TestNudgesWaitingPRMerged(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "Review of #418", On: "Marek", Link: prURL}, t0); err != nil {
+		t.Fatal(err)
+	}
+	p := &prs{states: map[string]sidebar.PRView{prURL: {State: "MERGED", Review: "APPROVED", Checks: sidebar.CIPassed, Ended: t0}}}
+	if err := s.Lookup(t0, 0, 0, p.view); err != nil {
+		t.Fatal(err)
+	}
+	day := 24 * time.Hour
+	for _, d := range []time.Duration{2, 4} {
+		got := nudges(t, s, t0.Add(d*day))
+		if len(got) != 1 || strings.Contains(got[0], "no action") {
+			t.Errorf("%dd: %q, want a nudge without no action", d, got)
+		}
 	}
 }
