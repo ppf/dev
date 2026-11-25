@@ -243,11 +243,13 @@ queued (printed): Claude reads it at its turn's next step. A one-line slash comm
 watched up to 3s: the dialog /effort and /model open mid-conversation is confirmed with 1, any other
 dialog is an error.
 
---wait (Claude only) needs an idle agent and returns once the hook saw the prompt and the agent settled
-again (idle or waiting), printing that state; another slash command Claude runs itself, once its screen
-shows it ran. Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box:
-read the pane), exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: --wait returns once the
-agent's new conversation started (its hook recorded a new session).
+--wait needs an idle agent whose dev state hooks run (Claude, Codex, Grok; agy's count the prompt at its
+first model call) and returns once the hook saw the prompt and the agent settled again (idle or waiting),
+printing that state; another slash command Claude runs itself, once its screen shows it ran (Claude only).
+Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box: read the pane),
+exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: --wait returns once the agent's new
+conversation started (its hook recorded a new session). Refused for Codex and Grok, whose hooks record none, and for agy, whose
+hook records one only from its first turn.
 
 From the manager's coordinator pane --kind is needed (see dev agent handoffs): work only passes on the user's
 latest pick there, typed messages since or not, being "Hand it on" on one question whose first line starts "Hand on to <target>"

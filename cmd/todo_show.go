@@ -40,7 +40,12 @@ Item n is the open one, else the newest ticked in the last day, as Done shows it
 still reads that text (item numbers restart once a list empties). --print prints it instead, no popup: its line as
 dev todo has it (number, mark, text, on whom when not you, answer), an open one's context, its details, as the manager
 checks one item.`,
-		Args: cobra.ExactArgs(2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return fmt.Errorf("show takes a boss and an item number, got %d argument(s)\nusage: %s", len(args), cmd.UseLine())
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if *boss != "" {
 				return errors.New("the boss is show's first argument: leave out --boss")
@@ -48,7 +53,7 @@ checks one item.`,
 			name := args[0]
 			id, err := strconv.Atoi(args[1])
 			if err != nil {
-				return fmt.Errorf("item number %q: %w", args[1], err)
+				return fmt.Errorf("item number %q: %w\nusage: %s", args[1], err, cmd.UseLine())
 			}
 			c := tmux.New()
 			it, err := showItem(c, cmd.ErrOrStderr(), name, id, question)

@@ -34,7 +34,7 @@ func newTodoCmd() *cobra.Command {
 		Use:   "todo",
 		Short: "A boss's to do list: what waits on the user, for its board",
 		Long: `Keep the boss's list of what waits on the user: a dev boss's previews pane shows it at the top, and
---json is what a desktop board reads. Without a subcommand, print it. The list belongs to the boss session it
+--json is what a desktop board reads. Without a subcommand (or with list), print it. The list belongs to the boss session it
 runs in: a dev boss session in tmux, else the desktop app session ($CLAUDE_CODE_HOST_SESSION_ID) unless a boss
 started it; --boss names one (a session name, or a desktop app session's local_… id). It outlives the coordinator's /clear and the boss session: a dev boss reopened under its name gets it back, and a desktop app
 session without a list takes over, on its first dev todo, add or done (not --json, set or clear, nor --boss) or
@@ -81,7 +81,10 @@ dev todo take-over takes over an earlier boss's list for this project, of any ki
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print a JSON object: items (id, text, on, session {id, name} when on is a worker, link, done, until, options ("<label> | <detail> (Recommended)" as given), choices (each option as {label, detail, recommended}), context (its lines) and answer for an ask, added, done_on, check {kind, pr, since} when it may be out of date, started {at, to} and start_late (10 minutes on) once dev todo start asked for it, status: decide, yours, starting, working, blocked, asks, waiting, idle, parked, gone, check or boss closed, none when ticked, or on someone when the workers can't be read, status_on: its worker or person, or the boss a start went to, quiet for a test item (--quiet), no_details for the user's own item marked --no-details, now: what its worker does now, when known (a desktop app worker's status text; dev serve's board also reads a tmux worker's tool call or wait), pr_state: its GitHub PR's open, merged or closed at the last lookup, column: todo, progress, waiting, review or done, assignee {kind: you, boss or worker, name, running}, waiting_for: the person it waits for, needs_you when it needs the user, parked for the boss's own that no one has taken up, doing {text, at}: who does it says what they do now, part_of: the id of its other half, for: an ask's item that waits on it (dev todo ask --for), waits_on {id, text, options, choices}: the open ask an item waits on, obvious: why its boss marked an open ask obvious, decided {by: manager or boss, pick, over, why, at}: an ask settled for the user with its recommended option, asking: the manager has its question up now (dev todo asking), finished items too), updated (unix seconds), stale; with --all an array of them, each with its boss, closed for a closed boss's, and error for a list it couldn't read (stale, no items)`)
 	cmd.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, the bosses with none left out: rows start with the boss")
 	cmd.PersistentFlags().StringVar(&boss, "boss", "", "the boss session whose list it is: a session name, or a desktop app session's local_… id; done and check take a closed boss too")
-	cmd.AddCommand(newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoAskingCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss), newTodoTallyCmd(&boss))
+	list := &cobra.Command{Use: "list", Short: "Print the list: the same as dev todo", Long: "Print the list, as dev todo does without a subcommand: see dev todo --help for --json's fields and --boss.", Args: cobra.NoArgs, RunE: cmd.RunE}
+	list.Flags().BoolVar(&asJSON, "json", false, "print the JSON dev todo --json describes")
+	list.Flags().BoolVar(&all, "all", false, "every dev boss's list on this tmux server, as dev todo --all")
+	cmd.AddCommand(list, newTodoSetCmd(&boss), newTodoAddCmd(&boss), newTodoAskCmd(&boss), newTodoAnswerCmd(&boss), newTodoStartCmd(&boss), newTodoDoingCmd(&boss), newTodoReopenCmd(&boss), newTodoOverruleCmd(&boss), newTodoAskingCmd(&boss), newTodoShowCmd(&boss), newTodoBoardCmd(&boss), newTodoDoneCmd(&boss), newTodoClearCmd(&boss), newTodoCheckCmd(&boss), newTodoNoteCmd(&boss), newTodoTakeOverCmd(&boss), newTodoTallyCmd(&boss))
 	return cmd
 }
 
@@ -925,6 +928,7 @@ func newTodoNoteAddCmd(boss *string, kind string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   kind + ` "<text>"`,
 		Short: "Add a " + kind + " note; prints its number",
+		Long:  fmt.Sprintf("Add a %s note; prints its number. The text and --why are at most %d characters each (counted before anything is written); a list keeps %d notes, see dev todo note.", kind, todo.MaxNote, todo.MaxNotes),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			n.Kind, n.Text, n.Why = kind, todo.Clean(args[0]), todo.Clean(n.Why)

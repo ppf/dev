@@ -29,8 +29,8 @@ const (
 	ThreadCap = 6
 	// hourCap is the most messages a boss sends in an hour.
 	hourCap = 20
-	// maxMessage is the longest message, in runes.
-	maxMessage = 1500
+	// MaxMessage is the longest message, in runes.
+	MaxMessage = 1500
 	// keepThreads is how long a thread stays after its last message.
 	keepThreads = 7 * 24 * time.Hour
 )
@@ -218,13 +218,13 @@ func (s Messages) Threads(viewer string, now time.Time) ([]Thread, error) {
 	return ts, nil
 }
 
-// checkText refuses an empty message and one over maxMessage runes.
-func checkText(text string) error {
+// CheckText refuses an empty message, one over MaxMessage runes and one with control characters.
+func CheckText(text string) error {
 	switch n := len([]rune(text)); {
 	case strings.TrimSpace(text) == "":
 		return errors.New("empty message")
-	case n > maxMessage:
-		return fmt.Errorf("message too long (%d characters, at most %d): write it to a file and send its path", n, maxMessage)
+	case n > MaxMessage:
+		return fmt.Errorf("message too long (%d characters, at most %d): write it to a file and send its path", n, MaxMessage)
 	case strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }):
 		// An escape would reach the previews pane and the recipient's input as keys
 		return errors.New("message has control characters: send plain text")
@@ -254,7 +254,7 @@ func (m *msgFile) add(msg Msg, now time.Time) (Msg, error) {
 
 // Post stores a message from boss from to boss to, starting a thread; fyi: it takes no reply.
 func (s Messages) Post(from, to, text string, fyi bool, now time.Time) (Msg, error) {
-	if err := checkText(text); err != nil {
+	if err := CheckText(text); err != nil {
 		return Msg{}, err
 	}
 	if from == to {
@@ -273,7 +273,7 @@ func (s Messages) Post(from, to, text string, fyi bool, now time.Time) (Msg, err
 // after its one message in a thread sent to it. reach (nil: none) checks the recipient before anything is stored, so a
 // reply it refuses neither counts against the caps nor ends the thread.
 func (s Messages) Reply(from, id, text string, done bool, now time.Time, reach func(to string) error) (Msg, error) {
-	if err := checkText(text); err != nil {
+	if err := CheckText(text); err != nil {
 		return Msg{}, err
 	}
 	var msg Msg
