@@ -820,8 +820,10 @@ func newAgentCloseCmd() *cobra.Command {
 	var boss string
 	cmd := &cobra.Command{
 		Use:   "close <target>",
-		Short: "Close a finished worker this session (or --boss's) started: kill its session, remove its worktree and branch",
-		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered.
+		Short: "Close a finished worker this session (or --boss's) started, or nobody did: kill its session, remove its worktree and branch",
+		Long: `Close a worker this session (or --boss's) started with dev agent start, once its work is delivered. A worker nobody
+started (from a plain terminal or the desktop app) is closed by any coordinator, or from a plain terminal; one another
+session started (or whose starter is gone) is refused. From a plain terminal, clients watching it are detached.
 Refused, naming the failed check, unless the worker is idle (or waiting only because it sat idle), its worktree has
 no changes to tracked files and its HEAD is in origin's default branch (fetched first; without an origin remote, the
 branch checked out in the main checkout), or is the head commit of a PR (gh) or MR (glab) found through origin's
@@ -840,12 +842,12 @@ unless it is idle, no session it started is left and its to do list has no open 
 			if err != nil {
 				return err
 			}
-			if pane == "" {
-				return errors.New("close only closes workers of the session it runs in: run it inside tmux, or pass --boss <session>")
-			}
 			a, err := resolveOther(c, args[0])
 			if err != nil {
 				return err
+			}
+			if pane == "" && (a.StartedBy != "" || a.Boss) {
+				return errors.New("close only closes workers of the session it runs in (or ones nobody started): run it inside tmux, or pass --boss <session>")
 			}
 			if a.Outside && !outsideBoss(boss) {
 				return fmt.Errorf("%s was started by a coordinator outside tmux (--boss): leave it to that coordinator", a.Session)

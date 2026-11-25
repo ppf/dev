@@ -118,13 +118,6 @@ func TestAgentArgs(t *testing.T) {
 	}
 }
 
-func TestAgentCloseOutsideTmux(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-	if _, _, err := execute(t, "", "agent", "close", "app"); err == nil || !strings.Contains(err.Error(), "run it inside tmux") {
-		t.Errorf("agent close outside tmux = %v, want an inside-tmux error", err)
-	}
-}
-
 func TestCheckStartAccepts(t *testing.T) {
 	for _, args := range [][]string{nil, {"--model", "claude-opus-5-5[1m]", "--effort", "max"}, {"--model", "arn:aws:bedrock:us-east-1:1:inference-profile/x"}, {"--effort", "low"}} {
 		var start agent.Start
