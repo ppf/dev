@@ -845,7 +845,7 @@ func TestPromptAskRules(t *testing.T) {
 			"one item per list, its text bumped per release", "a Codex review (unless the project's rules or the user's pick require it before any merge) that hits a usage limit doesn't wait (its brief says so): it merges with every other condition met and owes the review", `an item "Codex review owed: PR #<n>" on your list until it ran; a release and its ask name those still open`,
 			"optional Approaches section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk",
 			"its worker checks the premise against records or repo docs and cites the source line before drafting", "its writer subagent's prompt carries the project's writing rules word for word",
-			"after a pick, nobody sends or pastes it in that turn, nor is a worker told to (a relayed go too): run sleep 60 in the background and end the turn, then send it (or prompt its worker to) once the later notes and the user's later words hold nothing against it.",
+			"after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it.",
 			"Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source)", "done-when includes gh release view v<X>",
 			"Each brief carries the standing rules, items already on your list it touches, shared hot files, the build or test recipe and where results go (never a tracked file)"}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "to them yourself with AskUserQuestion", "Up to 4 asks per call, in order, one per question (2 while any boss works: relay notes first)",
@@ -965,16 +965,19 @@ func TestOpenExistingBossRefusesStart(t *testing.T) {
 	}
 }
 
-// tmux 3.8 refuses ~16360+ bytes of arguments ("command too long"); 100-byte paths leave the manager's new-session room.
+// tmux 3.8 refuses ~16360+ bytes of arguments ("command too long"); 100-byte paths leave the manager's and a boss's
+// new-session room.
 func TestManagerArgvFitsTmux(t *testing.T) {
 	path := "/" + strings.Repeat("p", 99)
-	argv := slices.Concat([]string{"new-session", "-d", "-x", "200", "-y", "50", "-s", Manager, "-c", path, "-n", "Boss", "-PF", "#{pane_id}"},
-		viaLoginShell(path+"/zsh", slices.Concat([]string{path, "pty-wrap", "--"}, coordinatorArgv(Manager, path, 300000))))
-	size := 0
-	for _, a := range argv {
-		size += len(a) + 1
-	}
-	if size > 16100 {
-		t.Errorf("❌ the manager's new-session is %d bytes, over 16100: shorten managerPrompt", size)
+	for _, session := range []string{Manager, SessionName(strings.Repeat("p", 30))} {
+		argv := slices.Concat([]string{"new-session", "-d", "-x", "200", "-y", "50", "-s", session, "-c", path, "-n", "Boss", "-PF", "#{pane_id}"},
+			viaLoginShell(path+"/zsh", slices.Concat([]string{path, "pty-wrap", "--"}, coordinatorArgv(session, path, 300000))))
+		size := 0
+		for _, a := range argv {
+			size += len(a) + 1
+		}
+		if size > 16100 {
+			t.Errorf("❌ %s's new-session is %d bytes, over 16100: shorten its prompt", session, size)
+		}
 	}
 }

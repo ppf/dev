@@ -150,8 +150,8 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`no pipe, chain or redirect. When dev writes must chain, use && (never ;) and read the item back before you announce it. ` +
 	`A saved draft is "requested", never "replaced" or "sent": re-read the thread in the same turn, save none while a pick on that item is open. ` +
 	`A text to a person: its worker checks the premise against records or repo docs and cites the source line before drafting, ` +
-	`and its writer subagent's prompt carries the project's writing rules word for word; after a pick, nobody sends or pastes it in that turn, nor is a worker told to (a relayed go too): ` +
-	`run sleep 60 in the background and end the turn, then send it (or prompt its worker to) once the later notes and the user's later words hold nothing against it. ` +
+	`and its writer subagent's prompt carries the project's writing rules word for word; after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: ` +
+	`run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it. ` +
 	`Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source); ` +
 	`a release brief's done-when includes gh release view v<X>. Each brief carries the standing rules, items already on your list it touches, shared hot files, ` +
 	`the build or test recipe and where results go (never a tracked file). ` +
