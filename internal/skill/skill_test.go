@@ -231,6 +231,9 @@ func TestAskRules(t *testing.T) {
 		"with `--agent grok` it always fails", "`--agent codex --model <slug> --effort <effort>`, the slug one `codex debug models` lists",
 		// An agy worker's decisions, relayed with the keys its lists take
 		"agy's lists take the option's digit alone", "`esc` cancels a permission prompt or skips a question",
+		// Short dialogs
+		"(else one per call). At most 2 while any boss works: a dialog holds every inbox note until it closes, so relay the notes you have first and keep it short.",
+		"(also for a time you stamp on the user's words, in a brief or a note)",
 	} {
 		if !strings.Contains(DevAgents, want) {
 			t.Errorf("dev-agents/SKILL.md: missing %q", want)
@@ -320,6 +323,11 @@ func TestAnalysisRules(t *testing.T) {
 			// P13: optional Approaches
 			"optional **Approaches** section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk, then the pick and what would move it to a bolder one",
 			"the user is asked about it only when the pick is costly",
+			// Texts to people, times and release pages, brief checklist
+			"check its premise (what happened, what was agreed, who owes what) against the records or the repo's docs", "cite the source line in your note", "A writer subagent's prompt carries the project's writing rules word for word",
+			"neither you nor a worker sends or pastes it in that turn, and you brief or prompt no worker to (relaying the user's go to a worker that asked counts): run `sleep 60` with `run_in_background` and end the turn, so queued inbox notes and the user's later words reach you; when it ends, send it (or prompt its worker to) once they hold nothing against it.",
+			"Every clock time (HH:MM) you write in a brief, note, ask or record comes from `date` run in that turn, never estimated (a past event keeps the time its source shows); a brief tells the worker the same.", "A release brief's done-when includes `gh release view v<X>`",
+			"the user's standing rules for this work, the items already on your list it touches", "shared hot files other workers edit too", "the build or test recipe", "never a tracked file such as `RESULT.md` at the repo root",
 		} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s/SKILL.md: missing %q", name, want)
