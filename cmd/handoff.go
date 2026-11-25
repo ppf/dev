@@ -17,9 +17,11 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-const kindHelp = "the manager's label of what it sends, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question whose first line starts \"Hand on to <target>\" and that holds the brief's first line as a line of its own, or with --go), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
+const kindHelp = "the manager's label of what it sends, needed in its pane: work (new work, only on the user's \"Hand it on\" pick of a question whose first line starts \"Hand on to <target>\" and that holds the brief's first line as a line of its own, or with --go or --command), question (state or a fact), pick (a follow-up to a relayed pick) or own (its easy decision)"
 
 const goHelp = "with --kind work: the user's words, quoted, from their latest message here, typed by them (not an inbox batch, another session's or a plugin's prompt, pasted text or a pick) and not used for a send before; recorded as a typed go"
+
+const commandHelp = "with --kind work: the user's plain command, quoted, from their latest message here, as --go checks it and holding no \"?\" outside a URL; recorded as a command"
 
 // handOn is a send from the manager's pane to a boss, let through by gateHandOn; nil for any other pane.
 type handOn struct {
@@ -27,14 +29,22 @@ type handOn struct {
 	h     inbox.Handoff
 	box   inbox.Box
 	pick  *inbox.Prompt // the user's "Hand it on" pick claimed for a KindWork send
-	typed *inbox.Go     // or the user's typed go claimed for it
+	typed *inbox.Go     // or the user's typed go or command claimed for it
 }
 
 // gateHandOn needs kind only in the manager's pane (nil handOn elsewhere); KindWork passes only on a matching HandItOn
-// pick, or with words (--go) on the user's latest message typed by them holding words, which it claims.
-func gateHandOn(c *tmux.Client, kind, words, boss, text string) (*handOn, error) {
-	if words != "" && kind != inbox.KindWork {
+// pick, or with words (--go) or command (--command) on the user's latest message typed by them holding them, which it
+// claims.
+func gateHandOn(c *tmux.Client, kind, words, command, boss, text string) (*handOn, error) {
+	switch {
+	case words != "" && command != "":
+		return nil, errors.New("--go or --command, not both")
+	case words != "" && kind != inbox.KindWork:
 		return nil, errors.New("--go goes with --kind work")
+	case command != "" && kind != inbox.KindWork:
+		return nil, errors.New("--command goes with --kind work")
+	case command != "" && !inbox.Quotes(text, command):
+		return nil, errors.New("--command: the brief doesn't carry the user's words word for word" + `: ask with the hand-on question ("Hand it on" / "Drop it")`)
 	}
 	var self inbox.Boss
 	manager := false
@@ -57,7 +67,7 @@ func gateHandOn(c *tmux.Client, kind, words, boss, text string) (*handOn, error)
 	case !manager:
 		return nil, errors.New("--kind is the manager's: only in its coordinator pane")
 	case kind == "":
-		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick or their typed go (--go)", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
+		return nil, fmt.Errorf("the manager's sends to a boss need --kind %s: work only on the user's %q pick, their typed go (--go) or their plain command (--command)", strings.Join(inbox.Kinds, "|"), inbox.HandItOn)
 	case !slices.Contains(inbox.Kinds, kind):
 		return nil, fmt.Errorf("--kind %s: one of %s", kind, strings.Join(inbox.Kinds, ", "))
 	}
@@ -73,19 +83,23 @@ func gateHandOn(c *tmux.Client, kind, words, boss, text string) (*handOn, error)
 	if kind != inbox.KindWork {
 		return g, nil
 	}
-	if words != "" {
+	if words != "" || command != "" {
 		transcript, err := c.Run("display-message", "-p", "-t", pane, "#{@agent_transcript}")
 		if err != nil {
 			return nil, err
 		}
-		typed, err := inbox.LatestGo(strings.TrimSpace(transcript), words)
+		latest, recorded, flag := inbox.LatestGo, inbox.TypedGo, "--go"
+		if command != "" {
+			latest, recorded, flag, words = inbox.LatestCommand, inbox.Command, "--command", command
+		}
+		typed, err := latest(strings.TrimSpace(transcript), words)
 		if err != nil {
 			return nil, err
 		}
 		if err := self.Box.ClaimGo(typed); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", flag, err)
 		}
-		g.typed, g.h.Kind, g.h.Go = &typed, inbox.TypedGo, words
+		g.typed, g.h.Kind, g.h.Go = &typed, recorded, words
 		return g, nil
 	}
 	// The latest pick, typed messages since or not; no pick yet: the latest typed message, which handOnPick refuses
@@ -138,7 +152,7 @@ func handOnPick(p *inbox.Prompt, boss, text string) error {
 	line := strings.ToLower(inbox.FirstLine(text))
 	switch {
 	case !p.Pick:
-		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q), or, on their typed go, add --go '<their words>'", inbox.HandItOn, inbox.DropIt)
+		return fmt.Errorf("--kind work: the user's latest words here are a typed message, not a pick: ask with AskUserQuestion (%q / %q), or, on their typed go, add --go '<their words>', on their plain command, --command '<their words>'", inbox.HandItOn, inbox.DropIt)
 	case p.HandOnMixed:
 		return errors.New("--kind work: the user's dialog held the hand-on question beside others: a hand-on question stays alone in its dialog: ask it again on its own")
 	case p.Question == "":
@@ -178,18 +192,18 @@ func (g *handOn) done(sent bool, now time.Time) error {
 		}
 	case g.typed != nil:
 		if err := g.box.UnclaimGo(*g.typed); err != nil {
-			return fmt.Errorf("not sent, and the user's go couldn't be given back: ask them again: %w", err)
+			return fmt.Errorf("not sent, and the user's go or command couldn't be given back: ask them again: %w", err)
 		}
 	}
 	return nil
 }
 
-// reached is err from a send whose text reached the pane anyway, saying so for a gated one: its pick or go is used.
+// reached is err from a send whose text reached the pane anyway, saying so for a gated one: its pick, go or command is used.
 func (g *handOn) reached(err error) error {
 	if err == nil || g == nil || (g.pick == nil && g.typed == nil) || control.NotSent(err) {
 		return err
 	}
-	return fmt.Errorf("%w (the brief reached %s's pane: recorded in dev agent handoffs, the user's pick or go is used; read the pane)", err, g.h.Boss)
+	return fmt.Errorf("%w (the brief reached %s's pane: recorded in dev agent handoffs, the user's pick, go or command is used; read the pane)", err, g.h.Boss)
 }
 
 func newAgentHandoffsCmd() *cobra.Command {
@@ -199,7 +213,7 @@ func newAgentHandoffsCmd() *cobra.Command {
 		Short: "List what the manager sent its bosses by --kind, ungated ones first, with the trial's counts",
 		Long: `List what the manager sent its bosses with dev agent prompt/message/reply --kind, ungated kinds (question, pick, own)
 first so a mislabel shows, then work (each on the user's "Hand it on" pick) and typed go (work on the user's typed words,
---go, shown after the brief), then hand-on questions that sent nothing
+--go, shown after the brief) and command (work on the user's plain command, --command, its words shown the same way), then hand-on questions that sent nothing
 (dropped: "Drop it" picked; corrected: typed under Other or another option picked), then the user's "Hand it on" clicks the gate
 refused (refused); newest first in each. The first line counts them. A
 dismissed question is not seen. --json prints [{kind, at, boss?, line, go?}], at in unix seconds.`,
@@ -228,8 +242,7 @@ dismissed question is not seen. --json prints [{kind, at, boss?, line, go?}], at
 	return cmd
 }
 
-// printHandoffs prints the counts, then a line per hand-on: "11-24 15:04 question boss-dev: <first line>", a typed
-// go's words after it: ` (go: "Tak ruszaj")`.
+// printHandoffs prints the counts, then a line per hand-on: "11-24 15:04 question boss-dev: <first line> (go: "Tak")".
 func printHandoffs(out io.Writer, hs []inbox.Handoff) {
 	fmt.Fprintln(out, inbox.Tally(hs))
 	for _, h := range hs {
@@ -237,7 +250,10 @@ func printHandoffs(out io.Writer, hs []inbox.Handoff) {
 		if h.Boss != "" {
 			to = " " + h.Boss
 		}
-		if h.Go != "" {
+		switch {
+		case h.Kind == inbox.Command:
+			words = fmt.Sprintf(" (command: %q)", h.Go)
+		case h.Go != "":
 			words = fmt.Sprintf(" (go: %q)", h.Go)
 		}
 		fmt.Fprintf(out, "%s %s%s: %s%s\n", time.Unix(h.At, 0).Format("01-02 15:04"), h.Kind, to, h.Line, words)

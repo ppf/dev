@@ -44,3 +44,18 @@ func TestHandOnPick(t *testing.T) {
 		t.Errorf("empty brief: %v", err)
 	}
 }
+
+// --go and --command: only with --kind work, never both, a command only in a brief carrying its words; refused before tmux.
+func TestGateHandOnFlags(t *testing.T) {
+	for _, tt := range []struct{ kind, words, command, want string }{
+		{"question", "", "zrób PR", "--command goes with --kind work"},
+		{"", "", "zrób PR", "--command goes with --kind work"},
+		{"question", "Tak", "", "--go goes with --kind work"},
+		{"work", "Tak", "zrób PR", "--go or --command, not both"},
+		{"work", "", "zrób PR z cache", `--command: the brief doesn't carry the user's words word for word: ask with the hand-on question ("Hand it on" / "Drop it")`},
+	} {
+		if _, err := gateHandOn(nil, tt.kind, tt.words, tt.command, "boss-dev", "Zrób PR"); err == nil || err.Error() != tt.want {
+			t.Errorf("%+v: %v, want %q", tt, err, tt.want)
+		}
+	}
+}

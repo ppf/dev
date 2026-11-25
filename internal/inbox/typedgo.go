@@ -13,7 +13,8 @@ import (
 	"strings"
 )
 
-// Go is the user's latest message in the manager's transcript, typed by them, which a --kind work send quotes.
+// Go is the user's latest message in the manager's transcript, typed by them, which a --kind work send quotes (--go or
+// --command).
 type Go struct {
 	UUID string
 	Text string // its typed words, pasted blocks left out
@@ -80,6 +81,8 @@ func (e entry) text() string {
 var (
 	pasted      = regexp.MustCompile(`(?s)<pasted_content[ >].*?</pasted_content[^>]*>`)
 	imageMarker = regexp.MustCompile(`\[Image #\d+\]`)
+	// A URL, whose query's "?" is no question
+	url = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 )
 
 // asks reports line a main-session assistant message calling AskUserQuestion.
@@ -115,15 +118,28 @@ const askAgain = `: ask with the hand-on question ("Hand it on" / "Drop it")`
 // hook's text, one dev typed, one dev can't read or doesn't know), a pick, an accepted suggestion, only pasted text,
 // doesn't hold words, or an AskUserQuestion was asked after it (even dismissed, it asked instead).
 func LatestGo(path, words string) (Go, error) {
+	return latestTyped(path, words, false)
+}
+
+// LatestCommand is LatestGo for a plain command (--command), refused also on a "?" outside a URL.
+func LatestCommand(path, words string) (Go, error) {
+	return latestTyped(path, words, true)
+}
+
+func latestTyped(path, words string, command bool) (Go, error) {
+	flag := "--go"
+	if command {
+		flag = "--command"
+	}
 	if fold(words) == "" {
-		return Go{}, errors.New("--go: no words quoted" + askAgain)
+		return Go{}, errors.New(flag + ": no words quoted" + askAgain)
 	}
 	if path == "" {
-		return Go{}, errors.New("--go: the manager's transcript is unknown" + askAgain)
+		return Go{}, errors.New(flag + ": the manager's transcript is unknown" + askAgain)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Go{}, fmt.Errorf("--go: reading the manager's transcript: %w%s", err, askAgain)
+		return Go{}, fmt.Errorf("%s: reading the manager's transcript: %w%s", flag, err, askAgain)
 	}
 	defer func() { _ = f.Close() }()
 	var last entry
@@ -137,7 +153,7 @@ func LatestGo(path, words string) (Go, error) {
 			break
 		}
 		if err != nil {
-			return Go{}, fmt.Errorf("--go: reading the manager's transcript: %w%s", err, askAgain)
+			return Go{}, fmt.Errorf("%s: reading the manager's transcript: %w%s", flag, err, askAgain)
 		}
 		if bytes.Contains(line, []byte(`"type":"user"`)) {
 			var e entry
@@ -152,7 +168,7 @@ func LatestGo(path, words string) (Go, error) {
 		}
 	}
 	if broken != nil {
-		return Go{}, fmt.Errorf("--go: a message in the manager's transcript can't be read: %w%s", broken, askAgain)
+		return Go{}, fmt.Errorf("%s: a message in the manager's transcript can't be read: %w%s", flag, broken, askAgain)
 	}
 	text := last.text()
 	// A pasted block or image splits the typed words: no phrase across one
@@ -181,6 +197,8 @@ func LatestGo(path, words string) (Go, error) {
 		why = "the latest message here is one dev typed, not the user's"
 	case strings.Trim(typed, "\x00 \t\n") == "":
 		why = "the user's latest message is pasted text, not typed"
+	case command && strings.ContainsAny(url.ReplaceAllString(typed, ""), "?？"):
+		why = "the user's latest message holds a question, not a plain command"
 	case strings.HasSuffix(strings.TrimRight(typed, "\x00 \t\n"), "?"):
 		why = "the user's latest message is a question, not a go"
 	case !holds(fold(typed), fold(words)):
@@ -188,7 +206,12 @@ func LatestGo(path, words string) (Go, error) {
 	default:
 		return Go{UUID: last.UUID, Text: strings.ReplaceAll(typed, "\x00", " ")}, nil
 	}
-	return Go{}, errors.New("--go: " + why + askAgain)
+	return Go{}, errors.New(flag + ": " + why + askAgain)
+}
+
+// Quotes reports whether text holds words as whole words, case, whitespace and quotes aside, as a go's match does.
+func Quotes(text, words string) bool {
+	return holds(fold(text), fold(words))
 }
 
 // holds reports words in text as whole words: "tak" is not in "takeover".
