@@ -67,9 +67,10 @@ func (s Store) AddNote(n Note, now time.Time) (id int, err error) {
 }
 
 // AddNoteDropping stores n and returns its id (1, 2…, shown as n1), never one used before; a state note replaces the
-// list's earlier one. At MaxNotes the oldest note whose item is done goes, else the oldest not a state note: returned
-// as dropped, nil for none. An over-long text or why, a said note without Until or Item, or an Item that isn't an
-// open item is an error. The list's Updated stays.
+// list's earlier one. At MaxNotes the oldest decided or risk note whose item is done goes, else the oldest decided or
+// risk note: returned as dropped. said and state notes never go: with only those left it is an error naming the count.
+// An over-long text or why, a said note without Until or Item, or an Item that isn't an open item is an error. The
+// list's Updated stays.
 func (s Store) AddNoteDropping(n Note, now time.Time) (id int, dropped *Note, err error) {
 	if err := n.Check(); err != nil {
 		return 0, nil, err
@@ -96,9 +97,13 @@ func (s Store) AddNoteDropping(n Note, now time.Time) (id int, dropped *Note, er
 			return fmt.Errorf("no open item %d", n.Item)
 		}
 		if len(notes) >= MaxNotes {
-			i := oldest(notes, func(o Note) bool { return o.ItemDone && o.Kind != NoteState })
+			droppable := func(o Note) bool { return o.Kind == NoteDecided || o.Kind == NoteRisk }
+			i := oldest(notes, func(o Note) bool { return o.ItemDone && droppable(o) })
 			if i < 0 {
-				i = oldest(notes, func(o Note) bool { return o.Kind != NoteState })
+				i = oldest(notes, droppable)
+			}
+			if i < 0 {
+				return fmt.Errorf("%d notes, all %s or %s ones, which are never dropped: dev todo note drop <n> frees one (start with those marked item done)", len(notes), NoteSaid, NoteState)
 			}
 			d := notes[i]
 			dropped, notes = &d, slices.Delete(slices.Clone(notes), i, i+1)

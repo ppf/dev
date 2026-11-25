@@ -887,9 +887,10 @@ func newTodoNoteCmd(boss *string) *cobra.Command {
 		Short: "Print the boss's notes: decisions with their why, what the user said, open risks",
 		Long: fmt.Sprintf(`Notes are short dated lines a boss keeps with its list, outliving its /clear and its session: dev todo note
 decided|said|risk|state "<text>" adds one, dev todo note drop <n> removes one, without a subcommand they are printed.
-At most %d notes of at most %d characters each; a new one at the cap drops the oldest whose item is done, else the
-oldest not a state note, and prints which. decided: a choice, --why says why; said: what the user told the boss
-that changes the work, it needs an end (--until or --item); risk: an open risk to watch; state: the boss's standing
+At most %d notes of at most %d characters each; a new one at the cap drops the oldest decided or risk note whose item is
+done, else the oldest decided or risk note, and prints which. said and state notes are never dropped: with only those left
+it is refused with the count.
+decided: a choice, --why says why; said: what the user told the boss that changes the work, it needs an end (--until or --item); risk: an open risk to watch; state: the boss's standing
 state, kept off the board ("6 fixes parked for after your testing"), one per list: a new one replaces it. Not actions (dev todo add), not
 standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
 		Args: cobra.NoArgs,
