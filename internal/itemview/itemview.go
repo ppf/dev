@@ -540,6 +540,8 @@ func (m Model) block(in int, now time.Time) []string {
 			out = append(out, row("over", strings.Join(d.OverLabels(), " · "))...)
 		}
 		return append(append(out, row("why", d.Why)...), end)
+	case it.Done && it.DoneBy == todo.DoneByDev:
+		return []string{rule(it.Result, sidebar.Green+ticked(it, now)+reset), end}
 	case it.Done && it.Result != "":
 		out := []string{rule("what was done", sidebar.Green+ticked(it, now)+reset)}
 		out = append(out, strings.Split(ansi.Wrap(it.Result, in, ""), "\n")...)
@@ -598,6 +600,8 @@ func ticked(it Item, now time.Time) string {
 		parts = append(parts, "by itself, at its time")
 	case todo.DoneByPR:
 		parts = append(parts, "by itself, at its PR's move")
+	case todo.DoneByDev:
+		parts = append(parts, "by dev")
 	default:
 		parts = append(parts, "by "+it.DoneBy)
 	}

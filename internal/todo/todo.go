@@ -82,7 +82,7 @@ type Item struct {
 	Context   []string `json:"context,omitempty"` // an ask's lines under its question
 	Details   string   `json:"details,omitempty"` // its longer text (--details): paragraphs, "- " lines
 	Result    string   `json:"result,omitempty"`  // what was done, said as it was ticked (dev todo done --result)
-	DoneBy    string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name or Boss, DoneByUntil or DoneByPR
+	DoneBy    string   `json:"done_by,omitempty"` // who ticked it: DoneByYou, its boss's name or Boss, DoneByUntil, DoneByPR or DoneByDev
 	Answer    string   `json:"answer,omitempty"`
 	Via       string   `json:"via,omitempty"`        // where the user answered it: ViaPage, ViaManager, "" for a shell, sidebar or board
 	Added     int64    `json:"added,omitempty"`      // when it was added or last replaced, unix seconds
@@ -97,6 +97,9 @@ type Item struct {
 	Dropped   []string `json:"dropped,omitempty"`    // options its replaces removed or changed: a pick of one is refused (droppedPick)
 	Obvious   string   `json:"obvious,omitempty"`    // an ask's: why its boss marked it obvious (dev todo ask --obvious), for the manager to settle
 	Decided   *Decided `json:"decided,omitempty"`    // an ask settled for the user with its recommended option (Settle, Decide)
+	Ends      string   `json:"ends,omitempty"`       // what dev's own state ticks it on: restart:<version> or test:<version> (Expire)
+	Waived    int64    `json:"waived,omitempty"`     // reopened after dev ticked it: the restarts until then don't tick it again
+	WaivedTo  string   `json:"waived_to,omitempty"`  // the newer test version dev last ticked it for: reopened, only a test newer still ticks it
 }
 
 // Doing is what an item's doer said it does now, and since when, unix seconds.
@@ -167,6 +170,7 @@ type Shown struct {
 	Answer  string         `json:"answer,omitempty"`
 	Added   int64          `json:"added,omitempty"`
 	DoneOn  string         `json:"done_on,omitempty"`
+	Ends    string         `json:"ends,omitempty"`
 	Check   *sidebar.Check `json:"check,omitempty"`
 	Started *Started       `json:"started,omitempty"`
 	// StartLate is a start 10 minutes old (the StartLate duration) that no --replaces took up
@@ -660,7 +664,7 @@ func (s Store) Read(now time.Time) (List, error) {
 		if it.PartOf == 0 {
 			it.PartOf = partner(f.Items, it.ID)
 		}
-		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Started: it.Started, Quiet: it.Quiet, NoDetails: it.NoDetails, Doing: it.Doing, PartOf: it.PartOf, For: it.For, Obvious: it.Obvious, Decided: it.Decided}
+		sh := Shown{ID: it.ID, Text: it.Text, On: it.On, Session: it.Session, Link: it.Link, Done: it.Done != 0, Until: it.Until, Options: it.Options, Context: it.Context, Details: it.Details, Result: it.Result, DoneBy: it.DoneBy, Answer: it.Answer, Added: it.Added, DoneOn: it.DoneOn, Ends: it.Ends, Started: it.Started, Quiet: it.Quiet, NoDetails: it.NoDetails, Doing: it.Doing, PartOf: it.PartOf, For: it.For, Obvious: it.Obvious, Decided: it.Decided}
 		for _, o := range it.Options {
 			sh.Choices = append(sh.Choices, Split(o))
 		}
@@ -701,6 +705,9 @@ func (s Store) Set(texts []string, now time.Time) error {
 // Add appends it and returns its id; ids restart at 1 once the list is empty, ticked items shown included.
 func (s Store) Add(it Item, now time.Time) (id int, err error) {
 	if err := it.checkDoneOn(); err != nil {
+		return 0, err
+	}
+	if err := it.checkEnds(); err != nil {
 		return 0, err
 	}
 	if err := checkAsk(it); err != nil {
@@ -756,7 +763,7 @@ func sameSession(a, b *Session) bool {
 }
 
 // Replace puts it in the place of open item id, keeping its number and the Text, On (with its Session), Link, Until,
-// DoneOn, Context, Details and PartOf it doesn't set, Quiet once set, NoDetails while ownBare holds, and Doing while On stays; On Me gives it back to the user, On Boss
+// DoneOn, Ends, Context, Details and PartOf it doesn't set, Waived, Quiet once set, NoDetails while ownBare holds, and Doing while On stays; On Me gives it back to the user, On Boss
 // without a Session to its boss. An id that isn't one is an error, as are an ask's new text over MaxQuestion and a new PartOf
 // checkPartOf refuses (one restated is kept as it is).
 func (s Store) Replace(id int, it Item, now time.Time) error {
@@ -801,6 +808,14 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 		}
 		it.Text, it.Link, it.Until = cmp.Or(it.Text, old.Text), cmp.Or(it.Link, old.Link), cmp.Or(it.Until, old.Until)
 		it.DoneOn, it.Quiet = cmp.Or(it.DoneOn, old.DoneOn), it.Quiet || old.Quiet
+		// An ask waits on the user, not on dev: it takes no --ends over
+		if len(it.Options) == 0 {
+			it.Ends = cmp.Or(it.Ends, old.Ends)
+		}
+		// Waived for its --ends: a new one starts afresh
+		if it.Ends == old.Ends {
+			it.Waived, it.WaivedTo = old.Waived, old.WaivedTo
+		}
 		if it.Options == nil {
 			it.Options = old.Options
 		}
@@ -849,6 +864,9 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 			}
 		}
 		if err := it.checkDoneOn(); err != nil {
+			return err
+		}
+		if err := it.checkEnds(); err != nil {
 			return err
 		}
 		it.Asked, it.Dropped = 0, nil
@@ -1484,6 +1502,9 @@ func (it Shown) line(now time.Time) string {
 	}
 	if it.DoneOn != "" {
 		b.WriteString(" (done on " + it.DoneOn + ")")
+	}
+	if it.Ends != "" {
+		b.WriteString(" (ends " + it.Ends + ")")
 	}
 	if on := it.OnIt("you are on it"); on != "" {
 		b.WriteString(" (" + on + ")")

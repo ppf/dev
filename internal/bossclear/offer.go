@@ -51,6 +51,7 @@ type offerRow struct {
 	Offered    string `tmux:"@dev_clear_offered"`    // OptOffered
 	OfferedAt  string `tmux:"@dev_clear_offered_at"` // OptOfferedAt
 	Checked    string `tmux:"@dev_clear_checked"`    // OptChecked
+	Created    string `tmux:"session_created"`
 }
 
 // Offer, run by the watch loop of the boss session pane is in, offers once per idle stretch to clear its boss once it
@@ -76,6 +77,13 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 		return nil
 	}
 	r, now := rows[i], clk.Now()
+	manager := r.Session == sidebar.Manager
+	if manager {
+		// Before any other check: an offer whose stretch ended goes whatever the manager does now
+		if err := withdrawOffer(c, r, now); err != nil {
+			return err
+		}
+	}
 	// Cheap checks first: this runs every watch round. Unset: no hook yet, or no dev statusline
 	if r.Since == "" || r.Context == "" || r.Transcript == "" || r.Offered == r.Since {
 		return nil
@@ -90,7 +98,6 @@ func offer(c *tmux.Client, clk control.Clock, pane string) error {
 	}
 	idle := now.Sub(time.Unix(since, 0))
 	st := agent.Trusted(r.State, r.StateCmd, r.Command)
-	manager := r.Session == sidebar.Manager
 	limit, early := IdleLimit, false
 	if at, err := strconv.ParseInt(r.OfferedAt, 10, 64); used >= BigContext && (err != nil || now.Sub(time.Unix(at, 0)) >= IdleLimit) {
 		limit, early = QuietFor, true
@@ -159,6 +166,83 @@ var offerOptions = []string{"Clear it | you run dev agent clear manager in a pla
 // isOffer reports it is dev's open offer on the manager's list.
 func isOffer(it todo.Shown) bool {
 	return !it.Done && it.Text == OfferQuestion && slices.Equal(it.Options, offerOptions)
+}
+
+// Withdrawn is the Result of an offer dev withdrew: its stretch ended, so its numbers no longer hold.
+const Withdrawn = "withdrawn by dev: the manager worked on"
+
+// withdrawOffer withdraws dev's open offer on the manager's list (r its coordinator) once the idle stretch it was put
+// in ended: the manager's state changed since (@agent_since), or its session is newer than the offer; not while the
+// manager has it up in its dialog or the user's pick on it waits to be relayed, nor while a clear runs (its end answers
+// it: answerOffer). The next stretch may offer
+// anew, with its own numbers.
+func withdrawOffer(c *tmux.Client, r offerRow, now time.Time) error {
+	if held, err := inbox.ClearHeld(c, r.Pane); held || err != nil {
+		return err
+	}
+	since, err := unixOr0(r.Since)
+	if err != nil {
+		return fmt.Errorf("%s @agent_since: %w", r.Session, err)
+	}
+	created, err := unixOr0(r.Created)
+	if err != nil {
+		return fmt.Errorf("%s session_created: %w", r.Session, err)
+	}
+	s, err := todo.ForPane(c, r.Pane)
+	if err != nil {
+		return err
+	}
+	l, err := s.Read(now)
+	if err != nil {
+		return err
+	}
+	var asking []inbox.Asking
+	var picked bool
+	read := false
+	for _, it := range l.Items {
+		if !isOffer(it) || since < it.Added && created <= it.Added {
+			continue
+		}
+		if !read {
+			if asking, err = inbox.ManagerAsking(c, now); err != nil {
+				return err
+			}
+			if picked, err = pickOwed(c, r.Pane); err != nil {
+				return err
+			}
+			read = true
+		}
+		if picked || slices.ContainsFunc(asking, func(a inbox.Asking) bool { return a.Boss == sidebar.Manager && a.ID == it.ID }) {
+			continue
+		}
+		if err := s.Withdraw(it.ID, it.Text, Withdrawn, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pickOwed reports the user's latest pick in the manager (pane) unrelayed and answering OfferQuestion: its relay
+// (dev todo answer --via manager) is on its way.
+func pickOwed(c *tmux.Client, pane string) (bool, error) {
+	b, ok, err := inbox.Here(c, pane)
+	if !ok || err != nil {
+		return false, err
+	}
+	p, err := b.Box.LatestPick()
+	if err != nil || p == nil || !p.Pick {
+		return false, err
+	}
+	offer := func(question string, spent bool) bool { return !spent && strings.Contains(question, OfferQuestion) }
+	return offer(p.Question, p.Spent) || slices.ContainsFunc(p.Asks, func(a inbox.Asked) bool { return offer(a.Question, a.Spent) }), nil
+}
+
+// unixOr0 is unix seconds v, 0 for unset.
+func unixOr0(v string) (int64, error) {
+	if v == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(v, 10, 64)
 }
 
 // offerUser puts OfferQuestion on the list of the manager's pane for the user, with why (text), unless it is open still.

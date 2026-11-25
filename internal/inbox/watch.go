@@ -301,6 +301,7 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	case !ok:
 		// Its inbox off: its board still shows its list
 		manager, err := lookupList(c, pane, clk.Now())
+		err = errors.Join(err, expirePane(c, pane, clk.Now()))
 		if manager {
 			err = errors.Join(err, lookupClosed(c, clk.Now()))
 		}
@@ -481,6 +482,8 @@ func Watch(c *tmux.Client, clk control.Clock, pane string) error {
 	if len(due) > 0 {
 		errs = append(errs, checkPRs(c, clk, b, due))
 	}
+	// Its rules' ticks first, told below; a failure doesn't hold up the lookups or notes
+	errs = append(errs, expirePane(c, pane, now))
 	manager, err := lookupList(c, pane, now)
 	if manager {
 		// Its own list failing doesn't hold them up
@@ -516,8 +519,15 @@ func lookupList(c *tmux.Client, pane string, now time.Time) (manager bool, err e
 	return s.Boss() == sidebar.Manager, s.Lookup(now, todo.LookupTTL, listLookups, viewPR)
 }
 
-// lookupClosed looks up the PRs of the closed bosses' lists as lookupList does, at most listLookups across them, so
-// a merged PR shows on its item rather than only boss closed, and a --done-on item ticks. A list not read is skipped: the board shows why.
+// expire ticks the items of list s whose --ends dev's state shows over (todo.Store.Expire).
+func expire(c *tmux.Client, s todo.Store, now time.Time) error {
+	_, err := s.Expire(now, func() ([]todo.Start, error) { return todo.Starts(c) })
+	return err
+}
+
+// lookupClosed ticks the closed bosses' lists' --ends items dev's state shows over, and looks up their PRs as lookupList
+// does, at most listLookups across them, so a merged PR shows on its item rather than only boss closed, and a --done-on
+// item ticks. A list not read is skipped: the board shows why.
 func lookupClosed(c *tmux.Client, now time.Time) error {
 	lists, err := todo.Closed(c, now)
 	if err != nil {
@@ -530,6 +540,11 @@ func lookupClosed(c *tmux.Client, now time.Time) error {
 	}
 	var errs []error
 	for _, l := range lists {
+		if l.Err == nil {
+			errs = append(errs, expire(c, l.Store, now))
+		}
+	}
+	for _, l := range lists {
 		// Lookup's limit 0 is no limit
 		if left <= 0 {
 			break
@@ -541,9 +556,9 @@ func lookupClosed(c *tmux.Client, now time.Time) error {
 	return errors.Join(errs...)
 }
 
-// nudgeList queues a note for each item on the boss's list that ticked by itself on its PR's move, and each it should
-// re-check (todo.Store.Nudges; live is its workers' sessions); queued reports any. An --until tick waits for the boss's
-// next reminder. None for a pane not in a boss session. Run only with its inbox on: with it off, a tick waits for the
+// nudgeList queues a note for each item on the boss's list that ticked by itself on its PR's move or by its --ends,
+// and each it should re-check (todo.Store.Nudges; live is its workers' sessions); queued reports any. An --until tick
+// and a withdrawn clear offer wait for the boss's next reminder. None for a pane not in a boss session. Run only with its inbox on: with it off, a tick waits for the
 // boss's next start or /clear, and no re-check note goes out.
 func nudgeList(c *tmux.Client, b Boss, pane string, live map[string]bool, now time.Time) (queued bool, err error) {
 	s, err := todo.ForPane(c, pane)
@@ -558,7 +573,8 @@ func nudgeList(c *tmux.Client, b Boss, pane string, live map[string]bool, now ti
 		_, err := b.Box.Add(n, now)
 		return err
 	}
-	ticked, err := s.TakeTicked(now, func(t todo.Ticked) bool { return t.PR != 0 }, func(ts []todo.Ticked) error {
+	// A withdrawn clear offer (Rule, no Ends) waits for the reminder: a note would start the manager's turn for nothing
+	ticked, err := s.TakeTicked(now, func(t todo.Ticked) bool { return t.PR != 0 || t.Ends != "" }, func(ts []todo.Ticked) error {
 		for _, t := range ts {
 			if err := add(Note{Kind: ToDo, Text: t.String(), Key: tickKey}); err != nil {
 				return err

@@ -238,6 +238,10 @@ func (s Store) reopen(id int, text string, then func(p *Item, orig Item) (overru
 		// A new Added, as a --replaces gives: its checks and age start afresh
 		it.Done, it.DoneOn, it.Answer, it.Via, it.Doing, it.Started, it.PartOf, it.Added = 0, "", "", "", nil, nil, 0, max(now.Unix(), it.Added+1)
 		it.Asked, it.Dropped, it.For = 0, nil, 0
+		// Ticked by dev, the events it ticked on don't tick it again
+		if orig.DoneBy == DoneByDev {
+			it.Waived = now.Unix()
+		}
 		// Reopened, the user answers it: no one settles it again
 		it.Result, it.DoneBy, it.Obvious, it.Decided = "", "", "", nil
 		if it.Until != 0 && now.Unix() >= it.Until {

@@ -12,6 +12,7 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/screen"
+	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 	"github.com/ppf/dev/internal/wait"
@@ -161,7 +162,7 @@ func openList(c *tmux.Client, pane, conversation string) (string, error) {
 // startList is the SessionStart hook output giving a dev boss coordinator pane its open to do list and notes, after
 // a dev agent clear's /clear (or a compaction while one runs) its handoff's line (handoffLine), and after a compaction
 // first what it still owes (owedLines), also without a list; an error reading one still gives the others, with why; ""
-// otherwise.
+// otherwise. A fresh start (startup) first records the dev version it started on (todo.OptVersion).
 // Matched by pane role: its first SessionStart comes before dev registers it as an agent.
 func startList(c *tmux.Client, pane, source, session string, hint Hint) (string, error) {
 	// herd.OptPane and herd.RoleCoordinator: herd imports this package
@@ -169,6 +170,13 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 	if err != nil || strings.TrimSpace(role) != "coordinator" {
 		return "", err
 	}
+	var verr error
+	if source == "startup" {
+		// A fresh start only: a /clear or resume keeps the prompt and settings it started with; a failure still gives the list
+		_, verr = c.Run("set-option", "-p", "-t", pane, todo.OptVersion, strconv.FormatInt(time.Now().Unix(), 10)+" "+devVersion())
+	}
+	// Its list as dev's rules leave it; a failure still gives the list
+	eerr := expirePane(c, pane, time.Now())
 	var owed string
 	var oerr error
 	if source == "compact" {
@@ -192,9 +200,9 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 		// The boss still gets what it owes and its handoff, and why its list is missing
 		data, jerr := json.Marshal(hookContext("SessionStart", strings.TrimSpace(owed+"\n"+handoff)+
 			"\ndev couldn't give your list and notes ("+err.Error()+"): run dev todo and dev todo note."))
-		return string(data), errors.Join(oerr, herr, err, jerr)
+		return string(data), errors.Join(verr, eerr, oerr, herr, err, jerr)
 	}
-	return out, errors.Join(oerr, herr, err)
+	return out, errors.Join(verr, eerr, oerr, herr, err)
 }
 
 // listContext is startList's output from the boss's list and notes, owed's lines (when any) first and the handoff line
@@ -219,6 +227,23 @@ func listContext(c *tmux.Client, pane, source, session string, hint Hint, owed, 
 	}
 	return StartContext(s, func() ([]todo.Session, error) { return todo.Workers(c, pane) }, hint, owed, source, session, time.Now())
 }
+
+// expirePane runs dev's rules at now on the list of the boss session pane is in (expire); none for a pane in no boss
+// session.
+func expirePane(c *tmux.Client, pane string, now time.Time) error {
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return expire(c, s, now)
+}
+
+// devVersion is the version of the running dev, which a coordinator's fresh start records (todo.OptVersion); tests
+// replace it.
+var devVersion = selfreload.Version
 
 // handoffLine is the start line naming the handoff of the dev agent clear that, still running, cleared pane's
 // conversation (never a leftover's); "" for none.

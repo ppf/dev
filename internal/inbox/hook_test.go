@@ -442,7 +442,7 @@ func TestStartContextNotes(t *testing.T) {
 	if _, err := s.AddNote(todo.Note{Kind: todo.NoteDecided, Text: "CSV only", Why: "parser"}, then); err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []string{"startup", "clear", "resume", "compact"} {
+	for _, source := range []string{"startup", "clear", "resume"} {
 		out, err := StartContext(s, none, noHint, "", source, "c1", then.Add(8*24*time.Hour))
 		if err != nil || !strings.Contains(out, "Your notes (1 of 12, oldest 8d)") || !strings.Contains(out, "CSV only (why: parser) (8d, still true?)") || strings.Contains(out, "open to do list") {
 			t.Errorf("%s, notes only = %q, %v", source, out, err)
@@ -569,5 +569,90 @@ func TestBossHookHandoffListError(t *testing.T) {
 		if !strings.Contains(got.Out.Context, want) {
 			t.Errorf("context = %q, want %q in it", got.Out.Context, want)
 		}
+	}
+}
+
+// A coordinator's fresh start (startup, not clear or resume) records the dev version it started on; with
+// every coordinator restarted on it, a restart:<version> item ticks by dev at that start, its boss told in its list.
+func TestBossHookStartVersion(t *testing.T) {
+	old := devVersion
+	devVersion = func() string { return "v0.93.0" }
+	t.Cleanup(func() { devVersion = old })
+	for _, source := range []string{"startup", "clear", "resume"} {
+		t.Run(source, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			version := ""
+			c := tmux.NewFake(func(args []string) (string, error) {
+				switch args[0] {
+				case "set-option":
+					if args[len(args)-2] == todo.OptVersion {
+						version = args[len(args)-1]
+					}
+				case "list-panes":
+					if strings.Contains(args[len(args)-1], todo.OptVersion) {
+						return tmux.FormatRow("boss", "coordinator", version, "0"), nil
+					}
+				case "display-message":
+					switch args[len(args)-1] {
+					case "#{@dev_boss_pane}":
+						return "coordinator\n", nil
+					case "#{" + OptHandoff + "}", "#{" + agent.OptEndedSession + "}":
+						return "\n", nil
+					}
+					if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
+						return tmux.FormatRow("$1", "1700000000", "boss", "1", "", "/tmp/tmux-1/default"), nil
+					}
+					return tmux.FormatRow("/tmp/tmux-1/default", "boss", "1", "$1", "1700000000"), nil
+				}
+				return "", nil
+			})
+			s, err := todo.ForPane(c, "%1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Add(todo.Item{Text: "Restart for v0.93.0", Ends: "restart:v0.93.0", Details: "close and start each boss"}, time.Now().Add(-time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			out, _, err := BossHook(c, "%1", []byte(`{"hook_event_name":"SessionStart","source":"`+source+`"}`), noHint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			at, v, _ := strings.Cut(version, " ")
+			ticked := strings.Contains(out, `#1 \"Restart for v0.93.0\" closed by dev: restarted on v0.93.0 (--ends restart:v0.93.0)`)
+			if source != "startup" {
+				if version != "" || ticked {
+					t.Errorf("❌ %s recorded %q, ticked %v: no fresh start", source, version, ticked)
+				}
+				return
+			}
+			if sec, err := strconv.ParseInt(at, 10, 64); err != nil || time.Since(time.Unix(sec, 0)) > time.Minute || v != "v0.93.0" {
+				t.Errorf("❌ recorded %q, want <now> v0.93.0", version)
+			}
+			if !ticked || strings.Contains(out, "\n1. Restart") {
+				t.Errorf("❌ start list %q: want the restart item ticked and told", out)
+			}
+		})
+	}
+}
+
+// dev's rules failing (the coordinators unreadable) still give the start list, with the error.
+func TestBossHookStartExpireError(t *testing.T) {
+	c := handoffTmux(t, "boss", "1", "")
+	failing := tmux.NewFake(func(args []string) (string, error) {
+		if args[0] == "list-panes" && strings.Contains(args[len(args)-1], todo.OptVersion) {
+			return "", errors.New("list-panes failed")
+		}
+		return c.Run(args...)
+	})
+	s, err := todo.ForPane(failing, "%1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(todo.Item{Text: "Restart for v0.93.0", Ends: "restart:v0.93.0", Details: "close and start each boss"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := BossHook(failing, "%1", []byte(`{"hook_event_name":"SessionStart","source":"resume"}`), noHint)
+	if err == nil || !strings.Contains(err.Error(), "list-panes failed") || !strings.Contains(out, "1. Restart for v0.93.0") {
+		t.Errorf("❌ out %q, err %v: want the list and the error", out, err)
 	}
 }

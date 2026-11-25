@@ -189,3 +189,87 @@ func TestNudgeList(t *testing.T) {
 		t.Errorf("past maxNotes the first to do note went first: kept %+v", bt.Notes[0])
 	}
 }
+
+// A watch ticks by dev the --ends items its state shows over, on its own list (expirePane) and, the manager's, the
+// closed bosses' lists, and queues the boss one note per tick at once.
+func TestWatchExpire(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	live := []string{"boss-a", sidebar.Manager}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			var out string
+			for _, n := range live {
+				out += tmux.FormatRow(n, "1")
+			}
+			return out, nil
+		case "list-panes":
+			return tmux.FormatRow(sidebar.Manager, "coordinator", "1800000100 v0.94.0", "0"), nil
+		case "display-message":
+			name := strings.Trim(args[3], "=:")
+			if args[3] == "%1" {
+				name = sidebar.Manager
+			}
+			return tmux.FormatRow("/tmp/tmux-1/default", name, "1", "$1", "1700000000"), nil
+		}
+		return "", nil
+	})
+	now := time.Unix(1_800_000_000, 0)
+	closed, err := todo.ForPane(c, tmux.SessionTarget("boss-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := closed.Add(todo.Item{Text: "Restart for v0.94.0", Ends: "restart:v0.94.0"}, now); err != nil {
+		t.Fatal(err)
+	}
+	own, err := todo.ForPane(c, "%1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range []todo.Item{{Text: "Test v0.93.0", Ends: "test:v0.93.0"}, {Text: "Test v0.94.0", Ends: "test:v0.94.0"}, {Text: "Reply to Ana"}} {
+		if _, err := own.Add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live = []string{sidebar.Manager}
+	later := now.Add(time.Hour)
+	if err := expirePane(c, "%1", later); err != nil {
+		t.Fatal(err)
+	}
+	if err := lookupClosed(c, later); err != nil {
+		t.Fatal(err)
+	}
+	done := func(s todo.Store) []string {
+		l, err := s.Read(later)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, it := range l.Items {
+			if it.Done {
+				out = append(out, it.Result)
+			}
+		}
+		return out
+	}
+	if got := done(own); !slices.Equal(got, []string{"closed by dev: v0.94.0 replaced v0.93.0 (#2)"}) {
+		t.Errorf("❌ own list ticked %q", got)
+	}
+	if got := done(closed); !slices.Equal(got, []string{"closed by dev: restarted on v0.94.0"}) {
+		t.Errorf("❌ closed list ticked %q", got)
+	}
+	b, err := Open("/tmp/tmux-1/default", "$1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := nudgeList(c, Boss{Name: sidebar.Manager, Box: b}, "%1", map[string]bool{}, later); err != nil || !queued {
+		t.Fatalf("❌ queued %v, %v", queued, err)
+	}
+	bt, err := b.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bt.String(); !strings.Contains(got, `- to do #1 "Test v0.93.0" closed by dev: v0.94.0 replaced v0.93.0 (#2) (--ends test:v0.93.0)`) {
+		t.Errorf("❌ the boss's note:\n%s", got)
+	}
+}

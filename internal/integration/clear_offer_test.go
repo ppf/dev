@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/bossclear"
 	"github.com/ppf/dev/internal/control"
 	"github.com/ppf/dev/internal/inbox"
@@ -366,4 +367,159 @@ func TestClearOfferManager(t *testing.T) {
 		t.Errorf("❌ the offer after the clear = %+v, want answered Clear it", items)
 	}
 	t.Log("✅ the user clears the manager from a shell; its offer is answered")
+}
+
+// The manager's offer is withdrawn by dev, never answered, once the stretch it was put in ended (not while its dialog
+// shows it), and the next stretch offers anew with its own numbers.
+func TestClearOfferWithdrawn(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	stub := clearStub(t, filepath.Join(tmp, "bin"))
+	s.T("new-session", "-d", "-s", "manager", "-e", "STUB_DIR="+tmp, stub)
+	s.T("set-option", "-t", "=manager:", "@dev_herd", "1")
+	manager := s.T("display", "-t", "=manager:", "-p", "#{pane_id}")
+	s.T("set-option", "-p", "-t", manager, "@dev_boss_pane", "coordinator")
+	waitFor(t, "manager registered", func() bool { return s.T("display", "-t", manager, "-p", "#{@agent_session}") == "s0" })
+	st, err := todo.ForPane(s.tmux, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	since := func() int64 {
+		t.Helper()
+		sec, err := strconv.ParseInt(s.T("display", "-t", manager, "-p", "#{@agent_since}"), 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sec
+	}
+	// round runs one offer at after into the stretch, then gives the list's offers, open and ticked
+	round := func(context string, after time.Duration) []todo.Shown {
+		t.Helper()
+		s.T("set-option", "-p", "-t", manager, "@agent_context", context)
+		at := time.Unix(since(), 0).Add(after)
+		clk := control.Clock{Now: func() time.Time { return at }, Sleep: time.Sleep}
+		if err := bossclear.Offer(s.tmux, clk, manager); err != nil {
+			t.Fatal(err)
+		}
+		l, err := st.Read(at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l.Items
+	}
+	items := round("68", bossclear.QuietFor)
+	if len(items) != 1 || items[0].Done || !strings.Contains(items[0].Context[0], "context 68%") {
+		t.Fatalf("❌ first offer: %+v", items)
+	}
+	offer := items[0]
+
+	// The manager works on, its dialog showing the offer: kept
+	moved := time.Unix(offer.Added, 0).Add(5 * time.Minute)
+	s.T("set-option", "-p", "-t", manager, "@agent_since", strconv.FormatInt(moved.Unix(), 10))
+	mb, ok, err := inbox.Here(s.tmux, manager)
+	if !ok || err != nil {
+		t.Fatalf("❌ no manager inbox: %v", err)
+	}
+	if err := mb.Box.SetAsking([]inbox.Asking{{Boss: "manager", ID: offer.ID, Text: offer.Text, Added: offer.Added, At: moved.Unix()}}); err != nil {
+		t.Fatal(err)
+	}
+	if items := round("26", time.Second); len(items) != 1 || items[0].Done {
+		t.Fatalf("❌ withdrawn while up in the manager's dialog: %+v", items)
+	}
+	if err := mb.Box.ClearAsking(); err != nil {
+		t.Fatal(err)
+	}
+	// A clear running (the user's dev agent clear manager): kept, for its end to answer it
+	s.T("set-option", "-p", "-t", manager, inbox.OptHandoff, inbox.ClearValue("s0", filepath.Join(tmp, "save.md"), time.Now().Add(time.Minute)))
+	if items := round("26", time.Second); len(items) != 1 || items[0].Done {
+		t.Fatalf("❌ withdrawn while a clear runs: %+v", items)
+	}
+	s.T("set-option", "-pu", "-t", manager, inbox.OptHandoff)
+	// The user picked on it in the manager's dialog, not relayed yet: kept, for the relay
+	if err := mb.Box.Picked([]agent.Pick{{Question: "manager #1: " + bossclear.OfferQuestion, Answer: "Not now", Labels: []string{"Clear it", "Not now"}}}, moved); err != nil {
+		t.Fatal(err)
+	}
+	if items := round("26", time.Second); len(items) != 1 || items[0].Done {
+		t.Fatalf("❌ withdrawn with the user's pick on it unrelayed: %+v", items)
+	}
+	if err := mb.Box.Picked([]agent.Pick{{Question: "Hand on to boss-app: the login fix?", Answer: "Drop it", Labels: []string{"Hand it on", "Drop it"}}}, moved); err != nil {
+		t.Fatal(err)
+	}
+	items = round("26", time.Second)
+	if len(items) != 1 || !items[0].Done || items[0].DoneBy != todo.DoneByDev || items[0].Result != bossclear.Withdrawn || items[0].Answer != "" {
+		t.Fatalf("❌ the stretch ended: %+v, want withdrawn by dev", items)
+	}
+	if events, err := todo.ReadEvents(); err != nil || len(events) != 0 {
+		t.Errorf("❌ tally events %+v %v: a withdrawal is no answer", events, err)
+	}
+	ticked, err := st.TakeTicked(time.Now(), nil, nil)
+	if err != nil || len(ticked) != 1 || ticked[0].String() != `#1 "Clear the manager's context?" withdrawn by dev: the manager worked on` {
+		t.Errorf("❌ the manager told %+v %v", ticked, err)
+	}
+	t.Log("✅ a stale offer is withdrawn by dev, not answered, not while asked, picked unrelayed or a clear runs")
+
+	// Reopened by the user, it stays through the next round; then they pick Not now
+	re := moved.Add(time.Minute)
+	if _, err := st.Reopen(offer.ID, offer.Text, re); err != nil {
+		t.Fatal(err)
+	}
+	if items := round("26", time.Second); len(items) != 1 || items[0].Done {
+		t.Fatalf("❌ reopened, withdrawn again: %+v", items)
+	}
+	if _, err := st.Answer(offer.ID, offer.Text, "Not now", 0, re); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next stretch offers anew, its own numbers
+	items = round("50", bossclear.IdleLimit+time.Minute)
+	var open []todo.Shown
+	for _, it := range items {
+		if !it.Done {
+			open = append(open, it)
+		}
+	}
+	if len(open) != 1 || !strings.Contains(open[0].Context[0], "idle 31m, no worker running, context 50%") {
+		t.Fatalf("❌ the next stretch: %+v, want a fresh offer", items)
+	}
+	t.Log("✅ a fresh offer follows a withdrawn one")
+}
+
+// A manager started after its offer was put (a new session, @agent_since not yet set) withdraws it at once.
+func TestClearOfferWithdrawnNewSession(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
+	s.T("new-session", "-d", "-s", "manager", "sleep 600")
+	s.T("set-option", "-t", "=manager:", "@dev_herd", "1")
+	manager := s.T("display", "-t", "=manager:", "-p", "#{pane_id}")
+	s.T("set-option", "-p", "-t", manager, "@dev_boss_pane", "coordinator")
+	st, err := todo.ForPane(s.tmux, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Put by an earlier manager session, a day ago
+	day := time.Now().Add(-24 * time.Hour)
+	if _, err := st.Add(todo.Item{Text: bossclear.OfferQuestion, Options: []string{"Clear it | you run dev agent clear manager in a plain shell (Recommended)", "Not now | the manager keeps its context"}}, day); err != nil {
+		t.Fatal(err)
+	}
+	if err := bossclear.Offer(s.tmux, control.RealClock, manager); err != nil {
+		t.Fatal(err)
+	}
+	l, err := st.Read(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 1 || !l.Items[0].Done || l.Items[0].Result != bossclear.Withdrawn {
+		t.Fatalf("❌ an offer older than the manager's session: %+v", l.Items)
+	}
+	t.Log("✅ an offer older than the manager's session is withdrawn")
 }
