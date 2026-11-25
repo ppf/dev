@@ -195,7 +195,7 @@ func TestUnchanged(t *testing.T) {
 	if got, want := checked(t, s, 1, t0.Add(5*24*time.Hour)), "unchanged 5d: check it at its source"; got != want {
 		t.Errorf("5d: check %q, want %q", got, want)
 	}
-	if c := check(Item{ID: 1, Text: "old"}, fact{}, t0); c != nil {
+	if c := check(Item{ID: 1, Text: "old"}, fact{}, "", t0); c != nil {
 		t.Errorf("no Added: check %+v, want none", c)
 	}
 }
@@ -380,7 +380,7 @@ func TestCheckKinds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := ""
-		if c := check(tt.it, tt.f, now); c != nil {
+		if c := check(tt.it, tt.f, "", now); c != nil {
 			got = c.Kind
 		}
 		if got != tt.want {

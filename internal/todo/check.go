@@ -101,7 +101,7 @@ func (s Store) readChecks() (map[string]fact, error) {
 
 // check is why open item it may be out of date at now: its PR merged or closed, its lookups failing, its PR's move
 // since its first lookup, in that order; else unchanged for two days, unless an ask or dated (Until to come); nil otherwise.
-func check(it Item, f fact, now time.Time) *sidebar.Check {
+func check(it Item, f fact, boss string, now time.Time) *sidebar.Check {
 	pr := lookedUp(it.Link)
 	if pr != 0 && f.Link == it.Link {
 		last, first := f.Last, f.First
@@ -124,7 +124,7 @@ func check(it Item, f fact, now time.Time) *sidebar.Check {
 		}
 	}
 	if it.stale(now) {
-		return &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added}
+		return &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: it.noNews(boss, f)}
 	}
 	return nil
 }
@@ -135,6 +135,15 @@ func (it Item) stale(now time.Time) bool {
 	parked := OnBoss(it.On, it.Session) && it.Doing == nil
 	return it.Added != 0 && now.Sub(time.Unix(it.Added, 0)) >= unchanged && len(it.Options) == 0 && it.Until <= now.Unix() && !parked
 }
+
+// waitingFor reports an item that waits for a person (--waiting-for): on someone, no session of its own, not the
+// boss's or, from an older dev, the user's (Own).
+func (it Item) waitingFor(boss string) bool {
+	return !Own(it.On, it.Session, boss) && !OnBoss(it.On, it.Session) && it.Session == nil && it.Added >= linked
+}
+
+// noNews reports a waiting item whose PR hasn't moved (a move is news): its unchanged check needs no action.
+func (it Item) noNews(boss string, f fact) bool { return it.waitingFor(boss) && len(moves(it, f)) == 0 }
 
 // A linked PR's state as Shown.PRState gives it.
 const (
@@ -429,8 +438,9 @@ const (
 // Nudges are the open items to tell their boss about at now, each reason once, keeping that it was told: its PR
 // merged, closed, approved, changes requested, checks green or failing since its first lookup; the worker it is on
 // (Session) not among workers any more; unchanged for two days (as check, an ask and a dated item aside), told again
-// after two more days without a --replaces. workers is read only when an open item is on one; with tell, they count
-// as told only once tell took them. The facts of items no longer open go.
+// after two more days without a --replaces (an item waiting for a person, its PR not moved: once only, no news is no
+// reason). workers is read only when an open item is on one; with tell, they count as told only once tell took them.
+// The facts of items no longer open go.
 func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell func([]Nudge) error) ([]Nudge, error) {
 	var out []Nudge
 	err := s.locked(func() error {
@@ -466,8 +476,10 @@ func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell fun
 			if l.Items[i].Gone && fc.Told[toldGone] == 0 {
 				tell(toldGone, "its session is gone")
 			}
-			if it.stale(now) && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged {
-				tell(toldUnchanged, (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added}).Long(now))
+			// One waiting for a person is told once: no news since is no reason to tell again
+			waiting := it.noNews(s.boss, fc)
+			if it.stale(now) && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged && !(waiting && fc.Told[toldUnchanged] != 0) {
+				tell(toldUnchanged, (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: waiting}).Long(now))
 			}
 			if fc.Told != nil {
 				facts[it.key()] = fc

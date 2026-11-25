@@ -828,7 +828,7 @@ An item added with --done-on ticks by itself once a lookup finds its PR in that 
 dev's state shows it over (closed by dev: its rule).
 A dev boss's previews look its items' PRs up by themselves (the manager's, the closed bosses' lists' too): every 15
 seconds two of those not looked up for 10 minutes; then, with its inbox on, they tell the boss in it, once per item and reason, of each PR move, worker gone, and of each item unchanged
-for 2 days (again after 2 more without --replaces), and of each item ticked by --done-on or --ends; an --until tick, and on a
+for 2 days (again after 2 more without --replaces; an item --waiting-for a person once only, worded "no action unless there is news"), and of each item ticked by --done-on or --ends; an --until tick, and on a
 desktop app boss every tick, is in the boss's next reminder. A desktop app boss runs this. A lookup that failed prints
 on stderr; the list still prints.`,
 		Args: cobra.NoArgs,

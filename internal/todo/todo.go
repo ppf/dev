@@ -675,7 +675,7 @@ func (s Store) Read(now time.Time) (List, error) {
 			}
 		}
 		if !sh.Done {
-			sh.Check = check(it, facts[it.key()], now)
+			sh.Check = check(it, facts[it.key()], s.boss, now)
 			sh.PRState = prState(it, facts[it.key()])
 			sh.StartLate = it.Started != nil && now.Sub(time.Unix(it.Started.At, 0)) >= StartLate
 		}
@@ -1548,7 +1548,9 @@ func detailsLine(items string) string {
 }
 
 // Flagged reports an open item to re-check: its worker is gone, or it has a Check.
-func (it Shown) Flagged() bool { return !it.Done && (it.Gone || it.Check != nil) }
+func (it Shown) Flagged() bool {
+	return !it.Done && (it.Gone || it.Check != nil && !it.Check.NoAction())
+}
 
 // whoLine asks a boss to say who does each item, as the reminders end.
 const whoLine = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user, with --details when it has none)."

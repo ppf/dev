@@ -17,6 +17,8 @@ type Check struct {
 	Kind  string `json:"kind"`
 	PR    int    `json:"pr,omitempty"`
 	Since int64  `json:"since"`
+	// Waiting marks an unchanged check of an item that waits for a person: no action unless there is news
+	Waiting bool `json:"waiting,omitempty"`
 }
 
 // Check kinds: a PR's (Event), then the others.
@@ -37,11 +39,17 @@ func (c Check) Tone() Tone {
 	if c.Kind == CheckBossClosed {
 		return ToneAlert
 	}
+	if c.NoAction() {
+		return ToneFaint
+	}
 	return ToneFlag
 }
 
 // Event reports a check its linked PR's move made, not its age, its boss or a failing lookup.
 func (c Check) Event() bool { return c.PR != 0 && c.Kind != CheckLookupFailing }
+
+// NoAction reports an unchanged check of an item that waits for a person: it needs no action unless there is news.
+func (c Check) NoAction() bool { return c.Kind == CheckUnchanged && c.Waiting }
 
 // Short is the check as a row shows it: "#412 approved 2h", "unchanged 5d", "boss closed", "#412 lookup failing".
 func (c Check) Short(now time.Time) string {
@@ -72,6 +80,8 @@ func (c Check) Long(now time.Time) string {
 		return fmt.Sprintf("PR #%d %s for %s: dev todo check shows why", c.PR, c.Kind, c.age(now))
 	case c.Event():
 		return fmt.Sprintf("PR #%d %s %s ago", c.PR, c.Kind, c.age(now))
+	case c.Kind == CheckUnchanged && c.Waiting:
+		return c.Kind + " " + c.age(now) + ": no action unless there is news"
 	case c.Kind == CheckUnchanged:
 		return c.Kind + " " + c.age(now) + ": check it at its source"
 	}

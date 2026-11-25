@@ -18,6 +18,7 @@ func TestCheckText(t *testing.T) {
 		{Check{Kind: CheckApproved, PR: 412, Since: ago(2 * time.Hour)}, "#412 approved 2h", "PR #412 approved 2h ago"},
 		{Check{Kind: CheckMerged, PR: 418, Since: ago(40 * time.Minute)}, "#418 merged 40m", "PR #418 merged 40m ago"},
 		{Check{Kind: CheckUnchanged, Since: ago(5*24*time.Hour + 3*time.Hour)}, "unchanged 5d", "unchanged 5d: check it at its source"},
+		{Check{Kind: CheckUnchanged, Waiting: true, Since: ago(5*24*time.Hour + 3*time.Hour)}, "unchanged 5d", "unchanged 5d: no action unless there is news"},
 		{Check{Kind: CheckBossClosed, Since: ago(time.Hour)}, "boss closed", "boss closed"},
 	}
 	for _, tt := range tests {
