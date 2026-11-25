@@ -992,3 +992,14 @@ func TestTodoNoteCapDrops(t *testing.T) {
 		t.Errorf("note at the cap = %q, want %q", got, want)
 	}
 }
+
+func TestTodoNoteCapRefusesSaid(t *testing.T) {
+	todoEnv(t)
+	for i := 1; i <= todo.MaxNotes; i++ {
+		run(t, "", "todo", "note", "said", "--until", "2099-01-01", fmt.Sprintf("said %d", i))
+	}
+	_, _, err := execute(t, "", "todo", "note", "risk", "one more")
+	if err == nil || !strings.Contains(err.Error(), "12 notes") {
+		t.Errorf("risk note with only said notes = %v, want a refusal naming 12 notes", err)
+	}
+}
