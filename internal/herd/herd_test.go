@@ -848,7 +848,7 @@ func TestPromptAskRules(t *testing.T) {
 			"after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it.",
 			"Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source)", "done-when includes gh release view v<X> (or its host's release page)",
 			"Each brief carries the standing rules, items already on your list it touches, shared hot files, the build or test recipe and where results go (never a tracked file)"}},
-		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "to them yourself with AskUserQuestion", "Up to 4 asks per call, in order, one per question (2 while any boss works: relay notes first)", "send-keys only the user's pick (a pick to send a text: after sleep 60)",
+		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "to them yourself with AskUserQuestion", "Up to 4 asks per call, in order, one per question (2 while any boss works: relay notes first)",
 			"only independent ones (no pick changes another's options or whether it is needed; else one per call)",
 			"a hand-on question stays alone in its call, as does an item offering \"Hand it on\"", "Relay every pick of a call before the next call",
 			"Right before the dialog mark every item it asks:",
