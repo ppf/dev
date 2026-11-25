@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -774,9 +775,9 @@ func TestCoordinatorArgv(t *testing.T) {
 		{"new with a model and effort", start.Args(false), []string{"claude", "--model", "opus", "--effort", "medium"}},
 		{"resumed, the effort again", append([]string{"--resume", "b1"}, start.Args(true)...), []string{"claude", "--resume", "b1", "--effort", "medium"}},
 	} {
-		want := append(tt.want, "--settings", coordinatorSettings("/bin/dev", false), "--append-system-prompt", coordinatorPrompt, "--remote-control=boss-p")
+		want := append(tt.want, "--settings", coordinatorSettings("/bin/dev", false), "--append-system-prompt-file", "/s/boss.md", "--remote-control=boss-p")
 		// A boss never gets the manager's window
-		if got := coordinatorArgv("boss-p", "/bin/dev", 300000, tt.args...); !slices.Equal(got, want) {
+		if got := coordinatorArgv("boss-p", "/bin/dev", "/s/boss.md", 300000, tt.args...); !slices.Equal(got, want) {
 			t.Errorf("%s: %q, want %q", tt.name, got[:len(got)-5], tt.want)
 		}
 	}
@@ -883,16 +884,16 @@ func TestPromptAskRules(t *testing.T) {
 	}
 }
 
-// The manager's coordinator gets managerPrompt, its claude.ai connectors off and its auto-compact window (none for 0), so
+// The manager's coordinator gets its prompt file, its claude.ai connectors off and its auto-compact window (none for 0), so
 // a resurrect's Adopt restores it as the manager; a new one runs on opus · medium where its start leaves them unset.
 func TestManagerArgvAndStart(t *testing.T) {
 	want := []string{"claude", "--settings", coordinatorSettings("/bin/dev", true), "--autocompact", "300000",
-		"--append-system-prompt", managerPrompt, "--remote-control=manager"}
-	if got := coordinatorArgv(Manager, "/bin/dev", 300000); !slices.Equal(got, want) {
+		"--append-system-prompt-file", "/s/manager.md", "--remote-control=manager"}
+	if got := coordinatorArgv(Manager, "/bin/dev", "/s/manager.md", 300000); !slices.Equal(got, want) {
 		t.Errorf("manager argv %q, want %q", got, want)
 	}
 	off := slices.Delete(slices.Clone(want), 3, 5)
-	if got := coordinatorArgv(Manager, "/bin/dev", 0); !slices.Equal(got, off) {
+	if got := coordinatorArgv(Manager, "/bin/dev", "/s/manager.md", 0); !slices.Equal(got, off) {
 		t.Errorf("manager argv, window 0: %q, want %q", got, off)
 	}
 	for _, tt := range []struct{ start, want agent.Start }{
@@ -906,10 +907,35 @@ func TestManagerArgvAndStart(t *testing.T) {
 	}
 }
 
+// The manager's and the bosses' prompts are each written whole to a file named by its text, the same again on the
+// next start, and absolute for a relative state directory: claude opens it from another directory.
+func TestWritePrompt(t *testing.T) {
+	state := t.TempDir()
+	t.Chdir(state)
+	t.Setenv("XDG_STATE_HOME", "rel")
+	dir := filepath.Join(state, "rel", "dev", "prompts")
+	for session, want := range map[string]string{Manager: managerPrompt, "boss-p": coordinatorPrompt} {
+		path, err := writePrompt(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(path); filepath.Dir(path) != dir || string(got) != want {
+			t.Errorf("%s: %s holds %.40q…", session, path, got)
+		}
+		if again, err := writePrompt(session); again != path || err != nil {
+			t.Errorf("%s again: %q, %v; want %q", session, again, err, path)
+		}
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 2 ||
+		!strings.HasPrefix(filepath.Base(files[0]), "boss-") || !strings.HasPrefix(filepath.Base(files[1]), "manager-") {
+		t.Errorf("prompts: %q, want one boss-<hash>.md and one manager-<hash>.md", files)
+	}
+}
+
 // The coordinator runs through an interactive login shell, so claude resolves on the user's PATH like a worker's.
 func TestViaLoginShell(t *testing.T) {
-	got := viaLoginShell("/bin/zsh", []string{"/x/dev", "pty-wrap", "--", "claude", "--append-system-prompt", "it's"})
-	want := []string{"/bin/zsh", "-l", "-i", "-c", `exec '/x/dev' 'pty-wrap' '--' 'claude' '--append-system-prompt' 'it'"'"'s'`}
+	got := viaLoginShell("/bin/zsh", []string{"/x/dev", "pty-wrap", "--", "claude", "--append-system-prompt-file", "/it's/boss.md"})
+	want := []string{"/bin/zsh", "-l", "-i", "-c", `exec '/x/dev' 'pty-wrap' '--' 'claude' '--append-system-prompt-file' '/it'"'"'s/boss.md'`}
 	if !slices.Equal(got, want) {
 		t.Errorf("%q, want %q", got, want)
 	}
@@ -966,18 +992,18 @@ func TestOpenExistingBossRefusesStart(t *testing.T) {
 }
 
 // tmux 3.8 refuses ~16360+ bytes of arguments ("command too long"); 100-byte paths leave the manager's and a boss's
-// new-session room.
+// new-session room, their prompts in files.
 func TestManagerArgvFitsTmux(t *testing.T) {
 	path := "/" + strings.Repeat("p", 99)
 	for _, session := range []string{Manager, SessionName(strings.Repeat("p", 30))} {
 		argv := slices.Concat([]string{"new-session", "-d", "-x", "200", "-y", "50", "-s", session, "-c", path, "-n", "Boss", "-PF", "#{pane_id}"},
-			viaLoginShell(path+"/zsh", slices.Concat([]string{path, "pty-wrap", "--"}, coordinatorArgv(session, path, 300000))))
+			viaLoginShell(path+"/zsh", slices.Concat([]string{path, "pty-wrap", "--"}, coordinatorArgv(session, path, path+"/prompts/manager-0123456789ab.md", 300000))))
 		size := 0
 		for _, a := range argv {
 			size += len(a) + 1
 		}
 		if size > 16100 {
-			t.Errorf("❌ %s's new-session is %d bytes, over 16100: shorten its prompt", session, size)
+			t.Errorf("❌ %s's new-session is %d bytes, over 16100", session, size)
 		}
 	}
 }

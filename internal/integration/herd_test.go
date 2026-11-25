@@ -56,7 +56,7 @@ func TestHerd(t *testing.T) {
 	managerPanes := strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{pane_current_path} #{pane_start_command}"), "\n")
 	if len(managerPanes) != 2 || !strings.HasPrefix(managerPanes[0], managerDir+" ") ||
 		!strings.Contains(managerPanes[0], `'claude' '--model' 'opus' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
-		!strings.Contains(managerPanes[0], `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt' 'You are the manager`) ||
+		!strings.Contains(managerPanes[0], `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt-file' '`+d.promptFile("manager", "You are the manager")+"'") ||
 		!strings.HasSuffix(managerPanes[0], `'--remote-control=manager'"`) || !strings.Contains(managerPanes[1], "boss --previews") {
 		t.Fatalf("manager panes: %q", managerPanes)
 	}
@@ -115,7 +115,7 @@ func TestHerd(t *testing.T) {
 		out, err := bare.CombinedOutput()
 		check(t, "manager_autocompact = "+tt[0], errStatus(err)+" "+string(out), tt[1])
 	}
-	if start := d.T("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}"); strings.Contains(start, "--autocompact") || !strings.Contains(start, "You are the manager") {
+	if start := d.T("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}"); strings.Contains(start, "--autocompact") || !strings.Contains(start, "'--append-system-prompt-file' '"+d.promptFile("manager", "You are the manager")+"'") {
 		t.Errorf("manager with manager_autocompact = 0: %q", start)
 	}
 	d.T("kill-session", "-t", "=manager:")
@@ -130,7 +130,7 @@ func TestHerd(t *testing.T) {
 	// Left to right: its sidebar, the coordinator, the previews
 	panes := strings.Split(d.T("list-panes", "-t", "=boss-hq:1", "-F", "#{pane_id} #{pane_start_command}"), "\n")
 	if len(panes) != 3 || !strings.Contains(panes[0], "'sidebar'") || !strings.Contains(panes[1], `-l -i -c "exec `) || !strings.Contains(panes[1], `'pty-wrap' '--' 'claude' '--settings' '{\"hooks\":`) ||
-		!strings.Contains(panes[1], `\"matcher\":\"compact\"}]}}' '--append-system-prompt'`) ||
+		!strings.Contains(panes[1], `\"matcher\":\"compact\"}]}}' '--append-system-prompt-file' '`+d.promptFile("boss", "You are the coordinator")+"'") ||
 		!strings.HasSuffix(panes[1], `'--remote-control=boss-hq'"`) || strings.Contains(panes[1], "--autocompact") ||
 		!strings.Contains(panes[2], "boss --previews") {
 		t.Fatalf("boss panes: %q", panes)
