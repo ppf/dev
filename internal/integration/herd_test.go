@@ -23,7 +23,7 @@ func TestHerd(t *testing.T) {
 	}
 	agentStub(t, stubs, "claude")
 
-	// Inside tmux without a terminal, no project: the manager started detached in its own folder, on fable ·
+	// Inside tmux without a terminal, no project: the manager started detached in its own folder, on opus ·
 	// medium, and how to reach it printed; again, only printed
 	xdg := writeProjects(t, [2]string{"hq", tempDir(t)}, [2]string{"app", tempDir(t)}, [2]string{"web", tempDir(t)})
 	env := d.scriptEnv(xdg)
@@ -39,8 +39,8 @@ func TestHerd(t *testing.T) {
 	// Its defaults apply to a new manager only: flags given are checked against what it was started with
 	for _, tt := range [][2]string{
 		{"--effort high", "1 ❌ session manager was started with --effort medium, not high: --model and --effort only apply to a new session\n"},
-		{"--model sonnet", "1 ❌ session manager was started with --model fable, not sonnet: --model and --effort only apply to a new session\n"},
-		{"--model fable --effort medium", "0 manager running: dev goto manager\n"},
+		{"--model sonnet", "1 ❌ session manager was started with --model opus, not sonnet: --model and --effort only apply to a new session\n"},
+		{"--model opus --effort medium", "0 manager running: dev goto manager\n"},
 	} {
 		flagged := exec.Command(devBin, append([]string{"boss"}, strings.Fields(tt[0])...)...)
 		flagged.Env = env
@@ -55,7 +55,7 @@ func TestHerd(t *testing.T) {
 	}
 	managerPanes := strings.Split(d.T("list-panes", "-t", "=manager:1", "-F", "#{pane_current_path} #{pane_start_command}"), "\n")
 	if len(managerPanes) != 2 || !strings.HasPrefix(managerPanes[0], managerDir+" ") ||
-		!strings.Contains(managerPanes[0], `'claude' '--model' 'fable' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
+		!strings.Contains(managerPanes[0], `'claude' '--model' 'opus' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
 		!strings.Contains(managerPanes[0], `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt' 'You are the manager`) ||
 		!strings.HasSuffix(managerPanes[0], `'--remote-control=manager'"`) || !strings.Contains(managerPanes[1], "boss --previews") {
 		t.Fatalf("manager panes: %q", managerPanes)
