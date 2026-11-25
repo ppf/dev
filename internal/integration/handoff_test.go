@@ -14,7 +14,7 @@ import (
 )
 
 // The manager's dev agent prompt and message to a boss need --kind; work passes only on the user's "Hand it on" pick
-// of a question naming the boss and the brief's first line, or on their typed go (--go), once. Everything sent is listed by dev agent handoffs,
+// of a question naming the boss and the brief's first line, or on their typed go (--go) or plain command (--command), once. Everything sent is listed by dev agent handoffs,
 // ungated first, with dropped and corrected hand-on questions counted. A boss is not affected.
 func TestManagerHandOnGate(t *testing.T) {
 	tmp := t.TempDir()
@@ -205,6 +205,21 @@ func TestManagerHandOnGate(t *testing.T) {
 	if out, stderr, err := dev(manager, "", "agent", "message", "boss-a", "--kind", "work", "--go", "Tak ruszaj", brief); err != nil {
 		t.Fatalf("❌ a message on the typed go given back: %q %v %s", out, err, stderr)
 	}
+	// A plain command: passes once with no pick, listed as a command; a question, an idea asked or words not in it are refused
+	refused("--command without --kind work", "--command goes with --kind work", "agent", "prompt", "boss-a", "--kind", "question", "--command", "zrób PR", brief)
+	cbrief := "Zrób PR z cache CI.\ncontract first"
+	refused("a command whose brief doesn't carry its words", "the brief doesn't carry the user's words word for word", "agent", "prompt", "boss-a", "--kind", "work", "--command", "zrób PR z cache CI", brief)
+	say("human", "typed", "Zrób PR z cache CI")
+	if out, stderr, err := dev(manager, "", "agent", "prompt", "boss-a", "--kind", "work", "--command", "zrób PR z cache CI", cbrief); err != nil {
+		t.Fatalf("❌ work on a plain command: %q %v %s", out, err, stderr)
+	}
+	refused("work twice on one command", "--command: the user's latest message was used for a send already", "agent", "prompt", "boss-a", "--kind", "work", "--command", "zrób PR z cache CI", cbrief)
+	say("human", "typed", "a może zrobimy cache CI?")
+	refused("an idea asked as a command", "holds a question, not a plain command: ask with the hand-on question", "agent", "prompt", "boss-a", "--kind", "work", "--command", "zrobimy cache CI", "Zrobimy cache CI.")
+	say("human", "typed", "czy to głupi pomysł? zrób PR z cache CI")
+	refused("a command beside a question", "holds a question, not a plain command", "agent", "prompt", "boss-a", "--kind", "work", "--command", "zrób PR z cache CI", cbrief)
+	say("human", "typed", "zrób PR z cache CI")
+	refused("a command without its words", `"start the release" is not in the user's latest message`, "agent", "prompt", "boss-a", "--kind", "work", "--command", "start the release", "Start the release.")
 	// The click passes after a typed go as before
 	ask(question, "Hand it on")
 	if out, stderr, err := work(); err != nil {
@@ -239,17 +254,18 @@ func TestManagerHandOnGate(t *testing.T) {
 
 	out, stderr, err = dev([]string{"TMUX_PANE=", "CLAUDECODE="}, "", "agent", "handoffs")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if err != nil || len(lines) != 14 || lines[0] != "gated 4 · typed go 2 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1 · refused 2" ||
+	if err != nil || len(lines) != 15 || lines[0] != "gated 4 · typed go 2 · command 1 · ungated: question 2, pick 0, own 1 · dropped 1 · corrected 1 · refused 2" ||
 		!strings.HasSuffix(lines[1], " own boss-b: Yes, rebase it") || !strings.HasSuffix(lines[2], " question plain: status?") ||
 		!strings.HasSuffix(lines[3], " question boss-b: Is #150 merged?") ||
 		!strings.HasSuffix(lines[4], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[5], ` typed go boss-a: Cache the CI builds. (go: "Tak ruszaj")`) ||
-		!strings.HasSuffix(lines[6], ` typed go boss-a: Cache the CI builds. (go: "Tak, ruszaj")`) ||
-		!strings.HasSuffix(lines[7], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[8], " work boss-a: Cache the CI builds.") || !strings.HasSuffix(lines[9], " work boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[10], " refused boss-b: Cache the CI builds.") || !strings.HasSuffix(lines[11], " refused boss-a: Cache the CI builds.") ||
-		!strings.HasSuffix(lines[12], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
-		!strings.HasSuffix(lines[13], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
+		!strings.HasSuffix(lines[5], ` command boss-a: Zrób PR z cache CI. (command: "zrób PR z cache CI")`) ||
+		!strings.HasSuffix(lines[6], ` typed go boss-a: Cache the CI builds. (go: "Tak ruszaj")`) ||
+		!strings.HasSuffix(lines[7], ` typed go boss-a: Cache the CI builds. (go: "Tak, ruszaj")`) ||
+		!strings.HasSuffix(lines[8], " work boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[9], " work boss-a: Cache the CI builds.") || !strings.HasSuffix(lines[10], " work boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[11], " refused boss-b: Cache the CI builds.") || !strings.HasSuffix(lines[12], " refused boss-a: Cache the CI builds.") ||
+		!strings.HasSuffix(lines[13], " corrected: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") ||
+		!strings.HasSuffix(lines[14], " dropped: Hand on to boss-a? Sound: faster CI. Cons: cache misses.") {
 		t.Errorf("❌ dev agent handoffs = %q, %v %s", out, err, stderr)
 	}
 }

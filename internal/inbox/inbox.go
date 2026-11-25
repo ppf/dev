@@ -828,11 +828,11 @@ func (p *Prompt) has(i int) bool {
 // finds it spent.
 const maxGoSpent = 50
 
-// ClaimGo spends g, the user's typed go: refused once spent.
+// ClaimGo spends g, the user's typed go or command: refused once spent.
 func (b Box) ClaimGo(g Go) error {
 	return b.update(func(s *state) error {
 		if slices.Contains(s.GoSpent, g.UUID) {
-			return errors.New("--go: the user's latest message was used for a send already" + askAgain)
+			return errors.New("the user's latest message was used for a send already" + askAgain)
 		}
 		s.GoSpent = append(s.GoSpent, g.UUID)
 		s.GoSpent = s.GoSpent[max(0, len(s.GoSpent)-maxGoSpent):]

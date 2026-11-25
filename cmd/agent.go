@@ -231,7 +231,7 @@ func typeInto(c *tmux.Client, target string) (control.Agent, error) {
 
 func newAgentPromptCmd() *cobra.Command {
 	var wait bool
-	var kind, words string
+	var kind, words, command string
 	var stall, timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "prompt <target> [text...]",
@@ -254,7 +254,8 @@ latest pick there, typed messages since or not, being "Hand it on" on one questi
 and that holds the brief's first line as a line of its own, once per pick; a new hand-on question drops it. Or, with
 --go '<the user's words>', on their latest message there when they typed it themselves (by the transcript: not an inbox
 batch, another session's or a plugin's prompt, an accepted suggestion, pasted text or a pick) and it holds the words, once
-per message, listed as a typed go.`,
+per message, listed as a typed go. Or, with --command '<the user's words>', the same on their plain command, also refused when
+that message holds a "?" outside a URL, listed as a command.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args[1:], " ")
@@ -270,7 +271,7 @@ per message, listed as a typed go.`,
 			if err != nil {
 				return err
 			}
-			g, err := gateHandOn(c, kind, words, a.Session, text)
+			g, err := gateHandOn(c, kind, words, command, a.Session, text)
 			if err != nil {
 				return err
 			}
@@ -302,6 +303,7 @@ per message, listed as a typed go.`,
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the agent finished its turn")
 	cmd.Flags().StringVar(&kind, "kind", "", kindHelp)
 	cmd.Flags().StringVar(&words, "go", "", goHelp)
+	cmd.Flags().StringVar(&command, "command", "", commandHelp)
 	cmd.Flags().DurationVar(&stall, "stall", 10*time.Second, "with --wait: give up when the prompt isn't picked up within this")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "with --wait: give up after this")
 	return cmd

@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,5 +121,51 @@ func TestClaimGo(t *testing.T) {
 	}
 	if err := b.ClaimGo(g); err == nil {
 		t.Error("❌ an older go claimed again after a newer one")
+	}
+}
+
+// cmdLine is the user's typed message with text, as Claude Code writes it.
+func cmdLine(text string) string {
+	b, _ := json.Marshal(text)
+	return `{"type":"user","uuid":"c1","timestamp":"2026-11-24T10:03:00.000Z","origin":{"kind":"human"},"promptSource":"typed","message":{"content":` + string(b) + `}}`
+}
+
+// A plain command passes as a typed go does, and is refused also when a sentence of it ends in "?".
+func TestLatestCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name, words, want string
+		lines             []string
+	}{
+		{name: "a command", words: "start nocworx morning routine", lines: []string{lineReply, cmdLine("Start nocworx morning routine")}},
+		{name: "a command with a link's query", words: "zrób PR", lines: []string{cmdLine("zrób PR wg https://x.dev/a?b=1 teraz")}},
+		{name: "a command beside a paste", words: "zrób PR", lines: []string{cmdLine("zrób PR <pasted_content id=\"a\">\nczy?\n</pasted_content id=\"a\">")}},
+		{name: "an idea asked", words: "dodamy X", lines: []string{cmdLine("a może dodamy X?")}, want: "holds a question, not a plain command"},
+		{name: "a question mid-message", words: "zrób PR", lines: []string{cmdLine("czy to głupi pomysł? zrób PR")}, want: "holds a question, not a plain command"},
+		{name: "a question before a paste", words: "zrób PR", lines: []string{cmdLine("zrób PR, ok?<pasted_content id=\"a\">\nlog\n</pasted_content id=\"a\"> i dalej")}, want: "holds a question"},
+		{name: "a question run into the next sentence", words: "zrób PR", lines: []string{cmdLine("ok?zrób PR")}, want: "holds a question"},
+		{name: "a link's encoded query", words: "zrób PR", lines: []string{cmdLine("zrób PR wg https://x.dev/?%71=1")}},
+		{name: "a question in brackets", words: "zrób PR", lines: []string{cmdLine("zrób PR (ok?) teraz")}, want: "holds a question"},
+		{name: "a question in quotes", words: "zrób PR", lines: []string{cmdLine(`zrób PR "czy?" teraz`)}, want: "holds a question"},
+		{name: "a question with ?!", words: "zrób PR", lines: []string{cmdLine("zrób PR?! teraz")}, want: "holds a question"},
+		{name: "a full-width question mark", words: "zrób PR", lines: []string{cmdLine("zrób PR？")}, want: "holds a question"},
+		{name: "words not in the message", words: "start the release", lines: []string{cmdLine("zrób PR")}, want: `"start the release" is not in the user's latest message`},
+		{name: "an inbox batch since", words: "zrób PR", lines: []string{cmdLine("zrób PR"), linePeer}, want: "another session's"},
+		{name: "a plugin since", words: "zrób PR", lines: []string{cmdLine("zrób PR"), linePlugin}, want: "a plugin's prompt"},
+		{name: "an accepted suggestion", words: "Tak ruszaj", lines: []string{lineSuggested}, want: `came as "suggestion_accepted"`},
+		{name: "only pasted", words: "Tak ruszaj", lines: []string{linePasted}, want: "pasted text, not typed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, err := LatestCommand(transcript(t, tc.lines...), tc.words)
+			switch {
+			case tc.want == "" && (err != nil || g.UUID != "c1"):
+				t.Errorf("❌ LatestCommand = %+v, %v; want c1", g, err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "--command: ") || !strings.HasSuffix(err.Error(), askAgain)):
+				t.Errorf("❌ LatestCommand = %+v, %v; want %q", g, err, tc.want)
+			}
+		})
+	}
+	// --go keeps its check: a question mark mid-message is no question there
+	if _, err := LatestGo(transcript(t, cmdLine("czy to głupi pomysł? zrób PR")), "zrób PR"); err != nil {
+		t.Errorf("❌ LatestGo on a question mid-message: %v", err)
 	}
 }

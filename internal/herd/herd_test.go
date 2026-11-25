@@ -855,13 +855,19 @@ func TestPromptAskRules(t *testing.T) {
 			"answer a permission prompt or dialog without the user's pick", "do anything destructive",
 			"project research and project decisions stay with that project's boss", "answer with dev agent message manager",
 			"for you the source is the boss", `is not opened again`, "plus \"contract first\"; don't scope it yourself", "Checks a plugin or hook asks for: run those that read only dev's own state",
-			"Before handing on the user's own new idea or request", "Before every hand-on of new work, not only on a conflict", "holding the assessment and the brief you would send",
+			"Before handing on the user's own new idea or request", "Before every hand-on of new work but a plain command, not only on a conflict", "holding the assessment and the brief you would send",
 			"one AskUserQuestion of your own", "Drop it or skipped, it isn't handed on", "you decide nothing for a project but the asks you settle (below)", "when you see no trade-off the boss missed", "dev todo answer <boss> <n> \"<recommended option>\" --recommended --question", "you decide yourself and report in one line",
 			"follows your assessment of that very work in your previous reply and names or plainly answers it (\"Tak ruszaj\" to \"start it today?\")",
 			"--kind work --go '<their words, quoted>'", "words about something else, a conditional or a question are no go: ask with the hand-on question",
-			"refused without that pick or a typed go",
+			"refused without that pick, a typed go or a plain command", "(not a pick, an answer, a dev command or a plain command)",
+			"A plain command goes at once: the user's latest typed message plainly tells you to do project work, you have no objection and it makes no list item clash or go stale: hand it on in that turn, no question",
+			"--kind work --command '<their words>' (brief: their words verbatim, nothing added)",
+			"Handed on to boss-<project> as you said (\"<their words>\"); no objection, no conflict on its list.",
+			"dev checks as for --go, plus no \"?\".",
+			"At once: \"start nocworx morning routine\", \"zrób PR z poprawką testu\", \"dodaj do listy boss-dev: X\".",
+			"Asked: \"a może dodamy X\", \"jeśli CI przejdzie, wydaj\", \"czy to głupi pomysł?\", objections, additions; unsure: ask.",
 			"you decide nothing for a project", "text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)", "send-keys that worker directly", "your own task --on boss (the word itself", "one a person owes --waiting-for <who>",
-			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", `reads "per boss-<project>" or "per <list> at HH:MM", the time from date run in that turn, never your guess`, "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick or a typed go), question", "dev agent handoffs",
+			"brief's first line stands word for word on a line of its own", "or dev agent message --kind question", `reads "per boss-<project>" or "per <list> at HH:MM", the time from date run in that turn, never your guess`, "prompt, message or reply you send a boss carries --kind: work (new work, refused without that pick, a typed go or a plain command), question", "dev agent handoffs",
 			"With an advisor tool in your session, call your advisor only before you assess the user's new idea or request", "before a boss is cleared or closed", "when a boss's report contradicts what its list or dev's state shows", "before you show the user a text meant for other people", "when you are unsure whether something is yours to settle or the user's", "manager advisor <why, 3-6 words>", "never on plain relays, state polls or list updates", "start that reply with [advisor]", "While the trial runs (from the restart, one week)", "~/.local/state/dev/design/trial/tally.log", "manager user-caught <what>", "manager bad-relay <what>", "No advisor tool: skip this",
 			`after a compaction, read the re-injected list and notes before answering, and first do what its "[dev] Owed from before the compaction" lines name`}},
 	} {
@@ -952,5 +958,19 @@ func TestOpenExistingBossRefusesStart(t *testing.T) {
 	if want := []string{"has-session -t =boss-p:", "show-option -qv -t =boss-p: @dev_herd",
 		"display-message -p -t =boss-p: #{@dev_model}\t#{@dev_effort}"}; !slices.Equal(ran, want) {
 		t.Errorf("ran %q, want only %q", ran, want)
+	}
+}
+
+// tmux 3.8 refuses ~16360+ bytes of arguments ("command too long"); 100-byte paths leave the manager's new-session room.
+func TestManagerArgvFitsTmux(t *testing.T) {
+	path := "/" + strings.Repeat("p", 99)
+	argv := slices.Concat([]string{"new-session", "-d", "-x", "200", "-y", "50", "-s", Manager, "-c", path, "-n", "Boss", "-PF", "#{pane_id}"},
+		viaLoginShell(path+"/zsh", slices.Concat([]string{path, "pty-wrap", "--"}, coordinatorArgv(Manager, path, 300000))))
+	size := 0
+	for _, a := range argv {
+		size += len(a) + 1
+	}
+	if size > 16100 {
+		t.Errorf("❌ the manager's new-session is %d bytes, over 16100: shorten managerPrompt", size)
 	}
 }
