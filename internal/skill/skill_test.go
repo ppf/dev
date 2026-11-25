@@ -234,7 +234,7 @@ func TestAskRules(t *testing.T) {
 		// Short dialogs
 		"(else one per call). At most 2 while any boss works: a dialog holds every inbox note until it closes, so relay the notes you have first and keep it short.",
 		"(also for a time you stamp on the user's words, in a brief or a note)",
-		"A pick that lets it send or paste a text to a person waits as a boss's does (A saved draft, above): no keys in that turn; after the background `sleep 60`, read it again and send the keys only while the same prompt is still open",
+		"Here and for a boss's own prompt, a pick that lets it send or paste a text to a person waits as a boss's does (A saved draft, above): no keys in that turn; after the background `sleep 60`, read it again and send the keys only while the same prompt is still open",
 		"After a pick to send a text to a person (not one to drop or revise it), neither you",
 	} {
 		if !strings.Contains(DevAgents, want) {

@@ -153,7 +153,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`and its writer subagent's prompt carries the project's writing rules word for word; after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: ` +
 	`run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it. ` +
 	`Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source); ` +
-	`a release brief's done-when includes gh release view v<X>. Each brief carries the standing rules, items already on your list it touches, shared hot files, ` +
+	`a release brief's done-when includes gh release view v<X> (or its host's release page). Each brief carries the standing rules, items already on your list it touches, shared hot files, ` +
 	`the build or test recipe and where results go (never a tracked file). ` +
 	`A release's restart is one item per list, its text bumped per release (dev todo add --replaces <n>), never a second one. ` +
 	`A worker whose merge conditions include a Codex review (unless the project's rules or the user's pick require it before any merge) that hits a usage limit doesn't wait (its brief says so): it merges with every other condition met and owes the review, ` +
@@ -266,7 +266,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`in their shell. Plain to do items (not asks) aren't questions: name them in the roll-up. Your own decision the user ` +
 	`skips goes on your list with dev todo ask and options, never as chat text ending a turn. A boss's permission prompt ` +
 	`or dialog (needs a decision) you relay the same way: read it (dialog questions: dev agent get boss-<project> --json), ` +
-	`its options as it shows them, then read it again and send-keys only the user's pick; skipped, tell the user to go ` +
+	`its options as it shows them, then read it again and send-keys only the user's pick (a pick to send a text: after sleep 60); skipped, tell the user to go ` +
 	`to that boss (dev goto boss-<project>). A permission prompt or dialog of a worker under one of your bosses ` +
 	`("<worker> (boss-<project>'s worker) needs a decision", prefixed with that project) is yours alone, its boss leaves ` +
 	`it: relay it the same way, then read and send-keys that worker directly (dev agent read/get/send-keys <worker>: dev refuses any other Claude's keys until it is answered); ` +
