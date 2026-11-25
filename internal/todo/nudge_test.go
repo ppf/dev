@@ -375,3 +375,23 @@ func TestFlaggedWaitingUnchanged(t *testing.T) {
 		t.Error("merged not flagged, want flagged")
 	}
 }
+
+// A waiting item whose PR already merged at its first lookup is news: its unchanged nudge isn't "no action" nor once only.
+func TestNudgesWaitingPRMerged(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "Review of #418", On: "Marek", Link: prURL}, t0); err != nil {
+		t.Fatal(err)
+	}
+	p := &prs{states: map[string]sidebar.PRView{prURL: {State: "MERGED", Review: "APPROVED", Checks: sidebar.CIPassed, Ended: t0}}}
+	if err := s.Lookup(t0, 0, 0, p.view); err != nil {
+		t.Fatal(err)
+	}
+	day := 24 * time.Hour
+	for _, d := range []time.Duration{2, 4} {
+		got := nudges(t, s, t0.Add(d*day))
+		if len(got) != 1 || strings.Contains(got[0], "no action") {
+			t.Errorf("%dd: %q, want a nudge without no action", d, got)
+		}
+	}
+}

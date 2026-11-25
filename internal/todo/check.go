@@ -124,7 +124,7 @@ func check(it Item, f fact, boss string, now time.Time) *sidebar.Check {
 		}
 	}
 	if it.stale(now) {
-		return &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: it.noNews(boss, f)}
+		return &sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: it.waitingFor(boss)}
 	}
 	return nil
 }
@@ -141,9 +141,6 @@ func (it Item) stale(now time.Time) bool {
 func (it Item) waitingFor(boss string) bool {
 	return !Own(it.On, it.Session, boss) && !OnBoss(it.On, it.Session) && it.Session == nil && it.Added >= linked
 }
-
-// noNews reports a waiting item whose PR hasn't moved (a move is news): its unchanged check needs no action.
-func (it Item) noNews(boss string, f fact) bool { return it.waitingFor(boss) && len(moves(it, f)) == 0 }
 
 // A linked PR's state as Shown.PRState gives it.
 const (
@@ -438,7 +435,7 @@ const (
 // Nudges are the open items to tell their boss about at now, each reason once, keeping that it was told: its PR
 // merged, closed, approved, changes requested, checks green or failing since its first lookup; the worker it is on
 // (Session) not among workers any more; unchanged for two days (as check, an ask and a dated item aside), told again
-// after two more days without a --replaces (an item waiting for a person, its PR not moved: once only, no news is no
+// after two more days without a --replaces (an item waiting for a person, nothing else to check: once only, no news is no
 // reason). workers is read only when an open item is on one; with tell, they count as told only once tell took them.
 // The facts of items no longer open go.
 func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell func([]Nudge) error) ([]Nudge, error) {
@@ -477,7 +474,9 @@ func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell fun
 				tell(toldGone, "its session is gone")
 			}
 			// One waiting for a person is told once: no news since is no reason to tell again
-			waiting := it.noNews(s.boss, fc)
+			// Its PR's state is news, as check puts it first: only an unchanged check left needs no action
+			c := check(it, fc, s.boss, now)
+			waiting := c != nil && c.NoAction()
 			if it.stale(now) && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged && !(waiting && fc.Told[toldUnchanged] != 0) {
 				tell(toldUnchanged, (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: waiting}).Long(now))
 			}
