@@ -1,6 +1,7 @@
 package herd
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -9,11 +10,15 @@ import (
 // the live dev's.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "herd-state-")
+	if err == nil {
+		err = os.Setenv("XDG_STATE_HOME", dir)
+	}
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("XDG_STATE_HOME", dir)
 	code := m.Run()
-	os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
 	os.Exit(code)
 }
