@@ -278,8 +278,8 @@ func TestNotesTextStale(t *testing.T) {
 	}
 }
 
-// At the cap the oldest note whose item is done goes before an older one still open; a state note is never the one
-// dropped while another goes; a failed add drops nothing.
+// At the cap the oldest note whose item is done goes before an older one still open; said and state notes are never
+// dropped; a failed add drops nothing.
 func TestNoteCapDropsDelivered(t *testing.T) {
 	s := store(t)
 	now := time.Unix(1700000000, 0)
@@ -312,6 +312,72 @@ func TestNoteCapDropsDelivered(t *testing.T) {
 	}
 	_, d, err = s.AddNoteDropping(Note{Kind: NoteRisk, Text: "newer"}, now)
 	if err != nil || d == nil || d.Text != "old open" {
-		t.Fatalf("dropped %+v, %v; want the oldest not a state note", d, err)
+		t.Fatalf("dropped %+v, %v; want the oldest decided or risk note", d, err)
+	}
+}
+
+// said and state notes are never dropped at the cap: the oldest decided or risk goes, and with only said and state
+// notes left the add is refused with the count.
+func TestNoteCapKeepsSaid(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.AddNote(Note{Kind: NoteSaid, Text: "Opus default", Until: now.Add(time.Hour).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNote(Note{Kind: NoteDecided, Text: "decision"}, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 2; i < MaxNotes; i++ {
+		if _, err := s.AddNote(Note{Kind: NoteSaid, Text: "rule", Until: now.Add(time.Hour).Unix()}, now.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, d, err := s.AddNoteDropping(Note{Kind: NoteRisk, Text: "new"}, now.Add(2*time.Minute))
+	if err != nil || d == nil || d.Text != "decision" {
+		t.Fatalf("dropped %+v, %v; want the decided note, not the older said one", d, err)
+	}
+	_, d, err = s.AddNoteDropping(Note{Kind: NoteSaid, Text: "x", Until: now.Add(time.Hour).Unix()}, now.Add(3*time.Minute))
+	if err != nil || d == nil || d.Text != "new" {
+		t.Fatalf("dropped %+v, %v; want the risk note", d, err)
+	}
+	_, d, err = s.AddNoteDropping(Note{Kind: NoteRisk, Text: "refused"}, now.Add(4*time.Minute))
+	if err == nil || d != nil || !strings.Contains(err.Error(), "12 notes") {
+		t.Fatalf("dropped %+v, %v; want a refusal naming 12 notes", d, err)
+	}
+	if notes, _ := s.Notes(now); len(notes) != MaxNotes {
+		t.Errorf("%d notes after the refusal, want %d", len(notes), MaxNotes)
+	}
+}
+
+// A said note tied to a finished item is still kept; state plus said notes alone refuse the add.
+func TestNoteCapKeepsDoneSaid(t *testing.T) {
+	s := store(t)
+	now := time.Unix(1700000000, 0)
+	if _, err := s.Add(Item{Text: "Merge #4"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []Note{
+		{Kind: NoteSaid, Text: "tied", Item: 1},
+		{Kind: NoteState, Text: "state"},
+		{Kind: NoteRisk, Text: "risk"},
+	} {
+		if _, err := s.AddNote(n, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 3; i < MaxNotes; i++ {
+		if _, err := s.AddNote(Note{Kind: NoteSaid, Text: "rule", Until: now.Add(time.Hour).Unix()}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Done([]int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	_, d, err := s.AddNoteDropping(Note{Kind: NoteSaid, Text: "new", Until: now.Add(time.Hour).Unix()}, now)
+	if err != nil || d == nil || d.Text != "risk" {
+		t.Fatalf("dropped %+v, %v; want the risk note, not the said note with its item done", d, err)
+	}
+	if _, d, err = s.AddNoteDropping(Note{Kind: NoteRisk, Text: "refused"}, now); err == nil || d != nil {
+		t.Fatalf("dropped %+v, %v; want a refusal with only said and state notes left", d, err)
 	}
 }
