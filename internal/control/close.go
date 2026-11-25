@@ -32,19 +32,28 @@ type Closed struct {
 	Files   []string `json:"files,omitempty"`
 }
 
-// Close closes worker a for the coordinator in pane, archiving its untracked files. It refuses unless pane's
-// session started a, a is idle (or waiting only because it sat idle), and a's worktree (under .claude/worktrees,
-// used by no other session) has no tracked changes and its HEAD is in origin's default branch (without origin, the
-// main checkout's branch), or is the head of a PR/MR that is open (into any branch), or merged into that branch.
+// Close closes worker a for the coordinator in pane ("" for a plain terminal, which may close only a worker nobody
+// started), archiving its untracked files. It refuses a worker another session started, and unless a is idle (or
+// waiting only because it sat idle) and a's worktree (under .claude/worktrees, used by no other session) has no
+// tracked changes and its HEAD is in origin's default branch (without origin, the main checkout's branch), or is the head of a PR/MR that is open (into any branch), or merged into that branch.
 func Close(c *tmux.Client, pane string, a Agent) (Closed, error) {
 	done := Closed{Session: a.Session}
-	own, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
-	if err != nil {
-		return done, err
+	own := ""
+	if pane != "" {
+		out, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+		if err != nil {
+			return done, err
+		}
+		own = strings.TrimSpace(out)
 	}
-	own = strings.TrimSpace(own)
-	if a.StartedBy != own {
-		return done, fmt.Errorf("%s wasn't started by this session (%s), but by %q: close only your own workers", a.Session, own, a.StartedBy)
+	if own == a.Session {
+		return done, fmt.Errorf("%s is this session: close it from another", a.Session)
+	}
+	if a.starterGone {
+		return done, fmt.Errorf("%s was started by a session that is gone: not closable, since it may be another coordinator's", a.Session)
+	}
+	if a.StartedBy != "" && a.StartedBy != own {
+		return done, fmt.Errorf("%s was started by %q, not by this session (%s): close only your own workers or ones nobody started", a.Session, a.StartedBy, own)
 	}
 	mainRoot, wt, ok := worktree.SessionWorktree(a.Path)
 	if !ok {
@@ -479,6 +488,12 @@ func kill(c *tmux.Client, session, to string, record sidebar.Ended) (string, err
 		return "", err
 	}
 	for _, client := range strings.Fields(clients) {
+		if to == "" { // a plain terminal has no session to move them to
+			if _, err := c.Run("detach-client", "-t", client); err != nil {
+				return "", err
+			}
+			continue
+		}
 		if _, err := c.Run("switch-client", "-c", client, "-t", tmux.SessionTarget(to)); err != nil {
 			return "", err
 		}

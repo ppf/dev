@@ -56,6 +56,8 @@ type Agent struct {
 	CostError     string   `json:"cost_error,omitempty"`
 	// StartedBy is the session whose coordinator started this one with `dev agent start`; "" otherwise.
 	StartedBy string `json:"started_by,omitempty"`
+	// starterGone: it has a starter tag, but no live session answers to it.
+	starterGone bool
 	// Boss marks a `dev boss` coordinator session.
 	Boss bool `json:"boss,omitempty"`
 	// Outside marks a worker a coordinator outside tmux started for StartedBy (dev agent start --boss).
@@ -232,7 +234,7 @@ func list(c *tmux.Client) ([]Agent, error) {
 		sessions = append(sessions, s)
 		ag := Agent{
 			Session: r.Session, Pane: a.Pane.ID, Label: a.Label, State: a.State,
-			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], Boss: r.Herd != "",
+			Project: r.Project, Path: a.Pane.Path, StartedBy: names[r.StartedBy], starterGone: r.StartedBy != "" && names[r.StartedBy] == "", Boss: r.Herd != "",
 			Outside: r.Outside != "", Model: r.Model, Effort: r.Effort, HideCost: sidebar.CostHidden(r.CostOpt),
 		}
 		ag.Deciding = agent.Deciding(a.State, byID[a.Pane.ID].WaitingFor)

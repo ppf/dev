@@ -59,7 +59,9 @@ func TestAgentClose(t *testing.T) {
 	if out, err := devCmd(coord, idle, "state", "idle"); err != nil {
 		t.Fatalf("❌ dev state idle: %v\n%s", err, out)
 	}
+	d.T("new-session", "-d", "-s", "rival", "sleep 600")
 	worker("other", false, "idle", idle)
+	d.T("set-option", "-t", "=other:", "@dev_started_by", d.T("display", "-t", "=rival:", "-p", "#{session_id}"))
 	writeFile(t, filepath.Join(worker("dirty", true, "idle", idle), ".gitignore"), "changed")
 	ahead := worker("ahead", true, "idle", idle)
 	writeFile(t, filepath.Join(ahead, "f.txt"), "f")
@@ -78,7 +80,7 @@ func TestAgentClose(t *testing.T) {
 	waitFor(t, "codex running", func() bool { return d.T("display", "-t", "=codex:", "-p", "#{pane_current_command}") == "codex" })
 
 	for name, want := range map[string]string{
-		"other":    "other wasn't started by this session (coord)",
+		"other":    `other was started by "rival", not by this session (coord)`,
 		"dirty":    "has uncommitted changes to tracked files",
 		"ahead":    "has commits that aren't in origin/main",
 		"busy":     "busy is working",
@@ -232,6 +234,50 @@ func TestAgentClose(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(results, "RESULT.md")); err != nil || string(b) != "# result" {
 		t.Errorf("❌ first results = %q, %v; want them kept", b, err)
 	}
+
+	// A worker nobody started (plain terminal, desktop) closes from any coordinator, or from a plain terminal
+	for _, tt := range []struct{ name, from string }{{"unowned-coord", coord}, {"unowned-plain", ""}} {
+		wt := worker(tt.name, false, "idle", idle)
+		if out, err := devCmd(tt.from, "", "agent", "close", tt.name); err != nil {
+			t.Errorf("❌ close %s: %v\n%s", tt.name, err, out)
+		}
+		if _, err := d.Try("has-session", "-t", "="+tt.name+":"); err == nil {
+			t.Errorf("❌ unowned session %s still there", tt.name)
+		}
+		check(t, tt.name+" worktree removed", boolStr(strings.Contains(git(t, root, "worktree", "list"), wt)), "0")
+	}
+	// Its delivered checks still apply, and a started worker or a boss isn't closable from a plain terminal
+	writeFile(t, filepath.Join(worker("unowned-dirty", false, "idle", idle), ".gitignore"), "changed")
+	worker("unowned-boss", false, "idle", idle)
+	d.T("set-option", "-t", "=unowned-boss:", "@dev_herd", "1")
+	worker("other-plain", true, "idle", idle)
+	worker("orphan", false, "idle", idle)
+	d.T("set-option", "-t", "=orphan:", "@dev_started_by", "$999")
+	for _, tt := range []struct{ name, from, want string }{
+		{"orphan", coord, "started by a session that is gone"},
+		{"unowned-dirty", "", "has uncommitted changes to tracked files"},
+		{"other-plain", "", "run it inside tmux"},
+		{"unowned-boss", "", "run it inside tmux"},
+	} {
+		if out, err := devCmd(tt.from, "", "agent", "close", tt.name); err == nil || !strings.Contains(out, tt.want) {
+			t.Errorf("❌ close %s = %v, %q; want an error with %q", tt.name, err, out, tt.want)
+		}
+		if _, err := d.Try("has-session", "-t", "="+tt.name+":"); err != nil {
+			t.Errorf("❌ refused close of %s killed it", tt.name)
+		}
+	}
+	// From a shell inside the worker's own session: refused, the session survives
+	worker("selfclose", false, "idle", idle)
+	shell := d.T("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=selfclose:", "sleep 600")
+	if out, err := devCmd(shell, "", "agent", "close", "selfclose"); err == nil || !strings.Contains(out, "is this session") {
+		t.Errorf("❌ close of own session = %v, %q; want it refused", err, out)
+	}
+	worker("unowned-boss-flag", false, "idle", idle)
+	d.T("set-option", "-t", "=coord:", "@dev_herd", "1")
+	if out, err := devCmd("", "", "agent", "close", "unowned-boss-flag", "--boss", "coord"); err != nil {
+		t.Errorf("❌ close unowned --boss coord: %v\n%s", err, out)
+	}
+	d.T("set-option", "-t", "=coord:", "-u", "@dev_herd")
 
 	// Outside tmux, --boss names the coordinator, once it's a boss session; a worker it started is only its own
 	worker("remote", true, "idle", idle)
