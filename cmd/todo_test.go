@@ -727,6 +727,28 @@ func TestTodoDoneOn(t *testing.T) {
 	}
 }
 
+// add --ends takes restart:<version> or test:<version>, never on an ask; dev todo check ticks an older version test
+// once a newer one is on the list, by dev, the result saying why.
+func TestTodoEnds(t *testing.T) {
+	todoEnv(t)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	for _, args := range [][]string{{"todo", "add", "--no-details", "x", "--ends", "reboot:v1.0.0"}, {"todo", "add", "--no-details", "x", "--ends", "test:1.0"},
+		{"todo", "ask", "Restart?", "--option", "Yes", "--option", "No", "--ends", "restart:v1.0.0"}} {
+		if _, _, err := execute(t, "", args...); err == nil {
+			t.Errorf("❌ dev %s: want an error", strings.Join(args, " "))
+		}
+	}
+	run(t, "", "todo", "add", "--no-details", "Check v0.83.0 on the iPad", "--ends", "test:v0.83.0")
+	run(t, "", "todo", "add", "--no-details", "Keep")
+	if got := run(t, "", "todo", "check"); got != "1\t☐\tCheck v0.83.0 on the iPad\tends test:v0.83.0\n2\t☐\tKeep\n" {
+		t.Errorf("❌ no newer test: %q", got)
+	}
+	run(t, "", "todo", "add", "--no-details", "Test v0.93.0 by hand", "--ends", "test:v0.93.0")
+	if got := run(t, "", "todo", "check"); !strings.Contains(got, "1\t☑\tCheck v0.83.0 on the iPad\tends test:v0.83.0\tclosed by dev: v0.93.0 replaced v0.83.0 (#3)\n") {
+		t.Errorf("❌ check = %q, want #1 closed by dev", got)
+	}
+}
+
 // note adds, prints and drops; a refusal leaves the notes as they were.
 func TestTodoNote(t *testing.T) {
 	todoEnv(t)

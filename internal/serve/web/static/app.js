@@ -522,11 +522,12 @@ function doneRow(x) {
   const { list, it } = x, who = whoOf(x);
   const named = project(list) + ' #' + it.id + (it.quiet ? ', test' : '') + ', ' + (who === ME ? 'you' : who) + (it.done_at ? ', ' + age(it.done_at) + ' ago' : '') + ': ' + it.text;
   // Focusable, so a card ticked from the keyboard keeps focus
-  return el('article', { class: 'card done' + (it.decided ? ' has-dec' : '') + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
+  return el('article', { class: 'card done' + (it.decided || it.done_by === 'dev' ? ' has-dec' : '') + (x.moving ? ' moving' : ''), title: named, 'aria-label': named, tabindex: '-1', 'data-f': 'done:' + itemHash(list.boss, it.id) },
     movingBand(x), el('span', { class: 'ok', 'aria-hidden': 'true' }, '✓'), dot(project(list)), el('span', { class: 'pn' }, project(list)), el('span', { class: 'num' }, '#' + it.id),
     el('a', { class: 't row', href: doneHash(list.boss, it), 'data-f': doneHash(list.boss, it) }, it.text), it.quiet && el('span', { class: 'tag test' }, 'TEST'), prChip(it),
     it.done_at && el('span', { class: 'age' }, age(it.done_at)), avatar(who, kindOf(x), true, 'sm'),
-    it.decided && el('span', { class: 'tag wait dec' }, 'decided for you: ' + it.decided.by));
+    it.decided && el('span', { class: 'tag wait dec' }, 'decided for you: ' + it.decided.by),
+    it.done_by === 'dev' && el('span', { class: 'tag wait dec' }, it.result));
 }
 
 // filters are the Project chips (a menu on the phone) and the Assignee avatars; those toggle, several at once, ME first.
@@ -868,7 +869,7 @@ function liveBlock(x) {
 }
 
 // BY is who ticked an item (done_by) as the sheet says it; a boss by its name
-const BY = { you: 'you', until: 'itself, at its time', 'done-on': "itself, at its PR's move" };
+const BY = { you: 'you', until: 'itself, at its time', 'done-on': "itself, at its PR's move", dev: 'dev' };
 const byOf = it => BY[it.done_by] || it.done_by;
 
 // overrulable is a ticked ask decided for the user that todo.Overrule takes: its boss running to be told, ticked under a

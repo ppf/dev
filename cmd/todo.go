@@ -283,9 +283,10 @@ func newTodoAddCmd(boss *string) *cobra.Command {
 	cmd.Flags().StringVar(&it.Link, "link", "", "a link for it, e.g. its PR's URL")
 	cmd.Flags().StringVar(&until, "until", "", `tick it by itself at this local time: 15:30 (today), 2026-11-16 (that day's end), "2026-11-16 10:00"`)
 	cmd.Flags().StringVar(&it.DoneOn, "done-on", "", "tick it by itself once its --link GitHub PR is merged, approved or green (checks passed), its first lookup included, and tell the boss; only this flag does, never the item's text")
+	cmd.Flags().StringVar(&it.Ends, "ends", "", "dev ticks it by itself once its own state shows it over, and tells the boss: restart:<version> once every running coordinator (the manager, each dev boss) started fresh on that dev version or later (a /clear or resume isn't one); test:<version> once a test:<newer version> item is on this list (the tick names it)")
 	cmd.Flags().StringArrayVar(&it.Context, "context", nil, "a line of context under the item, in order (with --replaces, replaces its context)")
 	cmd.Flags().StringVar(&it.Details, "details", "", detailsHelp)
-	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --context, --details, --part-of not given, and its doing line unless --on changes")
+	cmd.Flags().IntVar(&replaces, "replaces", 0, "put it in place of open item n, keeping n's number, place and the text, --on, --link, --until, --done-on, --ends, --context, --details, --part-of not given, and its doing line unless --on changes")
 	cmd.Flags().BoolVar(&it.NoDetails, "no-details", false, "an item the user does that needs no details, kept on it (never marked or counted as missing them) while the user does it without details (--details, --on or --waiting-for drop it); a waiting item still warns: without it or that mark, one the user does with none (none given, none kept by --replaces) is refused")
 	cmd.Flags().BoolVar(&it.Quiet, "quiet", false, quietHelp)
 	cmd.Flags().IntVar(&it.PartOf, "part-of", 0, "the other half of a task split between two assignees: open item n, not linked yet; both show the link until one leaves the list")
@@ -820,10 +821,11 @@ to re-check marked ⚠ with why: its PR merged or closed; approved, changes requ
 item was added or replaced (its first lookup after that); its PR's lookups failing for 20 minutes; unchanged for 2 days
 or more (not an ask, nor a dated item before its --until). An item on a worker session gone says so (session gone),
 not on a closed boss's list, which --boss checks too.
-An item added with --done-on ticks by itself once a lookup finds its PR in that state.
+An item added with --done-on ticks by itself once a lookup finds its PR in that state; one added with --ends, once
+dev's state shows it over (closed by dev: its rule).
 A dev boss's previews look its items' PRs up by themselves (the manager's, the closed bosses' lists' too): every 15
 seconds two of those not looked up for 10 minutes; then, with its inbox on, they tell the boss in it, once per item and reason, of each PR move, worker gone, and of each item unchanged
-for 2 days (again after 2 more without --replaces), and of each item ticked by --done-on; an --until tick, and on a
+for 2 days (again after 2 more without --replaces), and of each item ticked by --done-on or --ends; an --until tick, and on a
 desktop app boss every tick, is in the boss's next reminder. A desktop app boss runs this. A lookup that failed prints
 on stderr; the list still prints.`,
 		Args: cobra.NoArgs,
@@ -831,6 +833,10 @@ on stderr; the list still prints.`,
 			s, closed, err := listStore(*boss, true, cmd.ErrOrStderr())
 			if err != nil {
 				return err
+			}
+			// Its rules first; a failure, as a lookup's, still prints the list
+			if _, err := s.Expire(time.Now(), func() ([]todo.Start, error) { return todo.Starts(tmux.New()) }); err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "⚠ dev todo check: "+err.Error())
 			}
 			var lookups []error
 			if err := s.Lookup(time.Now(), 0, 0, func(url string) (sidebar.PRView, error) {
@@ -1327,6 +1333,9 @@ func todoLine(it todo.Shown, now time.Time) string {
 	if it.DoneOn != "" {
 		parts = append(parts, "done on "+it.DoneOn)
 	}
+	if it.Ends != "" {
+		parts = append(parts, "ends "+it.Ends)
+	}
 	// Read by other bosses and the manager too (--all): no "you"
 	if on := it.OnIt("the boss is on it"); on != "" {
 		parts = append(parts, on)
@@ -1334,6 +1343,8 @@ func todoLine(it todo.Shown, now time.Time) string {
 	switch {
 	case it.Decided != nil:
 		parts = append(parts, decidedLine(*it.Decided))
+	case it.DoneBy == todo.DoneByDev:
+		parts = append(parts, it.Result)
 	case it.Answer != "":
 		parts = append(parts, "answered: "+it.Answer)
 	case len(it.Options) > 0:

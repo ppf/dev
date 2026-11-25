@@ -826,6 +826,9 @@ func cardLines(c card, sel bool, cw int, now time.Time) []string {
 	case c.done && it.Decided != nil:
 		// A ticked card has no doing line: who decided it for the user takes it
 		doing = sidebar.Gold + ansi.Truncate("decided for you: "+it.Decided.By, cw, "…") + reset
+	case c.done && it.DoneBy == todo.DoneByDev:
+		// Closed or withdrawn by dev's rule, which its Result names
+		doing = sidebar.Gold + ansi.Truncate(it.Result, cw, "…") + reset
 	case mk.line != "":
 		doing = mk.lineColour + ansi.Truncate("▸ "+strings.Join(strings.Fields(mk.line), " "), cw, "…") + reset
 	}

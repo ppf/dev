@@ -979,6 +979,19 @@ func TestDecidedLabel(t *testing.T) {
 	}
 }
 
+// A Done card dev ticked by its rule says why on the line of "decided for you", gold, cut to the card, no taller.
+func TestDevClosedLabel(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	for _, result := range []string{"closed by dev: restarted on v0.93.0", "withdrawn by dev: the manager worked on"} {
+		it := todo.Shown{ID: 152, Text: "Restart for v0.93.0", Done: true, DoneBy: todo.DoneByDev, Result: result,
+			Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}
+		if lines := cardLines(card{boss: "boss-dev", it: it, done: true}, false, cardW, now); len(lines) != cardH || !strings.HasPrefix(lines[4], sidebar.Gold) ||
+			!strings.HasPrefix(result, strings.TrimSuffix(ansi.Strip(lines[4]), "…")) {
+			t.Errorf("❌ %q", lines)
+		}
+	}
+}
+
 // An open ask whose question the manager has up says so on its fifth line, gold, where what is done on it goes.
 func TestAskingLine(t *testing.T) {
 	now := time.Unix(1700000000, 0)

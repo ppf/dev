@@ -292,30 +292,39 @@ func (it Item) checkDoneOn() error {
 	return nil
 }
 
-// Ticked is an item that ticked by itself: on its PR's move (PR, On its --done-on), else at its --until time.
+// Ticked is an item that ticked by itself: on its PR's move (PR, On its --done-on), by dev's rule (Rule, its Result;
+// Ends its --ends, "" for an offer dev withdrew), else at its --until time.
 type Ticked struct {
 	ID   int    `json:"id"`
 	Text string `json:"text"`
 	PR   int    `json:"pr,omitempty"`
 	On   string `json:"on,omitempty"`
+	Ends string `json:"ends,omitempty"`
+	Rule string `json:"rule,omitempty"`
 }
 
 // String is the tick as its boss is told it: `#8 "Second review of #415" ticked by itself: PR #415 approved (--done-on
-// approved)`, or `… ticked by itself: its --until time came`.
+// approved)`, `… ticked by itself: its --until time came`, or `#3 "Test v0.83.0" closed by dev: v0.93.0 replaced v0.83.0
+// (#9) (--ends test:v0.83.0)`, or `#1 "Clear the manager's context?" withdrawn by dev: the manager worked on`.
 func (t Ticked) String() string {
-	why := "its --until time came"
-	if t.PR != 0 {
+	why := "ticked by itself: its --until time came"
+	switch {
+	case t.Ends != "":
+		why = fmt.Sprintf("%s (--ends %s)", t.Rule, t.Ends)
+	case t.Rule != "":
+		why = t.Rule
+	case t.PR != 0:
 		state := t.On
 		if t.On == OnGreen {
 			state = sidebar.CheckGreen
 		}
-		why = fmt.Sprintf("PR #%d %s (--done-on %s)", t.PR, state, t.On)
+		why = fmt.Sprintf("ticked by itself: PR #%d %s (--done-on %s)", t.PR, state, t.On)
 	}
 	if t.ID == 0 {
 		// Its item left the list before a take-over renumbered it
-		return fmt.Sprintf("%q ticked by itself: %s", t.Text, why)
+		return fmt.Sprintf("%q %s", t.Text, why)
 	}
-	return fmt.Sprintf("#%d %q ticked by itself: %s", t.ID, t.Text, why)
+	return fmt.Sprintf("#%d %q %s", t.ID, t.Text, why)
 }
 
 // tell keeps t for the boss to be told.

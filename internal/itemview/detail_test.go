@@ -178,6 +178,18 @@ func TestDoneBlock(t *testing.T) {
 	}
 }
 
+// An item dev ticked by its rule: one line, the rule's result, when, by dev; no "what was done".
+func TestDevClosedLine(t *testing.T) {
+	it := Item{Boss: "boss-dev", DoneAt: now.Add(-time.Hour).Unix(), Shown: todo.Shown{ID: 213, Text: "Check v0.83.0 on the iPad", Done: true, DoneBy: todo.DoneByDev,
+		Result:    "closed by dev: v0.93.0 replaced v0.83.0 (#310)",
+		Placement: todo.Placement{Column: sidebar.ColumnDone, Assignee: todo.Assignee{Kind: sidebar.AssigneeYou}}}}
+	v := ansi.Strip(New(it, Actions{}, false).View(Width, 50, now))
+	at := now.Add(-time.Hour).Format("15:04")
+	if !strings.Contains(v, "─ closed by dev: v0.93.0 replaced v0.83.0 (#310) ─") || !strings.Contains(v, at+" · by dev ─") || strings.Contains(v, "what was done") {
+		t.Errorf("❌ dev's line:\n%s", v)
+	}
+}
+
 // An ask decided for the user: who decided and when, the pick (★) over the others and why, in place of what was done.
 func TestDecidedBlock(t *testing.T) {
 	it := Item{Boss: "boss-dev", DoneAt: now.Add(-time.Hour).Unix(), Shown: todo.Shown{ID: 34, Text: "Re-run CI on #301?", Done: true, DoneBy: todo.DecidedManager, Answer: "Re-run the job",
