@@ -26,6 +26,20 @@ type devServer struct {
 	outer   *server // its session "out" shows the attached client's terminal
 }
 
+// promptFile is the path dev boss wrote a coordinator's prompt to, role "manager" or "boss", after checking it
+// is the only one and starts with want.
+func (d *devServer) promptFile(role, want string) string {
+	d.t.Helper()
+	paths, _ := filepath.Glob(filepath.Join(d.tmp, "state", "dev", "prompts", role+"-*.md"))
+	if len(paths) != 1 {
+		d.t.Fatalf("%s prompts: %q, want one", role, paths)
+	}
+	if got, err := os.ReadFile(paths[0]); err != nil || !strings.HasPrefix(string(got), want) {
+		d.t.Errorf("%s: %.40q, %v; want it to start with %q", paths[0], got, err, want)
+	}
+	return paths[0]
+}
+
 // newDevServer starts the server with extraConf appended to the base config.
 func newDevServer(t *testing.T, extraConf string) *devServer {
 	t.Helper()

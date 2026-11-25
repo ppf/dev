@@ -90,7 +90,7 @@ func TestResurrectBoss(t *testing.T) {
 	log, _ := os.ReadFile(d.stubLog)
 	// Its compaction hook runs this dev
 	if line := strings.TrimSpace(string(log)); !strings.HasPrefix(line, coordinator+" claude --resume b1 --effort medium --settings {\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"command\":\"'"+devBin+"' 'state' 'idle'\"") ||
-		!strings.Contains(line, `"matcher":"compact"}]}} --append-system-prompt You are the coordinator`) || !strings.HasSuffix(line, "--remote-control=boss-app") {
+		!strings.Contains(line, `"matcher":"compact"}]}} --append-system-prompt-file `+d.promptFile("boss", "You are the coordinator")+" ") || !strings.HasSuffix(line, "--remote-control=boss-app") {
 		t.Errorf("coordinator command: %q", line)
 	}
 	waitFor(t, "previews restarted", func() bool { return display(previews, "#{pane_current_command}") == "dev" })
@@ -165,7 +165,7 @@ func TestResurrectManager(t *testing.T) {
 	check(t, "restored manager only printed", errStatus(err)+" "+string(out), "0 manager running: dev goto manager\n")
 	start, _ := d.Try("display", "-t", "=manager:1.1", "-p", "#{pane_start_command}")
 	if !strings.Contains(start, `'claude' '--model' 'opus' '--effort' 'medium' '--settings' '{\"disableClaudeAiConnectors\":true,\"hooks\":`) ||
-		!strings.Contains(start, `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt' 'You are the manager`) ||
+		!strings.Contains(start, `\"matcher\":\"compact\"}]}}' '--autocompact' '300000' '--append-system-prompt-file' '`+d.promptFile("manager", "You are the manager")+"'") ||
 		!strings.Contains(start, `'--remote-control=manager'`) {
 		t.Errorf("restored manager's coordinator: %q", start)
 	}

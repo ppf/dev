@@ -3,7 +3,9 @@
 package herd
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -389,8 +391,7 @@ func withSidebar(c *tmux.Client, session string, from sidebar.Origin) error {
 	return ensureErr
 }
 
-// create builds the boss layout and returns the coordinator's pane, start recorded on the session; commands go
-// to tmux as argv, so the prompt needs no shell quoting.
+// create builds the boss layout and returns the coordinator's pane, start recorded on the session.
 func create(c *tmux.Client, session, project, dir string, start agent.Start) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -484,7 +485,11 @@ func coordinatorCmd(c *tmux.Client, session string, args ...string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	argv, err := ptywrap.Argv(coordinatorArgv(session, exe, window, args...)...)
+	prompt, err := writePrompt(session)
+	if err != nil {
+		return nil, err
+	}
+	argv, err := ptywrap.Argv(coordinatorArgv(session, exe, prompt, window, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -516,18 +521,52 @@ func coordinatorSettings(exe string, manager bool) string {
 	return string(data)
 }
 
-// coordinatorArgv is the coordinator Claude's argv with args and coordinatorSettings for exe: the Manager's with
-// managerPrompt and its auto-compact window (config.ManagerAutoCompact; 0: Claude Code's own).
-func coordinatorArgv(session, exe string, window int, args ...string) []string {
-	prompt := coordinatorPrompt
-	args = append(slices.Clone(args), "--settings", coordinatorSettings(exe, session == Manager))
+// writePrompt writes session's system prompt, managerPrompt or coordinatorPrompt, to a file under the state
+// directory and returns its path: passed inline it would outgrow the command size tmux allows. Named by its
+// text, so another dev version starting a coordinator never swaps the prompt of one still starting.
+func writePrompt(session string) (string, error) {
+	role, prompt := "boss", coordinatorPrompt
 	if session == Manager {
-		prompt = managerPrompt
-		if window > 0 {
-			args = append(args, "--autocompact", strconv.Itoa(window))
-		}
+		role, prompt = "manager", managerPrompt
 	}
-	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt", prompt)...)
+	sum := sha256.Sum256([]byte(prompt))
+	name := fmt.Sprintf("%s-%x.md", role, sum[:6])
+	state, err := config.StateDir()
+	if err != nil {
+		return "", err
+	}
+	// Absolute: claude opens it from the coordinator's own directory
+	dir, err := filepath.Abs(filepath.Join(state, "prompts"))
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	// Renamed into place: a coordinator starting at the same time never reads a half-written file
+	tmp, err := os.CreateTemp(dir, name+".*")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name)
+	_, err = tmp.WriteString(prompt)
+	if err = errors.Join(err, tmp.Close()); err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		return "", errors.Join(err, os.Remove(tmp.Name()))
+	}
+	return path, nil
+}
+
+// coordinatorArgv is the coordinator Claude's argv with args, coordinatorSettings for exe and its system prompt
+// from the file at prompt: the Manager's with its auto-compact window (config.ManagerAutoCompact; 0: Claude Code's own).
+func coordinatorArgv(session, exe, prompt string, window int, args ...string) []string {
+	args = append(slices.Clone(args), "--settings", coordinatorSettings(exe, session == Manager))
+	if session == Manager && window > 0 {
+		args = append(args, "--autocompact", strconv.Itoa(window))
+	}
+	return agent.ClaudeArgv(session, false, append(args, "--append-system-prompt-file", prompt)...)
 }
 
 // bind marks claude and previews with their roles and closes target's session for good when either exits
