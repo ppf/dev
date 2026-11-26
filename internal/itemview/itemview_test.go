@@ -688,3 +688,21 @@ func TestWaitsOnAsk(t *testing.T) {
 		t.Errorf("a closed boss's item offers its ask:\n%s", v)
 	}
 }
+
+// The item view gives the clock time an item was added, with its age; another day's carries its date.
+func TestAddedClock(t *testing.T) {
+	at := time.Date(2026, 11, 26, 12, 0, 0, 0, time.Local)
+	for _, tt := range []struct {
+		added time.Time
+		want  string
+	}{
+		{at.Add(-2 * time.Hour), "added 10:00 (2h ago)"},
+		{at.Add(-13 * time.Hour), "added Nov 25 23:00 (13h ago)"},
+	} {
+		it := ask
+		it.Added = tt.added.Unix()
+		if v := ansi.Strip(New(it, (&recorder{}).actions(), false).View(Width, 40, at)); !strings.Contains(v, tt.want) {
+			t.Errorf("view missing %q:\n%s", tt.want, v)
+		}
+	}
+}
