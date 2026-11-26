@@ -604,6 +604,10 @@ func Trusted(state, stateCmd, command string) string {
 	return state
 }
 
+// ProofEnv, set in a dev run's environment (exported before a private tmux server starts, so its panes
+// have it), marks a proof or test run: dev restores no saved sessions and starts claude without Remote Control.
+const ProofEnv = "DEV_PROOF"
+
 // Claude is the agent kind whose sessions `dev state` records.
 const Claude = "claude"
 
@@ -618,10 +622,12 @@ const (
 // the pane title to the name, leaving the sidebar and previews no task title. Joined with =, as the name
 // is optional: a name starting with - would be taken for a flag. A worker (a new session dev agent start
 // opens from a pane) starts without Remote Control, session unused, even under remoteControlAtStartup:
-// --settings outranks the user's settings.
+// --settings outranks the user's settings. Every claude under DEV_PROOF (a proof or test run) starts the same way.
 func ClaudeArgv(session string, worker bool, args ...string) []string {
 	argv := append([]string{Claude}, args...)
-	if worker {
+	if proof := os.Getenv(ProofEnv) != ""; proof && slices.Contains(args, "--settings") {
+		return argv // the caller's settings carry remoteControlAtStartup:false
+	} else if worker || proof {
 		return append(argv, "--settings", `{"remoteControlAtStartup":false}`)
 	}
 	return append(argv, "--remote-control="+session)

@@ -514,6 +514,9 @@ func coordinatorSettings(exe string, manager bool) string {
 	if manager {
 		settings["disableClaudeAiConnectors"] = true
 	}
+	if os.Getenv(agent.ProofEnv) != "" {
+		settings["remoteControlAtStartup"] = false
+	}
 	data, err := json.Marshal(settings)
 	if err != nil {
 		panic(err) // maps of strings, bools and ints always marshal

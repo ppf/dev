@@ -154,6 +154,24 @@ func TestOpenFirstRunRestore(t *testing.T) {
 	check(t, "dev: warnings printed", outs["dev"], "⚠  Session restore: devt: slot busy\n\033]2;app\007")
 }
 
+// Under DEV_PROOF the first dev of a server restores nothing and marks the server restored, and its claude
+// starts without Remote Control.
+func TestOpenProofRunRestoresNothing(t *testing.T) {
+	requireFiles(t, filepath.Join(tmuxHome(t), "plugins/tmux-resurrect/scripts/restore.sh"))
+	dir := tempDir(t)
+	cfg := writeProjects(t, [2]string{"app", dir})
+	d := newDevServer(t, "")
+	writeFile(t, filepath.Join(d.tmp, "resurrect/last"),
+		"pane\tsaved\t1\t1\t:*\t1\trestored\t:"+dir+"\t1\tsh\t:\nstate\tboot\tboot\n")
+	_, err := runScript(d.scriptEnv(cfg, "DEV_PROOF=1"), devBin, "app")
+	check(t, "first run status", errStatus(err), "0")
+	_, err = d.Try("has-session", "-t", "=saved:")
+	check(t, "saved session not restored", strconv.FormatBool(err == nil), "false")
+	check(t, "@dev_restored set", d.T("show-option", "-gqv", "@dev_restored"), "1")
+	d.waitForStubs("app")
+	check(t, "claude without Remote Control", d.agentStub("app"), `claude --settings {"remoteControlAtStartup":false}`)
+}
+
 // The picker opens the chosen project's boss: Enter on a project creates boss-<name> (coordinator in its
 // directory) and switches the client to it, Enter again attaches to it, and a git repo gets no worktree step.
 func TestPickerBoss(t *testing.T) {

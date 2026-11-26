@@ -217,14 +217,19 @@ func tput(capability string) string {
 }
 
 // RestoreOnce restores saved sessions on the first dev of a tmux server, so `dev <name>` attaches to
-// the restored session instead of creating a new one.
+// the restored session instead of creating a new one. Under DEV_PROOF nothing is restored, only marked.
 func RestoreOnce(c *tmux.Client, home string, out io.Writer) error {
 	// An error here is usually "no server running": nothing restored yet either.
 	if done, err := c.Run("show-option", "-gqv", "@dev_restored"); err == nil && strings.TrimSpace(done) != "" {
 		return nil
 	}
-	res, err := c.Run("start-server", ";", "set-option", "-g", "@dev_restored", "1",
-		";", "run-shell", home+"/.tmux/plugins/tmux-resurrect/scripts/restore.sh")
+	cmd := []string{"start-server", ";", "set-option", "-g", "@dev_restored", "1"}
+	if os.Getenv(agent.ProofEnv) == "" {
+		cmd = append(cmd, ";", "run-shell", home+"/.tmux/plugins/tmux-resurrect/scripts/restore.sh")
+	} else {
+		fmt.Fprintf(out, "⚠  %s set: saved sessions not restored\n", agent.ProofEnv)
+	}
+	res, err := c.Run(cmd...)
 	fmt.Fprint(out, res)
 	if err != nil {
 		// Like bash, a failed restore is reported but doesn't stop the session from opening.

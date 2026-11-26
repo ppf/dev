@@ -1014,3 +1014,12 @@ func TestManagerArgvFitsTmux(t *testing.T) {
 		}
 	}
 }
+
+func TestCoordinatorArgvProofEnv(t *testing.T) {
+	t.Setenv(agent.ProofEnv, "1")
+	argv := coordinatorArgv(Manager, "/bin/dev", "/s/m.md", 0)
+	if n := slices.Index(argv, "--settings"); n < 0 || !strings.Contains(argv[n+1], `"remoteControlAtStartup":false`) || !strings.Contains(argv[n+1], "SessionStart") ||
+		strings.Count(strings.Join(argv, " "), "--settings") != 1 || strings.Contains(strings.Join(argv, " "), "--remote-control") {
+		t.Errorf("proof coordinator argv: %q", argv)
+	}
+}
