@@ -768,7 +768,8 @@ func (m Model) facts(in int, now time.Time) []string {
 	}
 	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
 	if it.Added != 0 {
-		facts = append(facts, [2]string{"added", clock(time.Unix(it.Added, 0), now) + " (" + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago)"})
+		added := time.Unix(it.Added, 0)
+		facts = append(facts, [2]string{"added", clock(added, now) + " (" + sidebar.AgeSpan(now.Sub(added)) + " ago)"})
 	}
 	doing := it.Now
 	if it.Doing != nil {
