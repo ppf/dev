@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,6 +58,9 @@ func handoffTmux(t *testing.T, name, todoHerd, handoff string) *tmux.Client {
 
 // who is the line the reminders end with, asking who does each item.
 const who = "\nWho does an item, when not the user: dev todo add --replaces <n> --on <worker name> (a session), --on boss (your own or parked), --waiting-for <person>, --on me (back to the user, with --details when it has none)."
+
+// addedStamp is the real time the start list gives each item.
+var addedStamp = regexp.MustCompile(` \(added \d{4}-\d\d-\d\d \d\d:\d\d\)`)
 
 // nodet is the line the reminders add when an item has no details.
 const nodet = "\nAn item marked (no details) gets them: dev todo add --replaces <n> --details '<what it is and why, where it stands, what done looks like>' (an ask: dev todo ask --replaces <n> --details '…')."
@@ -321,8 +325,8 @@ func TestBossHookStart(t *testing.T) {
 					t.Fatalf("out %q: %v", out, err)
 				}
 			}
-			if got.Out.Context != tt.want {
-				t.Errorf("context = %q, want %q", got.Out.Context, tt.want)
+			if ctx := addedStamp.ReplaceAllString(got.Out.Context, ""); ctx != tt.want {
+				t.Errorf("context = %q, want %q", ctx, tt.want)
 			}
 		})
 	}

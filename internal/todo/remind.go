@@ -20,7 +20,7 @@ const tickLine = "\nTick what these notes closed (dev todo done <n>); an item th
 // reminder is Reminder; with seen (the lines a boss last got, by item id), only the items changed since under a
 // count line, those to re-check always. shown is the lines it names.
 func (l List) reminder(ticked []Ticked, seen map[int]string, now time.Time) (string, map[int]string) {
-	items, shown := l.linesSince(0, seen, now)
+	items, shown := l.linesSince(0, seen, now, false)
 	if seen == nil {
 		if items == "" {
 			return tickedText(ticked), shown
@@ -144,7 +144,7 @@ func (s Store) StartRemind(l List, kept bool, age string, ticked []Ticked, conve
 			return s.forgetShown()
 		}
 		// One past startShown is kept as "": the next Remind lists it as not in the start list, not as changed
-		_, shown := l.linesSince(startShown, nil, now)
+		_, shown := l.linesSince(startShown, nil, now, false)
 		for _, it := range l.Items {
 			if _, ok := shown[it.ID]; !ok && !it.Done {
 				shown[it.ID] = ""

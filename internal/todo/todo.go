@@ -1420,13 +1420,13 @@ const startShown = 20
 // lines is the open items, numbered, one per line after a newline; past limit (0: none) a "+N more" line. Items to
 // re-check (Flagged) come first under a line saying so, each with why, then the rest under "The rest:".
 func (l List) lines(limit int, now time.Time) string {
-	text, _ := l.linesSince(limit, nil, now)
+	text, _ := l.linesSince(limit, nil, now, false)
 	return text
 }
 
 // linesSince is lines; with seen (an item's line by its id, as a boss last got them), only the rest whose line differs
-// from seen's. shown is each line written, by its item's id.
-func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text string, shown map[int]string) {
+// from seen's. shown is each line written, by its item's id; stamped, each line ends with when dev added its item.
+func (l List) linesSince(limit int, seen map[int]string, now time.Time, stamped bool) (text string, shown map[int]string) {
 	var flagged, rest []Shown
 	for _, it := range l.Items {
 		switch {
@@ -1447,6 +1447,9 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time) (text st
 		}
 		shown[it.ID] = it.seenAs(now)
 		b.WriteString("\n" + it.line(now))
+		if stamped && it.Added != 0 {
+			b.WriteString(" (added " + time.Unix(it.Added, 0).Format(UntilLayout) + ")")
+		}
 	}
 	if len(flagged) > 0 {
 		b.WriteString("\nRe-check these first: tick it, replace it with what's true now, or confirm it holds (dev todo add --replaces <n>, with --details when it is the user's and has none):")
@@ -1566,7 +1569,7 @@ func (l List) Reminder(ticked []Ticked, now time.Time) string {
 // at now, at most startShown, with how long ago the list changed (age, e.g. "2h ago") and, when kept, that an earlier
 // boss session left it; "" when none ticked and none is open.
 func (l List) startReminder(kept bool, age string, ticked []Ticked, now time.Time) string {
-	items := l.lines(startShown, now)
+	items, _ := l.linesSince(startShown, nil, now, true)
 	if items == "" {
 		return tickedText(ticked)
 	}

@@ -745,15 +745,12 @@ func (m Model) statusText(waiting bool, now time.Time) string {
 	return strings.Join(parts, " · ")
 }
 
-// facts are the item's column and assignee, status, link, list and age, and its tick time and check when it has them.
+// facts are the item's column and assignee, status, link, list, when it was added and its age, and its tick time and check when it has them.
 func (m Model) facts(in int, now time.Time) []string {
 	it := m.it
 	list := it.Boss
 	if it.Closed {
 		list += " (closed)"
-	}
-	if it.Added != 0 {
-		list += " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago"
 	}
 	var facts [][2]string
 	waiting := !it.Done && it.WaitingFor != "" && it.Assignee.Kind == sidebar.AssigneeBoss
@@ -770,6 +767,10 @@ func (m Model) facts(in int, now time.Time) []string {
 		facts = append(facts, [2]string{"status", sidebar.StatusColours[it.Status] + status + reset})
 	}
 	facts = append(facts, [2]string{"link", cmp.Or(it.Link, "—")}, [2]string{"list", list})
+	if it.Added != 0 {
+		added := time.Unix(it.Added, 0)
+		facts = append(facts, [2]string{"added", clock(added, now) + " (" + sidebar.AgeSpan(now.Sub(added)) + " ago)"})
+	}
 	doing := it.Now
 	if it.Doing != nil {
 		doing = it.Doing.Text

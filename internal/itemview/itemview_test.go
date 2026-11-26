@@ -72,7 +72,7 @@ func TestAsk(t *testing.T) {
 	m := New(ask, r.actions(), false)
 	v := ansi.Strip(m.View(Width, 40, now))
 	for _, want := range []string{"╭─ dev #4 · To do ", " 2h ─╮", "Merge #221 now?", "CI green", "▸ 1  ★ Merge now   ships today", "  2    Wait        after the test",
-		"m    In your own words…", "column  To do · @you", "status  decide", "link    https://x/pull/221", "list    boss-dev · added 2h ago", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
+		"m    In your own words…", "column  To do · @you", "status  decide", "link    https://x/pull/221", "list    boss-dev", "added   " + clock(time.Unix(ask.Added, 0), now) + " (2h ago)", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}
@@ -686,5 +686,23 @@ func TestWaitsOnAsk(t *testing.T) {
 	it.Closed = true
 	if v := ansi.Strip(New(it, r.actions(), false).View(Width, 40, now)); strings.Contains(v, "waits on your answer") {
 		t.Errorf("a closed boss's item offers its ask:\n%s", v)
+	}
+}
+
+// The item view gives the clock time an item was added, with its age; another day's carries its date.
+func TestAddedClock(t *testing.T) {
+	at := time.Date(2026, 11, 26, 12, 0, 0, 0, time.Local)
+	for _, tt := range []struct {
+		added time.Time
+		want  string
+	}{
+		{at.Add(-2 * time.Hour), "added   10:00 (2h ago)"},
+		{at.Add(-13 * time.Hour), "added   Nov 25 23:00 (13h ago)"},
+	} {
+		it := ask
+		it.Added = tt.added.Unix()
+		if v := ansi.Strip(New(it, (&recorder{}).actions(), false).View(Width, 40, at)); !strings.Contains(v, tt.want) {
+			t.Errorf("view missing %q:\n%s", tt.want, v)
+		}
 	}
 }

@@ -854,7 +854,7 @@ func TestPromptAskRules(t *testing.T) {
 			"optional Approaches section: 3-5 clearly different approaches, one inverting an assumption, each with its strongest side and main risk",
 			"its worker checks the premise against records or repo docs and cites the source line before drafting", "its writer subagent's prompt carries the project's writing rules word for word",
 			"after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it.",
-			"Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source)", "done-when includes gh release view v<X> (or its host's release page)",
+			"never write a current time by hand there; other clock times (briefs, records) come from date, never estimated (a past event: its source)", "done-when includes gh release view v<X> (or its host's release page)",
 			"Each brief carries the standing rules, items already on your list it touches, shared hot files, the build or test recipe and where results go (never a tracked file)"}},
 		{"managerPrompt", managerPrompt, []string{bossBriefAsk, "to them yourself with AskUserQuestion", "Up to 4 asks per call, in order, one per question (2 while any boss works: relay notes first)",
 			"only independent ones (no pick changes another's options or whether it is needed; else one per call)",
