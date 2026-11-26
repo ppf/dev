@@ -72,7 +72,7 @@ func TestAsk(t *testing.T) {
 	m := New(ask, r.actions(), false)
 	v := ansi.Strip(m.View(Width, 40, now))
 	for _, want := range []string{"╭─ dev #4 · To do ", " 2h ─╮", "Merge #221 now?", "CI green", "▸ 1  ★ Merge now   ships today", "  2    Wait        after the test",
-		"m    In your own words…", "column  To do · @you", "status  decide", "link    https://x/pull/221", "list    boss-dev · added 2h ago", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
+		"m    In your own words…", "column  To do · @you", "status  decide", "link    https://x/pull/221", "list    boss-dev · added " + clock(time.Unix(ask.Added, 0), now) + " (2h ago)", "1-2 answer · j/k ⏎ pick · m own words · o open link · g go to boss · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("%q missing:\n%s", want, v)
 		}

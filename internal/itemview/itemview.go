@@ -753,7 +753,7 @@ func (m Model) facts(in int, now time.Time) []string {
 		list += " (closed)"
 	}
 	if it.Added != 0 {
-		list += " · added " + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago"
+		list += " · added " + clock(time.Unix(it.Added, 0), now) + " (" + sidebar.AgeSpan(now.Sub(time.Unix(it.Added, 0))) + " ago)"
 	}
 	var facts [][2]string
 	waiting := !it.Done && it.WaitingFor != "" && it.Assignee.Kind == sidebar.AssigneeBoss

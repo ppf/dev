@@ -42,7 +42,7 @@ func TestNotes(t *testing.T) {
 	if got := text(now.Add(time.Minute)); !strings.Contains(got, "(item #1 done)") {
 		t.Errorf("done item's note = %q, want it flagged", got)
 	}
-	want := "[dev todo] Your notes (1 of 12, oldest 3d):\n n1 " + time.Unix(1700000000, 0).Format(time.DateOnly) + " decided: CSV only (why: parser) (item #1 done)\nCheck each still holds: drop what's over (dev todo note drop <n>)."
+	want := "[dev todo] Your notes (1 of 12, oldest 3d):\n n1 " + time.Unix(1700000000, 0).Format(UntilLayout) + " decided: CSV only (why: parser) (item #1 done)\nCheck each still holds: drop what's over (dev todo note drop <n>)."
 	if got := text(now.Add(72 * time.Hour)); got != want {
 		t.Errorf("text = %q, want %q", got, want)
 	}
@@ -379,5 +379,37 @@ func TestNoteCapKeepsDoneSaid(t *testing.T) {
 	}
 	if _, d, err = s.AddNoteDropping(Note{Kind: NoteRisk, Text: "refused"}, now); err == nil || d != nil {
 		t.Fatalf("dropped %+v, %v; want a refusal with only said and state notes left", d, err)
+	}
+}
+
+// The start list gives each open item the time dev added it, from the clock: an item without one (an older list) none.
+func TestStartListStampsAdded(t *testing.T) {
+	added := time.Date(2026, 11, 26, 12, 34, 0, 0, time.Local)
+	l := List{Items: []Shown{{ID: 1, Text: "a", Details: "d", Added: added.Unix()}, {ID: 2, Text: "b", Details: "d"}}}
+	got := l.startReminder(false, "just now", nil, added.Add(time.Hour))
+	if !strings.Contains(got, "\n1. a (added 2026-11-26 12:34)\n") || !strings.Contains(got, "\n2. b\n") {
+		t.Errorf("start list = %q, want item 1 stamped 2026-11-26 12:34 and item 2 not", got)
+	}
+	if got := l.Reminder(nil, added); strings.Contains(got, "added") {
+		t.Errorf("worker-note reminder = %q, want no stamp", got)
+	}
+}
+
+// A note and an item get the clock's time when dev stores them, and a note lists it to the minute.
+func TestStoreStampsFromClock(t *testing.T) {
+	s := store(t)
+	now := time.Date(2026, 11, 26, 9, 41, 0, 0, time.Local)
+	if _, err := s.Add(Item{Text: "x", Details: "d"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNote(Note{Kind: NoteSaid, Text: "no merges", Until: now.Add(time.Hour).Unix()}, now); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(t, s, now); l.Items[0].Added != now.Unix() {
+		t.Errorf("item Added = %d, want %d", l.Items[0].Added, now.Unix())
+	}
+	n, err := s.Notes(now)
+	if err != nil || len(n) != 1 || n[0].Added != now.Unix() || !strings.Contains(NotesText(n, now), " 2026-11-26 09:41 said: no merges") {
+		t.Errorf("notes = %+v, %v, text %q: want it stamped 2026-11-26 09:41", n, err, NotesText(n, now))
 	}
 }

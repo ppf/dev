@@ -197,7 +197,7 @@ func NotesText(notes []Note, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[dev todo] Your notes (%d of %d, oldest %s):", len(notes), MaxNotes, age(notes[0]))
 	for _, n := range notes {
-		fmt.Fprintf(&b, "\n n%d %s %s: %s", n.ID, time.Unix(n.Added, 0).Format(time.DateOnly), n.Kind, n.Text)
+		fmt.Fprintf(&b, "\n n%d %s %s: %s", n.ID, time.Unix(n.Added, 0).Format(UntilLayout), n.Kind, n.Text)
 		if n.Why != "" {
 			b.WriteString(" (why: " + n.Why + ")")
 		}

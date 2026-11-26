@@ -154,7 +154,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`A text to a person: its worker checks the premise against records or repo docs and cites the source line before drafting, ` +
 	`and its writer subagent's prompt carries the project's writing rules word for word; after a pick to send it, nothing is sent, pasted or relayed to a worker in that turn: ` +
 	`run sleep 60 in the background, end the turn, then send (or prompt its worker) once later notes and the user's words hold nothing against it. ` +
-	`Clock times in briefs, notes, asks and records come from date, never estimated (a past event: its source); ` +
+	`dev stamps the time on every item, ask and note: never write a current time by hand there; other clock times (briefs, records) come from date, never estimated (a past event: its source); ` +
 	`a release brief's done-when includes gh release view v<X> (or its host's release page). Each brief carries the standing rules, items already on your list it touches, shared hot files, ` +
 	`the build or test recipe and where results go (never a tracked file). ` +
 	`A release's restart is one item per list, its text bumped per release (dev todo add --replaces <n>), never a second one. ` +
