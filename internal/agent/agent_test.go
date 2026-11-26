@@ -803,3 +803,15 @@ func TestCodexModelsRefusesAnUnreadableCatalog(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeArgvProofEnv(t *testing.T) {
+	want := []string{"claude", "--settings", `{"remoteControlAtStartup":false}`}
+	t.Setenv(ProofEnv, "")
+	if got := ClaudeArgv("dev-x", false); !slices.Equal(got, []string{"claude", "--remote-control=dev-x"}) {
+		t.Errorf("without %s: %q", ProofEnv, got)
+	}
+	t.Setenv(ProofEnv, "1")
+	if got := ClaudeArgv("dev-x", false); !slices.Equal(got, want) {
+		t.Errorf("under %s: %q, want %q", ProofEnv, got, want)
+	}
+}
