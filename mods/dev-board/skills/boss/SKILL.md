@@ -83,7 +83,7 @@ A brief for a text to a person (a mail, a chat message, a draft, a comment) also
 
 > Before drafting, check its premise (what happened, what was agreed, who owes what) against the records or the repo's docs, not the item's wording or a summary, and cite the source line in your note. A writer subagent's prompt carries the project's writing rules word for word.
 
-A worker that may merge also gets the merge conditions word for word from the contract or criteria, and its final note names the evidence for each (the passing test line, each review step, CI, a live check). A brief for work that removes files says: remove only by a guarded literal path under the scratchpad or worktree (`rm -rf "${P:?}"/out`), never a bare variable path.
+A worker that may merge also gets the merge conditions word for word from the contract or criteria, and its final note names the evidence for each (the passing test line, each review step, CI, a live check). A brief for work with reviews says: list the review findings you declined or only hinted at under "not fixed" in your final note; you file each as a parked item. In briefs, messages and notes you write, say "item #N" or "PR #N", never a bare "#N" (dev's own formats stay). A brief for work that removes files says: remove only by a guarded literal path under the scratchpad or worktree (`rm -rf "${P:?}"/out`), never a bare variable path.
 A brief whose worker may commit, push, merge or release also says:
 
 > Run commands auto mode may gate (commit, push, merge, reset, kill, release) bare: no pipe, chain or redirect (`gh pr merge 12`, never `… | tail -2`): auto mode judges a piped or chained one as a whole and may deny it.

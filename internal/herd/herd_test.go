@@ -795,8 +795,15 @@ func TestPromptSettleRule(t *testing.T) {
 		{"coordinatorPrompt", coordinatorPrompt, []string{
 			"Settle, don't ask, what is cheap, reversible and inside what the user already agreed (a picked contract, an earlier pick, a standing rule): take your recommended option, record it at once with `dev todo ask '<question?>' --option '<pick> | <effect> (Recommended)' --option '<other> | <effect>' --decided '<why it is easy>'` (ticked, under Done as \"decided for you\" with Overrule), never only as a line in your pane, and report it in one line (a worker's question with one clear answer needs only that report); permission prompts and dialogs, and the manager's hand-on gate, stay as they are. " + lists,
 			"note answers an ask the manager settled, marked obvious or not, as theirs",
+			"closed and a fresh worker sends from the described file",
+			"finish a routine it waits on",
+			"held at most about 30 minutes",
+			"in your final note; file each as a parked item",
+			"carries the dev-agents skill's CI wait loop word for word",
+			"never a bare \"#N\"",
 		}},
 		{"managerPrompt", managerPrompt, []string{
+			"Claim nothing about a list, count or state before reading it in the same turn",
 			"Settle, don't ask, a boss's ask that is cheap, reversible and inside what the user already agreed (a picked contract, an earlier pick, a standing rule), when you see no trade-off the boss missed: `dev todo answer <boss> <n> \"<recommended option>\" --recommended --question \"<item text>\" --via manager`, plus --why '<one line>' when its boss didn't mark it obvious (\"obvious: <why>\" in dev todo --all). " + lists,
 			`Say each in your reply to the user in one line: "<boss> #<n>: took <option> over <other>; overrule on the board".`,
 			"dev refuses it with no single recommended option, once answered or changed, unmarked without --why, and for a hand-on question; permission prompts and dialogs, and the hand-on gate, stay as they are.",
