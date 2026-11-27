@@ -46,6 +46,8 @@ func handoffTmux(t *testing.T, name, todoHerd, handoff string) *tmux.Client {
 				return handoff + "\n", nil
 			case "#{" + agent.OptEndedSession + "}":
 				return "s0\n", nil
+			case "#{session_name}":
+				return name + "\n", nil
 			}
 			if strings.Contains(args[len(args)-1], "@dev_boss_inbox") {
 				return tmux.FormatRow("$1", "1700000000", name, "1", "", "/tmp/tmux-1/default"), nil

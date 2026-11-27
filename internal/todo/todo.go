@@ -129,6 +129,8 @@ type file struct {
 	Notes   []Note   `json:"notes,omitempty"`
 	// NextNote is the id the next note gets: never reused while the file lives
 	NextNote int `json:"next_note,omitempty"`
+	// Session is its boss's current session, for its last-session file (EndSession)
+	Session *sessionMark `json:"session,omitempty"`
 	movedMarker
 	takenStamp
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
@@ -574,16 +576,42 @@ func All(c *tmux.Client, now time.Time, keep func(name string) bool, closed, fin
 // key (legacyBoss). A list it can't read is named by its file. With finished, a list with only ticked or finished
 // items comes too.
 func closedLists(socket string, live map[string]bool, now time.Time, finished bool) ([]BossList, error) {
+	var out []BossList
+	err := closedFiles(socket, live, func(s Store, f file, err error) {
+		var l List
+		if err == nil {
+			l, err = s.Read(now)
+		}
+		if err != nil {
+			out = append(out, BossList{Boss: s.boss, Err: err, Closed: true, Store: s, List: List{Items: []Shown{}, Stale: true}})
+			return
+		}
+		if n, _ := l.Open(); n == 0 && !(finished && (len(l.Items) > 0 || len(l.Finished) > 0)) {
+			return
+		}
+		for i, it := range l.Items {
+			if !it.Done && (it.Check == nil || !it.Check.Event()) {
+				l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
+			}
+		}
+		out = append(out, BossList{Boss: s.boss, Closed: true, Store: s, List: l})
+	})
+	slices.SortFunc(out, func(a, b BossList) int { return strings.Compare(a.Boss, b.Boss) })
+	return out, err
+}
+
+// closedFiles calls fn with each list of a boss closed on the server at socket, its boss named (Boss), and its file as
+// read, or why it couldn't be read; live is as closedLists has it.
+func closedFiles(socket string, live map[string]bool, fn func(s Store, f file, err error)) error {
 	probe, err := open(socket + "-x")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	prefix := strings.TrimSuffix(filepath.Base(probe.path), "x.json")
 	paths, err := filepath.Glob(filepath.Join(filepath.Dir(probe.path), prefix+"*.json"))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var out []BossList
 	for _, path := range paths {
 		s := Store{path: path}
 		key := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), prefix), ".json")
@@ -592,33 +620,55 @@ func closedLists(socket string, live map[string]bool, now time.Time, finished bo
 		}
 		name := key
 		f, err := s.read()
-		var l List
 		if err == nil {
 			name = cmp.Or(f.Boss, legacyBoss(key))
-			// Read names the boss on its finished items
-			s.boss = name
-			l, err = s.Read(now)
 		}
 		if (name != sidebar.Manager && !strings.HasPrefix(name, "boss-")) || sessionKey(name) != key {
 			continue
 		}
+		// Read names the boss on its finished items
 		s.boss = name
-		if err != nil {
-			out = append(out, BossList{Boss: name, Err: err, Closed: true, Store: s, List: List{Items: []Shown{}, Stale: true}})
-			continue
-		}
-		if n, _ := l.Open(); n == 0 && !(finished && (len(l.Items) > 0 || len(l.Finished) > 0)) {
-			continue
-		}
-		for i, it := range l.Items {
-			if !it.Done && (it.Check == nil || !it.Check.Event()) {
-				l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
-			}
-		}
-		out = append(out, BossList{Boss: name, Closed: true, Store: s, List: l})
+		fn(s, f, err)
 	}
-	slices.SortFunc(out, func(a, b BossList) int { return strings.Compare(a.Boss, b.Boss) })
-	return out, nil
+	return nil
+}
+
+// Gone is the list of a boss with no session on its server whose last session, started at Start (unix seconds), no
+// last-session file covers.
+type Gone struct {
+	Store Store
+	Start int64
+}
+
+// GoneUnwritten are the lists of the bosses (not the manager) with no session on c's server (none when it has no
+// sessions) whose last session no last-session file covers: gone without a close, as a crash or a kill leaves them.
+func GoneUnwritten(c *tmux.Client) ([]Gone, error) {
+	type boss struct {
+		Name string `tmux:"session_name"`
+	}
+	sessions, err := tmux.Query[boss](c, "list-sessions")
+	if err != nil || len(sessions) == 0 {
+		return nil, err
+	}
+	first, err := paneSession(c, tmux.SessionTarget(sessions[0].Name))
+	if err != nil {
+		return nil, err
+	}
+	live := map[string]bool{}
+	for _, sess := range sessions {
+		live[sessionKey(sess.Name)] = true
+	}
+	var gone []Gone
+	var errs []error
+	err = closedFiles(first.Socket, live, func(s Store, f file, err error) {
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case s.boss != sidebar.Manager && f.unwritten():
+			gone = append(gone, Gone{s, f.Session.Start})
+		}
+	})
+	return gone, errors.Join(append(errs, err)...)
 }
 
 var (
@@ -1377,6 +1427,7 @@ func (s Store) write(f file) error {
 		if err := s.keepDone(f.dropped, f.pruned); err != nil {
 			return err
 		}
+		f.keepSessionTicked()
 	}
 	data, err := json.Marshal(f)
 	if err != nil {

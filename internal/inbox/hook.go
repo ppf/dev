@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -195,14 +198,79 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 				"minutes ago; an older one isn't yours to act on."
 		}
 	}
+	last, lerr := lastSession(c, pane, source, time.Now())
+	handoff = strings.TrimSpace(handoff + "\n" + last)
 	out, err := listContext(c, pane, source, session, hint, owed, handoff)
 	if err != nil && (owed != "" || handoff != "") {
 		// The boss still gets what it owes and its handoff, and why its list is missing
 		data, jerr := json.Marshal(hookContext("SessionStart", strings.TrimSpace(owed+"\n"+handoff)+
 			"\ndev couldn't give your list and notes ("+err.Error()+"): run dev todo and dev todo note."))
-		return string(data), errors.Join(verr, eerr, oerr, herr, err, jerr)
+		return string(data), errors.Join(verr, eerr, oerr, herr, lerr, err, jerr)
 	}
-	return out, errors.Join(verr, eerr, oerr, herr, err)
+	return out, errors.Join(verr, eerr, oerr, herr, lerr, err)
+}
+
+// lastSession writes a coordinator's last-session files on a fresh start or /clear, a boss's starting a new session in
+// its list, and returns the line naming them; none on a resume or compaction, as the same session goes on.
+func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, error) {
+	if source != "startup" && source != "clear" {
+		return "", nil
+	}
+	name, err := c.Run("display-message", "-p", "-t", pane, "#{session_name}")
+	if err != nil {
+		return "", err
+	}
+	if name = strings.TrimSpace(name); name == Manager {
+		return managerLastLine(c, now)
+	}
+	s, err := todo.ForPane(c, pane)
+	if errors.Is(err, todo.ErrNotBoss) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	how := EndedGoneStart
+	if source == "clear" {
+		how = EndedCleared
+	}
+	_, err = EndBossSession(c, s, name, how, 0, 0, true, now)
+	path, perr := LastSessionPath(name)
+	if perr != nil {
+		return "", errors.Join(err, perr)
+	}
+	if _, serr := os.Stat(path); errors.Is(serr, fs.ErrNotExist) {
+		return "", err
+	} else if serr != nil {
+		return "", errors.Join(err, serr)
+	}
+	line := "Your last session's file: " + path + ": read it before new work (dev wrote it from your list, workers and " +
+		"messages; its first part is your state note). Keep that state note current as you go: dev todo note state " +
+		"\"<half-way>; next: <step>\" --why \"<why>\"."
+	if err != nil {
+		line = "dev couldn't write your last session's file (" + err.Error() + "): " + path + " is from an earlier " +
+			"session; check dev todo and dev todo note before new work."
+	}
+	return line, err
+}
+
+// managerLastLine writes the last-session files of the bosses gone without one, then names the files there are.
+func managerLastLine(c *tmux.Client, now time.Time) (string, error) {
+	_, err := WriteGone(c, now)
+	dir, derr := LastSessionDir()
+	if derr != nil {
+		return "", errors.Join(err, derr)
+	}
+	paths, gerr := filepath.Glob(filepath.Join(dir, "*.md"))
+	if gerr != nil || len(paths) == 0 {
+		return "", errors.Join(err, gerr)
+	}
+	names := make([]string, len(paths))
+	for i, p := range paths {
+		names[i] = strings.TrimSuffix(filepath.Base(p), ".md")
+	}
+	return "Bosses' last-session files in " + dir + " (" + strings.Join(names, ", ") + "): read a boss's <boss>.md " +
+		"before handing it work.", err
 }
 
 // listContext is startList's output from the boss's list and notes, owed's lines (when any) first and the handoff line

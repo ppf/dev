@@ -894,7 +894,8 @@ At most %d notes of at most %d characters each; a new one at the cap drops the o
 done, else the oldest decided or risk note, and prints which. said and state notes are never dropped: with only those left
 it is refused with the count.
 decided: a choice, --why says why; said: what the user told the boss that changes the work, it needs an end (--until or --item); risk: an open risk to watch; state: the boss's standing
-state, kept off the board ("6 fixes parked for after your testing"), one per list: a new one replaces it. Not actions (dev todo add), not
+state, kept off the board ("6 fixes parked for after your testing"), one per list: a new one replaces it; kept current as
+it goes (what is half-way, the next step, --why), it comes first in the boss's last-session file. Not actions (dev todo add), not
 standing rules (CLAUDE.md, memory). A note with --until drops itself then; one with --item n is flagged once item n is done.`, todo.MaxNotes, todo.MaxNote),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

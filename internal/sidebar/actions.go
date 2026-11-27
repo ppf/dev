@@ -129,7 +129,15 @@ func killNow(c *tmux.Client, client, current, target string, e Ended) (killed bo
 		return false, "", err
 	}
 	// Before the kill, which may take this process with it, and while its panes still say what it ran
-	record, err = archive(c, target, e)
+	record, undo, err := archive(c, target, e)
+	if undo != nil {
+		// A boss left open keeps its session: its later close writes the file anew
+		defer func() {
+			if !killed {
+				err = errors.Join(err, undo())
+			}
+		}()
+	}
 	if err != nil {
 		return false, "", fmt.Errorf("archiving %s: %w", target, err)
 	}
