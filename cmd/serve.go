@@ -176,8 +176,14 @@ command's output.`, int(serve.CodeTTL.Minutes())),
 			if popup {
 				return pairPopup(cmd.OutOrStdout())
 			}
+			ack := os.Getenv(pairGuard)
+			if ack != "" {
+				if err := os.WriteFile(ack, nil, 0o600); err != nil {
+					return err
+				}
+			}
 			err := servePair(cmd.OutOrStdout())
-			if err == nil && os.Getenv(pairGuard) != "" {
+			if err == nil && ack != "" {
 				open.Pause(cmd.OutOrStdout(), "Press enter to close…")
 			}
 			return err

@@ -141,6 +141,17 @@ func TestServePairPopup(t *testing.T) {
 		t.Errorf("❌ pair --popup for a new prompt: %q %q %v", out, errOut, err)
 	}
 	waitFor(t, "the second popup", func() bool { return codeRe.MatchString(user.T("capture-pane", "-p", "-t", "out")) })
+	// tmux answers a popup on a client showing one already with success: no ack, so the prompt is given back
+	if _, errOut, err := dev(`{"hook_event_name":"UserPromptSubmit","prompt":"and my laptop"}`, "state", "working"); err != nil {
+		t.Fatalf("❌ the user's third prompt: %v %s", err, errOut)
+	}
+	refused("a popup over the open one", "the popup didn't show")
+	user.T("send-keys", "-t", "out", "Enter")
+	waitFor(t, "the second popup closed", func() bool { return !codeRe.MatchString(user.T("capture-pane", "-p", "-t", "out")) })
+	if out, errOut, err := dev("", "serve", "pair", "--popup"); err != nil || !strings.HasPrefix(out, "pair popup opened on ") {
+		t.Errorf("❌ pair --popup once the other closed: %q %q %v", out, errOut, err)
+	}
+	waitFor(t, "the third popup", func() bool { return codeRe.MatchString(user.T("capture-pane", "-p", "-t", "out")) })
 	user.T("send-keys", "-t", "out", "Enter")
 }
 
