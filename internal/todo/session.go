@@ -96,8 +96,7 @@ func (s Store) Unend(start int64) error {
 	})
 }
 
-// SessionStart is when the list's session started (unix seconds) and whether a last-session file covers it yet;
-// 0 for none.
+// SessionStart is when the list's session started (unix seconds, 0 for none) and whether no file covers it yet.
 func (s Store) SessionStart() (start int64, unwritten bool, err error) {
 	f, err := s.read()
 	if err != nil || f.Session == nil {

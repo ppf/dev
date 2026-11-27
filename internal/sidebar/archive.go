@@ -142,8 +142,7 @@ func starterName(c *tmux.Client, v string) (string, error) {
 	return strings.TrimSpace(name), nil
 }
 
-// Records are the archive records of the sessions closed for good, in no order; those it can't read are left out and
-// named in bad.
+// Records are the archive records of the sessions closed for good, in no order; bad names those it couldn't read.
 func Records() (records []Ended, bad error, err error) {
 	dir, err := config.StateDir()
 	if err != nil {
