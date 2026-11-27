@@ -55,7 +55,7 @@ func TestServePairPopupAck(t *testing.T) {
 	acks := func(what string) func(string) error {
 		return func(ack string) error {
 			f, err := openAck(ack)
-			if err != nil || what == "" {
+			if err != nil {
 				return err
 			}
 			if what == ackCoded {
@@ -99,11 +99,17 @@ func TestServePairPopupAck(t *testing.T) {
 		t.Errorf("second popup for one prompt: %v, want refused", err)
 	}
 
-	// Up but silent: the prompt stays taken
+	// Up but silent, or caught half-way through its ack: the prompt stays taken
 	if err := box.Arrived("pair my tablet", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	popup = acks("")
+	popup = func(ack string) error {
+		f, err := openAck(ack)
+		if err == nil {
+			_, err = f.WriteString(ackCoded[:2])
+		}
+		return err
+	}
 	if out, _, err := execute(t, "", "serve", "pair", "--popup"); err != nil || !strings.Contains(out, "hasn't said yet whether it showed a code") {
 		t.Errorf("silent popup: %q %v", out, err)
 	}

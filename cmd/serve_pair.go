@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ppf/dev/internal/sidebar"
@@ -23,7 +24,7 @@ var pairTmux, pairSelf = tmux.New, managerSelf // test seams
 
 // pairAckWait is how long --popup waits for the popup's ack file (tmux answers a popup on a client showing one
 // already with success and nothing shown), pairShowWait then for what it showed.
-var pairAckWait, pairShowWait = 3 * time.Second, 10 * time.Second
+var pairAckWait, pairShowWait = 10 * time.Second, 10 * time.Second
 
 // errShowUnknown: the popup is up but hasn't said what it showed.
 var errShowUnknown = errors.New("not said")
@@ -54,7 +55,25 @@ func pairPopup(out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "dev-pair-")
+	// The popup runs in tmux's folder: a relative one would be another there
+	state := os.Getenv("XDG_STATE_HOME")
+	if state != "" {
+		if state, err = filepath.Abs(state); err != nil {
+			return err
+		}
+	}
+	// In the state folder the popup gets, not this process's TMPDIR, which a sandbox may give it alone
+	base, err := authDir()
+	if err == nil {
+		base, err = filepath.Abs(base)
+	}
+	if err == nil {
+		err = os.MkdirAll(base, 0o700)
+	}
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp(base, "pair-")
 	if err != nil {
 		return err
 	}
@@ -66,7 +85,7 @@ func pairPopup(out io.Writer) error {
 	// state folder, not the tmux server's, holds the running dev serve's records
 	err = c.Start("display-popup", "-c", client.TTY, "-E", "-b", "rounded", "-T", " pair a phone ",
 		"-s", "bg=terminal,fg=terminal", "-w", "80%", "-h", "12", "-e", pairGuard+"="+filepath.Join(dir, "ack"),
-		"-e", "CLAUDECODE=", "-e", "XDG_STATE_HOME="+os.Getenv("XDG_STATE_HOME"), "--", tmux.ShellJoin(bin, "serve", "pair"))
+		"-e", "CLAUDECODE=", "-e", "XDG_STATE_HOME="+state, "--", tmux.ShellJoin(bin, "serve", "pair"))
 	if err == nil {
 		err = awaitAck(dir)
 	}
@@ -96,7 +115,7 @@ func awaitAck(dir string) error {
 		}
 		defer func() { _ = os.RemoveAll(closed) }()
 		if ack = filepath.Join(closed, "ack"); !exists(ack) {
-			return errors.New("dev serve pair --popup: the popup didn't show (another popup or menu open on the user's client?): ask them to close it, then run it again")
+			return errors.New("dev serve pair --popup: the popup didn't show (another popup or menu open on the user's client, or a slow start?): ask them to close it, then run it again")
 		}
 		break
 	}
@@ -104,11 +123,11 @@ func awaitAck(dir string) error {
 		switch b, err := os.ReadFile(ack); {
 		case err != nil:
 			return err
-		case len(b) == 0: // not written yet
-		case string(b) == ackCoded:
+		case len(b) == 0 || b[len(b)-1] != '\n': // not all written yet
+		case string(b) == ackCoded+"\n":
 			return nil
 		default:
-			return fmt.Errorf("dev serve pair --popup: the popup showed no code: %s", b)
+			return fmt.Errorf("dev serve pair --popup: the popup showed no code: %s", strings.TrimSpace(string(b)))
 		}
 	}
 	return errShowUnknown
@@ -138,6 +157,6 @@ func writeAck(f *os.File, coded bool, failed error) error {
 	case !coded:
 		what = "dev serve listens on this Mac only: a phone can't reach it"
 	}
-	_, err := f.WriteString(what)
+	_, err := f.WriteString(what + "\n")
 	return errors.Join(err, f.Close())
 }
