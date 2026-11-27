@@ -2,7 +2,9 @@ package sidebar
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,20 +28,21 @@ type Ended struct {
 	Worktree        string `json:"worktree,omitempty"`
 	WorktreeRemoved bool   `json:"worktree_removed,omitempty"`
 	Note            string `json:"note,omitempty"`
-	// StartedBy is the boss or manager that started it, by name; StartedAt when its tmux session was made
+	// StartedBy is the boss or manager that started it, by name (its session id when that session was gone); StartedAt
+	// when its tmux session was made
 	StartedBy string    `json:"started_by,omitempty"`
 	StartedAt time.Time `json:"started_at,omitzero"`
 	At        time.Time `json:"ended_at"`
 }
 
-// BossEnding, when set, writes a boss's last-session file as its session closes, before the kill: a boss's archive
-// record notes its failure. Set by package cmd, as it needs the boss's list.
-var BossEnding func(c *tmux.Client, session string, created int64) error
+// BossEnding, when set, writes a boss's last-session file before the kill closing it, returning undo for a kill that
+// fails; its record notes a failure. Set by package cmd: inbox, which writes it, imports this package.
+var BossEnding func(c *tmux.Client, session string, created int64) (undo func() error, err error)
 
 const recordFile = "session.json"
 
 // archive writes e for session, completed from its panes, into a new archive directory, which it returns.
-func archive(c *tmux.Client, session string, e Ended) (string, error) {
+func archive(c *tmux.Client, session string, e Ended) (dir string, undo func() error, err error) {
 	panes, err := tmux.Query[struct {
 		Project         string `tmux:"@project"`
 		Path            string `tmux:"session_path"`
@@ -55,7 +58,7 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 		Herd            string `tmux:"@dev_herd"`
 	}](c, "list-panes", "-s", "-t", tmux.SessionTarget(session))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	live := spent.Ledger{}
 	for _, p := range panes {
@@ -80,40 +83,46 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 	}
 	if len(panes) > 0 {
 		p := panes[0]
+		// Its starter and creation time only describe it: their failure doesn't stop the close
 		var created int64
 		if p.Created != "" {
 			if created, err = strconv.ParseInt(p.Created, 10, 64); err != nil {
-				return "", fmt.Errorf("%s's creation time %q: %w", session, p.Created, err)
+				e.addNote(fmt.Sprintf("its creation time %q: %v", p.Created, err))
 			}
 			e.StartedAt = time.Unix(created, 0)
 		}
 		if e.StartedBy, err = starterName(c, p.StartedBy); err != nil {
-			return "", err
+			e.StartedBy = p.StartedBy
+			e.addNote("its starter's name: " + err.Error())
 		}
 		if BossEnding != nil && p.Herd != "" {
-			if err := BossEnding(c, session, created); err != nil {
-				e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its last-session file isn't written: " + err.Error()
+			if undo, err = BossEnding(c, session, created); err != nil {
+				e.addNote("its last-session file isn't written: " + err.Error())
 			}
 		}
 	}
-	dir, err := config.StateDir()
-	if err != nil {
-		return "", err
+	if dir, err = config.StateDir(); err != nil {
+		return "", undo, err
 	}
 	// A session name may hold a /, which would nest the directory
 	if dir, err = config.NewDir(filepath.Join(dir, "archive"), strings.ReplaceAll(session, "/", "_")); err != nil {
-		return "", err
+		return "", undo, err
 	}
 	if err := writeRecord(dir, e); err != nil || len(panes) == 0 {
-		return dir, err
+		return dir, undo, err
 	}
 	// Last, so a close that fails before keeps its ledger; one this fails still closes, its record saying so
 	p := panes[0]
 	if err := spent.Closing(c, p.Socket, p.SessionID, p.Created, p.StartedBy, live); err != nil {
-		e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its cost isn't kept: " + err.Error()
-		return dir, writeRecord(dir, e)
+		e.addNote("its cost isn't kept: " + err.Error())
+		return dir, undo, writeRecord(dir, e)
 	}
-	return dir, nil
+	return dir, undo, nil
+}
+
+// addNote adds note to e's.
+func (e *Ended) addNote(note string) {
+	e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + note
 }
 
 // starterName is the name of the session the @dev_started_by value v names (a session id, or a boss's name); v itself
@@ -145,6 +154,10 @@ func Records() ([]Ended, error) {
 	records := make([]Ended, 0, len(paths))
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			// Removed since the glob: a close that failed
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -176,7 +189,12 @@ func writeRecord(dir string, e Ended) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, recordFile), append(data, '\n'), 0o644)
+	// Renamed into place: Records may read it meanwhile
+	path := filepath.Join(dir, recordFile)
+	if err := os.WriteFile(path+".tmp", append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
 }
 
 // Exited closes target's session (target: a pane or session id) for good once its agent exited cleanly, as

@@ -3,10 +3,12 @@ package inbox
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/todo"
 )
@@ -63,7 +65,7 @@ None.
 | dev-fix-q4 | 26.11 17:07 | 26.11 18:32 |
 | dev-other | 26.11 18:00 | still open |
 
-## PRs named
+## PRs and links named
 PR #335 · terminal#158
 
 ## Messages
@@ -123,6 +125,8 @@ func TestBossStartLastSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Gone without a close: the next start writes it
+	// Session starts are in seconds: the next one in a later second
+	time.Sleep(1100 * time.Millisecond)
 	ctx := start("startup")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -140,6 +144,7 @@ func TestBossStartLastSession(t *testing.T) {
 	if _, err := s.Add(todo.Item{Text: "second session's", On: "boss"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(1100 * time.Millisecond)
 	start("clear")
 	data, err = os.ReadFile(path)
 	if err != nil {
@@ -162,13 +167,23 @@ func TestManagerStartLastSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.EndSession(time.Now().Add(-time.Hour), 0, true, nil); err != nil {
+	if _, err := s.EndSession(time.Now().Add(-time.Hour), 0, 0, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Add(todo.Item{Text: "left half-way", On: "boss"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// Only the manager's session is open now
+	// A live boss's unwritten session is its own
+	live := namedTmux(t, "boss-live", "1")
+	t.Setenv("XDG_STATE_HOME", state)
+	ls, err := todo.ForPane(live, "%1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ls.EndSession(time.Now().Add(-time.Hour), 0, 0, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Only the manager's and boss-live's sessions are open now
 	inner := namedTmux(t, Manager, "1")
 	t.Setenv("XDG_STATE_HOME", state)
 	c := tmux.NewFake(func(args []string) (string, error) {
@@ -176,7 +191,9 @@ func TestManagerStartLastSession(t *testing.T) {
 			// The manager's name, then empty fields
 			row := make([]string, strings.Count(args[len(args)-1], tmux.Sep))
 			row[0] = Manager
-			return tmux.FormatRow(row...), nil
+			rows := tmux.FormatRow(row...)
+			row[0] = "boss-live"
+			return rows + tmux.FormatRow(row...), nil
 		}
 		return inner.Run(args...)
 	})
@@ -202,7 +219,110 @@ func TestManagerStartLastSession(t *testing.T) {
 	if _, err := os.Stat(strings.Replace(path, "boss-gone", Manager, 1)); !os.IsNotExist(err) {
 		t.Errorf("the manager got a file: %v", err)
 	}
-	if un, err := s.Unwritten(); err != nil || un {
-		t.Errorf("Unwritten = %v, %v after the sweep", un, err)
+	if _, un, err := s.SessionStart(); err != nil || un {
+		t.Errorf("unwritten = %v, %v after the sweep", un, err)
+	}
+	if _, un, err := ls.SessionStart(); err != nil || !un {
+		t.Errorf("boss-live unwritten = %v, %v: want its live session left to it", un, err)
+	}
+	if _, err := os.Stat(strings.Replace(path, "boss-gone", "boss-live", 1)); !os.IsNotExist(err) {
+		t.Errorf("a live boss got a file: %v", err)
+	}
+}
+
+// A boss's close writes its file as closed, with no mark before from its session's creation; undo, for a kill that
+// failed, leaves its session to its later close.
+func TestBossClosing(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	c := namedTmux(t, "boss-x", "1")
+	s, err := todo.ForPane(c, "%1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := time.Now().Add(-time.Hour).Unix()
+	if _, err := s.Add(todo.Item{Text: "made before the upgrade", On: "boss"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	undo, err := BossClosing(c, "boss-x", created)
+	if err != nil || undo == nil {
+		t.Fatalf("BossClosing: undo %t, %v", undo != nil, err)
+	}
+	path, _ := LastSessionPath("boss-x")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(data); !strings.Contains(text, ", closed.") || !strings.Contains(text, "- #1 made before the upgrade") {
+		t.Errorf("file =\n%s", text)
+	}
+	if again, err := BossClosing(c, "boss-x", created); err != nil || again != nil {
+		t.Errorf("a second close: undo %t, %v: want nothing written", again != nil, err)
+	}
+	if err := undo(); err != nil {
+		t.Fatal(err)
+	}
+	if _, un, err := s.SessionStart(); err != nil || !un {
+		t.Errorf("after undo unwritten = %v, %v", un, err)
+	}
+}
+
+// A boss's file lists the workers it started that closed in its session and those still open, last; and the
+// messages to or from it in its session.
+func TestSessionWorkersAndMessages(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	start := time.Unix(1700000000, 0)
+	f := todo.SessionFacts{Start: start.Unix(), End: start.Add(time.Hour).Unix()}
+	for name, e := range map[string]sidebar.Ended{
+		"w-in":      {Session: "w-in", StartedBy: "boss-x", StartedAt: start.Add(time.Minute), At: start.Add(2 * time.Minute)},
+		"w-other":   {Session: "w-other", StartedBy: "boss-y", At: start.Add(2 * time.Minute)},
+		"w-earlier": {Session: "w-earlier", StartedBy: "boss-x", At: start.Add(-time.Minute)},
+	} {
+		dir := filepath.Join(state, "dev", "archive", name)
+		data, _ := json.Marshal(e)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "session.json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			// session_name, session_id, session_created, @dev_started_by
+			return tmux.FormatRow("boss-x", "$1", "1700000000", "") + tmux.FormatRow("w-open", "$2", "1700000600", "boss-x") +
+				tmux.FormatRow("w-else", "$3", "1700000600", "boss-y"), nil
+		case "display-message":
+			return "/tmp/tmux-1/default\n", nil
+		}
+		return "", nil
+	})
+	ws, err := sessionWorkers(c, "boss-x", f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, w := range ws {
+		names = append(names, w.Name)
+	}
+	if strings.Join(names, " ") != "w-in w-open" || !ws[1].Closed.IsZero() {
+		t.Errorf("workers = %+v, want w-in then w-open still open", ws)
+	}
+	store, err := OpenMessages("/tmp/tmux-1/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []struct {
+		from, to string
+		at       time.Time
+	}{{"manager", "boss-x", start.Add(time.Minute)}, {"boss-y", "manager", start.Add(time.Minute)}, {"boss-x", "manager", start.Add(-time.Minute)}} {
+		if _, err := store.Post(m.from, m.to, "hi "+m.from, false, m.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msgs, err := sessionMessages(c, "boss-x", f)
+	if err != nil || len(msgs) != 1 || msgs[0].From != "manager" {
+		t.Errorf("messages = %+v, %v: want only the manager's in the session", msgs, err)
 	}
 }

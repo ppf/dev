@@ -210,8 +210,8 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 	return out, errors.Join(verr, eerr, oerr, herr, lerr, err)
 }
 
-// lastSession writes a coordinator's last-session files on a fresh start or /clear and returns the line naming them;
-// none on a resume or compaction, as the same session goes on.
+// lastSession writes a coordinator's last-session files on a fresh start or /clear, a boss's starting a new session in
+// its list, and returns the line naming them; none on a resume or compaction, as the same session goes on.
 func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, error) {
 	if source != "startup" && source != "clear" {
 		return "", nil
@@ -234,7 +234,7 @@ func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, er
 	if source == "clear" {
 		how = EndedCleared
 	}
-	_, err = EndBossSession(c, s, name, how, 0, true, now)
+	_, err = EndBossSession(c, s, name, how, 0, 0, true, now)
 	path, perr := LastSessionPath(name)
 	if perr != nil {
 		return "", errors.Join(err, perr)
@@ -244,9 +244,14 @@ func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, er
 	} else if serr != nil {
 		return "", errors.Join(err, serr)
 	}
-	return "Your last session's file: " + path + ": read it before new work (dev wrote it from your list, workers and " +
+	line := "Your last session's file: " + path + ": read it before new work (dev wrote it from your list, workers and " +
 		"messages; its first part is your state note). Keep that state note current as you go: dev todo note state " +
-		"\"<half-way>; next: <step>\" --why \"<why>\".", err
+		"\"<half-way>; next: <step>\" --why \"<why>\"."
+	if err != nil {
+		line = "dev couldn't write your last session's file (" + err.Error() + "): " + path + " is from an earlier " +
+			"session; check dev todo and dev todo note before new work."
+	}
+	return line, err
 }
 
 // managerLastLine writes the last-session files of the bosses gone without one, then names the files there are.

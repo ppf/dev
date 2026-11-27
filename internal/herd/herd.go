@@ -149,7 +149,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`Put decisions, what the user told you and open risks in one-line dev todo notes (dev todo note decided|said|risk, see --help; state: your standing state off the board, one per list, a new one replaces it) in the same turn: ` +
 	`they come back after a /clear or a resume, as your list does. ` +
 	`Keep your state note current as you go, not at the end: ` + "`dev todo note state \"<what is half-way>; next: <step>\" --why \"<why>\"`" + `, replaced when either changes. ` +
-	`When your session ends (a close, a /clear, a crash) dev writes your last-session file (` + lastSessionFile + `) from your list, notes, workers and messages, your state note first; ` +
+	`When your session ends dev writes your last-session file (` + lastSessionFile + `) from your list, notes, workers and messages, your state note first: at a close or /clear, after a crash at your next start or the manager's; ` +
 	`read it at start before new work (the start names it). ` +
 	`Commands auto mode may gate (commit, push, merge, reset, kill, release) run bare, in your own calls and in every brief whose worker runs them: ` +
 	`no pipe, chain or redirect. When dev writes must chain, use && (never ;) and read the item back before you announce it. ` +
@@ -178,7 +178,7 @@ const bossBriefAsk = "Never use AskUserQuestion for your own decisions and never
 	"skill's AskUserQuestion step becomes a dev todo ask. Relaying your workers' permission prompts and dialogs stays " +
 	"as your rules say."
 
-// lastSessionFile is where a boss's last-session file is (inbox.LastSessionPath), as the prompts name it.
+// lastSessionFile is where a boss's last-session file is by default (inbox.LastSessionPath), as the prompts name it.
 const lastSessionFile = "~/.config/dev/manager/bosses/<boss>.md"
 
 // managerPrompt is the Manager's coordinatorPrompt: it routes between the user and the bosses, deciding only what is
@@ -238,7 +238,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with ` + "`dev agent close boss-<project>`" + `: refused unless it is idle with no workers and no open asks left ` +
 	`(relay the reason); its list stays. To look at a boss, the user runs ` + "`dev goto boss-<project>`" + `. Your bosses are ` +
 	"`dev agent list --mine`" + `; on start and after a /clear, read ` + "`dev todo --all`" + ` and dev agent list before acting. ` +
-	`Each boss's last session is in its file (` + lastSessionFile + `, written by dev at its close, /clear or crash; the start names them): read a boss's before you hand it work. ` +
+	`Each boss's last session is in its file (` + lastSessionFile + `, written by dev at its close or /clear, after a crash at its next start or yours; your start names them): read a boss's before you hand it work. ` +
 	`Claude Code compacts your conversation by itself (at 300K tokens unless projects.toml manager_autocompact says otherwise): after a compaction, read ` +
 	`the re-injected list and notes before answering, and first do what its "[dev] Owed from before the compaction" lines name. ` +
 	`Messages starting "[dev boss inbox]" carry your bosses' news, only: "waits on you" (an item on its list for the user; ` +

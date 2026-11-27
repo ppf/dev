@@ -23,8 +23,8 @@ import (
 const (
 	EndedClosed      = "closed"
 	EndedCleared     = "cleared (/clear)"
-	EndedGoneStart   = "gone without a close (crash or killed), found at its next start"
-	EndedGoneManager = "gone without a close (crash or killed), found at the manager's start"
+	EndedGoneStart   = "not written at its end (a crash, a kill or a failed write at its close), found at its next start"
+	EndedGoneManager = "not written at its end (a crash, a kill or a failed write at its close), found at the manager's start"
 )
 
 // LastSessionDir is the manager folder's directory of the bosses' last-session files.
@@ -39,13 +39,13 @@ func LastSessionPath(boss string) (string, error) {
 	return filepath.Join(dir, strings.ReplaceAll(boss, "/", "_")+".md"), err
 }
 
-// EndBossSession writes boss's last-session file from list s's session (todo.EndSession), ended as how says; the
-// manager has none.
-func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from int64, next bool, now time.Time) (wrote bool, err error) {
+// EndBossSession writes boss's last-session file from list s's session (todo.EndSession: from, only and next as
+// there), ended as how says; the manager has none.
+func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from, only int64, next bool, now time.Time) (wrote bool, err error) {
 	if boss == Manager {
 		return false, nil
 	}
-	return s.EndSession(now, from, next, func(f todo.SessionFacts) error {
+	return s.EndSession(now, from, only, next, func(f todo.SessionFacts) error {
 		workers, err := sessionWorkers(c, boss, f)
 		if err != nil {
 			return err
@@ -69,15 +69,19 @@ func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from int64, 
 	})
 }
 
-// BossClosing writes the last-session file of boss session, made at created (unix seconds), as it closes
-// (sidebar.BossEnding).
-func BossClosing(c *tmux.Client, session string, created int64) error {
+// BossClosing writes the last-session file of boss session, made at created (unix seconds), before the kill closing
+// it (sidebar.BossEnding); undo, for a kill that fails, marks its session not written again.
+func BossClosing(c *tmux.Client, session string, created int64) (undo func() error, err error) {
 	s, err := todo.ForPane(c, tmux.SessionTarget(session))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = EndBossSession(c, s, session, EndedClosed, created, false, time.Now())
-	return err
+	wrote, err := EndBossSession(c, s, session, EndedClosed, created, 0, false, time.Now())
+	if !wrote || err != nil {
+		return nil, err
+	}
+	start, _, err := s.SessionStart()
+	return func() error { return s.Unend(start) }, err
 }
 
 // WriteGone writes the last-session file of each boss closed on c's server without one (todo.GoneUnwritten), as the
@@ -85,10 +89,11 @@ func BossClosing(c *tmux.Client, session string, created int64) error {
 func WriteGone(c *tmux.Client, now time.Time) ([]string, error) {
 	gone, err := todo.GoneUnwritten(c)
 	var wrote []string
-	for _, s := range gone {
-		ok, werr := EndBossSession(c, s, s.Boss(), EndedGoneManager, 0, false, now)
+	for _, g := range gone {
+		// Only the session found gone: one its boss started since is its own
+		ok, werr := EndBossSession(c, g.Store, g.Store.Boss(), EndedGoneManager, 0, g.Start, false, now)
 		if ok {
-			wrote = append(wrote, s.Boss())
+			wrote = append(wrote, g.Store.Boss())
 		}
 		err = errors.Join(err, werr)
 	}
@@ -193,7 +198,12 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 	}
 	line("# %s: last session", boss)
 	line("")
-	line("Session %s → %s, %s. Written by dev at %s, over the session before; your list: dev todo.", at(f.Start), at(f.End), how, at(f.End))
+	if strings.HasPrefix(how, "not written") {
+		line("Session from %s, %s at %s; its end time isn't known. Written by dev then, over the session before; your list: dev todo.",
+			at(f.Start), how, at(f.End))
+	} else {
+		line("Session %s → %s, %s. Written by dev at %s, over the session before; your list: dev todo.", at(f.Start), at(f.End), how, at(f.End))
+	}
 
 	section("From the boss (state note)")
 	if n := f.State; n != nil {
@@ -260,7 +270,7 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 	}
 	none(len(workers))
 
-	section("PRs named")
+	section("PRs and links named")
 	var prs []string
 	for _, it := range slices.Concat(f.Ticked, f.Added) {
 		for _, ref := range append(prRef.FindAllString(it.Result, -1), it.Link) {

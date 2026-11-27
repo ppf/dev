@@ -130,7 +130,7 @@ type file struct {
 	// NextNote is the id the next note gets: never reused while the file lives
 	NextNote int `json:"next_note,omitempty"`
 	// Session is its boss's current session, for its last-session file (EndSession)
-	Session *SessionMark `json:"session,omitempty"`
+	Session *sessionMark `json:"session,omitempty"`
 	movedMarker
 	takenStamp
 	// dropped are the ticked items prune or a Set or Clear took off at pruned: write keeps them (keepDone)
@@ -633,9 +633,16 @@ func closedFiles(socket string, live map[string]bool, fn func(s Store, f file, e
 	return nil
 }
 
-// GoneUnwritten are the lists of the bosses (not the manager) closed on c's server, with a tmux session open there,
-// whose last session no last-session file covers: gone without a close, as a crash or a killed session leaves them.
-func GoneUnwritten(c *tmux.Client) ([]Store, error) {
+// Gone is the list of a boss with no session on its server whose last session, started at Start (unix seconds), no
+// last-session file covers.
+type Gone struct {
+	Store Store
+	Start int64
+}
+
+// GoneUnwritten are the lists of the bosses (not the manager) with no session on c's server (none when it has no
+// sessions) whose last session no last-session file covers: gone without a close, as a crash or a kill leaves them.
+func GoneUnwritten(c *tmux.Client) ([]Gone, error) {
 	type boss struct {
 		Name string `tmux:"session_name"`
 	}
@@ -651,14 +658,14 @@ func GoneUnwritten(c *tmux.Client) ([]Store, error) {
 	for _, sess := range sessions {
 		live[sessionKey(sess.Name)] = true
 	}
-	var gone []Store
+	var gone []Gone
 	var errs []error
 	err = closedFiles(first.Socket, live, func(s Store, f file, err error) {
 		switch {
 		case err != nil:
 			errs = append(errs, err)
 		case s.boss != sidebar.Manager && f.unwritten():
-			gone = append(gone, s)
+			gone = append(gone, Gone{s, f.Session.Start})
 		}
 	})
 	return gone, errors.Join(append(errs, err)...)

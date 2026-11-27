@@ -30,7 +30,7 @@ func TestEndSession(t *testing.T) {
 	write := func(f SessionFacts) error { got = append(got, f); return nil }
 
 	// No mark and no start: nothing to write, but a session starts
-	if wrote, err := s.EndSession(t0.Add(time.Minute), 0, true, write); err != nil || wrote {
+	if wrote, err := s.EndSession(t0.Add(time.Minute), 0, 0, true, write); err != nil || wrote {
 		t.Fatalf("first start = %v, %v: want nothing written", wrote, err)
 	}
 	if l := read(t, s, t0); l.Updated != t0.Unix() {
@@ -60,7 +60,7 @@ func TestEndSession(t *testing.T) {
 	// Two days on a change drops the ticks off the list and the finished items: the session's mark keeps them
 	t2 := t1.Add(48 * time.Hour)
 	add(Item{Text: "later test", Quiet: true, On: "boss"}, t2)
-	if wrote, err := s.EndSession(t2, 0, false, write); err != nil || !wrote {
+	if wrote, err := s.EndSession(t2, 0, 0, false, write); err != nil || !wrote {
 		t.Fatalf("close = %v, %v: want written", wrote, err)
 	}
 	f := got[0]
@@ -70,34 +70,88 @@ func TestEndSession(t *testing.T) {
 	if !slices.Equal(itemIDs(f.Ticked), []int{ticked, added}) || f.Ticked[0].Result != "PR #5 merged" {
 		t.Errorf("ticked = %+v, want #%d (its result) then #%d", f.Ticked, ticked, added)
 	}
-	if len(f.Added) != 0 || !slices.Equal(itemIDs(f.Asks), []int{ask}) {
+	// The replaced item counts as added in it
+	if !slices.Equal(itemIDs(f.Added), []int{old}) || !slices.Equal(itemIDs(f.Asks), []int{ask}) {
 		t.Errorf("added %v asks %v", itemIDs(f.Added), itemIDs(f.Asks))
 	}
 	if f.State == nil || f.State.Why != "release" || len(f.Notes) != 1 || f.Notes[0].Text != "CSV only" {
 		t.Errorf("state %+v notes %+v", f.State, f.Notes)
 	}
 	// Written: a second end writes nothing
-	if wrote, err := s.EndSession(t2.Add(time.Minute), 0, false, write); err != nil || wrote {
+	if wrote, err := s.EndSession(t2.Add(time.Minute), 0, 0, false, write); err != nil || wrote {
 		t.Errorf("second end = %v, %v: want nothing", wrote, err)
 	}
 
 	// The next session: what the one before left open shows until done
 	t3 := t2.Add(time.Hour)
-	if _, err := s.EndSession(t3, 0, true, write); err != nil {
+	if _, err := s.EndSession(t3, 0, 0, true, write); err != nil {
 		t.Fatal(err)
 	}
 	fresh := add(Item{Text: "New", On: "boss"}, t3.Add(time.Minute))
-	if wrote, err := s.EndSession(t3.Add(time.Hour), 0, true, write); err != nil || !wrote {
+	if wrote, err := s.EndSession(t3.Add(time.Hour), 0, 0, true, write); err != nil || !wrote {
 		t.Fatalf("clear = %v, %v", wrote, err)
 	}
-	if f := got[1]; !slices.Equal(itemIDs(f.Added), []int{fresh}) || len(f.Left) != 0 {
-		t.Errorf("2nd session added %v left %v: want #%d, none left (#%d wasn't added in the one before)", itemIDs(f.Added), itemIDs(f.Left), fresh, old)
+	if f := got[1]; !slices.Equal(itemIDs(f.Added), []int{fresh}) || !slices.Equal(itemIDs(f.Left), []int{old}) {
+		t.Errorf("2nd session added %v left %v: want #%d added, #%d left", itemIDs(f.Added), itemIDs(f.Left), fresh, old)
 	}
-	if wrote, err := s.EndSession(t3.Add(2*time.Hour), 0, false, write); err != nil || !wrote {
+	if wrote, err := s.EndSession(t3.Add(2*time.Hour), 0, 0, false, write); err != nil || !wrote {
 		t.Fatalf("close = %v, %v", wrote, err)
 	}
-	if f := got[2]; !slices.Equal(itemIDs(f.Left), []int{fresh}) || len(f.Added) != 0 {
-		t.Errorf("3rd session left %v added %v: want #%d left", itemIDs(f.Left), itemIDs(f.Added), fresh)
+	if f := got[2]; !slices.Equal(itemIDs(f.Left), []int{old, fresh}) || len(f.Added) != 0 {
+		t.Errorf("3rd session left %v added %v: want #%d #%d left", itemIDs(f.Left), itemIDs(f.Added), old, fresh)
+	}
+}
+
+// Numbers restart once a list empties: a new item under an old number is added, not left from before.
+func TestEndSessionNumberReused(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1700000000, 0)
+	var got []SessionFacts
+	write := func(f SessionFacts) error { got = append(got, f); return nil }
+	if _, err := s.EndSession(t0, 0, 0, true, write); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "first", On: "boss"}, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndSession(t0.Add(time.Hour), 0, 0, true, write); err != nil {
+		t.Fatal(err)
+	}
+	t1 := t0.Add(2 * time.Hour)
+	if err := s.Done([]int{1}, t1); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Add(Item{Text: "second", On: "boss"}, t1.Add(time.Minute))
+	if err != nil || id != 1 {
+		t.Fatalf("Add = %d, %v: want #1 again", id, err)
+	}
+	if _, err := s.EndSession(t1.Add(time.Hour), 0, 0, false, write); err != nil {
+		t.Fatal(err)
+	}
+	if f := got[1]; len(f.Left) != 0 || len(f.Added) != 1 || f.Added[0].Text != "second" {
+		t.Errorf("left %+v added %+v: want the new #1 added, nothing left", f.Left, f.Added)
+	}
+}
+
+// only writes just the session that started then; Unend marks a written one unwritten again.
+func TestEndSessionOnlyAndUnend(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1700000000, 0)
+	write := func(SessionFacts) error { return nil }
+	if _, err := s.EndSession(t0, 0, 0, true, write); err != nil {
+		t.Fatal(err)
+	}
+	if wrote, err := s.EndSession(t0.Add(time.Hour), 0, t0.Unix()-1, false, write); err != nil || wrote {
+		t.Errorf("another session's only = %v, %v: want nothing written", wrote, err)
+	}
+	if wrote, err := s.EndSession(t0.Add(time.Hour), 0, t0.Unix(), false, write); err != nil || !wrote {
+		t.Errorf("its only = %v, %v: want written", wrote, err)
+	}
+	if err := s.Unend(t0.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if start, un, err := s.SessionStart(); err != nil || start != t0.Unix() || !un {
+		t.Errorf("after Unend = %d, %v, %v: want its session unwritten", start, un, err)
 	}
 }
 
@@ -108,20 +162,20 @@ func TestEndSessionFromAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A failed write marks nothing and starts nothing
-	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), true, func(SessionFacts) error { return errors.New("disk") }); err == nil || wrote {
+	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), 0, true, func(SessionFacts) error { return errors.New("disk") }); err == nil || wrote {
 		t.Fatalf("failed write = %v, %v: want the error", wrote, err)
 	}
-	if un, err := s.Unwritten(); err != nil || un {
-		t.Errorf("Unwritten = %v, %v: want no mark after a failed write", un, err)
+	if _, un, err := s.SessionStart(); err != nil || un {
+		t.Errorf("unwritten = %v, %v: want no mark after a failed write", un, err)
 	}
 	var f SessionFacts
-	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), false, func(x SessionFacts) error { f = x; return nil }); err != nil || !wrote {
+	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), 0, false, func(x SessionFacts) error { f = x; return nil }); err != nil || !wrote {
 		t.Fatalf("from = %v, %v", wrote, err)
 	}
 	if f.Start != t0.Unix() || len(f.Added) != 1 {
 		t.Errorf("facts from the session's creation = %+v", f)
 	}
-	if un, err := s.Unwritten(); err != nil || un {
-		t.Errorf("Unwritten = %v, %v after the write", un, err)
+	if _, un, err := s.SessionStart(); err != nil || un {
+		t.Errorf("unwritten = %v, %v after the write", un, err)
 	}
 }
