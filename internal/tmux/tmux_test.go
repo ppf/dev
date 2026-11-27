@@ -32,6 +32,18 @@ func TestDefaultServerRefusedUnderTest(t *testing.T) {
 	}
 }
 
+// Start is refused on the default server under test; a fake runs it at once.
+func TestStart(t *testing.T) {
+	if err := New().Start("display-popup"); !errors.Is(err, ErrNoSocket) {
+		t.Errorf("Start on the default server = %v, want ErrNoSocket", err)
+	}
+	var got []string
+	c := NewFake(func(args []string) (string, error) { got = args; return "", nil })
+	if err := c.Start("display-popup", "-c", "/dev/ttys001"); err != nil || !slices.Equal(got, []string{"display-popup", "-c", "/dev/ttys001"}) {
+		t.Errorf("fake Start: %q %v", got, err)
+	}
+}
+
 func TestIsolatedSocketAndConfigOverride(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-1/default,1,0")
 	t.Setenv("TMUX_PANE", "%1")

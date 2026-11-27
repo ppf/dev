@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -139,17 +138,23 @@ func environWithoutTmux() []string {
 	return env
 }
 
-// Start starts one tmux command in a session of its own (no hangup when the caller's terminal goes) without waiting
-// for it: a display-popup, which returns only once the popup closes. Its stderr goes to stderr.
-func (c *Client) Start(stderr io.Writer, args ...string) (*exec.Cmd, error) {
-	if c.socket == "" && testing.Testing() {
-		return nil, ErrNoSocket
+// Start starts one tmux command in a session of its own without waiting for it: a display-popup, which returns only
+// once the popup closes. Its output goes nowhere, so it holds no pipe of its caller's open; a fake runs it at once.
+func (c *Client) Start(args ...string) error {
+	switch {
+	case c.fake:
+		_, _, err := c.run(c.argv(args), c.env)
+		return err
+	case c.socket == "" && testing.Testing():
+		return ErrNoSocket
 	}
 	cmd := exec.Command("tmux", append([]string{"-u"}, c.argv(args)...)...)
 	cmd.Env = c.env
-	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd, cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return &Error{Args: c.argv(args), Err: err}
+	}
+	return cmd.Process.Release()
 }
 
 // Interactive runs a tmux command attached to this process's terminal (attach-session, popups).

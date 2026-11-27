@@ -70,7 +70,7 @@ func Execute() {
 	if !errors.Is(err, open.ErrShown) {
 		fmt.Fprintln(os.Stderr, "❌ "+err.Error())
 		// The popup closes as soon as dev exits, taking the message with it.
-		if os.Getenv(picker.PopupGuard) != "" || os.Getenv(showGuard) != "" || os.Getenv(boardGuard) != "" {
+		if os.Getenv(picker.PopupGuard) != "" || os.Getenv(showGuard) != "" || os.Getenv(boardGuard) != "" || os.Getenv(pairGuard) != "" {
 			open.Pause(os.Stderr, "Press enter to close…")
 		}
 	}
