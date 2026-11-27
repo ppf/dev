@@ -36,7 +36,7 @@ func setStatuses(c *tmux.Client, lists []bossList, now time.Time, withNow bool, 
 
 // setStatus sets the statuses of l, s's list: a tmux boss's as setStatuses does, a desktop app boss's (boss, as
 // todoBoss reads it) from its workers on the desktop board (desktopOwner).
-func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
+func setStatus(s todo.Store, l todo.List, boss string, closed bool, stderr io.Writer) {
 	if s.Boss() == "" {
 		// Only an item on someone but the boss itself reads the workers (a ticked one too, for its assignee): the board
 		// polls this every 2 s
@@ -54,7 +54,7 @@ func setStatus(s todo.Store, l todo.List, boss string, stderr io.Writer) {
 		}
 		return
 	}
-	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), List: l}}, time.Now(), false, stderr)
+	setStatuses(tmux.New(), []bossList{{Boss: s.Boss(), Closed: closed, List: l}}, time.Now(), false, stderr)
 }
 
 // desktopOwner is the desktop app boss's Owner: its workers on the desktop board (desktop.Board, without its question

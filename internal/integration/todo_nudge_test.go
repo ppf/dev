@@ -94,9 +94,9 @@ esac`, "gh")
 	check(t, "told once", watch(12*time.Minute), "")
 	aged := watch(49 * time.Hour)
 	check(t, "unchanged 2d", strings.SplitN(aged, "\n(a \"to do\"", 2)[0], "[dev boss inbox] 3 worker update(s):\n"+
-		`- to do #2 "Deploy the cache fix after #418 merges" (on Tomas): unchanged 2d: check it at its source`+"\n"+
-		`- to do #3 "Rework export rounding" (on fix): unchanged 2d: check it at its source`+"\n"+
-		`- to do #4 "Attach the signed DPA to the vendor ticket": unchanged 2d: check it at its source`)
+		`- to do #2 "Deploy the cache fix after #418 merges" (on Tomas): unchanged 2d: dev todo show 'boss-orbit' 2`+"\n"+
+		`- to do #3 "Rework export rounding" (on fix): unchanged 2d: dev todo show 'boss-orbit' 3`+"\n"+
+		`- to do #4 "Attach the signed DPA to the vendor ticket": unchanged 2d: dev todo show 'boss-orbit' 4`)
 	check(t, "not again at 3d", watch(72*time.Hour), "")
 	if os.Getenv("ZZ_CAPTURE") != "" {
 		writeFile(t, os.Getenv("ZZ_CAPTURE"), "## watch after the PRs moved and the worker closed\n"+moved+"\n## watch at 49h\n"+aged+"\n## dev todo\n"+dev("todo"))

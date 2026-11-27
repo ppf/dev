@@ -207,7 +207,7 @@ func TestAskRules(t *testing.T) {
 		"Still asked with the hand-on question: an idea (\"a może dodamy X\"), a conditional (\"jeśli CI przejdzie, wydaj\"), a question (\"czy to głupi pomysł?\")",
 		"also anything you would object to, that conflicts with or makes stale an item on a boss's list, an addition to work handed on and every addition of your own; unsure whether it is a command or an idea: ask.",
 		"the brief carries their words word for word and adds no work they did not name",
-		"Handed on to boss-<project> as you said (\"<their words>\"); no objection, no conflict on its list.",
+		"Handed on to boss-<project> as you said (\"<their words>\"); no objection.",
 		"you have no objection and it conflicts with nothing on the bosses' lists and makes nothing there stale, hand it on in that turn with no question",
 		"you decide nothing for a project",
 		"text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)",
