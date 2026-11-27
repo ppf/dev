@@ -1023,3 +1023,56 @@ func TestCoordinatorArgvProofEnv(t *testing.T) {
 		t.Errorf("proof coordinator argv: %q", argv)
 	}
 }
+
+// R2, R3, S1-S3 (26.11 and 27.11 analyses): each rule is in the prompt and in the skill, in step.
+func TestPromptSessionRules(t *testing.T) {
+	boss := []string{
+		"each option a whole outcome (one accepts the rest without that change); the pick on the bundle settles the rest",
+		`gets an answer in that turn, or "unknown, checking by HH:MM"`,
+		"no part is asked again later",
+		"goes to that boss's list from the start (closed boss: say so in the ask)",
+		"before you close or are cleared, list the questions you left unanswered in your state note",
+	}
+	manager := []string{
+		"run one premise-only check (about 2 min, not a full review) or label the draft \"unchecked\" in the pick",
+		"Relay a boss's correction whole, never half.",
+		"is checked against the boss's own rules by that boss (ask it)",
+		"A document already with a worker isn't handed on again",
+		"don't re-ask an order the user gave",
+		"sent back with",
+		"reply to the user in the language they type (commits, items and other artefacts keep theirs)",
+		"or on your own when it has an open item whose text names today (say so in one line; none: only when asked)",
+		`dev todo note said "<idea>: <questions>" --until <date 2 days on>`,
+		"before you close, list the questions you left unanswered",
+	}
+	skillBoss := []string{
+		"each option a whole outcome (one accepts the rest without that change); the pick on the bundle settles the rest",
+		"gets an answer in that turn,** or `unknown, checking by HH:MM`",
+		"no part is asked again later",
+		"goes to that boss's list from the start (closed boss: say so in the ask)",
+		"Before you close or are cleared, list the questions you left unanswered in your state note.",
+	}
+	skillManager := []string{
+		"run one premise-only check (about 2 min, not a full review) or label the draft \"unchecked\" in the pick",
+		"Relay a boss's correction whole, never half.",
+		"is checked against the boss's own rules by that boss (ask it)",
+		"A document already with a worker isn't handed on again",
+		"don't re-ask an order the user gave",
+		"sent back with",
+		"reply to the user in the language they type (commits, items and other artefacts keep theirs)",
+		"or on your own when it has an open item whose text names today (say so in one line; none: only when asked)",
+		"`dev todo note said \"<idea>: <questions>\" --until <date 2 days on>`",
+		"before you close, list the questions you left unanswered",
+	}
+	bossPart, managerPart, _ := strings.Cut(skill.DevAgents, "\n## Manager\n")
+	for _, tt := range []struct {
+		name, text string
+		wants      []string
+	}{{"coordinatorPrompt", coordinatorPrompt, boss}, {"managerPrompt", managerPrompt, manager}, {"skill boss rules", bossPart, skillBoss}, {"skill manager section", managerPart, skillManager}} {
+		for _, want := range tt.wants {
+			if !strings.Contains(tt.text, want) {
+				t.Errorf("%s: missing %q", tt.name, want)
+			}
+		}
+	}
+}
