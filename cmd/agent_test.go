@@ -15,7 +15,6 @@ import (
 
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/control"
-	"github.com/ppf/dev/internal/open"
 )
 
 func TestExitCode(t *testing.T) {
@@ -33,25 +32,25 @@ func TestExitCode(t *testing.T) {
 func TestTimedOut(t *testing.T) {
 	working := control.Status{State: agent.Working, StateCmd: "claude", Command: "claude"}
 	waiting := control.Status{State: agent.Waiting, StateCmd: "claude", Command: "claude"}
-	run := func(st control.Status, err error) (string, error) {
+	run := func(st control.Status, err error) (string, bool) {
 		var out strings.Builder
 		cmd := &cobra.Command{}
 		cmd.SetOut(&out)
-		err = timedOut(cmd, st, err, 100*time.Second)
-		return out.String(), err
+		handled := timedOut(cmd, st, err, 100*time.Second)
+		return out.String(), handled
 	}
 	timeout := fmt.Errorf("%w after 1m40s", control.ErrTimeout)
-	out, err := run(working, timeout)
-	if want := "working: still at it after 1m40s; wait again or read it\n"; out != want || !errors.Is(err, open.ErrShown) || exitCode(err) != exitTimeout {
-		t.Errorf("timedOut(working) = %q, %v (exit %d), want %q, shown, exit 2", out, err, exitCode(err), want)
+	out, handled := run(working, timeout)
+	if want := "working: still at it after 1m40s; wait again or read it\n"; out != want || !handled {
+		t.Errorf("timedOut(working) = %q, %v, want %q, handled (exit 0)", out, handled, want)
 	}
-	// Not working (a prompt nobody picked up, a dialog): still an error, exit 2 kept
-	if out, got := run(waiting, timeout); got != timeout || out != "" || exitCode(got) != exitTimeout {
-		t.Errorf("timedOut(waiting) = %v, %q; want the error unchanged, exit 2", got, out)
+	// Not working (a prompt nobody picked up, a dialog): the caller keeps the error, exit 2
+	if out, handled := run(waiting, timeout); handled || out != "" || exitCode(timeout) != exitTimeout {
+		t.Errorf("timedOut(waiting) = %v, %q; want it left to the caller, exit 2", handled, out)
 	}
 	for _, err := range []error{errors.New("boom"), fmt.Errorf("x: %w", control.ErrStalled)} {
-		if out, got := run(working, err); got != err || out != "" {
-			t.Errorf("timedOut(%v) = %v, %q; want it unchanged and silent", err, got, out)
+		if out, handled := run(working, err); handled || out != "" {
+			t.Errorf("timedOut(%v) = %v, %q; want it left to the caller and silent", err, handled, out)
 		}
 	}
 }

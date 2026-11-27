@@ -405,6 +405,55 @@ func TestWorkerHookBossAsksUp(t *testing.T) {
 	}
 }
 
+// A worker's finished note reaches its boss whole up to maxFinished; past it the line holds the head and the path of a file with all of it.
+func TestWorkerHookFinishedWhole(t *testing.T) {
+	for _, tt := range []struct {
+		name, last string
+		inLine     bool
+	}{
+		{"whole", strings.Repeat("Merged PR 9, tests green. ", 40), true},
+		{"in a file", strings.Repeat("Merged PR 9, tests green. ", 100), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			c := tmux.NewFake(func(args []string) (string, error) {
+				if args[0] != "display-message" {
+					return "", nil
+				}
+				if strings.Contains(args[len(args)-1], "@dev_started_by") {
+					return tmux.FormatRow("boss", "w", "", "", "", "", ""), nil
+				}
+				return tmux.FormatRow("$1", "1700000000", "boss", "1", "", "/tmp/tmux-1/default"), nil
+			})
+			in, _ := json.Marshal(map[string]string{"hook_event_name": "Stop", "last_assistant_message": tt.last})
+			clk := control.Clock{Now: func() time.Time { return time.Unix(1700000100, 0) }, Sleep: func(time.Duration) {}}
+			_ = WorkerHook(c, clk, "%5", in)
+			b, _, ok, err := BossOf(c, "%5")
+			if !ok || err != nil {
+				t.Fatalf("BossOf = %v, %v", ok, err)
+			}
+			bt, err := b.Box.Take()
+			if err != nil || len(bt.Notes) != 1 {
+				t.Fatalf("Take = %v, %v; want one note", bt, err)
+			}
+			got := bt.Notes[0].Text
+			if tt.inLine {
+				if got != strings.TrimSpace(tt.last) {
+					t.Errorf("note = %q, want the whole message", got)
+				}
+				return
+			}
+			_, path, ok := strings.Cut(got, "characters: ")
+			if !ok {
+				t.Fatalf("note = %q, want a file path", got)
+			}
+			if body, err := os.ReadFile(strings.TrimSuffix(path, ")")); err != nil || string(body) != tt.last+"\n" {
+				t.Errorf("file = %q, %v; want the whole message", body, err)
+			}
+		})
+	}
+}
+
 // A start, /clear or compaction tells an --until tick once; workers that can't be read leave it.
 func TestStartContextTicked(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

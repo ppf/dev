@@ -457,6 +457,7 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		// A finished turn ends a run of rate limits
 		resumeErr = unsetResume(c, pane, true)
 	}
+	var spillErr error
 	var handErr error
 	if ok && n.Kind == Decision && w.Herd == "" && w.Outside == "" {
 		n.Handed, handErr = handOver(c, clk, b, w, n)
@@ -466,10 +467,18 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 		handErr = b.Box.unhand(w.Session)
 	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
+		if n.Kind == Finished {
+			n.Text, spillErr = b.Box.spill(n)
+		}
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
+	// A finished note can run to maxFinished: the pane's preview keeps its first line's worth
+	summary := n.Summary()
+	if n.Kind == Finished {
+		summary = clean(summary)
+	}
 	// After the boss's note, which a pane that can't take its own doesn't hold up; a new prompt has none
-	return errors.Join(askErr, resumeErr, handErr, err, setNote(c, pane, n.Summary()))
+	return errors.Join(askErr, resumeErr, spillErr, handErr, err, setNote(c, pane, summary))
 }
 
 // handOver queues worker w's decision n in the Manager's inbox, once per wait, and delivers it, when w's boss b runs
