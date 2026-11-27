@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -135,6 +137,19 @@ func environWithoutTmux() []string {
 		}
 	}
 	return env
+}
+
+// Start starts one tmux command in a session of its own (no hangup when the caller's terminal goes) without waiting
+// for it: a display-popup, which returns only once the popup closes. Its stderr goes to stderr.
+func (c *Client) Start(stderr io.Writer, args ...string) (*exec.Cmd, error) {
+	if c.socket == "" && testing.Testing() {
+		return nil, ErrNoSocket
+	}
+	cmd := exec.Command("tmux", append([]string{"-u"}, c.argv(args)...)...)
+	cmd.Env = c.env
+	cmd.Stderr = stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd, cmd.Start()
 }
 
 // Interactive runs a tmux command attached to this process's terminal (attach-session, popups).

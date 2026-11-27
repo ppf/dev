@@ -437,6 +437,8 @@ type Prompt struct {
 	// Asks: a pick of several questions, each good for one relayed answer; HandOnMixed: one of them is a hand-on question
 	Asks        []Asked `json:"asks,omitempty"`
 	HandOnMixed bool    `json:"hand_on_mixed,omitempty"`
+	// Paired: a pairing code was shown on it (ClaimPair)
+	Paired bool `json:"paired,omitempty"`
 }
 
 // Asked is one question of a pick of several (Prompt.Asks), with the user's answer ("" for none: never relayed).
@@ -812,7 +814,31 @@ func (s *state) spend(p Prompt, i int, spent bool) {
 	}
 }
 
-// is reports p the same prompt as q, spent or not, its questions too.
+// ClaimPair marks p, the prompt a pairing code is shown on: refused once one was or when the user said something since.
+func (b Box) ClaimPair(p Prompt) error {
+	return b.update(func(s *state) error {
+		switch {
+		case !s.Prompt.is(p):
+			return errors.New("the user said something since: look again")
+		case s.Prompt.Paired:
+			return errors.New("the user's latest prompt paired a phone already: ask them to say so again")
+		}
+		s.Prompt.Paired = true
+		return nil
+	})
+}
+
+// UnclaimPair gives back p, claimed for a code that wasn't shown, unless the user said something since.
+func (b Box) UnclaimPair(p Prompt) error {
+	return b.update(func(s *state) error {
+		if s.Prompt.is(p) {
+			s.Prompt.Paired = false
+		}
+		return nil
+	})
+}
+
+// is reports p the same prompt as q, spent or paired or not, its questions too.
 func (p *Prompt) is(q Prompt) bool {
 	same := func(a, b Asked) bool { return a.Question == b.Question && a.Answer == b.Answer && a.Typed == b.Typed }
 	return p != nil && p.Text == q.Text && p.At == q.At && p.Pick == q.Pick && p.Question == q.Question &&
