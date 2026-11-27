@@ -13,7 +13,7 @@ import (
 )
 
 // clearStub is a Claude stand-in for dev agent clear: hooks like agentStub's (SessionStart's output kept in
-// $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn after each turn, and the
+// $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn before each turn's end hook, and the
 // files dev asks for copied from $STUB_DIR: save.md as the handoff, fix.md on a handoff fix, proof.md as the proof,
 // proof-fix.md on a proof fix (a missing source writes nothing); with $STUB_DIR/noclear there it ignores /clear. On
 // the save prompt it runs $STUB_DIR/on-save if
@@ -26,8 +26,8 @@ box() { printf '────────────────────\n�
 hook() { printf '{"hook_event_name":"%s","source":"%s","notification_type":"%s","session_id":"s%s","transcript_path":"%s/s%s.jsonl"}' "$2" "$3" "$4" "$n" "$STUB_DIR" "$n" | `+dev+` state "$1" > "$STUB_DIR/$2-$n.json"; }
 put() { f=$(printf '%s' "$line" | sed "s/$1/\\1/"); [ -f "$STUB_DIR/$2" ] && cp "$STUB_DIR/$2" "$f"; }
 stty -icanon 2>/dev/null
-hook idle SessionStart startup
 box
+hook idle SessionStart startup
 while IFS= read -r line; do
 	if [ "$line" = /clear ] && [ -f "$STUB_DIR/noclear" ]; then
 		box
@@ -36,8 +36,8 @@ while IFS= read -r line; do
 	if [ "$line" = /clear ]; then
 		hook clear SessionEnd
 		n=$((n + 1))
-		hook idle SessionStart clear
 		box
+		hook idle SessionStart clear
 		continue
 	fi
 	hook working UserPromptSubmit
@@ -49,12 +49,12 @@ while IFS= read -r line; do
 	*"Your proof "*) put '.*Your proof \([^ ]*\) misses.*' proof-fix.md ;;
 	*"Before touching any worker"*) put '.*Before touching any worker, write \([^ ]*\) with.*' proof.md ;;
 	esac
+	box
 	if [ -f "$STUB_DIR/decide" ]; then
 		hook waiting Notification "" permission_prompt
 	else
 		hook idle Stop
 	fi
-	box
 done`, "claude"), "claude")
 }
 

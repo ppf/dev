@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // dev agent close, run in a coordinator's pane, refuses a worker that isn't its own, is busy or awaiting
@@ -210,9 +211,11 @@ func TestAgentClose(t *testing.T) {
 		t.Error("❌ session done still there")
 	}
 	check(t, "client moved to the coordinator", actClientSession(d), "coord")
-	actWait(d, "saved without done", func() string {
-		return boolStr(!slices.Contains(strings.Fields(d.saved()), "done"))
-	}, "1")
+	// Longer than actWait's 15 s: save.sh runs a ps per pane, up to 0.9 s each under load, for some 25 panes here
+	for deadline := time.Now().Add(2 * time.Minute); slices.Contains(strings.Fields(d.saved()), "done") && time.Now().Before(deadline); {
+		time.Sleep(time.Second)
+	}
+	check(t, "saved without done", boolStr(!slices.Contains(strings.Fields(d.saved()), "done")), "1")
 	check(t, "worktree removed", boolStr(strings.Contains(git(t, root, "worktree", "list"), done)), "0")
 	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/done"); err == nil {
 		t.Error("❌ branch done still there")

@@ -13,6 +13,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -781,7 +782,10 @@ func Snapshot(c *tmux.Client) error {
 	}
 	defer func() { _ = lock.Close() }()
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// A signal (the server's exit ends its run-shell jobs) also kills save.sh's group: alone it would outlive the lock
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, save, "quiet")
 	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
@@ -801,7 +805,9 @@ func Snapshot(c *tmux.Client) error {
 		return nil
 	}
 	what := "failed (" + err.Error() + ")"
-	if ctx.Err() != nil {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		what = "stopped by a signal"
+	} else if ctx.Err() != nil {
 		what = "timed out after " + timeout.String()
 		if panesErr != nil {
 			what += " (no pane count: " + panesErr.Error() + ")"

@@ -1128,6 +1128,38 @@ func TestSnapshotTimeout(t *testing.T) {
 	waitGone(t, childPid(t, pidFile))
 }
 
+// A SIGTERM (the server's exit ends its run-shell job) kills save.sh's group with it: left behind, save.sh would
+// outlive the lock.
+func TestSnapshotSignal(t *testing.T) {
+	home := t.TempDir()
+	pidFile := filepath.Join(home, "child.pid")
+	saveScript(t, home, "sleep 30 &\necho $! > '"+pidFile+".tmp'\nmv '"+pidFile+".tmp' '"+pidFile+"'\nsleep 30\n")
+	f := &fakeServer{}
+	done := make(chan error, 1)
+	go func() { done <- Snapshot(f.client()) }()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(pidFile); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("save.sh never started")
+		}
+	}
+	child := childPid(t, pidFile)
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh stopped by a signal") {
+			t.Errorf("Snapshot = %v, calls %q; want a stopped warning", err, f.calls)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("Snapshot kept waiting for save.sh after SIGTERM")
+	}
+	waitGone(t, child)
+}
+
 // save.sh takes about 0.6-0.9 s per pane (a ps per pane), so a save past snapshotTimeout with many panes isn't hung.
 func TestSnapshotTimeoutPerPane(t *testing.T) {
 	saveScript(t, t.TempDir(), "sleep 2\n")
