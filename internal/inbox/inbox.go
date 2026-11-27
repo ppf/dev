@@ -5,6 +5,7 @@ package inbox
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,8 @@ type Note struct {
 	Handed bool `json:"handed,omitempty"`
 	// Of is the boss of the worker whose decision it is, in the Manager's copy of a Handed note.
 	Of string `json:"of,omitempty"`
+	// full is a Finished note's worker message as sent, for spill; never stored.
+	full string
 }
 
 // leaveIt ends an Outside note's line.
@@ -125,6 +128,10 @@ func (n Note) Summary() string {
 const (
 	maxText  = 200
 	maxNotes = 20
+	// maxFinished is how long a finished note may be in the boss's line before spill keeps its whole message in a file: as long as a
+	// message to a worker (MaxMessage); past it a batch of 20 notes would run to about 7k tokens.
+	maxFinished  = MaxMessage
+	finishedHead = 300
 	// askLines is how many of a last message's non-blank lines may hold its question: the question and its options, or list items asking questions.
 	askLines = 5
 )
@@ -167,7 +174,7 @@ func FromHook(worker string, input []byte) (Note, bool) {
 		// The question's end, then as many options as fit
 		n = Note{Kind: Asks, Text: clean(cleanTail(ask) + " " + options)}
 	case e.Name == "Stop":
-		n = Note{Kind: Finished, Text: clean(e.Last)}
+		n = Note{Kind: Finished, Text: strings.Join(strings.Fields(e.Last), " "), full: e.Last}
 	case e.Name == "StopFailure":
 		// The error's type, then what Claude showed ("You've hit your session limit · resets 7:10pm (Europe/Warsaw)")
 		text := cmp.Or(e.Error, "stopped on an error")
@@ -351,6 +358,28 @@ func clean(s string) string {
 	return s
 }
 
+// spill keeps a finished note within maxFinished: past it the line holds the head and the path of a file in the inbox's
+// notes directory with the whole message (its original line breaks kept), named by it so a repeat writes the same file.
+func (b Box) spill(n Note) (string, error) {
+	r := []rune(n.Text)
+	if len(r) <= maxFinished {
+		return n.Text, nil
+	}
+	full := cmp.Or(n.full, n.Text)
+	sum := sha256.Sum256([]byte(full))
+	dir := filepath.Join(filepath.Dir(b.path), "notes")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%x.txt", unsafe.ReplaceAllString(n.Worker, "_"), sum[:6]))
+	head := string(r[:finishedHead-1]) + "…"
+	err := os.MkdirAll(dir, 0o700)
+	if err == nil {
+		err = os.WriteFile(path, []byte(full+"\n"), 0o600)
+	}
+	if err != nil {
+		return fmt.Sprintf("%s (whole note not saved: %v)", head, err), fmt.Errorf("keeping %s's finished note: %w", n.Worker, err)
+	}
+	return fmt.Sprintf("%s (whole note, %d characters: %s)", head, len(r), path), nil
+}
+
 // cleanTail is clean truncating from the start, as a question ends a message.
 func cleanTail(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
@@ -437,6 +466,8 @@ type Prompt struct {
 	// Asks: a pick of several questions, each good for one relayed answer; HandOnMixed: one of them is a hand-on question
 	Asks        []Asked `json:"asks,omitempty"`
 	HandOnMixed bool    `json:"hand_on_mixed,omitempty"`
+	// Paired: a pairing popup was opened for it (ClaimPair)
+	Paired bool `json:"paired,omitempty"`
 }
 
 // Asked is one question of a pick of several (Prompt.Asks), with the user's answer ("" for none: never relayed).
@@ -812,7 +843,31 @@ func (s *state) spend(p Prompt, i int, spent bool) {
 	}
 }
 
-// is reports p the same prompt as q, spent or not, its questions too.
+// ClaimPair marks p, the prompt a pairing popup is opened for: refused once one was or when the user said something since.
+func (b Box) ClaimPair(p Prompt) error {
+	return b.update(func(s *state) error {
+		switch {
+		case !s.Prompt.is(p):
+			return errors.New("the user said something since: look again")
+		case s.Prompt.Paired:
+			return errors.New("the user's latest prompt paired a phone already: ask them to say so again")
+		}
+		s.Prompt.Paired = true
+		return nil
+	})
+}
+
+// UnclaimPair gives back p, claimed for a popup that didn't open, unless the user said something since.
+func (b Box) UnclaimPair(p Prompt) error {
+	return b.update(func(s *state) error {
+		if s.Prompt.is(p) {
+			s.Prompt.Paired = false
+		}
+		return nil
+	})
+}
+
+// is reports p the same prompt as q, spent or paired or not, its questions too.
 func (p *Prompt) is(q Prompt) bool {
 	same := func(a, b Asked) bool { return a.Question == b.Question && a.Answer == b.Answer && a.Typed == b.Typed }
 	return p != nil && p.Text == q.Text && p.At == q.At && p.Pick == q.Pick && p.Question == q.Question &&

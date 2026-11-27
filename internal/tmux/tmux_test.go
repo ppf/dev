@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 type call struct{ args, env []string }
@@ -29,6 +30,26 @@ func TestDefaultServerRefusedUnderTest(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("tmux was invoked: %v", *calls)
+	}
+}
+
+// Start is refused on the default server under test; a fake runs it at once.
+func TestStart(t *testing.T) {
+	if err := New().Start("display-popup"); !errors.Is(err, ErrNoSocket) {
+		t.Errorf("Start on the default server = %v, want ErrNoSocket", err)
+	}
+	var got []string
+	c := NewFake(func(args []string) (string, error) { got = args; return "", nil })
+	if err := c.Start("display-popup", "-c", "/dev/ttys001"); err != nil || !slices.Equal(got, []string{"display-popup", "-c", "/dev/ttys001"}) {
+		t.Errorf("fake Start: %q %v", got, err)
+	}
+	// tmux failing at once is an error with its stderr
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	err := NewIsolated(fmt.Sprintf("dev-start-none-%d", time.Now().UnixNano()), "").Start("display-popup", "-E", "--", "true")
+	if e, ok := errors.AsType[*Error](err); !ok || !strings.Contains(e.Stderr, "no server running") && !strings.Contains(e.Stderr, "error connecting to") {
+		t.Errorf("Start with no server = %v, want its stderr", err)
 	}
 }
 

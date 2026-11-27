@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/ppf/dev/internal/config"
+	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/selfreload"
 	"github.com/ppf/dev/internal/serve"
 	"github.com/ppf/dev/internal/serve/web"
@@ -156,6 +157,7 @@ another origin's (Sec-Fetch-Site, Origin) is refused instead.`, serve.DefaultPor
 }
 
 func newServePairCmd() *cobra.Command {
+	var popup bool
 	cmd := &cobra.Command{
 		Use:   "pair",
 		Short: "Print a one-time code that pairs a phone with dev serve",
@@ -164,45 +166,72 @@ codes or a new dev serve pair void it): the running
 dev serve then sets the phone's session cookie. The URL is the address the running dev serve listens on (with several,
 each one a phone can reach); when that is loopback only, it needs no pairing and a phone can't reach it, so pair writes no code and says so and how to restart
 dev serve (one from an older dev, which still wants pairing there, it says to restart). Errors when dev serve is not
-running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.`, int(serve.CodeTTL.Minutes())),
+running. Refused in a Claude Code session ($CLAUDECODE set) and outside a terminal: only the user pairs.
+
+--popup, from the manager's coordinator pane only, opens dev serve pair in a popup on the user's client showing the
+manager, for the user's latest prompt there, once a prompt: the code shows only in the popup, never in this
+command's output.`, int(serve.CodeTTL.Minutes())),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			switch {
-			case os.Getenv("CLAUDECODE") != "":
-				return errors.New("refused in a Claude Code session: only the user pairs (in a shell)")
-			case !hasTerminal():
-				return errors.New("refused outside a terminal: run dev serve pair in a shell")
+			if popup {
+				return pairPopup(cmd.OutOrStdout())
 			}
-			dir, err := authDir()
-			if err != nil {
-				return err
-			}
-			live, err := pairServed(dir, ownIP, time.Second)
-			if err != nil {
-				return err
-			}
-			urls := phoneURLs(live)
-			if len(urls) == 0 {
-				var errs []error
-				for _, r := range live { // one an older dev runs may come first
-					if err := unpairedBoard(r.Addr); err != nil {
-						errs = append(errs, err)
-						continue
-					}
-					_, err = fmt.Fprint(cmd.OutOrStdout(), loopbackMessage(r.Addr, restartHint()))
+			var ack *os.File
+			if path := os.Getenv(pairGuard); path != "" {
+				var err error
+				if ack, err = openAck(path); err != nil {
 					return err
 				}
-				return errors.Join(errs...)
 			}
-			code, err := serve.NewCode(dir, time.Now())
-			if err != nil {
-				return err
+			coded, err := servePair(cmd.OutOrStdout())
+			if ack != nil {
+				err = errors.Join(err, writeAck(ack, coded, err))
+				if err == nil {
+					open.Pause(cmd.OutOrStdout(), "Press enter to close…")
+				}
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "open %s on the phone and enter the code %s (valid %d minutes, once)\n", strings.Join(urls, " or "), code, int(serve.CodeTTL.Minutes()))
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&popup, "popup", false, "from the manager: show the code in a popup on the user's client, not here")
 	return cmd
+}
+
+// servePair is dev serve pair: the URL and a new code to out (coded), or why there is none.
+func servePair(out io.Writer) (bool, error) {
+	switch {
+	case os.Getenv("CLAUDECODE") != "":
+		return false, errors.New("refused in a Claude Code session: only the user pairs (in a shell)")
+	case !hasTerminal():
+		return false, errors.New("refused outside a terminal: run dev serve pair in a shell")
+	}
+	dir, err := authDir()
+	if err != nil {
+		return false, err
+	}
+	live, err := pairServed(dir, ownIP, time.Second)
+	if err != nil {
+		return false, err
+	}
+	urls := phoneURLs(live)
+	if len(urls) == 0 {
+		var errs []error
+		for _, r := range live { // one an older dev runs may come first
+			if err := unpairedBoard(r.Addr); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			_, err = fmt.Fprint(out, loopbackMessage(r.Addr, restartHint()))
+			return false, err
+		}
+		return false, errors.Join(errs...)
+	}
+	code, err := serve.NewCode(dir, time.Now())
+	if err != nil {
+		return false, err
+	}
+	_, err = fmt.Fprintf(out, "open %s on the phone and enter the code %s (valid %d minutes, once)\n", strings.Join(urls, " or "), code, int(serve.CodeTTL.Minutes()))
+	return err == nil, err
 }
 
 var pairServed = serve.Served // test seam: a phone-reachable dev serve would need a LAN bind

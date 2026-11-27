@@ -37,7 +37,8 @@ stopped (i again), your own ticked one reopened (r, as dev todo reopen), or, dec
 the other options by its number (as dev todo overrule); o opens
 its link, w goes to the worker it's on, g to its boss; esc closes. The boards' and the sidebar's TO DO open it with space.
 Item n is the open one, else the newest ticked in the last day, as Done shows it. --question refuses it unless item n
-still reads that text (item numbers restart once a list empties). --print prints it instead, no popup: its line as
+still reads that text (item numbers restart once a list empties). --print prints it instead, no popup, as it does when
+stdin or stdout isn't a terminal and --client is not given: its line as
 dev todo has it (number, mark, text, on whom when not you, answer), an open one's context, its details, as the manager
 checks one item.`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -60,7 +61,7 @@ checks one item.`,
 			if err != nil {
 				return err
 			}
-			if printOnly {
+			if printOnly || showPrints(cmd.Flags().Changed("client")) {
 				// As the text list marks it: --json's status has it, MarkGone's flag doesn't
 				it.Gone = it.Status == todo.StatusGone
 				printShown(cmd.OutOrStdout(), ofClosed(it.Shown, it.Closed), it.Closed, time.Now())
@@ -88,11 +89,15 @@ checks one item.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&client, "client", "", "the tmux client to show it on and switch: tmux's current one by default")
+	cmd.Flags().StringVar(&client, "client", "", "the tmux client to show it on and switch: tmux's current one by default (without the flag, outside a terminal, it prints)")
 	cmd.Flags().StringVar(&question, "question", "", "the item's text: refuse when item n reads otherwise")
 	cmd.Flags().BoolVar(&printOnly, "print", false, "print the item as text instead of the popup")
 	return cmd
 }
+
+// showPrints: with no --client flag (an empty one still names tmux's choice) and no terminal (a script, a tool) there is
+// no popup to show, and one on tmux's last client would wait there for a key. The popup's own re-run and the boards' calls pass it.
+func showPrints(clientGiven bool) bool { return !clientGiven && !hasTerminal() }
 
 // printShown prints it at now as dev todo show --print does: its line (todoLine, with boss closed), an open one's
 // context and details, indented.

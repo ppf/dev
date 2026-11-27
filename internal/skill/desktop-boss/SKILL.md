@@ -132,6 +132,7 @@ A note is the worker's report, not proof: check the PR, branch or file before te
 On each note:
 
 <!-- boss-core:reports -->
+- **A watch worker wakes its boss only on news:** a recurring check (mail, CI, a calendar) ends its turn silently when nothing changed, and messages its boss only for something new, never "nothing new".
 - **Act unasked when the next step is clear and safe:** message the worker with it (fix the failing check, address the review), or hand finished work to review or a PR. Report what you did in one or two lines: the user wants to be told, not asked.
 - **A task already under way needs no question for these:** pushing its branch and opening its PR, replying to comments on that PR, and posting a comment on its task (Linear etc.) once the comment is checked against the user's rules and is valid, clean and short. E.g. "Fixed in 3f2a1c, thanks" to a review comment on its PR, or "PR: <url>, How To Test added" on its Linear issue; mail or chat to a person elsewhere is not one of these.
 - **One option clearly recommended, the others making little sense:** take it and report it, don't ask. This holds for a question a worker asks as text too. E.g. a worker asks "add the missing test in this PR or a follow-up?": tell it "this PR" and report it.

@@ -207,7 +207,7 @@ func TestAskRules(t *testing.T) {
 		"Still asked with the hand-on question: an idea (\"a może dodamy X\"), a conditional (\"jeśli CI przejdzie, wydaj\"), a question (\"czy to głupi pomysł?\")",
 		"also anything you would object to, that conflicts with or makes stale an item on a boss's list, an addition to work handed on and every addition of your own; unsure whether it is a command or an idea: ask.",
 		"the brief carries their words word for word and adds no work they did not name",
-		"Handed on to boss-<project> as you said (\"<their words>\"); no objection, no conflict on its list.",
+		"Handed on to boss-<project> as you said (\"<their words>\"); no objection.",
 		"you have no objection and it conflicts with nothing on the bosses' lists and makes nothing there stale, hand it on in that turn with no question",
 		"you decide nothing for a project",
 		"text typed under Other is a correction: revise and ask again", "Not gated: relaying the user's pick on an item", "your own easy decisions (simple or obvious; new work never is one)", "the brief you would send (the assessment and its cons in it)",
@@ -223,7 +223,7 @@ func TestAskRules(t *testing.T) {
 		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
 		"- **dev offers it:** once per idle stretch", "Run it yourself then, in the background, without asking the user, and tell them in one line; if it refuses, never force it: say why in one line",
 		"or 2 minutes at a context of 40% or more with none of its asks up in your question dialog (not again for 30 minutes after an offer)",
-		"prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
+		"prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error): when the line says `working`", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
 		"- **Mark the call's items asked, right before the dialog:** one `dev todo asking <boss> <n> [<boss> <n>]... --question \"<item text>\" [--question \"<item text>\"]...` naming every item the call asks",
 		// Claude Code's dim suggestion is never the user's draft
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",

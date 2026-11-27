@@ -37,14 +37,14 @@ const (
 	exitStalled = 3
 )
 
-// timedOut turns the timeout of a wait on a working agent into one neutral stdout line that still exits 2: it is
-// not failing. Any other error, a timeout in another state included, passes through.
-func timedOut(cmd *cobra.Command, st control.Status, err error, timeout time.Duration) error {
+// timedOut reports the timeout of a wait on a working agent as one neutral stdout line and true: the caller exits 0, it
+// is not failing. Any other error, a timeout in another state included, is left to the caller.
+func timedOut(cmd *cobra.Command, st control.Status, err error, timeout time.Duration) bool {
 	if !errors.Is(err, control.ErrTimeout) || st.Trusted() != agent.Working {
-		return err
+		return false
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "working: still at it after %s; wait again or read it\n", timeout)
-	return fmt.Errorf("%w: %w", open.ErrShown, err)
+	return true
 }
 
 // exitCode maps an error to dev's exit status.
@@ -63,7 +63,7 @@ func newAgentCmd() *cobra.Command {
 		Use:   "agent",
 		Short: "Drive agent sessions from a coordinator agent (targets: session name or pane id)",
 		Long: `Drive agent sessions from a coordinator agent. A target is a session name (exact) or an agent
-pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout (a neutral line on stdout while it still works), 3 stalled (prompt not picked up).
+pane id (%N), never a sidebar position. Exit status: 0 ok, 1 error, 2 timeout (an agent not working; one still working prints a neutral line on stdout and exits 0), 3 stalled (prompt not picked up).
 Run "dev agent skill [dev-agents|desktop-boss]" for a coordinator skill.`,
 	}
 	cmd.AddCommand(newAgentListCmd(), newAgentGetCmd(), newAgentReadCmd(), newAgentPromptCmd(), newAgentWaitCmd(), newAgentWaitUntilCmd(),
@@ -247,7 +247,7 @@ dialog is an error.
 first model call) and returns once the hook saw the prompt and the agent settled again (idle or waiting),
 printing that state; another slash command Claude runs itself, once its screen shows it ran (Claude only).
 Exit 3 when the prompt isn't picked up within --stall (it may still sit in the input box: read the pane),
-exit 2 on --timeout. "/clear" (or /reset, /new) starts no turn: --wait returns once the agent's new
+exit 2 on --timeout of a worker not working (a still-working one prints a neutral line and exits 0). "/clear" (or /reset, /new) starts no turn: --wait returns once the agent's new
 conversation started (its hook recorded a new session). Refused for Codex and Grok, whose hooks record none, and for agy, whose
 hook records one only from its first turn.
 
@@ -292,8 +292,8 @@ that message holds a "?" outside a URL, listed as a command.`,
 			}
 			// A gated hand-on keeps its error (it says the brief reached the pane), and so does a timeout before the stall
 			// check could confirm the pickup
-			if gerr == nil && (g == nil || g.pick == nil) && timeout >= stall {
-				err = timedOut(cmd, st, err, timeout)
+			if gerr == nil && (g == nil || g.pick == nil) && timeout >= stall && timedOut(cmd, st, err, timeout) {
+				return nil
 			}
 			if err != nil || gerr != nil {
 				return errors.Join(g.reached(err), gerr)
@@ -334,7 +334,10 @@ func newAgentWaitCmd() *cobra.Command {
 			}
 			st, err := control.Wait(c, control.RealClock, a.Pane, timeout, done)
 			if err != nil {
-				return timedOut(cmd, st, err, timeout)
+				if timedOut(cmd, st, err, timeout) {
+					return nil
+				}
+				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), st.Trusted())
 			return nil

@@ -589,11 +589,7 @@ func closedLists(socket string, live map[string]bool, now time.Time, finished bo
 		if n, _ := l.Open(); n == 0 && !(finished && (len(l.Items) > 0 || len(l.Finished) > 0)) {
 			return
 		}
-		for i, it := range l.Items {
-			if !it.Done && (it.Check == nil || !it.Check.Event()) {
-				l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
-			}
-		}
+		l.MarkBossClosed()
 		out = append(out, BossList{Boss: s.boss, Closed: true, Store: s, List: l})
 	})
 	slices.SortFunc(out, func(a, b BossList) int { return strings.Compare(a.Boss, b.Boss) })
@@ -935,7 +931,7 @@ func (s Store) replace(id int, it Item, ask bool, renamed *bool, now time.Time) 
 		}
 		f.Items[i] = it
 		*renamed = it.Text != old.Text
-		if it.Text == old.Text && it.Link == old.Link && it.On == old.On && sameSession(it.Session, old.Session) {
+		if sameBar(it.Text, old.Text) && it.Link == old.Link && it.On == old.On && sameSession(it.Session, old.Session) {
 			return s.keepTold(old, it)
 		}
 		return nil
@@ -1518,6 +1514,15 @@ func (l List) linesSince(limit int, seen map[int]string, now time.Time, stamped 
 		fmt.Fprintf(&b, "\n+%d more: dev todo", n-limit)
 	}
 	return b.String(), shown
+}
+
+// MarkBossClosed flags the open items of a closed boss's list as boss closed, unless their PR moved.
+func (l List) MarkBossClosed() {
+	for i, it := range l.Items {
+		if !it.Done && (it.Check == nil || !it.Check.Event()) {
+			l.Items[i].Check = &sidebar.Check{Kind: sidebar.CheckBossClosed, Since: l.Updated}
+		}
+	}
 }
 
 // seenAs is how a boss's list keeps the item it named: its text, then its line and revision (Added), so a replace or

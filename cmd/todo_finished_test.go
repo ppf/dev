@@ -91,3 +91,45 @@ func TestTodoAllFinishedOnly(t *testing.T) {
 		t.Errorf("dev serve's board lacks the finished items:\n%s", board)
 	}
 }
+
+// dev todo --boss <closed boss> reads its list, as text and JSON, instead of "no session".
+func TestTodoClosedBossList(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLAUDECODE", "")
+	t.Setenv("TMUX_PANE", "")
+	sessions := []string{"boss-shut", "manager"}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		switch args[0] {
+		case "list-sessions":
+			var out string
+			for _, n := range sessions {
+				out += tmux.FormatRow(n, "1")
+			}
+			return out, nil
+		case "display-message":
+			return tmux.FormatRow("/tmp/tmux-1/default", strings.Trim(args[3], "=:"), "1", "$1", "1700000000"), nil
+		}
+		return "", nil
+	})
+	s, err := todo.ForPane(c, tmux.SessionTarget("boss-shut"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(todo.Item{Text: "Left open"}, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	sessions = []string{"manager"}
+	old := closedTmux
+	closedTmux = func() *tmux.Client { return c }
+	t.Cleanup(func() { closedTmux = old })
+
+	if got := run(t, "", "todo", "--boss", "boss-shut"); !strings.Contains(got, "Left open") {
+		t.Errorf("text: %q, want its item", got)
+	}
+	if got := run(t, "", "todo", "--boss", "boss-shut", "--json"); !strings.Contains(got, `"text": "Left open"`) || !strings.Contains(got, `"status": "boss closed"`) {
+		t.Errorf("JSON: %q, want its item with status boss closed", got)
+	}
+	if _, _, err := execute(t, "", "todo", "--boss", "boss-nobody"); err == nil {
+		t.Error("a boss that never was: want the error")
+	}
+}

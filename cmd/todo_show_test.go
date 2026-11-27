@@ -45,3 +45,19 @@ func TestShowClick(t *testing.T) {
 		t.Errorf("❌ answered %v, done %v", answered, s.(showModel).m.Done)
 	}
 }
+
+// Outside a terminal and with no --client dev todo show prints at once instead of waiting on a popup; --client keeps it.
+func TestShowPrints(t *testing.T) {
+	orig := hasTerminal
+	t.Cleanup(func() { hasTerminal = orig })
+	for _, tt := range []struct {
+		terminal bool
+		given    bool
+		want     bool
+	}{{false, false, true}, {true, false, false}, {false, true, false}, {true, true, false}} {
+		hasTerminal = func() bool { return tt.terminal }
+		if got := showPrints(tt.given); got != tt.want {
+			t.Errorf("❌ terminal %v, --client given %v: prints %v, want %v", tt.terminal, tt.given, got, tt.want)
+		}
+	}
+}
