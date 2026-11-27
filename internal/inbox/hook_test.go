@@ -443,6 +443,9 @@ func TestWorkerHookFinishedWhole(t *testing.T) {
 				}
 				return
 			}
+			if len(bt.Notes[0].Key) > len(got)+len(Finished)+1 {
+				t.Errorf("key holds %d bytes, want it to follow the short line", len(bt.Notes[0].Key))
+			}
 			_, path, ok := strings.Cut(got, "characters: ")
 			if !ok {
 				t.Fatalf("note = %q, want a file path", got)

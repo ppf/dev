@@ -468,7 +468,10 @@ func WorkerHook(c *tmux.Client, clk control.Clock, pane string, input []byte) er
 	}
 	if ok && (w.Herd == "" || up(n.Kind) || e.Name == "UserPromptSubmit") {
 		if n.Kind == Finished {
-			n.Text, spillErr = b.Box.spill(n)
+			if text, err := b.Box.spill(n); text != n.Text {
+				// The dedupe key follows the short line, not the whole message
+				n.Text, n.Key, spillErr = text, n.Kind+"\x00"+text, err
+			}
 		}
 		err = deliverNote(c, clk, b, w, n, e.Name)
 	}
