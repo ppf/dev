@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -45,6 +47,8 @@ type starter struct {
 	exe    string
 	served func(dir string, timeout time.Duration) ([]serve.Running, error) // serve.Served on this Mac's addresses
 	alive  func(dir string) (bool, error)                                   // serve.AnyAlive
+	taken  func(ap netip.AddrPort) bool                                     // something listens on ap
+	settle time.Duration                                                    // how long a starting or reloading dev serve takes to listen
 	bind   func(addr string) error
 	spawn  func(exe string, args, env []string, log, hold *os.File) (exited <-chan struct{}, err error)
 	own    string
@@ -88,16 +92,18 @@ func newStarter() (*starter, error) {
 		served: func(dir string, timeout time.Duration) ([]serve.Running, error) {
 			return serve.Served(dir, ownIP, timeout)
 		},
-		alive: serve.AnyAlive,
-		bind:  func(addr string) error { _, _, err := bind(addr); return err },
-		spawn: spawnServe,
-		own:   selfreload.Version(),
-		wait:  3 * time.Second,
+		alive:  serve.AnyAlive,
+		taken:  portTaken,
+		settle: time.Second,
+		bind:   func(addr string) error { _, _, err := bind(addr); return err },
+		spawn:  spawnServe,
+		own:    selfreload.Version(),
+		wait:   3 * time.Second,
 	}, nil
 }
 
-// ensure starts dev serve unless one answers, a launchd agent owns it, or this boss runs on a private tmux server
-// with no DEV_SERVE_ADDR; it takes at most s.wait (and a health check's last second) in all.
+// ensure starts dev serve unless one answers (on loopback: there), a launchd agent owns it, or this boss runs on a
+// private tmux server with no DEV_SERVE_ADDR; it takes at most s.wait (and a health check's last second) in all.
 func (s *starter) ensure(stderr io.Writer) error {
 	deadline := time.Now().Add(s.wait)
 	served := func(most time.Duration) ([]serve.Running, error) {
@@ -119,8 +125,16 @@ func (s *starter) ensure(stderr io.Writer) error {
 		return nil
 	}
 	defer func() { _ = hold.Close() }()
+	want, wantErr := netip.ParseAddrPort(addr)                  // an error: DEV_SERVE_ADDR not ip:port, s.bind says so
+	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
+	// On loopback dev boss wants its own: a tailnet or LAN one (the launchd agent's) can lose its address, and the
+	// Mac's board with it
+	loopback := wantErr == nil && want.Addr().IsLoopback() && want.Port() != 0
 	live, err := served(time.Second)
-	if err == nil {
+	if err != nil && !errors.Is(err, serve.ErrNotRunning) {
+		return err
+	}
+	if len(live) > 0 && (!loopback || slices.ContainsFunc(live, func(r serve.Running) bool { return r.Addr == want })) {
 		warned := map[string]bool{}
 		for _, r := range live {
 			if r.Version != s.own && !warned[r.Version] {
@@ -129,22 +143,41 @@ func (s *starter) ensure(stderr io.Writer) error {
 			}
 		}
 		return nil
-	} else if !errors.Is(err, serve.ErrNotRunning) {
+	}
+	// One that runs but doesn't answer (its recorded address gone, hung) would be a second; on loopback only one
+	// that holds the port would
+	alive, err := s.alive(s.dir)
+	if err != nil {
 		return err
 	}
-	// One that runs but doesn't answer (its recorded address gone, hung) would be a second
-	if alive, err := s.alive(s.dir); err != nil {
-		return err
-	} else if alive {
+	taken := alive && !loopback
+	if alive && loopback {
+		// One starting or reloading there holds the alive lock a moment before it listens
+		end := time.Now().Add(s.settle)
+		if deadline.Before(end) {
+			end = deadline
+		}
+		for ; ; time.Sleep(50 * time.Millisecond) {
+			if taken = s.taken(want); taken || !time.Now().Before(end) {
+				break
+			}
+		}
+	}
+	if taken && loopback {
+		fmt.Fprintf(stderr, "⚠ dev serve: something holds %s but doesn't answer as dev serve (a hung one? see %s): not starting another\n", want, filepath.Join(s.dir, "serve.log"))
+		return nil
+	} else if taken {
 		fmt.Fprintf(stderr, "⚠ dev serve runs but doesn't answer on its address (see %s): not starting another\n", filepath.Join(s.dir, "serve.log"))
 		return nil
 	}
-	if _, err := os.Stat(serve.PlistPath(s.home)); err == nil {
-		fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%[1]d/%[2]s (not loaded: launchctl bootstrap gui/%[1]d %[3]q)\n",
-			s.uid, serve.Label, serve.PlistPath(s.home))
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return err
+	// One it can't read or parse may be on want: as before, it's the agent's
+	if plist, err := os.ReadFile(serve.PlistPath(s.home)); !errors.Is(err, fs.ErrNotExist) {
+		agent, perr := agentAddr(plist)
+		if !loopback || err != nil || perr != nil || agent == want {
+			fmt.Fprintf(stderr, "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/%[1]d/%[2]s (not loaded: launchctl bootstrap gui/%[1]d %[3]q)\n",
+				s.uid, serve.Label, serve.PlistPath(s.home))
+			return nil
+		}
 	}
 	if err := s.bind(addr); err != nil {
 		switch {
@@ -155,16 +188,14 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 		return err
 	}
-	want, err := netip.ParseAddrPort(addr)                      // "": dev serve's own default, any address
-	want = netip.AddrPortFrom(want.Addr().Unmap(), want.Port()) // as dev serve records it
-	if err == nil && want.Port() == 0 {
+	if wantErr == nil && want.Port() == 0 {
 		return errors.New("DEV_SERVE_ADDR: port 0 picks a new port each start, so each dev boss would start another: give one")
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return err
 	}
 	logPath := filepath.Join(s.dir, "serve.log")
-	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 1<<20 { // none runs: nothing writes it now
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 1<<20 && !alive { // none runs: nothing writes it now
 		if err := os.Truncate(logPath, 0); err != nil {
 			return err
 		}
@@ -246,6 +277,52 @@ func (s *starter) ensure(stderr io.Writer) error {
 	return nil
 }
 
+// agentAddr is the last --addr in a launchd agent's ProgramArguments, as dev serve records it; none without one.
+func agentAddr(plist []byte) (netip.AddrPort, error) {
+	var p struct {
+		Dict struct {
+			Nodes []struct {
+				XMLName xml.Name
+				Text    string   `xml:",chardata"`
+				Strings []string `xml:"string"`
+			} `xml:",any"`
+		} `xml:"dict"`
+	}
+	if err := xml.Unmarshal(plist, &p); err != nil {
+		return netip.AddrPort{}, err
+	}
+	var args []string
+	for i, n := range p.Dict.Nodes {
+		if n.XMLName.Local == "key" && strings.TrimSpace(n.Text) == "ProgramArguments" && i+1 < len(p.Dict.Nodes) {
+			args = p.Dict.Nodes[i+1].Strings
+		}
+	}
+	addr := ""
+	for i, a := range args {
+		switch v, ok := strings.CutPrefix(strings.TrimSpace(a), "--addr="); {
+		case ok:
+			addr = v
+		case strings.TrimSpace(a) == "--addr" && i+1 < len(args):
+			addr = args[i+1]
+		}
+	}
+	if addr == "" {
+		return netip.AddrPort{}, nil
+	}
+	ap, _, err := serve.Check(strings.TrimSpace(addr))
+	return ap, err
+}
+
+// portTaken is whether something accepts connections on ap; it doesn't bind ap, which would fail a dev serve starting there.
+func portTaken(ap netip.AddrPort) bool {
+	c, err := net.DialTimeout("tcp", ap.String(), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
 // startLock takes dir/start, so two dev bosses don't both start one; nil once deadline passes first. The dev serve
 // it starts inherits it (envStartFd) and holds it until it holds its alive lock.
 func startLock(dir string, deadline time.Time) (*os.File, error) {
@@ -301,7 +378,13 @@ func lastLine(path string, from int64, none string) string {
 		return err.Error()
 	}
 	lines := strings.Split(strings.TrimSpace(string(bytes.ToValidUTF8(b, nil))), "\n")
-	if l := strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "❌ "); l != "" {
+	// A launchd agent beside it may write to the same log: the started one's error comes first
+	for _, l := range slices.Backward(lines) {
+		if l, ok := strings.CutPrefix(strings.TrimSpace(l), "❌ "); ok && l != "" {
+			return l
+		}
+	}
+	if l := strings.TrimSpace(lines[len(lines)-1]); l != "" {
 		return l
 	}
 	return none

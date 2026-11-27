@@ -74,7 +74,8 @@ func TestBossStartsServe(t *testing.T) {
 	out, errOut = run(env, "boss", "hq", "--background", "--no-serve")
 	check(t, "--no-serve", out+errOut+strconv.Itoa(len(pids())), "0 boss-hq\n0")
 	home := tempDir(t)
-	writeFile(t, filepath.Join(home, "Library/LaunchAgents/dev.serve.plist"), "<plist/>")
+	writeFile(t, filepath.Join(home, "Library/LaunchAgents/dev.serve.plist"), // an agent on dev boss's own address
+		"<plist><dict><key>ProgramArguments</key><array><string>serve</string><string>--addr</string><string>"+addr+"</string></array></dict></plist>")
 	out, errOut = run(append(env, "HOME="+home), "boss", "hq", "--background")
 	check(t, "launchd agent", out+errOut+strconv.Itoa(len(pids())),
 		"0 boss-hq\n⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/"+strconv.Itoa(os.Getuid())+"/dev.serve (not loaded: launchctl bootstrap gui/"+strconv.Itoa(os.Getuid())+" \""+filepath.Join(home, "Library/LaunchAgents/dev.serve.plist")+"\")\n0")
@@ -114,7 +115,7 @@ func TestBossStartsServe(t *testing.T) {
 	}
 	out, errOut = run(env, "boss", "hq", "--background")
 	_ = syscall.Kill(first[0], syscall.SIGCONT)
-	if out != "0 boss-hq\n" || !strings.HasPrefix(errOut, "⚠ dev serve runs but doesn't answer on its address") || len(pids()) != 1 {
+	if out != "0 boss-hq\n" || !strings.HasPrefix(errOut, "⚠ dev serve: something holds "+addr) || len(pids()) != 1 {
 		t.Errorf("stopped: %q %q %v", out, errOut, pids())
 	}
 

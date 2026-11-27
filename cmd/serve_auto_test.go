@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -24,7 +25,9 @@ type fakeStart struct {
 	exit     bool   // the spawned serve exits at once
 	logLine  string // what it writes to its log
 	bindErr  error
-	alive    bool // a dev serve holds the alive lock
+	alive    bool             // a dev serve holds the alive lock
+	taken    bool             // something listens on dev boss's address
+	asked    []netip.AddrPort // the addresses taken was asked about
 	envValue map[string]string
 }
 
@@ -41,6 +44,7 @@ func (f *fakeStart) starter(t *testing.T) *starter {
 			return []serve.Running{{Addr: netip.MustParseAddrPort(cmp.Or(f.at, "127.0.0.1:18417")), Version: f.version}}, nil
 		},
 		alive: func(string) (bool, error) { return f.alive, nil },
+		taken: func(ap netip.AddrPort) bool { f.asked = append(f.asked, ap); return f.taken },
 		bind:  func(string) error { return f.bindErr },
 		spawn: func(exe string, args, env []string, log, _ *os.File) (<-chan struct{}, error) {
 			f.spawned = append(f.spawned, append([]string{exe}, args...))
@@ -94,7 +98,7 @@ func TestAutoServeRunning(t *testing.T) {
 		{"(devel) abc", ""},
 		{"v0.71.0", "⚠ dev serve v0.71.0 runs (this dev is (devel) abc): restart it to update, unless it reloads itself\n"},
 	} {
-		f := &fakeStart{version: tt.version, envValue: map[string]string{}}
+		f := &fakeStart{version: tt.version, at: "127.0.0.1:8417", envValue: map[string]string{}}
 		var out bytes.Buffer
 		if err := f.starter(t).ensure(&out); err != nil || out.String() != tt.want || len(f.spawned) > 0 {
 			t.Errorf("%s: err %v, out %q, spawned %q; want %q", tt.version, err, out.String(), f.spawned, tt.want)
@@ -204,14 +208,92 @@ func TestAutoServePortZero(t *testing.T) {
 }
 
 func TestAutoServeAliveNotAnswering(t *testing.T) {
+	for _, tt := range []struct {
+		name, where string
+		f           *fakeStart
+	}{
+		{"loopback, its port taken", "⚠ dev serve: something holds 127.0.0.1:18417 but doesn't answer as dev serve (a hung one? see ", &fakeStart{runs: -1, alive: true, taken: true, envValue: map[string]string{"DEV_SERVE_ADDR": "[::ffff:127.0.0.1]:18417"}}},
+		{"tailnet", "⚠ dev serve runs but doesn't answer on its address (see ", &fakeStart{runs: -1, alive: true, envValue: map[string]string{"DEV_SERVE_ADDR": "100.96.196.51:8417"}}},
+	} {
+		name, f := tt.name, tt.f
+		s := f.starter(t)
+		var out bytes.Buffer
+		if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
+			t.Fatalf("%s: err %v, spawned %q", name, err, f.spawned)
+		}
+		if want := tt.where + filepath.Join(s.dir, "serve.log") + "): not starting another\n"; out.String() != want {
+			t.Fatalf("%s: got %q, want %q", name, out.String(), want)
+		}
+		if f.taken && !slices.Equal(f.asked, []netip.AddrPort{netip.MustParseAddrPort("127.0.0.1:18417")}) {
+			t.Fatalf("%s: asked %v, want the unmapped address", name, f.asked)
+		}
+	}
+}
+
+// A taken loopback port with no dev serve alive isn't a stuck one: the start says what holds it
+func TestAutoServeTakenNoneAlive(t *testing.T) {
+	f := &fakeStart{runs: 1, at: "127.0.0.1:8417", taken: true, envValue: map[string]string{}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || len(f.spawned) != 1 || len(f.asked) > 0 {
+		t.Fatalf("err %v, out %q, spawned %q, asked %v", err, out.String(), f.spawned, f.asked)
+	}
+}
+
+// One starting or reloading on loopback holds the alive lock before it listens: dev boss waits for its port
+func TestAutoServeSettles(t *testing.T) {
 	f := &fakeStart{runs: -1, alive: true, envValue: map[string]string{}}
 	s := f.starter(t)
+	s.settle = time.Second
+	s.taken = func(netip.AddrPort) bool { f.asked = append(f.asked, netip.AddrPort{}); return len(f.asked) >= 3 }
 	var out bytes.Buffer
-	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
-		t.Fatalf("err %v, spawned %q", err, f.spawned)
+	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 || len(f.asked) != 3 || !strings.HasPrefix(out.String(), "⚠ dev serve: something holds 127.0.0.1:8417") {
+		t.Fatalf("err %v, out %q, spawned %q, asked %d", err, out.String(), f.spawned, len(f.asked))
 	}
-	if want := "⚠ dev serve runs but doesn't answer on its address (see " + filepath.Join(s.dir, "serve.log") + "): not starting another\n"; out.String() != want {
-		t.Fatalf("got %q, want %q", out.String(), want)
+}
+
+// Port 0 on loopback: any answering one will do, as before
+func TestAutoServePortZeroRunning(t *testing.T) {
+	f := &fakeStart{version: "(devel) abc", envValue: map[string]string{"DEV_SERVE_ADDR": "127.0.0.1:0"}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
+		t.Fatalf("err %v, out %q, spawned %q", err, out.String(), f.spawned)
+	}
+}
+
+// On a tailnet or LAN DEV_SERVE_ADDR any answering dev serve will do, as before
+func TestAutoServeRunningElsewhere(t *testing.T) {
+	f := &fakeStart{at: "127.0.0.1:8417", version: "(devel) abc", envValue: map[string]string{"DEV_SERVE_ADDR": "100.96.196.51:8417"}}
+	var out bytes.Buffer
+	if err := f.starter(t).ensure(&out); err != nil || out.Len() > 0 || len(f.spawned) > 0 {
+		t.Fatalf("err %v, out %q, spawned %q", err, out.String(), f.spawned)
+	}
+}
+
+// #314, #347: the launchd agent's tailnet dev serve answers, or runs with its address gone: dev boss's own starts on
+// loopback beside it
+func TestAutoServeBesideTailnet(t *testing.T) {
+	tailnet := serve.Running{Addr: netip.MustParseAddrPort("100.96.196.51:8417"), Version: "(devel) abc"}
+	own := serve.Running{Addr: netip.MustParseAddrPort("127.0.0.1:8417"), Version: "(devel) abc"}
+	for name, first := range map[string][]serve.Running{"answering": {tailnet}, "address gone": nil} {
+		f := &fakeStart{alive: true, envValue: map[string]string{}}
+		s := f.starter(t)
+		if _, err := serve.Install(s.home, serve.Agent{Bin: "/bin/dev", Addr: tailnet.Addr.String(), Log: filepath.Join(s.home, "serve.log")}); err != nil {
+			t.Fatal(err)
+		}
+		calls := 0
+		s.served = func(string, time.Duration) ([]serve.Running, error) {
+			if calls++; calls == 1 {
+				if first == nil {
+					return nil, serve.ErrNotRunning
+				}
+				return first, nil
+			}
+			return append(slices.Clone(first), own), nil
+		}
+		var out bytes.Buffer
+		if err := s.ensure(&out); err != nil || len(f.spawned) != 1 || out.String() != "dev serve started: http://127.0.0.1:8417/ (this Mac only, no pairing needed)\n" {
+			t.Errorf("%s: err %v, out %q, spawned %q", name, err, out.String(), f.spawned)
+		}
 	}
 }
 
@@ -270,17 +352,34 @@ func TestLastLine(t *testing.T) {
 }
 
 func TestAutoServeLaunchAgent(t *testing.T) {
-	f := &fakeStart{runs: -1, envValue: map[string]string{}}
+	for _, tt := range []struct{ name, env, agent string }{
+		{"its address", "127.0.0.1:18417", "127.0.0.1:18417"},
+		{"its address mapped", "127.0.0.1:18417", "[::ffff:127.0.0.1]:18417"},
+		{"not loopback", "100.96.196.51:8417", "127.0.0.1:18417"},
+		{"not loopback, no --addr", "100.96.196.51:8417", ""},
+		{"an --addr it refuses", "127.0.0.1:18417", "0.0.0.0:18417"},
+	} {
+		f := &fakeStart{runs: -1, envValue: map[string]string{"DEV_SERVE_ADDR": tt.env}}
+		s := f.starter(t)
+		if _, err := serve.Install(s.home, serve.Agent{Bin: "/bin/dev", Addr: tt.agent, Log: filepath.Join(s.home, "serve.log")}); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
+			t.Fatalf("%s: err %v, spawned %q", tt.name, err, f.spawned)
+		}
+		if want := "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/501/dev.serve (not loaded: launchctl bootstrap gui/501 \"" + serve.PlistPath(s.home) + "\")\n"; out.String() != want {
+			t.Fatalf("%s: got %q, want %q", tt.name, out.String(), want)
+		}
+	}
+	// An agent on dev serve's own default (tailnet, else LAN) isn't on loopback: dev boss's starts
+	f := &fakeStart{runs: 1, at: "127.0.0.1:8417", envValue: map[string]string{}}
 	s := f.starter(t)
 	if _, err := serve.Install(s.home, serve.Agent{Bin: "/bin/dev", Log: filepath.Join(s.home, "serve.log")}); err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
-	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 {
-		t.Fatalf("err %v, spawned %q", err, f.spawned)
-	}
-	if want := "⚠ dev serve: launchd agent installed but not answering: launchctl kickstart gui/501/dev.serve (not loaded: launchctl bootstrap gui/501 \"" + serve.PlistPath(s.home) + "\")\n"; out.String() != want {
-		t.Fatalf("got %q, want %q", out.String(), want)
+	if err := s.ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
+		t.Fatalf("no --addr: err %v, spawned %q", err, f.spawned)
 	}
 }
 
@@ -335,4 +434,104 @@ func TestAutoServeFails(t *testing.T) {
 			t.Fatalf("err %v, spawned %q", err, f.spawned)
 		}
 	})
+}
+
+func TestAgentAddr(t *testing.T) {
+	want := netip.MustParseAddrPort("127.0.0.1:8417")
+	plist := func(args ...string) string {
+		var b strings.Builder
+		for _, a := range args {
+			b.WriteString("<string>" + a + "</string><!-- a comment -->\n")
+		}
+		return `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>dev.serve</string>
+<key>EnvironmentVariables</key><dict><key>X</key><string>--addr=10.0.0.1:1</string></dict>
+<key>ProgramArguments</key><array>` + b.String() + `</array></dict></plist>`
+	}
+	for name, tt := range map[string]struct {
+		plist string
+		ok    bool
+	}{
+		"written":       {string(serve.Plist(serve.Agent{Bin: "/bin/dev", Addr: "127.0.0.1:8417", Log: "/l"})), true},
+		"--addr=":       {plist("/bin/dev", "serve", "--addr=[::ffff:127.0.0.1]:8417"), true},
+		"spaces":        {plist("/bin/dev", "serve", " --addr ", " 127.0.0.1:8417 "), true},
+		"the last":      {plist("/bin/dev", "serve", "--addr", "100.96.196.51:8417", "--addr", "127.0.0.1:8417"), true},
+		"none":          {plist("/bin/dev", "serve"), false},
+		"another":       {plist("/bin/dev", "serve", "--addr", "127.0.0.1:9"), false},
+		"env, not args": {plist("/bin/dev", "serve"), false},
+	} {
+		if got, err := agentAddr([]byte(tt.plist)); err != nil || (got == want) != tt.ok {
+			t.Errorf("%s: %v %v", name, got, err)
+		}
+	}
+	for name, p := range map[string]string{"refused": plist("serve", "--addr", "0.0.0.0:1"), "not XML": "bplist00\x01"} {
+		if _, err := agentAddr([]byte(p)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func TestPortTaken(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap := ln.Addr().(*net.TCPAddr).AddrPort()
+	if !portTaken(ap) {
+		t.Error("listening: not taken")
+	}
+	_ = ln.Close()
+	if portTaken(ap) {
+		t.Error("closed: taken")
+	}
+}
+
+// The log a running dev serve (the launchd agent's) writes to is kept when dev boss starts its own beside it
+func TestAutoServeKeepsLiveLog(t *testing.T) {
+	f := &fakeStart{runs: 1, at: "127.0.0.1:8417", alive: true, envValue: map[string]string{}}
+	s := f.starter(t)
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(s.dir, "serve.log")
+	if err := os.WriteFile(logPath, bytes.Repeat([]byte("x"), 1<<20+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ensure(&bytes.Buffer{}); err != nil || len(f.spawned) != 1 {
+		t.Fatalf("err %v, spawned %q", err, f.spawned)
+	}
+	if fi, err := os.Stat(logPath); err != nil || fi.Size() <= 1<<20 {
+		t.Fatalf("log truncated: %v %v", fi, err)
+	}
+}
+
+// A plist it can't read or parse may be on dev boss's address: the agent's, as before
+func TestAutoServeAgentUnreadable(t *testing.T) {
+	for name, mode := range map[string]os.FileMode{"not XML": 0o644, "unreadable": 0} {
+		if mode == 0 && os.Getuid() == 0 {
+			continue
+		}
+		f := &fakeStart{runs: -1, envValue: map[string]string{}}
+		s := f.starter(t)
+		path := serve.PlistPath(s.home)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("bplist00"), mode); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := s.ensure(&out); err != nil || len(f.spawned) > 0 || !strings.HasPrefix(out.String(), "⚠ dev serve: launchd agent installed but not answering") {
+			t.Errorf("%s: err %v, out %q, spawned %q", name, err, out.String(), f.spawned)
+		}
+	}
+}
+
+func TestLastLineBesideAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "serve.log")
+	if err := os.WriteFile(path, []byte("❌ listen tcp 127.0.0.1:8417: bind: address already in use\n↻ dev serve: reloading into v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastLine(path, 0, "exited"); got != "listen tcp 127.0.0.1:8417: bind: address already in use" {
+		t.Errorf("got %q: want the started one's error", got)
+	}
 }
