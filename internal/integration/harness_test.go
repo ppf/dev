@@ -134,8 +134,8 @@ func (s *server) kill() {
 			for _, p := range survivors {
 				args = append(args, "-p", strconv.Itoa(p))
 			}
-			ps, _ := exec.Command("ps", args...).Output()
-			s.t.Errorf("processes still running 10s after kill-server, sending SIGKILL:\n%s", ps)
+			ps, err := exec.Command("ps", args...).Output()
+			s.t.Errorf("processes still running 10s after kill-server, sending SIGKILL: %v (ps: %v)\n%s", survivors, err, ps)
 			for _, p := range survivors {
 				syscall.Kill(p, syscall.SIGKILL)
 			}

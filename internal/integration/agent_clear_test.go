@@ -13,11 +13,11 @@ import (
 )
 
 // clearStub is a Claude stand-in for dev agent clear: hooks like agentStub's (SessionStart's output kept in
-// $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn before each turn's end hook,
-// and the files dev asks for copied from $STUB_DIR: save.md as the handoff, fix.md on a handoff fix, proof.md as
-// the proof, proof-fix.md on a proof fix (a missing source writes nothing); with $STUB_DIR/noclear there it ignores
-// /clear. On the save prompt it runs $STUB_DIR/on-save if there; with $STUB_DIR/decide there, a turn ends on a
-// permission prompt.
+// $STUB_DIR/start-<n>.json, transcript $STUB_DIR/s<n>.jsonl), an empty input box drawn before each SessionStart and
+// turn-end hook, and the files dev asks for copied from $STUB_DIR: save.md as the handoff, fix.md on a handoff fix,
+// proof.md as the proof, proof-fix.md on a proof fix (a missing source writes nothing); with $STUB_DIR/noclear there
+// it ignores /clear. On the save prompt it runs $STUB_DIR/on-save if there; with $STUB_DIR/decide there, a turn ends
+// on a permission prompt.
 func clearStub(t *testing.T, dir string) string {
 	t.Helper()
 	dev := shellQuote(devBin)

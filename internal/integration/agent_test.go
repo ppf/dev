@@ -94,7 +94,10 @@ func TestAgentControl(t *testing.T) {
 			return strings.Contains(out, "got: line one\n") && strings.HasSuffix(out, "got: line two\n")
 		})
 		// The stub echoes a line before its turn's hooks: the next subtest's /clear wants both turns over
-		n, _ := strconv.Atoi(prompts)
+		n, err := strconv.Atoi(prompts)
+		if err != nil {
+			t.Fatalf("@agent_prompts %q: %v", prompts, err)
+		}
 		waitFor(t, "both turns over", func() bool {
 			return s.T("display", "-t", w1, "-p", "#{@agent_prompts} #{@agent_state}") == strconv.Itoa(n+2)+" idle"
 		})
