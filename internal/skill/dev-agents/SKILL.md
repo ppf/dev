@@ -92,10 +92,10 @@ Always send with `--wait`: it confirms the worker picked the prompt up before it
 dev agent prompt <target> --wait --timeout 100s "Fix the failing test in internal/foo. Reply DONE when green."
 ```
 
-Exit 0: the turn ended (prints `idle` or `waiting`). Exit 2: picked up but still working (prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error) — keep waiting in a loop, checking progress in between:
+Exit 0: the turn ended (prints `idle` or `waiting`), or it is picked up but still working at the timeout (prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error): when the line says `working`, keep waiting in a loop, checking progress in between. Exit 2: timeout on an agent not working. Exit 3: prompt never picked up:
 
 ```bash
-dev agent wait <target> --timeout 100s     # exit 2 = still working; read, then wait again
+dev agent wait <target> --timeout 100s     # prints working = still at it; read, then wait again
 dev agent read <target> --lines 40
 ```
 

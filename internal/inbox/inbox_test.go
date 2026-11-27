@@ -42,7 +42,7 @@ func TestFromHook(t *testing.T) {
 		{"idle reminder makes none", `{"hook_event_name":"Notification","notification_type":"idle_prompt"}`, "", false},
 		{"tool event makes none", `{"hook_event_name":"PostToolUse"}`, "", false},
 		{"malformed makes none", `{`, "", false},
-		{"truncated", `{"hook_event_name":"Stop","last_assistant_message":"` + long + `"}`, "w finished: " + strings.Repeat("word ", 39) + "word…", true},
+		{"truncated", `{"hook_event_name":"Stop","last_assistant_message":"` + long + `"}`, "w finished: " + strings.TrimSpace(long), true},
 		{"asks", `{"hook_event_name":"Stop","last_assistant_message":"PR #12 merged.\n\nShould I start the next item?"}`, "w asks: Should I start the next item?", true},
 		{"asks in bold", `{"hook_event_name":"Stop","last_assistant_message":"Done.\n**Merge it now?**\n"}`, "w asks: **Merge it now?**", true},
 		{"asks with its options", `{"hook_event_name":"Stop","last_assistant_message":"Two ways:\nWhich one?\n1. Rewrite\n2. Patch"}`, "w asks: Which one? 1. Rewrite 2. Patch", true},
@@ -937,5 +937,54 @@ func TestWithdrawSettled(t *testing.T) {
 	}
 	if n := AnswerOverruled(4, "Q?", "B", "A", "boss"); !strings.Contains(n.Text, "(you had decided A): B") {
 		t.Errorf("overruled a boss's own = %q", n.Text)
+	}
+}
+
+func TestSpillFinished(t *testing.T) {
+	b := Box{path: t.TempDir() + "/inbox.json"}
+	finished := func(msg string) Note {
+		n, _ := FromHook("w", []byte(`{"hook_event_name":"Stop","last_assistant_message":"`+msg+`"}`))
+		return n
+	}
+	whole := strings.TrimSpace(strings.Repeat("word ", maxFinished/5))
+	if got, err := b.spill(finished(whole)); err != nil || got != whole {
+		t.Errorf("a note of %d characters = %q, %v; want it whole", len(whole), got, err)
+	}
+	long := strings.Repeat("line one\\nline two ", 100)
+	got, err := b.spill(finished(long))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, path, ok := strings.Cut(got, " (whole note, ")
+	if !ok || len([]rune(head)) != finishedHead || !strings.HasPrefix(head, "line one line two") {
+		t.Fatalf("a long note = %q; want its head and a path", got)
+	}
+	path = path[strings.Index(path, ": ")+2 : len(path)-1]
+	if body, err := os.ReadFile(path); err != nil || string(body) != strings.ReplaceAll(long, "\\n", "\n")+"\n" {
+		t.Errorf("file %s = %q, %v; want the whole message as sent", path, body, err)
+	}
+	if again, _ := b.spill(finished(long)); again != got {
+		t.Errorf("a repeat = %q, want the same line %q", again, got)
+	}
+}
+
+func TestSpillFinishedEdges(t *testing.T) {
+	finished := func(msg string) Note {
+		n, _ := FromHook("w", []byte(`{"hook_event_name":"Stop","last_assistant_message":"`+msg+`"}`))
+		return n
+	}
+	dir := t.TempDir()
+	b := Box{path: dir + "/inbox.json"}
+	if got, err := b.spill(finished(strings.Repeat("x", maxFinished+1))); err != nil || !strings.Contains(got, "whole note, 1501 characters") {
+		t.Errorf("one rune over the cap = %q, %v; want a file", got, err)
+	}
+	// The notes directory can't be made: the line says so and the error comes back
+	if err := os.WriteFile(dir+"/file", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := Box{path: dir + "/file/inbox.json"}
+	got, err := blocked.spill(finished(strings.Repeat("é", maxFinished+1)))
+	if err == nil || !strings.Contains(got, "whole note not saved") || strings.Contains(got, "whole note,") || len([]rune(got)) < finishedHead {
+		t.Errorf("a failed write = %q, %v; want the head, a not-saved marker and an error", got, err)
 	}
 }

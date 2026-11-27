@@ -223,7 +223,7 @@ func TestAskRules(t *testing.T) {
 		"`dev agent clear`'s own prompts aren't in `dev agent handoffs`",
 		"- **dev offers it:** once per idle stretch", "Run it yourself then, in the background, without asking the user, and tell them in one line; if it refuses, never force it: say why in one line",
 		"or 2 minutes at a context of 40% or more with none of its asks up in your question dialog (not again for 30 minutes after an offer)",
-		"prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
+		"prints the neutral `working: still at it after <timeout>; wait again or read it` on stdout, not an error): when the line says `working`", "who runs `dev agent clear manager` in a plain shell (a clear that passes answers it): never clear yourself",
 		"- **Mark the call's items asked, right before the dialog:** one `dev todo asking <boss> <n> [<boss> <n>]... --question \"<item text>\" [--question \"<item text>\"]...` naming every item the call asks",
 		// Claude Code's dim suggestion is never the user's draft
 		"a row ending `[suggestion]` is Claude Code's own dim suggestion", "`input.suggestion` true in `dev agent get boss-<project> --json`",
