@@ -400,7 +400,7 @@ func sameBar(a, b string) bool {
 }
 
 // keepTold carries what old's boss was told (Nudges) over to it, which replaced it keeping its text (but for its
-// numbers), link and who does it: a reason isn't told again; its PR's moves count from its next lookup, its age from now.
+// "N of M" counter), link and who does it: a reason isn't told again; its PR's moves count from its next lookup, its age from now.
 func (s Store) keepTold(old, it Item) error {
 	if s.trial {
 		return nil
@@ -451,7 +451,7 @@ const (
 // Nudges are the open items to tell their boss about at now, each reason once, keeping that it was told: its PR
 // merged, closed, approved, changes requested, checks green or failing since its first lookup; the worker it is on
 // (Session) not among workers any more; unchanged for two days (as check, an ask and a dated item aside), told again
-// after two more days without a --replaces (an item waiting for a person, nothing else to check: once only, no news is no
+// after two more days (seven for one an open ask waits on) without a --replaces (an item waiting for a person, nothing else to check: once only, no news is no
 // reason). workers is read only when an open item is on one; with tell, they count as told only once tell took them.
 // The facts of items no longer open go.
 func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell func([]Nudge) error) ([]Nudge, error) {

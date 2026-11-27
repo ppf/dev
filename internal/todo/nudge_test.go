@@ -444,7 +444,7 @@ func TestNudgesWaitingOnUserPick(t *testing.T) {
 	}
 }
 
-// A replace that changes only a number in the text (a counter) keeps what the boss was told: its worker gone isn't told again.
+// A replace that changes only an "N of M" counter keeps what the boss was told: its worker gone isn't told again.
 func TestNudgesCounterOnlyReplace(t *testing.T) {
 	s := store(t)
 	t0 := time.Unix(1_800_000_000, 0)
