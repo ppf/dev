@@ -103,8 +103,8 @@ func TestArchiveStarterAndBossEnding(t *testing.T) {
 		if _, _, err := archive(c, "boss-x", Ended{}); err != nil {
 			t.Fatal(err)
 		}
-		records, err := Records()
-		if err != nil || len(records) != 1 {
+		records, bad, err := Records()
+		if err != nil || bad != nil || len(records) != 1 {
 			t.Fatalf("Records = %+v, %v", records, err)
 		}
 		e := records[0]

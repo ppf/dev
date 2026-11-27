@@ -88,8 +88,9 @@ func archive(c *tmux.Client, session string, e Ended) (dir string, undo func() e
 		if p.Created != "" {
 			if created, err = strconv.ParseInt(p.Created, 10, 64); err != nil {
 				e.addNote(fmt.Sprintf("its creation time %q: %v", p.Created, err))
+			} else {
+				e.StartedAt = time.Unix(created, 0)
 			}
-			e.StartedAt = time.Unix(created, 0)
 		}
 		if e.StartedBy, err = starterName(c, p.StartedBy); err != nil {
 			e.StartedBy = p.StartedBy
@@ -141,33 +142,35 @@ func starterName(c *tmux.Client, v string) (string, error) {
 	return strings.TrimSpace(name), nil
 }
 
-// Records are the archive records of the sessions closed for good, in no order.
-func Records() ([]Ended, error) {
+// Records are the archive records of the sessions closed for good, in no order; those it can't read are left out and
+// named in bad.
+func Records() (records []Ended, bad error, err error) {
 	dir, err := config.StateDir()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	paths, err := filepath.Glob(filepath.Join(dir, "archive", "*", recordFile))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	records := make([]Ended, 0, len(paths))
+	var unread []error
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if errors.Is(err, fs.ErrNotExist) {
 			// Removed since the glob: a close that failed
 			continue
 		}
-		if err != nil {
-			return nil, err
-		}
 		var e Ended
-		if err := json.Unmarshal(data, &e); err != nil {
-			return nil, fmt.Errorf("%s: %w", p, err)
+		if err == nil {
+			err = json.Unmarshal(data, &e)
+		}
+		if err != nil {
+			unread = append(unread, fmt.Errorf("%s: %w", p, err))
+			continue
 		}
 		records = append(records, e)
 	}
-	return records, nil
+	return records, errors.Join(unread...), nil
 }
 
 // MarkRemoved records in dir's record that the session's worktree was removed.

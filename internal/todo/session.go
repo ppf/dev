@@ -2,6 +2,7 @@ package todo
 
 import (
 	"cmp"
+	"errors"
 	"slices"
 	"time"
 )
@@ -51,14 +52,20 @@ func (s Store) EndSession(now time.Time, from, only int64, next bool, write func
 		}
 		if m != nil && !m.Written && (only == 0 || m.Start == only) {
 			facts, err := s.sessionFacts(f, *m, now)
+			if err == nil {
+				err = write(facts)
+			}
+			if err != nil && f.Session == nil {
+				// A session from from is kept unwritten, for a later start or the manager's to write
+				f.Session = m
+				return errors.Join(err, s.write(f))
+			}
 			if err != nil {
 				return err
 			}
-			if err := write(facts); err != nil {
-				return err
-			}
+			// Ticked stays until the next session: a close whose kill fails (Unend) writes it again
 			wrote = true
-			m.Written, m.Carry, m.Ticked = true, carry(facts), nil
+			m.Written, m.Carry = true, carry(facts)
 			f.Session = m
 		}
 		if next {
@@ -77,7 +84,7 @@ func (s Store) EndSession(now time.Time, from, only int64, next bool, write func
 }
 
 // Unend marks the session that started at start (unix seconds) not written again, as its boss's close failed after
-// its file was written: its later close writes it anew. Ticks the list dropped before are no longer kept apart.
+// its file was written: its later close writes it anew.
 func (s Store) Unend(start int64) error {
 	return s.locked(func() error {
 		f, err := s.read()

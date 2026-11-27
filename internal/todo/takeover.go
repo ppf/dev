@@ -483,6 +483,8 @@ func (s Store) move(from Store, src, dst file, now time.Time) error {
 	moved.Boss, moved.Updated = s.boss, now.Unix()
 	moved.takenStamp = takenStamp{TakenFrom: from.key(), TakenAt: now.Unix()}
 	moved.Ticked = slices.Concat(dst.Ticked, src.Ticked)
+	// The taker's session goes on: the list's earlier boss's isn't its own
+	moved.Session = dst.Session
 	if err := s.write(moved); err != nil {
 		return err
 	}

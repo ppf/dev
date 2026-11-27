@@ -74,7 +74,7 @@ PR #335 · terminal#158
 ## Left from the session before, still open
 - #314 Finding: the board asks to pair
 `
-	if got := LastSessionText("boss-dev", EndedClosed, f, workers, msgs); got != want {
+	if got := LastSessionText("boss-dev", EndedClosed, f, workers, nil, msgs); got != want {
 		t.Errorf("text =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -298,9 +298,23 @@ func TestSessionWorkersAndMessages(t *testing.T) {
 		}
 		return "", nil
 	})
-	ws, err := sessionWorkers(c, "boss-x", f)
+	// One record unreadable: named, the others still read
+	bad := filepath.Join(state, "dev", "archive", "w-bad")
+	if err := os.MkdirAll(bad, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "session.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws, unread, err := sessionWorkers(c, "boss-x", f)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if unread == nil || !strings.Contains(unread.Error(), "w-bad") {
+		t.Errorf("unread = %v, want w-bad named", unread)
+	}
+	if text := LastSessionText("boss-x", EndedClosed, f, ws, unread, nil); !strings.Contains(text, "⚠ archive records not read") {
+		t.Errorf("text without the unread line:\n%s", text)
 	}
 	var names []string
 	for _, w := range ws {

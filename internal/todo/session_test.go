@@ -161,15 +161,15 @@ func TestEndSessionFromAndFailure(t *testing.T) {
 	if _, err := s.Add(Item{Text: "a", On: "boss"}, t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	// A failed write marks nothing and starts nothing
+	// A failed write starts nothing; a session from from is kept unwritten, for a later start or the manager's
 	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), 0, true, func(SessionFacts) error { return errors.New("disk") }); err == nil || wrote {
 		t.Fatalf("failed write = %v, %v: want the error", wrote, err)
 	}
-	if _, un, err := s.SessionStart(); err != nil || un {
-		t.Errorf("unwritten = %v, %v: want no mark after a failed write", un, err)
+	if start, un, err := s.SessionStart(); err != nil || !un || start != t0.Unix() {
+		t.Errorf("after a failed write = %d, %v, %v: want the session from from kept unwritten", start, un, err)
 	}
 	var f SessionFacts
-	if wrote, err := s.EndSession(t0.Add(time.Hour), t0.Unix(), 0, false, func(x SessionFacts) error { f = x; return nil }); err != nil || !wrote {
+	if wrote, err := s.EndSession(t0.Add(time.Hour), 0, 0, false, func(x SessionFacts) error { f = x; return nil }); err != nil || !wrote {
 		t.Fatalf("from = %v, %v", wrote, err)
 	}
 	if f.Start != t0.Unix() || len(f.Added) != 1 {
@@ -177,5 +177,31 @@ func TestEndSessionFromAndFailure(t *testing.T) {
 	}
 	if _, un, err := s.SessionStart(); err != nil || un {
 		t.Errorf("unwritten = %v, %v after the write", un, err)
+	}
+}
+
+// A take-over keeps the taker's own session, not the list's earlier boss's.
+func TestTakeOverKeepsSession(t *testing.T) {
+	from, to := store(t), store(t)
+	now := time.Unix(1700000000, 0)
+	write := func(SessionFacts) error { return nil }
+	if _, err := from.Add(Item{Text: "theirs", On: "boss"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.EndSession(now, 0, 0, true, write); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := from.EndSession(now.Add(time.Minute), 0, 0, false, write); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if _, err := to.EndSession(later, 0, 0, true, write); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.TakeOver(from, later.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if start, un, err := to.SessionStart(); err != nil || start != later.Unix() || !un {
+		t.Errorf("taker's session = %d, %v, %v: want its own, unwritten", start, un, err)
 	}
 }

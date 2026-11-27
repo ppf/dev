@@ -23,8 +23,8 @@ import (
 const (
 	EndedClosed      = "closed"
 	EndedCleared     = "cleared (/clear)"
-	EndedGoneStart   = "not written at its end (a crash, a kill or a failed write at its close), found at its next start"
-	EndedGoneManager = "not written at its end (a crash, a kill or a failed write at its close), found at the manager's start"
+	EndedGoneStart   = "not written at its end (a crash, a kill, a failed write or an older dev's close), found at its next start"
+	EndedGoneManager = "not written at its end (a crash, a kill, a failed write or an older dev's close), found at the manager's start"
 )
 
 // LastSessionDir is the manager folder's directory of the bosses' last-session files.
@@ -46,7 +46,7 @@ func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from, only i
 		return false, nil
 	}
 	return s.EndSession(now, from, only, next, func(f todo.SessionFacts) error {
-		workers, err := sessionWorkers(c, boss, f)
+		workers, unread, err := sessionWorkers(c, boss, f)
 		if err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from, only i
 			return err
 		}
 		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, []byte(LastSessionText(boss, how, f, workers, msgs)), 0o600); err != nil {
+		if err := os.WriteFile(tmp, []byte(LastSessionText(boss, how, f, workers, unread, msgs)), 0o600); err != nil {
 			return err
 		}
 		return os.Rename(tmp, path)
@@ -107,13 +107,13 @@ type Worker struct {
 	Note            string
 }
 
-// sessionWorkers are the sessions boss started that closed in session f (archive records) or are open now.
-func sessionWorkers(c *tmux.Client, boss string, f todo.SessionFacts) ([]Worker, error) {
-	records, err := sidebar.Records()
+// sessionWorkers are the sessions boss started that closed in session f (archive records) or are open now; unread
+// names the archive records it couldn't read, left out.
+func sessionWorkers(c *tmux.Client, boss string, f todo.SessionFacts) (ws []Worker, unread error, err error) {
+	records, unread, err := sidebar.Records()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var ws []Worker
 	for _, r := range records {
 		if r.StartedBy == boss && r.At.Unix() >= f.Start && r.At.Unix() <= f.End {
 			ws = append(ws, Worker{Name: r.Session, Started: r.StartedAt, Closed: r.At, Note: r.Note})
@@ -127,7 +127,7 @@ func sessionWorkers(c *tmux.Client, boss string, f todo.SessionFacts) ([]Worker,
 	}
 	sessions, err := tmux.Query[session](c, "list-sessions")
 	if err != nil && !tmux.IsNoServer(err) {
-		return nil, err
+		return nil, nil, err
 	}
 	var id string
 	if i := slices.IndexFunc(sessions, func(s session) bool { return s.Name == boss }); i >= 0 {
@@ -139,7 +139,7 @@ func sessionWorkers(c *tmux.Client, boss string, f todo.SessionFacts) ([]Worker,
 		}
 		created, err := strconv.ParseInt(s.Created, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s's creation time %q: %w", s.Name, s.Created, err)
+			return nil, nil, fmt.Errorf("%s's creation time %q: %w", s.Name, s.Created, err)
 		}
 		ws = append(ws, Worker{Name: s.Name, Started: time.Unix(created, 0)})
 	}
@@ -154,7 +154,7 @@ func sessionWorkers(c *tmux.Client, boss string, f todo.SessionFacts) ([]Worker,
 		}
 		return cmp.Or(ca.Compare(cb), strings.Compare(a.Name, b.Name))
 	})
-	return ws, nil
+	return ws, unread, nil
 }
 
 // sessionMessages are the messages to or from boss in session f, oldest first.
@@ -185,8 +185,9 @@ func sessionMessages(c *tmux.Client, boss string, f todo.SessionFacts) ([]Msg, e
 
 var prRef = regexp.MustCompile(`\bPR #\d+|\b[a-z][\w.-]*#\d+`)
 
-// LastSessionText is boss's last-session file: what its session f did, how it ended, its workers and messages.
-func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, msgs []Msg) string {
+// LastSessionText is boss's last-session file: what its session f did, how it ended, its workers (unread: the archive
+// records not read) and messages.
+func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, unread error, msgs []Msg) string {
 	at := func(t int64) string { return time.Unix(t, 0).Format("02.01 15:04") }
 	var b strings.Builder
 	line := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
@@ -226,7 +227,7 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 			text += ": answered " + short(it.Answer)
 		}
 		if it.Result != "" {
-			text += ": " + it.Result
+			text += ": " + oneLine(it.Result)
 		}
 		line("%s", text)
 	}
@@ -251,6 +252,9 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 	none(len(f.Notes))
 
 	section("Workers")
+	if unread != nil {
+		line("⚠ archive records not read, their workers left out: %s", oneLine(unread.Error()))
+	}
 	if len(workers) > 0 {
 		line("| worker | started | closed |")
 		line("|---|---|---|")
@@ -263,7 +267,7 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 		if !w.Closed.IsZero() {
 			closed = at(w.Closed.Unix())
 			if w.Note != "" {
-				closed += " (" + w.Note + ")"
+				closed += " (" + strings.ReplaceAll(oneLine(w.Note), "|", "\\|") + ")"
 			}
 		}
 		line("| %s | %s | %s |", w.Name, started, closed)
@@ -307,8 +311,14 @@ func LastSessionText(boss, how string, f todo.SessionFacts, workers []Worker, ms
 const shortMax = 100
 
 func short(s string) string {
+	s = oneLine(s)
 	if utf8.RuneCountInString(s) <= shortMax {
 		return s
 	}
 	return string([]rune(s)[:shortMax-1]) + "…"
+}
+
+// oneLine is s with its line breaks as spaces, so it stays on its line of the file.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
