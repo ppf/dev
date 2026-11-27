@@ -212,7 +212,11 @@ func TestAgentClose(t *testing.T) {
 	}
 	check(t, "client moved to the coordinator", actClientSession(d), "coord")
 	// Longer than actWait's 15 s: save.sh runs a ps per pane, up to 0.9 s each under load, for some 25 panes here
-	savedWithoutDone := func() bool { return !slices.Contains(strings.Fields(d.saved()), "done") }
+	// coord in it: a snapshot was read, not an error
+	savedWithoutDone := func() bool {
+		saved := strings.Fields(d.saved())
+		return slices.Contains(saved, "coord") && !slices.Contains(saved, "done")
+	}
 	for deadline := time.Now().Add(2 * time.Minute); !savedWithoutDone() && time.Now().Before(deadline); {
 		time.Sleep(time.Second)
 	}

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1128,8 +1129,8 @@ func TestSnapshotTimeout(t *testing.T) {
 	waitGone(t, childPid(t, pidFile))
 }
 
-// A SIGTERM (the server's exit ends its run-shell job) kills save.sh's group with it: left behind, save.sh would
-// outlive the lock.
+// A SIGTERM (the server's exit ends its run-shell job) kills save.sh's group with it, warning in no tmux: left behind,
+// save.sh would outlive the lock.
 func TestSnapshotSignal(t *testing.T) {
 	home := t.TempDir()
 	pidFile := filepath.Join(home, "child.pid")
@@ -1146,13 +1147,17 @@ func TestSnapshotSignal(t *testing.T) {
 		}
 	}
 	child := childPid(t, pidFile)
+	// Without Snapshot's handler the SIGTERM lands here, not on the test binary
+	backstop := make(chan os.Signal, 1)
+	signal.Notify(backstop, syscall.SIGTERM)
+	t.Cleanup(func() { signal.Stop(backstop) })
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(strings.Join(f.calls, "\n"), "save.sh stopped by a signal") {
-			t.Errorf("Snapshot = %v, calls %q; want a stopped warning", err, f.calls)
+		if err == nil || !strings.Contains(err.Error(), "save.sh stopped by SIGTERM") || len(f.calls) != 1 {
+			t.Errorf("Snapshot = %v, calls %q; want a stopped error and no warning, only the pane count", err, f.calls)
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("Snapshot kept waiting for save.sh after SIGTERM")
