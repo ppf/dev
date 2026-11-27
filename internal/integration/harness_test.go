@@ -130,7 +130,12 @@ func (s *server) kill() {
 	for i := 0; slices.ContainsFunc(pids, alive); i++ {
 		if i == 100 {
 			survivors := slices.DeleteFunc(pids, func(p int) bool { return !alive(p) })
-			s.t.Errorf("processes still running 10s after kill-server, sending SIGKILL: %v", survivors)
+			args := []string{"-o", "pid=,ppid=,etime=,command="}
+			for _, p := range survivors {
+				args = append(args, "-p", strconv.Itoa(p))
+			}
+			ps, err := exec.Command("ps", args...).Output()
+			s.t.Errorf("processes still running 10s after kill-server, sending SIGKILL: %v (ps: %v)\n%s", survivors, err, ps)
 			for _, p := range survivors {
 				syscall.Kill(p, syscall.SIGKILL)
 			}

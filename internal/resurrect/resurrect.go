@@ -13,6 +13,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -781,11 +782,15 @@ func Snapshot(c *tmux.Client) error {
 	}
 	defer func() { _ = lock.Close() }()
 	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// The server's exit SIGTERMs its run-shell job: that kills save.sh's group too, which in its own group would
+	// outlive dev and the lock, saving a server that is gone
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, save, "quiet")
 	cmd.Env = append(os.Environ(), snapshotGuard+"=1")
-	// The timeout kills save.sh's whole group: a pane dump left behind would keep writing a cut snapshot
+	// The timeout or SIGTERM kills save.sh's whole group: a pane dump left behind would keep writing a cut snapshot
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	// A child left holding the output after save.sh exited would keep CombinedOutput waiting
@@ -794,14 +799,21 @@ func Snapshot(c *tmux.Client) error {
 	if err == nil {
 		return nil
 	}
-	// Any child left (held the output past WaitDelay, or outlived a failed save.sh) goes before the lock does
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// Any child left (held the output past WaitDelay, or outlived a failed save.sh) goes before the lock does; SIGTERM
+	// before the fork leaves no process
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	// save.sh exited 0 (at the deadline, or a child held the output): its snapshot is written
 	if cmd.ProcessState != nil && cmd.ProcessState.Success() {
 		return nil
 	}
+	// Killed for SIGTERM, not failed on its own: the server is going, no tmux left to warn in
+	if errors.Is(ctx.Err(), context.Canceled) && (cmd.ProcessState == nil || !cmd.ProcessState.Exited()) {
+		return fmt.Errorf("save.sh stopped by SIGTERM: %w", err)
+	}
 	what := "failed (" + err.Error() + ")"
-	if ctx.Err() != nil {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		what = "timed out after " + timeout.String()
 		if panesErr != nil {
 			what += " (no pane count: " + panesErr.Error() + ")"

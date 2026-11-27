@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -86,10 +87,21 @@ func TestAgentControl(t *testing.T) {
 		out, _, _ = devAgent(env, "", "read", "w1", "--lines", "1")
 		check(t, "read", out, "got: hello there;\n")
 		// Multi-line from stdin pastes as one piece; the line-reading stub sees each line
+		prompts, err := strconv.Atoi(s.T("show-option", "-pqv", "-t", w1, "@agent_prompts"))
+		if err != nil {
+			t.Fatalf("@agent_prompts: %v", err)
+		}
 		devAgent(env, "line one\nline two\n", "prompt", "w1")
 		waitFor(t, "both lines read", func() bool {
 			out, _, _ := devAgent(env, "", "read", "w1", "--lines", "5")
 			return strings.Contains(out, "got: line one\n") && strings.HasSuffix(out, "got: line two\n")
+		})
+		// The stub echoes a line before its turn's hooks: the next subtest's /clear wants both turns over
+		waitFor(t, "both turns over", func() bool {
+			var n int
+			var state string
+			fmt.Sscan(s.T("display", "-t", w1, "-p", "#{@agent_prompts} #{@agent_state}"), &n, &state)
+			return n >= prompts+2 && state == "idle"
 		})
 	})
 

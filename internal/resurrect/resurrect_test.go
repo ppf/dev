@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1126,6 +1127,42 @@ func TestSnapshotTimeout(t *testing.T) {
 		t.Errorf("Snapshot = %v, calls %q; want a timed out warning", err, f.calls)
 	}
 	waitGone(t, childPid(t, pidFile))
+}
+
+// A SIGTERM (the server's exit ends its run-shell job) kills save.sh's group with it, warning in no tmux: left behind,
+// save.sh would outlive the lock.
+func TestSnapshotSignal(t *testing.T) {
+	home := t.TempDir()
+	pidFile := filepath.Join(home, "child.pid")
+	saveScript(t, home, "sleep 30 &\necho $! > '"+pidFile+".tmp'\nmv '"+pidFile+".tmp' '"+pidFile+"'\nsleep 30\n")
+	f := &fakeServer{}
+	done := make(chan error, 1)
+	go func() { done <- Snapshot(f.client()) }()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(pidFile); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("save.sh never started")
+		}
+	}
+	child := childPid(t, pidFile)
+	// Without Snapshot's handler the SIGTERM lands here, not on the test binary
+	backstop := make(chan os.Signal, 1)
+	signal.Notify(backstop, syscall.SIGTERM)
+	t.Cleanup(func() { signal.Stop(backstop) })
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "save.sh stopped by SIGTERM") || len(f.calls) != 1 {
+			t.Errorf("Snapshot = %v, calls %q; want a stopped error and no warning, only the pane count", err, f.calls)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("Snapshot kept waiting for save.sh after SIGTERM")
+	}
+	waitGone(t, child)
 }
 
 // save.sh takes about 0.6-0.9 s per pane (a ps per pane), so a save past snapshotTimeout with many panes isn't hung.
