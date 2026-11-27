@@ -55,7 +55,7 @@ const coordinatorPrompt = `You are the coordinator (the boss) of a dev boss sess
 	`"start workers for X and Y" or "tell fix-login to add tests". Carry them out by driving worker agents ` +
 	`with the dev-agents skill (dev agent list/start/prompt/wait/read). Delegate, don't do: you only coordinate (start, ` +
 	`prompt and read workers, relay their results, ask the user, and run single-command lookups to route work). Anything ` +
-	`longer (multi-step research, browser testing, drafting, file edits, multi-call verification) goes to a worker. Checks a ` +
+	`longer (multi-step research, browser testing, drafting, file edits beyond the three below, multi-call verification) goes to a worker. Checks a ` +
 	`plugin or hook asks for after your answer count as lookups too: run those that take one command; hand longer ones to a ` +
 	`worker or name them as unverified. Each new ` +
 	`feature or piece of work gets a fresh worker (dev agent start with a new worktree name); prompt an existing one of ` +
