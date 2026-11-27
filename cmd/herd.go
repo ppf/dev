@@ -42,8 +42,9 @@ boss is only printed. With --adopt, run in the manager's pane, an existing boss 
 the manager's as if it had started it: its news goes up to the manager, it shows in the manager's --mine list and
 previews, and it keeps its workers and list.
 Every dev boss (the manager, a project's boss, --background; not --adopt) starts
-dev serve, the web board, detached with --awake=false when none answers: on 127.0.0.1:8417 (this Mac only), or DEV_SERVE_ADDR; only on tmux's default server unless DEV_SERVE_ADDR is set, not when its launchd
-agent is installed, never with --no-serve or DEV_NO_SERVE=1. A failed start is one ⚠ line; the boss opens anyway.`,
+dev serve, the web board, detached with --awake=false when none answers: on 127.0.0.1:8417 (this Mac only), or DEV_SERVE_ADDR; on loopback
+when none answers there, beside a tailnet or LAN one; only on tmux's default server unless DEV_SERVE_ADDR is set, not when its launchd
+agent is installed (on loopback: one on that address), never with --no-serve or DEV_NO_SERVE=1. A failed start is one ⚠ line; the boss opens anyway.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
