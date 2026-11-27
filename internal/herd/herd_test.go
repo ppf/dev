@@ -843,6 +843,8 @@ func TestPromptAskRules(t *testing.T) {
 			"never ask your own decisions with AskUserQuestion or only as chat text",
 			"relay them through your AskUserQuestion", "never let you answer a permission prompt",
 			"Checks a plugin or hook asks for after your answer count as lookups too",
+			"file edits beyond the three below, multi-call verification",
+			"start a worker on it (or do it yourself, if it is one of the three small things)",
 			"Three small things you do yourself, without a worker: (1) tick or update your list items; (2) write a one-line record or memory note in one file, with no text for people; (3) answer a simple question from what you know or one lookup. Still to workers: texts to people, drafts, meeting notes (the fact-card path stays), multi-step research, code changes, anything touching more than one file.",
 			"dev todo note decided|said|risk",
 			"write a five-line contract file", "An item you do yourself or park is --on boss", "--waiting-for <who>, never a free-text owner", "state: your standing state off the board", `ending "leave it to the manager" is the manager's`, "(dev agent send-keys refuses you until it is answered)",

@@ -351,8 +351,10 @@ func TestAnalysisRules(t *testing.T) {
 func TestSmallTasksRule(t *testing.T) {
 	for name, text := range byName {
 		want := "Three small things you do yourself, without a worker: (1) tick or update your list items; (2) write a one-line record or memory note in one file, with no text for people; (3) answer a simple question from what you know or one lookup. Still to workers: texts to people, drafts, meeting notes (the fact-card path stays), multi-step research, code changes, anything touching more than one file."
-		if !strings.Contains(text, want) {
-			t.Errorf("%s/SKILL.md: missing %q", name, want)
+		for _, w := range []string{want, "file edits beyond the three below, multi-call verification"} {
+			if !strings.Contains(text, w) {
+				t.Errorf("%s/SKILL.md: missing %q", name, w)
+			}
 		}
 	}
 }
