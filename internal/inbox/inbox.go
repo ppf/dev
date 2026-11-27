@@ -5,6 +5,7 @@ package inbox
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,8 @@ type Note struct {
 	Handed bool `json:"handed,omitempty"`
 	// Of is the boss of the worker whose decision it is, in the Manager's copy of a Handed note.
 	Of string `json:"of,omitempty"`
+	// full is a Finished note's worker message as sent, for spill; never stored.
+	full string
 }
 
 // leaveIt ends an Outside note's line.
@@ -125,6 +128,10 @@ func (n Note) Summary() string {
 const (
 	maxText  = 200
 	maxNotes = 20
+	// maxFinished is how long a finished note may be in the boss's line before spill keeps its whole message in a file: as long as a
+	// message to a worker (MaxMessage); past it a batch of 20 notes would run to about 7k tokens.
+	maxFinished  = MaxMessage
+	finishedHead = 300
 	// askLines is how many of a last message's non-blank lines may hold its question: the question and its options, or list items asking questions.
 	askLines = 5
 )
@@ -167,7 +174,7 @@ func FromHook(worker string, input []byte) (Note, bool) {
 		// The question's end, then as many options as fit
 		n = Note{Kind: Asks, Text: clean(cleanTail(ask) + " " + options)}
 	case e.Name == "Stop":
-		n = Note{Kind: Finished, Text: clean(e.Last)}
+		n = Note{Kind: Finished, Text: strings.Join(strings.Fields(e.Last), " "), full: e.Last}
 	case e.Name == "StopFailure":
 		// The error's type, then what Claude showed ("You've hit your session limit · resets 7:10pm (Europe/Warsaw)")
 		text := cmp.Or(e.Error, "stopped on an error")
@@ -349,6 +356,28 @@ func clean(s string) string {
 		s = string(r[:maxText-1]) + "…"
 	}
 	return s
+}
+
+// spill keeps a finished note within maxFinished: past it the line holds the head and the path of a file in the inbox's
+// notes directory with the whole message (its original line breaks kept), named by it so a repeat writes the same file.
+func (b Box) spill(n Note) (string, error) {
+	r := []rune(n.Text)
+	if len(r) <= maxFinished {
+		return n.Text, nil
+	}
+	full := cmp.Or(n.full, n.Text)
+	sum := sha256.Sum256([]byte(full))
+	dir := filepath.Join(filepath.Dir(b.path), "notes")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%x.txt", unsafe.ReplaceAllString(n.Worker, "_"), sum[:6]))
+	head := string(r[:finishedHead-1]) + "…"
+	err := os.MkdirAll(dir, 0o700)
+	if err == nil {
+		err = os.WriteFile(path, []byte(full+"\n"), 0o600)
+	}
+	if err != nil {
+		return fmt.Sprintf("%s (whole note not saved: %v)", head, err), fmt.Errorf("keeping %s's finished note: %w", n.Worker, err)
+	}
+	return fmt.Sprintf("%s (whole note, %d characters: %s)", head, len(r), path), nil
 }
 
 // cleanTail is clean truncating from the start, as a question ends a message.
