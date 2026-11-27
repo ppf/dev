@@ -164,7 +164,7 @@ func (s *starter) ensure(stderr io.Writer) error {
 		}
 	}
 	if taken && loopback {
-		fmt.Fprintf(stderr, "⚠ dev serve: something holds %s but doesn't answer as dev serve (a hung one? see %s): not starting another\n", want, filepath.Join(s.dir, "serve.log"))
+		fmt.Fprintf(stderr, "⚠ dev serve: %s is taken but no dev serve answers there (a hung one, or another program; see %s): not starting another\n", want, filepath.Join(s.dir, "serve.log"))
 		return nil
 	} else if taken {
 		fmt.Fprintf(stderr, "⚠ dev serve runs but doesn't answer on its address (see %s): not starting another\n", filepath.Join(s.dir, "serve.log"))
@@ -299,17 +299,17 @@ func agentAddr(plist []byte) (netip.AddrPort, error) {
 	}
 	addr := ""
 	for i, a := range args {
-		switch v, ok := strings.CutPrefix(strings.TrimSpace(a), "--addr="); {
+		switch v, ok := strings.CutPrefix(a, "--addr="); { // as launchd passes them and pflag reads them: untrimmed
 		case ok:
 			addr = v
-		case strings.TrimSpace(a) == "--addr" && i+1 < len(args):
+		case a == "--addr" && i+1 < len(args):
 			addr = args[i+1]
 		}
 	}
 	if addr == "" {
 		return netip.AddrPort{}, nil
 	}
-	ap, _, err := serve.Check(strings.TrimSpace(addr))
+	ap, _, err := serve.Check(addr)
 	return ap, err
 }
 

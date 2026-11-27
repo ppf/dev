@@ -212,7 +212,7 @@ func TestAutoServeAliveNotAnswering(t *testing.T) {
 		name, where string
 		f           *fakeStart
 	}{
-		{"loopback, its port taken", "⚠ dev serve: something holds 127.0.0.1:18417 but doesn't answer as dev serve (a hung one? see ", &fakeStart{runs: -1, alive: true, taken: true, envValue: map[string]string{"DEV_SERVE_ADDR": "[::ffff:127.0.0.1]:18417"}}},
+		{"loopback, its port taken", "⚠ dev serve: 127.0.0.1:18417 is taken but no dev serve answers there (a hung one, or another program; see ", &fakeStart{runs: -1, alive: true, taken: true, envValue: map[string]string{"DEV_SERVE_ADDR": "[::ffff:127.0.0.1]:18417"}}},
 		{"tailnet", "⚠ dev serve runs but doesn't answer on its address (see ", &fakeStart{runs: -1, alive: true, envValue: map[string]string{"DEV_SERVE_ADDR": "100.96.196.51:8417"}}},
 	} {
 		name, f := tt.name, tt.f
@@ -246,7 +246,7 @@ func TestAutoServeSettles(t *testing.T) {
 	s.settle = time.Second
 	s.taken = func(netip.AddrPort) bool { f.asked = append(f.asked, netip.AddrPort{}); return len(f.asked) >= 3 }
 	var out bytes.Buffer
-	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 || len(f.asked) != 3 || !strings.HasPrefix(out.String(), "⚠ dev serve: something holds 127.0.0.1:8417") {
+	if err := s.ensure(&out); err != nil || len(f.spawned) > 0 || len(f.asked) != 3 || !strings.HasPrefix(out.String(), "⚠ dev serve: 127.0.0.1:8417 is taken") {
 		t.Fatalf("err %v, out %q, spawned %q, asked %d", err, out.String(), f.spawned, len(f.asked))
 	}
 }
@@ -444,20 +444,19 @@ func TestAgentAddr(t *testing.T) {
 			b.WriteString("<string>" + a + "</string><!-- a comment -->\n")
 		}
 		return `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>dev.serve</string>
-<key>EnvironmentVariables</key><dict><key>X</key><string>--addr=10.0.0.1:1</string></dict>
+<key>EnvironmentVariables</key><dict><key>X</key><string>--addr=127.0.0.1:8417</string></dict>
 <key>ProgramArguments</key><array>` + b.String() + `</array></dict></plist>`
 	}
 	for name, tt := range map[string]struct {
 		plist string
 		ok    bool
 	}{
-		"written":       {string(serve.Plist(serve.Agent{Bin: "/bin/dev", Addr: "127.0.0.1:8417", Log: "/l"})), true},
-		"--addr=":       {plist("/bin/dev", "serve", "--addr=[::ffff:127.0.0.1]:8417"), true},
-		"spaces":        {plist("/bin/dev", "serve", " --addr ", " 127.0.0.1:8417 "), true},
-		"the last":      {plist("/bin/dev", "serve", "--addr", "100.96.196.51:8417", "--addr", "127.0.0.1:8417"), true},
-		"none":          {plist("/bin/dev", "serve"), false},
-		"another":       {plist("/bin/dev", "serve", "--addr", "127.0.0.1:9"), false},
-		"env, not args": {plist("/bin/dev", "serve"), false},
+		"written":      {string(serve.Plist(serve.Agent{Bin: "/bin/dev", Addr: "127.0.0.1:8417", Log: "/l"})), true},
+		"--addr=":      {plist("/bin/dev", "serve", "--addr=[::ffff:127.0.0.1]:8417"), true},
+		"not the flag": {plist("/bin/dev", "serve", " --addr ", "127.0.0.1:8417"), false},
+		"the last":     {plist("/bin/dev", "serve", "--addr", "100.96.196.51:8417", "--addr", "127.0.0.1:8417"), true},
+		"none":         {plist("/bin/dev", "serve"), false},
+		"another":      {plist("/bin/dev", "serve", "--addr", "127.0.0.1:9"), false},
 	} {
 		if got, err := agentAddr([]byte(tt.plist)); err != nil || (got == want) != tt.ok {
 			t.Errorf("%s: %v %v", name, got, err)

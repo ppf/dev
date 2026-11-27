@@ -115,7 +115,7 @@ func TestBossStartsServe(t *testing.T) {
 	}
 	out, errOut = run(env, "boss", "hq", "--background")
 	_ = syscall.Kill(first[0], syscall.SIGCONT)
-	if out != "0 boss-hq\n" || !strings.HasPrefix(errOut, "⚠ dev serve: something holds "+addr) || len(pids()) != 1 {
+	if out != "0 boss-hq\n" || !strings.HasPrefix(errOut, "⚠ dev serve: "+addr+" is taken") || len(pids()) != 1 {
 		t.Errorf("stopped: %q %q %v", out, errOut, pids())
 	}
 
