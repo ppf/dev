@@ -24,7 +24,7 @@ var pairTmux, pairSelf = tmux.New, managerSelf // test seams
 
 // pairAckWait is how long --popup waits for the popup's ack file (tmux answers a popup on a client showing one
 // already with success and nothing shown), pairShowWait then for what it showed.
-var pairAckWait, pairShowWait = 10 * time.Second, 10 * time.Second
+var pairAckWait, pairShowWait = 10 * time.Second, 20 * time.Second
 
 // errShowUnknown: the popup is up but hasn't said what it showed.
 var errShowUnknown = errors.New("not said")
@@ -153,7 +153,7 @@ func writeAck(f *os.File, coded bool, failed error) error {
 	what := ackCoded
 	switch {
 	case failed != nil:
-		what = failed.Error()
+		what = strings.ReplaceAll(failed.Error(), "\n", "; ") // one line: the newline ends it
 	case !coded:
 		what = "dev serve listens on this Mac only: a phone can't reach it"
 	}
