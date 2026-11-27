@@ -12,9 +12,11 @@ import (
 	"github.com/ppf/dev/internal/agent"
 	"github.com/ppf/dev/internal/config"
 	"github.com/ppf/dev/internal/herd"
+	"github.com/ppf/dev/internal/inbox"
 	"github.com/ppf/dev/internal/open"
 	"github.com/ppf/dev/internal/picker"
 	"github.com/ppf/dev/internal/selfreload"
+	"github.com/ppf/dev/internal/sidebar"
 	"github.com/ppf/dev/internal/tmux"
 	"github.com/ppf/dev/internal/worktree"
 )
@@ -59,6 +61,8 @@ func worktreeArg(args []string) (string, error) {
 
 // Execute runs dev; errors are printed as "❌ <err>" (unless already shown) and exit with exitCode.
 func Execute() {
+	// Every close of a boss, whichever path, writes its last-session file
+	sidebar.BossEnding = inbox.BossClosing
 	err := newRootCmd().Execute()
 	if err == nil {
 		return

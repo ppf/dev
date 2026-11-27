@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,13 +21,20 @@ type Ended struct {
 	Project string `json:"project,omitempty"`
 	Path    string `json:"path,omitempty"`
 	// Conversation is its agent's last Claude conversation, to resume by hand (claude --resume)
-	Conversation    string    `json:"conversation,omitempty"`
-	Transcript      string    `json:"transcript,omitempty"`
-	Worktree        string    `json:"worktree,omitempty"`
-	WorktreeRemoved bool      `json:"worktree_removed,omitempty"`
-	Note            string    `json:"note,omitempty"`
-	At              time.Time `json:"ended_at"`
+	Conversation    string `json:"conversation,omitempty"`
+	Transcript      string `json:"transcript,omitempty"`
+	Worktree        string `json:"worktree,omitempty"`
+	WorktreeRemoved bool   `json:"worktree_removed,omitempty"`
+	Note            string `json:"note,omitempty"`
+	// StartedBy is the boss or manager that started it, by name; StartedAt when its tmux session was made
+	StartedBy string    `json:"started_by,omitempty"`
+	StartedAt time.Time `json:"started_at,omitzero"`
+	At        time.Time `json:"ended_at"`
 }
+
+// BossEnding, when set, writes a boss's last-session file as its session closes, before the kill: a boss's archive
+// record notes its failure. Set by package cmd, as it needs the boss's list.
+var BossEnding func(c *tmux.Client, session string, created int64) error
 
 const recordFile = "session.json"
 
@@ -44,6 +52,7 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 		SessionID       string `tmux:"session_id"`
 		Created         string `tmux:"session_created"`
 		StartedBy       string `tmux:"@dev_started_by"`
+		Herd            string `tmux:"@dev_herd"`
 	}](c, "list-panes", "-s", "-t", tmux.SessionTarget(session))
 	if err != nil {
 		return "", err
@@ -69,6 +78,23 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 	if e.Conversation == "" {
 		e.Conversation, e.Transcript = endedID, endedTranscript
 	}
+	var created int64
+	if len(panes) > 0 {
+		if panes[0].Created != "" {
+			if created, err = strconv.ParseInt(panes[0].Created, 10, 64); err != nil {
+				return "", fmt.Errorf("%s's creation time %q: %w", session, panes[0].Created, err)
+			}
+			e.StartedAt = time.Unix(created, 0)
+		}
+		if e.StartedBy, err = starterName(c, panes[0].StartedBy); err != nil {
+			return "", err
+		}
+	}
+	if BossEnding != nil && len(panes) > 0 && panes[0].Herd != "" {
+		if err := BossEnding(c, session, created); err != nil {
+			e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its last-session file isn't written: " + err.Error()
+		}
+	}
 	dir, err := config.StateDir()
 	if err != nil {
 		return "", err
@@ -87,6 +113,47 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 		return dir, writeRecord(dir, e)
 	}
 	return dir, nil
+}
+
+// starterName is the name of the session the @dev_started_by value v names (a session id, or a boss's name); v itself
+// when no session has that id, "" for none.
+func starterName(c *tmux.Client, v string) (string, error) {
+	if !IsSessionID(v) {
+		return v, nil
+	}
+	name, err := c.Run("display-message", "-p", "-t", v, "#{session_name}")
+	if err != nil {
+		if _, gone := c.Run("has-session", "-t", v); gone != nil {
+			return v, nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// Records are the archive records of the sessions closed for good, in no order.
+func Records() ([]Ended, error) {
+	dir, err := config.StateDir()
+	if err != nil {
+		return nil, err
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "archive", "*", recordFile))
+	if err != nil {
+		return nil, err
+	}
+	records := make([]Ended, 0, len(paths))
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		var e Ended
+		if err := json.Unmarshal(data, &e); err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		records = append(records, e)
+	}
+	return records, nil
 }
 
 // MarkRemoved records in dir's record that the session's worktree was removed.

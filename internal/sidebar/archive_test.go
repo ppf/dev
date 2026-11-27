@@ -2,10 +2,15 @@ package sidebar
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // TestMain keeps the archive records the kill tests write out of the user's state dir.
@@ -73,5 +78,40 @@ func TestKillNowUndyingNoRecord(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(filepath.Join(os.Getenv("XDG_STATE_HOME"), "dev/archive")); err != nil || len(entries) != 0 {
 		t.Errorf("archive = %v, %v; want empty", entries, err)
+	}
+}
+
+// A record names its starter by name and when its session was made; a boss's close writes its last-session file
+// first (BossEnding), a failure noted in the record.
+func TestArchiveStarterAndBossEnding(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	w := &actWorld{panes: []map[string]string{{"session_name": "boss-x", "session_created": "1700000000",
+		"@dev_started_by": "$3", "@dev_herd": "1"}}}
+	c := tmux.NewFake(func(args []string) (string, error) {
+		if slices.Contains(args, "$3") && slices.Contains(args, "#{session_name}") {
+			return "manager\n", nil
+		}
+		return w.run(args)
+	})
+	var ended []string
+	BossEnding = func(_ *tmux.Client, session string, created int64) error {
+		ended = append(ended, fmt.Sprintf("%s %d", session, created))
+		return errors.New("disk full")
+	}
+	t.Cleanup(func() { BossEnding = nil })
+	dir, err := archive(c, "boss-x", Ended{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ended, []string{"boss-x 1700000000"}) {
+		t.Errorf("BossEnding calls = %v", ended)
+	}
+	records, err := Records()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("Records = %+v, %v", records, err)
+	}
+	e := records[0]
+	if e.StartedBy != "manager" || e.StartedAt.Unix() != 1700000000 || e.Note != "its last-session file isn't written: disk full" {
+		t.Errorf("record in %s = %+v", dir, e)
 	}
 }
