@@ -805,9 +805,10 @@ func Snapshot(c *tmux.Client) error {
 		return nil
 	}
 	what := "failed (" + err.Error() + ")"
-	if errors.Is(ctx.Err(), context.Canceled) {
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
 		what = "stopped by a signal"
-	} else if ctx.Err() != nil {
+	case ctx.Err() != nil:
 		what = "timed out after " + timeout.String()
 		if panesErr != nil {
 			what += " (no pane count: " + panesErr.Error() + ")"

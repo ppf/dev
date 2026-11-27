@@ -212,10 +212,11 @@ func TestAgentClose(t *testing.T) {
 	}
 	check(t, "client moved to the coordinator", actClientSession(d), "coord")
 	// Longer than actWait's 15 s: save.sh runs a ps per pane, up to 0.9 s each under load, for some 25 panes here
-	for deadline := time.Now().Add(2 * time.Minute); slices.Contains(strings.Fields(d.saved()), "done") && time.Now().Before(deadline); {
+	savedWithoutDone := func() bool { return !slices.Contains(strings.Fields(d.saved()), "done") }
+	for deadline := time.Now().Add(2 * time.Minute); !savedWithoutDone() && time.Now().Before(deadline); {
 		time.Sleep(time.Second)
 	}
-	check(t, "saved without done", boolStr(!slices.Contains(strings.Fields(d.saved()), "done")), "1")
+	check(t, "saved without done", boolStr(savedWithoutDone()), "1")
 	check(t, "worktree removed", boolStr(strings.Contains(git(t, root, "worktree", "list"), done)), "0")
 	if _, err := gitTry(root, "show-ref", "--verify", "refs/heads/done"); err == nil {
 		t.Error("❌ branch done still there")
