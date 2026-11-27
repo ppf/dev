@@ -657,7 +657,7 @@ func GoneUnwritten(c *tmux.Client) ([]Store, error) {
 		switch {
 		case err != nil:
 			errs = append(errs, err)
-		case s.boss != sidebar.Manager && f.MovedTo == "" && f.Session != nil && !f.Session.Written:
+		case s.boss != sidebar.Manager && f.unwritten():
 			gone = append(gone, s)
 		}
 	})

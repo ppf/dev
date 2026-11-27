@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// SessionMark is a boss's current session as its last-session file needs it: when it started (unix seconds), its open
-// items then, the items ticked since that left the list (the finished items keep them only KeptFor), whether a file
-// covers it, and the items the last file written left open, for the next file's leftovers.
+// SessionMark is a boss's current session as its last-session file needs it; Ticked keeps ticked items the list
+// dropped (finished items last only KeptFor), Carry the items the last file left open.
 type SessionMark struct {
 	Start   int64  `json:"start,omitempty"`
 	Open    []int  `json:"open,omitempty"`
@@ -80,7 +79,12 @@ func (s Store) Unwritten() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return f.MovedTo == "" && f.Session != nil && !f.Session.Written, nil
+	return f.unwritten(), nil
+}
+
+// unwritten reports whether f holds a session no last-session file covers yet.
+func (f file) unwritten() bool {
+	return f.MovedTo == "" && f.Session != nil && !f.Session.Written
 }
 
 // sessionFacts is what f, pruned, holds of session m up to now; its caller holds the list's lock.
@@ -92,8 +96,8 @@ func (s Store) sessionFacts(f file, m SessionMark, now time.Time) (SessionFacts,
 	}
 	in := func(t int64) bool { return t >= m.Start && t <= facts.End }
 	for _, it := range slices.Concat(m.Ticked, f.dropped, done, f.Items) {
-		dup := slices.ContainsFunc(facts.Ticked, func(o Item) bool { return o.ID == it.ID && o.Done == it.Done })
-		if it.Done != 0 && in(it.Done) && !it.Quiet && !dup {
+		dup := func(o Item) bool { return o.ID == it.ID && o.Done == it.Done }
+		if it.Done != 0 && in(it.Done) && !it.Quiet && !slices.ContainsFunc(facts.Ticked, dup) {
 			facts.Ticked = append(facts.Ticked, it)
 		}
 	}

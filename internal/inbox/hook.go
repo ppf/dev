@@ -210,10 +210,8 @@ func startList(c *tmux.Client, pane, source, session string, hint Hint) (string,
 	return out, errors.Join(verr, eerr, oerr, herr, lerr, err)
 }
 
-// lastSession is a coordinator's fresh start's or /clear's part in the last-session files, returning the line that
-// names the file(s) to read: a boss's writes its session before unless a file covers it (a /clear, or gone without a
-// close), then starts a new one; the manager's writes those of the bosses gone without one. None on a resume or
-// compaction: the same session goes on.
+// lastSession writes a coordinator's last-session files on a fresh start or /clear and returns the line naming them;
+// none on a resume or compaction, as the same session goes on.
 func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, error) {
 	if source != "startup" && source != "clear" {
 		return "", nil
@@ -241,8 +239,10 @@ func lastSession(c *tmux.Client, pane, source string, now time.Time) (string, er
 	if perr != nil {
 		return "", errors.Join(err, perr)
 	}
-	if _, serr := os.Stat(path); serr != nil {
-		return "", errors.Join(err, ignoreNotExist(serr))
+	if _, serr := os.Stat(path); errors.Is(serr, fs.ErrNotExist) {
+		return "", err
+	} else if serr != nil {
+		return "", errors.Join(err, serr)
 	}
 	return "Your last session's file: " + path + ": read it before new work (dev wrote it from your list, workers and " +
 		"messages; its first part is your state note). Keep that state note current as you go: dev todo note state " +
@@ -266,14 +266,6 @@ func managerLastLine(c *tmux.Client, now time.Time) (string, error) {
 	}
 	return "Bosses' last-session files in " + dir + " (" + strings.Join(names, ", ") + "): read a boss's <boss>.md " +
 		"before handing it work.", err
-}
-
-// ignoreNotExist is err, nil for a file that doesn't exist.
-func ignoreNotExist(err error) error {
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
 }
 
 // listContext is startList's output from the boss's list and notes, owed's lines (when any) first and the handoff line

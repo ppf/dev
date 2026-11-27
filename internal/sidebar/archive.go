@@ -78,21 +78,22 @@ func archive(c *tmux.Client, session string, e Ended) (string, error) {
 	if e.Conversation == "" {
 		e.Conversation, e.Transcript = endedID, endedTranscript
 	}
-	var created int64
 	if len(panes) > 0 {
-		if panes[0].Created != "" {
-			if created, err = strconv.ParseInt(panes[0].Created, 10, 64); err != nil {
-				return "", fmt.Errorf("%s's creation time %q: %w", session, panes[0].Created, err)
+		p := panes[0]
+		var created int64
+		if p.Created != "" {
+			if created, err = strconv.ParseInt(p.Created, 10, 64); err != nil {
+				return "", fmt.Errorf("%s's creation time %q: %w", session, p.Created, err)
 			}
 			e.StartedAt = time.Unix(created, 0)
 		}
-		if e.StartedBy, err = starterName(c, panes[0].StartedBy); err != nil {
+		if e.StartedBy, err = starterName(c, p.StartedBy); err != nil {
 			return "", err
 		}
-	}
-	if BossEnding != nil && len(panes) > 0 && panes[0].Herd != "" {
-		if err := BossEnding(c, session, created); err != nil {
-			e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its last-session file isn't written: " + err.Error()
+		if BossEnding != nil && p.Herd != "" {
+			if err := BossEnding(c, session, created); err != nil {
+				e.Note = strings.TrimPrefix(e.Note+"; ", "; ") + "its last-session file isn't written: " + err.Error()
+			}
 		}
 	}
 	dir, err := config.StateDir()

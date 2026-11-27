@@ -39,9 +39,8 @@ func LastSessionPath(boss string) (string, error) {
 	return filepath.Join(dir, strings.ReplaceAll(boss, "/", "_")+".md"), err
 }
 
-// EndBossSession writes boss's last-session file over the one before from list s's session (todo.EndSession), which
-// ended as how says, from (unix seconds, 0 for none) its start when the list has none; with next, a new one starts.
-// The manager has none.
+// EndBossSession writes boss's last-session file from list s's session (todo.EndSession), ended as how says; the
+// manager has none.
 func EndBossSession(c *tmux.Client, s todo.Store, boss, how string, from int64, next bool, now time.Time) (wrote bool, err error) {
 	if boss == Manager {
 		return false, nil
