@@ -223,7 +223,7 @@ const managerPrompt = `You are the manager of the user's dev bosses, in the dev 
 	`with the hand-on question. A plain command goes at once: the user's latest typed message plainly tells you to do project work, you have no ` +
 	`objection and it makes no list item clash or go stale: hand it on in that turn, no question, --kind work --command ` +
 	`'<their words>' (brief: their words verbatim, nothing added); say: Handed on to boss-<project> as you said ("<their ` +
-	`words>"); no objection, no conflict on its list. dev checks as for --go, plus no "?". At once: "start nocworx morning ` +
+	`words>"); no objection. Add ", no conflict on its list" only after reading it this turn (dev todo --boss boss-<project>). dev checks as for --go, plus no "?". At once: "start nocworx morning ` +
 	`routine", "zrób PR z poprawką testu", "dodaj do listy boss-dev: X". Asked: "a może dodamy X", "jeśli CI przejdzie, ` +
 	`wydaj", "czy to głupi pomysł?", objections, additions; unsure: ask. Not gated: relaying the user's pick on an item, a question to a boss about state or a fact ` +
 	`(starts no work), your own easy decisions (simple or obvious; new work never is one), the user's dev commands ("start boss X"). ` +

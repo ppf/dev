@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ppf/dev/internal/sidebar"
+	"github.com/ppf/dev/internal/tmux"
 )
 
 // LookupTTL is how long an item's PR lookup holds before the inbox watcher looks it up again; lookupFailing how long
@@ -391,8 +392,15 @@ func (s Store) TakeTicked(now time.Time, take func(Ticked) bool, tell func([]Tic
 	return taken, err
 }
 
-// keepTold carries what old's boss was told (Nudges) over to it, which replaced it keeping its text, link and who does
-// it: a reason isn't told again; its PR's moves count from its next lookup, its age from now.
+// counter is a count in an item's text ("3 of 5"): one changing is no new item.
+var counter = regexp.MustCompile(`\d+ of \d+`)
+
+func sameBar(a, b string) bool {
+	return counter.ReplaceAllString(a, "#") == counter.ReplaceAllString(b, "#")
+}
+
+// keepTold carries what old's boss was told (Nudges) over to it, which replaced it keeping its text (but for its
+// "N of M" counter), link and who does it: a reason isn't told again; its PR's moves count from its next lookup, its age from now.
 func (s Store) keepTold(old, it Item) error {
 	if s.trial {
 		return nil
@@ -426,6 +434,14 @@ func (n Nudge) String() string {
 	return fmt.Sprintf("#%d %q%s: %s", n.ID, n.Text, on, n.Why)
 }
 
+// userWaits is how long an item that waits on the user's pick goes before its boss is told it is unchanged, and again.
+const userWaits = 7 * 24 * time.Hour
+
+// waitsOnUser reports an item an open ask waits on (dev todo ask --for): the user's pick holds it.
+func waitsOnUser(it Item, open []Item) bool {
+	return slices.ContainsFunc(open, func(a Item) bool { return a.For == it.ID && len(a.Options) > 0 })
+}
+
 // Reasons an item's boss is told it may be out of date, besides its PR's moves (the sidebar.Check kinds).
 const (
 	toldGone      = "gone"
@@ -435,7 +451,7 @@ const (
 // Nudges are the open items to tell their boss about at now, each reason once, keeping that it was told: its PR
 // merged, closed, approved, changes requested, checks green or failing since its first lookup; the worker it is on
 // (Session) not among workers any more; unchanged for two days (as check, an ask and a dated item aside), told again
-// after two more days without a --replaces (an item waiting for a person, nothing else to check: once only, no news is no
+// after two more days (seven for one an open ask waits on) without a --replaces (an item waiting for a person, nothing else to check: once only, no news is no
 // reason). workers is read only when an open item is on one; with tell, they count as told only once tell took them.
 // The facts of items no longer open go.
 func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell func([]Nudge) error) ([]Nudge, error) {
@@ -477,8 +493,18 @@ func (s Store) Nudges(now time.Time, workers func() ([]Session, error), tell fun
 			// Its PR's state is news, as check puts it first: only an unchanged check left needs no action
 			c := check(it, fc, s.boss, now)
 			waiting := c != nil && c.NoAction()
-			if it.stale(now) && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= unchanged && !(waiting && fc.Told[toldUnchanged] != 0) {
-				tell(toldUnchanged, (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: waiting}).Long(now))
+			// One that waits on the user's pick is told weekly, not after two days
+			every := unchanged
+			if waitsOnUser(it, openItems) {
+				every = userWaits
+			}
+			age := now.Sub(time.Unix(it.Added, 0))
+			if it.stale(now) && age >= every && now.Sub(time.Unix(fc.Told[toldUnchanged], 0)) >= every && !(waiting && fc.Told[toldUnchanged] != 0) {
+				why := (&sidebar.Check{Kind: sidebar.CheckUnchanged, Since: it.Added, Waiting: waiting}).Long(now)
+				if !waiting && s.boss != "" {
+					why = fmt.Sprintf("unchanged %s: dev todo show %s %d", sidebar.AgeSpan(age), tmux.ShellJoin(s.boss), it.ID)
+				}
+				tell(toldUnchanged, why)
 			}
 			if fc.Told != nil {
 				facts[it.key()] = fc

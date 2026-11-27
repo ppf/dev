@@ -874,7 +874,7 @@ func TestPromptAskRules(t *testing.T) {
 			"refused without that pick, a typed go or a plain command", "(not a pick, an answer, a dev command or a plain command)",
 			"A plain command goes at once: the user's latest typed message plainly tells you to do project work, you have no objection and it makes no list item clash or go stale: hand it on in that turn, no question",
 			"--kind work --command '<their words>' (brief: their words verbatim, nothing added)",
-			"Handed on to boss-<project> as you said (\"<their words>\"); no objection, no conflict on its list.",
+			"Handed on to boss-<project> as you said (\"<their words>\"); no objection.",
 			"dev checks as for --go, plus no \"?\".",
 			"At once: \"start nocworx morning routine\", \"zrób PR z poprawką testu\", \"dodaj do listy boss-dev: X\".",
 			"Asked: \"a może dodamy X\", \"jeśli CI przejdzie, wydaj\", \"czy to głupi pomysł?\", objections, additions; unsure: ask.",

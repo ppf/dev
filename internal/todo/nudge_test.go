@@ -395,3 +395,75 @@ func TestNudgesWaitingPRMerged(t *testing.T) {
 		}
 	}
 }
+
+// An item an open ask waits on (ask --for) is not told unchanged at two days but at seven, and weekly after; its hint names dev todo show.
+func TestNudgesWaitingOnUserPick(t *testing.T) {
+	s := store(t)
+	s.boss = "boss-a"
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "Ship the cache fix"}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "Ship it?", Options: []string{"Yes", "No"}, For: 1}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Add(Item{Text: "Plain item"}, t0); err != nil {
+		t.Fatal(err)
+	}
+	day := 24 * time.Hour
+	first := func(at time.Duration) []string {
+		var out []string
+		for _, l := range nudges(t, s, t0.Add(at)) {
+			if strings.HasPrefix(l, "#1 ") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	if got, want := nudges(t, s, t0.Add(2*day)), []string{"#3 \"Plain item\": unchanged 2d: dev todo show 'boss-a' 3"}; !slices.Equal(got, want) {
+		t.Errorf("2d: %q, want %q", got, want)
+	}
+	if got := first(6 * day); len(got) != 0 {
+		t.Errorf("6d: %q, want none for #1", got)
+	}
+	if got, want := first(7*day), []string{"#1 \"Ship the cache fix\": unchanged 7d: dev todo show 'boss-a' 1"}; !slices.Equal(got, want) {
+		t.Errorf("7d: %q, want %q", got, want)
+	}
+	if got := first(10 * day); len(got) != 0 {
+		t.Errorf("10d: %q, want no second #1 nag within the week", got)
+	}
+	if got := first(14 * day); len(got) != 1 {
+		t.Errorf("14d: %q, want the weekly #1 nag again", got)
+	}
+	// Its ask answered, the item is back on the two-day cadence
+	if err := s.Done([]int{2}, t0.Add(14*day)); err != nil {
+		t.Fatal(err)
+	}
+	if got := first(16 * day); len(got) != 1 {
+		t.Errorf("ask answered: %q, want #1 nagged again at the two-day cadence", got)
+	}
+}
+
+// A replace that changes only an "N of M" counter keeps what the boss was told: its worker gone isn't told again.
+func TestNudgesCounterOnlyReplace(t *testing.T) {
+	s := store(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	if _, err := s.Add(Item{Text: "Rework 2 of 5", On: "fix", Session: &Session{ID: "fix", Name: "fix"}}, t0); err != nil {
+		t.Fatal(err)
+	}
+	if got := nudges(t, s, t0.Add(time.Hour)); len(got) != 1 {
+		t.Fatalf("gone: %q, want one nudge", got)
+	}
+	if err := s.Replace(1, Item{Text: "Rework 3 of 5"}, t0.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got := nudges(t, s, t0.Add(3*time.Hour)); len(got) != 0 {
+		t.Errorf("counter changed: %q, want none", got)
+	}
+	if err := s.Replace(1, Item{Text: "Rework, rewritten"}, t0.Add(4*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got := nudges(t, s, t0.Add(5*time.Hour)); len(got) != 1 {
+		t.Errorf("new wording: %q, want its worker gone told afresh", got)
+	}
+}
