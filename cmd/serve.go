@@ -176,15 +176,19 @@ command's output.`, int(serve.CodeTTL.Minutes())),
 			if popup {
 				return pairPopup(cmd.OutOrStdout())
 			}
-			ack := os.Getenv(pairGuard)
-			if ack != "" {
-				if err := os.WriteFile(ack, nil, 0o600); err != nil {
+			var ack *os.File
+			if path := os.Getenv(pairGuard); path != "" {
+				var err error
+				if ack, err = openAck(path); err != nil {
 					return err
 				}
 			}
-			err := servePair(cmd.OutOrStdout())
-			if err == nil && ack != "" {
-				open.Pause(cmd.OutOrStdout(), "Press enter to close…")
+			coded, err := servePair(cmd.OutOrStdout())
+			if ack != nil {
+				err = errors.Join(err, writeAck(ack, coded, err))
+				if err == nil {
+					open.Pause(cmd.OutOrStdout(), "Press enter to close…")
+				}
 			}
 			return err
 		},
@@ -193,21 +197,21 @@ command's output.`, int(serve.CodeTTL.Minutes())),
 	return cmd
 }
 
-// servePair is dev serve pair: the URL and a new code to out, or why there is none.
-func servePair(out io.Writer) error {
+// servePair is dev serve pair: the URL and a new code to out (coded), or why there is none.
+func servePair(out io.Writer) (bool, error) {
 	switch {
 	case os.Getenv("CLAUDECODE") != "":
-		return errors.New("refused in a Claude Code session: only the user pairs (in a shell)")
+		return false, errors.New("refused in a Claude Code session: only the user pairs (in a shell)")
 	case !hasTerminal():
-		return errors.New("refused outside a terminal: run dev serve pair in a shell")
+		return false, errors.New("refused outside a terminal: run dev serve pair in a shell")
 	}
 	dir, err := authDir()
 	if err != nil {
-		return err
+		return false, err
 	}
 	live, err := pairServed(dir, ownIP, time.Second)
 	if err != nil {
-		return err
+		return false, err
 	}
 	urls := phoneURLs(live)
 	if len(urls) == 0 {
@@ -218,16 +222,16 @@ func servePair(out io.Writer) error {
 				continue
 			}
 			_, err = fmt.Fprint(out, loopbackMessage(r.Addr, restartHint()))
-			return err
+			return false, err
 		}
-		return errors.Join(errs...)
+		return false, errors.Join(errs...)
 	}
 	code, err := serve.NewCode(dir, time.Now())
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, err = fmt.Fprintf(out, "open %s on the phone and enter the code %s (valid %d minutes, once)\n", strings.Join(urls, " or "), code, int(serve.CodeTTL.Minutes()))
-	return err
+	return err == nil, err
 }
 
 var pairServed = serve.Served // test seam: a phone-reachable dev serve would need a LAN bind

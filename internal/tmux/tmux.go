@@ -170,8 +170,8 @@ func (c *Client) Start(args ...string) error {
 	select {
 	case err := <-exited:
 		if err != nil {
-			msg, _ := os.ReadFile(stderr.Name())
-			return &Error{Args: argv, Stderr: strings.TrimSpace(string(msg)), Err: err}
+			msg, readErr := os.ReadFile(stderr.Name())
+			return &Error{Args: argv, Stderr: strings.TrimSpace(string(msg)), Err: errors.Join(err, readErr)}
 		}
 	case <-time.After(startSettle):
 	}

@@ -153,6 +153,23 @@ func TestServePairPopup(t *testing.T) {
 	}
 	waitFor(t, "the third popup", func() bool { return codeRe.MatchString(user.T("capture-pane", "-p", "-t", "out")) })
 	user.T("send-keys", "-t", "out", "Enter")
+	waitFor(t, "the third popup closed", func() bool { return !codeRe.MatchString(user.T("capture-pane", "-p", "-t", "out")) })
+
+	// No dev serve: the popup says why, shows no code, and the prompt is given back
+	health.Close()
+	if _, errOut, err := dev(`{"hook_event_name":"UserPromptSubmit","prompt":"and my watch"}`, "state", "working"); err != nil {
+		t.Fatalf("❌ the user's fourth prompt: %v %s", err, errOut)
+	}
+	for range 2 {
+		refused("a popup with no dev serve", "the popup showed no code: dev serve is not running")
+		waitFor(t, "the reason in the popup", func() bool {
+			return strings.Contains(user.T("capture-pane", "-p", "-t", "out"), "Press enter to close")
+		})
+		user.T("send-keys", "-t", "out", "Enter")
+		waitFor(t, "that popup closed", func() bool {
+			return !strings.Contains(user.T("capture-pane", "-p", "-t", "out"), "Press enter to close")
+		})
+	}
 }
 
 // lanIP is one of this machine's own IPv4 addresses, neither loopback nor link-local, which dev serve pair names to a phone.
