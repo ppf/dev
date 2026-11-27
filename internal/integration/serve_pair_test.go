@@ -47,7 +47,7 @@ func TestServePairPopup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n","XDG_STATE_HOME="+stateDir)
+	s := newServer(t, "set -g base-index 1\nset -g @dev_notify off\n", "XDG_STATE_HOME="+stateDir)
 	s.T("new-session", "-d", "-s", "manager", "sleep 600")
 	s.T("set-option", "-t", "=manager:", "@dev_herd", "1")
 	manager := s.T("display", "-t", "=manager:", "-p", "#{pane_id}")
@@ -70,7 +70,6 @@ func TestServePairPopup(t *testing.T) {
 	if _, errOut, err := dev(`{"hook_event_name":"SessionStart"}`, "state", "idle"); err != nil {
 		t.Fatalf("❌ register the manager: %v %s", err, errOut)
 	}
-	// Its agent runs as sleep here, not claude
 	s.T("set-option", "-p", "-t", manager, "@agent_cmd", "sleep")
 	refused("before the user prompted", "the user hasn't prompted the manager yet")
 	if _, errOut, err := dev(`{"hook_event_name":"UserPromptSubmit","prompt":"pair my phone"}`, "state", "working"); err != nil {
@@ -122,7 +121,6 @@ func TestServePairPopup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The second device pairs with the code read off the popup
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/pair", strings.NewReader(`{"code":"`+forms[0]+`","device":"phone"}`))
 	req.Header.Set("Content-Type", "application/json")

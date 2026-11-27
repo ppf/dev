@@ -10,13 +10,12 @@ import (
 	"github.com/ppf/dev/internal/tmux"
 )
 
-// pairGuard marks dev serve pair run in the popup dev serve pair --popup opens: it waits for a key before the popup closes.
+// pairGuard marks dev serve pair run in the --popup popup: it waits for a key before the popup closes.
 const pairGuard = "DEV_SERVE_PAIR_IN_POPUP"
 
 var pairTmux = tmux.New // test seam
 
-// pairPopup opens dev serve pair in a popup on the user's client showing the manager, for the user's latest prompt
-// there, once a prompt. The code is made in the popup and shows only there: out gets where the popup opened.
+// pairPopup opens dev serve pair in a popup on the user's manager client, once per user prompt; the code shows only there.
 func pairPopup(out io.Writer) error {
 	c := pairTmux()
 	self, err := managerSelf(c, "dev serve pair --popup")
@@ -34,13 +33,8 @@ func pairPopup(out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var client sidebar.Client
-	for _, cl := range clients {
-		if client.TTY == "" || cl.Activity > client.Activity {
-			client = cl
-		}
-	}
-	if client.TTY == "" {
+	client, ok := sidebar.ActiveClient(clients, "")
+	if !ok {
 		return errors.New("dev serve pair --popup: no client shows the manager: ask the user to switch to it, then run it again")
 	}
 	bin, err := os.Executable()

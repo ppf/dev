@@ -138,8 +138,8 @@ func environWithoutTmux() []string {
 	return env
 }
 
-// Start starts one tmux command in a session of its own without waiting for it: a display-popup, which returns only
-// once the popup closes. Its output goes nowhere, so it holds no pipe of its caller's open; a fake runs it at once.
+// Start runs a tmux command (a display-popup, blocking until closed) detached; output goes nowhere so it holds no
+// caller pipe open. A fake runs it at once.
 func (c *Client) Start(args ...string) error {
 	switch {
 	case c.fake:
@@ -148,11 +148,12 @@ func (c *Client) Start(args ...string) error {
 	case c.socket == "" && testing.Testing():
 		return ErrNoSocket
 	}
-	cmd := exec.Command("tmux", append([]string{"-u"}, c.argv(args)...)...)
+	argv := c.argv(args)
+	cmd := exec.Command("tmux", append([]string{"-u"}, argv...)...)
 	cmd.Env = c.env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return &Error{Args: c.argv(args), Err: err}
+		return &Error{Args: argv, Err: err}
 	}
 	return cmd.Process.Release()
 }
