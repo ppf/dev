@@ -437,7 +437,7 @@ type Prompt struct {
 	// Asks: a pick of several questions, each good for one relayed answer; HandOnMixed: one of them is a hand-on question
 	Asks        []Asked `json:"asks,omitempty"`
 	HandOnMixed bool    `json:"hand_on_mixed,omitempty"`
-	// Paired: a pairing code was shown on it (ClaimPair)
+	// Paired: a pairing popup was opened for it (ClaimPair)
 	Paired bool `json:"paired,omitempty"`
 }
 
@@ -814,7 +814,7 @@ func (s *state) spend(p Prompt, i int, spent bool) {
 	}
 }
 
-// ClaimPair marks p, the prompt a pairing code is shown on: refused once one was or when the user said something since.
+// ClaimPair marks p, the prompt a pairing popup is opened for: refused once one was or when the user said something since.
 func (b Box) ClaimPair(p Prompt) error {
 	return b.update(func(s *state) error {
 		switch {
@@ -828,7 +828,7 @@ func (b Box) ClaimPair(p Prompt) error {
 	})
 }
 
-// UnclaimPair gives back p, claimed for a code that wasn't shown, unless the user said something since.
+// UnclaimPair gives back p, claimed for a popup that didn't open, unless the user said something since.
 func (b Box) UnclaimPair(p Prompt) error {
 	return b.update(func(s *state) error {
 		if s.Prompt.is(p) {

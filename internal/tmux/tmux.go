@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // ErrNoSocket is returned when a test binary tries to reach the user's default tmux server.
@@ -138,24 +139,43 @@ func environWithoutTmux() []string {
 	return env
 }
 
-// Start runs a tmux command (a display-popup, blocking until closed) detached; output goes nowhere so it holds no
-// caller pipe open. A fake runs it at once.
+// startSettle is how long Start waits for tmux to fail fast (a client gone, a popup refused).
+const startSettle = 300 * time.Millisecond
+
+// Start runs a tmux command (a display-popup, blocking until closed) detached, holding no caller pipe open: its
+// stderr goes to a file, read when it fails within startSettle; past that it counts as started. A fake runs it at once.
 func (c *Client) Start(args ...string) error {
 	switch {
 	case c.fake:
-		_, _, err := c.run(c.argv(args), c.env)
+		_, err := c.Run(args...)
 		return err
 	case c.socket == "" && testing.Testing():
 		return ErrNoSocket
 	}
 	argv := c.argv(args)
+	stderr, err := os.CreateTemp("", "dev-tmux-start-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(stderr.Name()) }()
+	defer func() { _ = stderr.Close() }()
 	cmd := exec.Command("tmux", append([]string{"-u"}, argv...)...)
-	cmd.Env = c.env
+	cmd.Env, cmd.Stderr = c.env, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return &Error{Args: argv, Err: err}
 	}
-	return cmd.Process.Release()
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case err := <-exited:
+		if err != nil {
+			msg, _ := os.ReadFile(stderr.Name())
+			return &Error{Args: argv, Stderr: strings.TrimSpace(string(msg)), Err: err}
+		}
+	case <-time.After(startSettle):
+	}
+	return nil
 }
 
 // Interactive runs a tmux command attached to this process's terminal (attach-session, popups).

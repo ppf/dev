@@ -20,7 +20,7 @@ import (
 )
 
 // dev serve pair --popup, run by the manager's Claude, opens dev serve pair in a popup on the user's client: the code
-// shows there and pairs a second device, and never reaches the command's output, the manager's pane, tmux or a file.
+// shows there and pairs a second device, and never reaches the command's output, the manager's pane, tmux or a file in plain text.
 // Once a prompt of the user's; refused with no prompt and with no client showing the manager.
 func TestServePairPopup(t *testing.T) {
 	ip := lanIP(t)
@@ -81,6 +81,8 @@ func TestServePairPopup(t *testing.T) {
 	user.T("new-session", "-d", "-s", "out", "-x", "160", "-y", "40")
 	user.T("send-keys", "-t", "out", "TMUX= tmux -L "+s.socket+" attach -t manager", "Enter")
 	waitFor(t, "the user's client attached", func() bool { c, _ := s.Try("list-clients", "-F", "#{client_name}"); return c != "" })
+	// A tmux server started from a Claude session hands its popups CLAUDECODE: the popup empties it
+	s.T("set-environment", "-g", "CLAUDECODE", "1")
 
 	out, errOut, err := dev("", "serve", "pair", "--popup")
 	if err != nil || !strings.HasPrefix(out, "pair popup opened on ") {
@@ -142,7 +144,7 @@ func TestServePairPopup(t *testing.T) {
 	user.T("send-keys", "-t", "out", "Enter")
 }
 
-// lanIP is one of this machine's own addresses that isn't loopback, which dev serve pair names to a phone.
+// lanIP is one of this machine's own IPv4 addresses, neither loopback nor link-local, which dev serve pair names to a phone.
 func lanIP(t *testing.T) netip.Addr {
 	t.Helper()
 	addrs, err := net.InterfaceAddrs()

@@ -403,7 +403,7 @@ func TestLatestPick(t *testing.T) {
 }
 
 // A pairing code is shown once per prompt of the user's: given back when not shown, refused after a prompt since;
-// a new prompt may pair again. Pairing leaves the prompt's pick unspent.
+// a new prompt may pair again. Pairing leaves the prompt unspent (Claim still takes it).
 func TestClaimPair(t *testing.T) {
 	b := testBox(t)
 	at := time.Unix(1700000000, 0)
